@@ -6,6 +6,15 @@ function generateId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/** Return a name that doesn't collide with existing workspace names. */
+function ensureUniqueName(name: string, existing: { name: string }[]): string {
+  const names = new Set(existing.map((ws) => ws.name));
+  if (!names.has(name)) return name;
+  let n = 2;
+  while (names.has(`${name} (${n})`)) n++;
+  return `${name} (${n})`;
+}
+
 const defaultLayout: Layout = {
   id: "default-layout",
   name: "Default",
@@ -77,13 +86,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   addWorkspace: (name, layoutId) => {
-    const { layouts } = get();
+    const { layouts, workspaces } = get();
     const layout = layouts.find((l) => l.id === layoutId);
     if (!layout) return;
 
+    const uniqueName = ensureUniqueName(name, workspaces);
+
     const ws: Workspace = {
       id: generateId("ws"),
-      name,
+      name: uniqueName,
       layoutId,
       panes: layout.panes.map((p) => ({
         id: generateId("pane"),
@@ -132,9 +143,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   renameWorkspace: (id, name) => {
+    const { workspaces } = get();
+    const others = workspaces.filter((ws) => ws.id !== id);
+    const uniqueName = ensureUniqueName(name, others);
     set((state) => ({
       workspaces: state.workspaces.map((ws) =>
-        ws.id === id ? { ...ws, name } : ws,
+        ws.id === id ? { ...ws, name: uniqueName } : ws,
       ),
     }));
   },

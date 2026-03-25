@@ -311,7 +311,7 @@ describe("Terminal Store E2E", () => {
     const store = useTerminalStore.getState();
     store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
     store.registerInstance({ id: "t2", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "CMD", syncGroup: "g2", workspaceId: "ws-1" });
+    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g2", workspaceId: "ws-1" });
 
     expect(useTerminalStore.getState().instances.length).toBe(3);
 
@@ -324,7 +324,7 @@ describe("Terminal Store E2E", () => {
     const store = useTerminalStore.getState();
     store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
     store.registerInstance({ id: "t2", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "CMD", syncGroup: "project-b", workspaceId: "ws-1" });
+    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "project-b", workspaceId: "ws-1" });
     store.registerInstance({ id: "t4", profile: "WSL", syncGroup: "", workspaceId: "ws-1" }); // independent
 
     const groupA = useTerminalStore.getState().getInstancesBySyncGroup("project-a");
@@ -584,7 +584,6 @@ describe("Settings Store E2E", () => {
       profiles: [
         makeTestProfile({ name: "PowerShell", commandLine: "powershell.exe -NoLogo" }),
         makeTestProfile({ name: "WSL", commandLine: "wsl.exe" }),
-        makeTestProfile({ name: "CMD", commandLine: "cmd.exe" }),
       ],
       colorSchemes: [],
       keybindings: [],
@@ -607,7 +606,7 @@ describe("Settings Store E2E", () => {
     // 10 builtins + 1 loaded = 11 (builtins are always merged)
     expect(state.colorSchemes.length).toBe(11);
     // Profiles should remain unchanged since not in the update
-    expect(state.profiles.length).toBe(3);
+    expect(state.profiles.length).toBe(2);
   });
 
   it("should add and remove color schemes", () => {
@@ -837,18 +836,17 @@ describe("OSC Parser E2E", () => {
 // ============================================================================
 
 describe("OSC Presets E2E", () => {
-  it("sync-cwd preset should match OSC 7 and OSC 9;9 events", () => {
+  it("sync-cwd preset should match OSC 7 only", () => {
     const hooks = getPresetHooks("sync-cwd");
-    expect(hooks.length).toBe(2);
+    expect(hooks.length).toBe(1);
     expect(hooks[0].osc).toBe(7);
-    expect(hooks[1].osc).toBe(9);
 
     const event: OscEvent = { code: 7, data: "file:///home/user" };
     expect(matchHook(hooks, event).length).toBe(1);
 
-    // OSC 9;9 ConEmu/WSL CWD
+    // OSC 9;9 should NOT match sync-cwd (handled by set-wsl-distro)
     const osc9Event: OscEvent = { code: 9, data: "9;//wsl.localhost/Ubuntu/home/user" };
-    expect(matchHook(hooks, osc9Event).length).toBe(1);
+    expect(matchHook(hooks, osc9Event).length).toBe(0);
   });
 
   it("sync-branch preset should match git switch/checkout commands", () => {
@@ -897,12 +895,13 @@ describe("OSC Presets E2E", () => {
   it("all presets together should handle a complete terminal session", () => {
     const allHooks = [
       ...getPresetHooks("sync-cwd"),
+      ...getPresetHooks("set-wsl-distro"),
       ...getPresetHooks("sync-branch"),
       ...getPresetHooks("notify-on-fail"),
       ...getPresetHooks("set-title-cwd"),
     ];
 
-    // CWD change → 2 hooks match (sync-cwd + set-title-cwd)
+    // CWD change via OSC 7 → 2 hooks match (sync-cwd + set-title-cwd)
     const cwdEvent: OscEvent = { code: 7, data: "file:///home/user/project" };
     expect(matchHook(allHooks, cwdEvent).length).toBe(2);
 
@@ -1113,7 +1112,7 @@ describe("Cross-Store Integration E2E", () => {
   it("should simulate sync-branch updating all group terminals", () => {
     useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
     useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "CMD", syncGroup: "other", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "other", workspaceId: "ws-1" });
 
     // Sync branch for "dev" group
     const groupTerminals = useTerminalStore.getState().getInstancesBySyncGroup("dev");
@@ -1177,7 +1176,7 @@ describe("Cross-Store Integration E2E", () => {
   it("should simulate terminal close and sync group cleanup", () => {
     useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
     useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "CMD", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
 
     expect(useTerminalStore.getState().getInstancesBySyncGroup("g1").length).toBe(3);
 

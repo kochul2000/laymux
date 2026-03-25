@@ -57,6 +57,10 @@ pub struct TerminalSession {
     /// Used to prevent sync-cwd from injecting `cd` into interactive apps.
     #[serde(default)]
     pub command_running: bool,
+    /// WSL distribution name, extracted from UNC paths (e.g., "Ubuntu-22.04").
+    /// Used for cross-profile path conversion (e.g., /home/... → \\wsl.localhost\distro\...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wsl_distro: Option<String>,
 }
 
 impl TerminalSession {
@@ -68,6 +72,7 @@ impl TerminalSession {
             cwd: None,
             branch: None,
             command_running: false,
+            wsl_distro: None,
         }
     }
 
@@ -118,7 +123,6 @@ impl TerminalSession {
                     ],
                 )
             }
-            "CMD" | "cmd" => ("cmd.exe".into(), vec![]),
             _ => ("powershell.exe".into(), vec!["-NoLogo".into()]),
         }
     }
@@ -167,9 +171,10 @@ $global:__lmx_f = $true
 function prompt {
     $ec = $global:LASTEXITCODE; if ($null -eq $ec) { $ec = 0 }
     $e = $global:__lmx_e; $b = $global:__lmx_b
-    $loc = (Get-Location).Path
+    $loc = (Get-Location).ProviderPath
     $cwd = $loc.Replace([char]92, '/')
-    $r = $e + ']7;file://localhost/' + $cwd + $b
+    if ($cwd.StartsWith('//')) { $r = $e + ']7;' + $cwd + $b }
+    else { $r = $e + ']7;file://localhost/' + $cwd + $b }
     if (-not $global:__lmx_f) { $r = $e + ']133;D;' + $ec + $b + $r }
     $global:__lmx_f = $false
     $global:LASTEXITCODE = $ec
@@ -268,8 +273,6 @@ mod tests {
         assert_eq!(cmd, "powershell.exe");
         assert!(args.contains(&"-NoLogo".to_string()));
 
-        let (cmd, _) = TerminalSession::profile_to_command("CMD");
-        assert_eq!(cmd, "cmd.exe");
     }
 
     #[test]

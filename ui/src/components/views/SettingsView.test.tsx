@@ -97,23 +97,22 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     expect(screen.getAllByText("PowerShell").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("WSL").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("CMD").length).toBeGreaterThanOrEqual(1);
   });
 
   it("has a remove button for profiles", () => {
     render(<SettingsView />);
     const removeButtons = screen.getAllByTestId(/^remove-profile-/);
-    expect(removeButtons.length).toBe(3);
+    expect(removeButtons.length).toBe(2);
   });
 
   it("removes a profile when remove button is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    const removeBtn = screen.getByTestId("remove-profile-2");
+    const removeBtn = screen.getByTestId("remove-profile-1");
     await user.click(removeBtn);
 
-    expect(useSettingsStore.getState().profiles).toHaveLength(2);
+    expect(useSettingsStore.getState().profiles).toHaveLength(1);
   });
 
   it("shows add profile button", () => {

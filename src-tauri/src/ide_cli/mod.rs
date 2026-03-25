@@ -60,6 +60,11 @@ pub enum IdeMessage {
         #[serde(default)]
         exit_code: Option<i32>,
     },
+    #[serde(rename = "set-wsl-distro")]
+    SetWslDistro {
+        path: String,
+        terminal_id: String,
+    },
 }
 
 /// Response from the IDE to the `ide` CLI.

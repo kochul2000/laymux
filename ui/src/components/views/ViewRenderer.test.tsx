@@ -93,14 +93,14 @@ describe("ViewRenderer", () => {
   });
 
   it("defaults profile to settings defaultProfile when viewConfig has no profile", () => {
-    useSettingsStore.setState({ defaultProfile: "CMD" });
+    useSettingsStore.setState({ defaultProfile: "WSL" });
     render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView" }}
       />,
     );
-    expect(terminalViewProps.at(-1)?.profile).toBe("CMD");
+    expect(terminalViewProps.at(-1)?.profile).toBe("WSL");
   });
 
   it("defaults profile to settings defaultProfile when viewConfig is undefined", () => {

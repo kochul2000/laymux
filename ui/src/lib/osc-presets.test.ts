@@ -2,15 +2,19 @@ import { describe, it, expect } from "vitest";
 import { getPresetHooks, OscPresetName } from "./osc-presets";
 
 describe("OSC Presets", () => {
-  it("returns sync-cwd preset hooks for OSC 7 and OSC 9;9", () => {
+  it("returns sync-cwd preset with OSC 7 only", () => {
     const hooks = getPresetHooks("sync-cwd");
-    expect(hooks).toHaveLength(2);
+    expect(hooks).toHaveLength(1);
     expect(hooks[0].osc).toBe(7);
     expect(hooks[0].run).toContain("sync-cwd");
-    // OSC 9;9 ConEmu/WSL CWD report
-    expect(hooks[1].osc).toBe(9);
-    expect(hooks[1].when).toContain("message.startsWith('9;')");
-    expect(hooks[1].run).toContain("sync-cwd");
+  });
+
+  it("returns set-wsl-distro preset with OSC 9;9", () => {
+    const hooks = getPresetHooks("set-wsl-distro");
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0].osc).toBe(9);
+    expect(hooks[0].when).toContain("message.startsWith('9;')");
+    expect(hooks[0].run).toContain("set-wsl-distro");
   });
 
   it("returns sync-branch preset hooks", () => {

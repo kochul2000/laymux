@@ -359,7 +359,6 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   profiles: [
     makeProfile("PowerShell", "powershell.exe -NoLogo"),
     makeProfile("WSL", "wsl.exe"),
-    makeProfile("CMD", "cmd.exe"),
   ],
   colorSchemes: [...builtinColorSchemes],
   keybindings: [],

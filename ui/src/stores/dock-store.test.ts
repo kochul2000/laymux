@@ -131,9 +131,9 @@ describe("DockStore", () => {
     expect(bottom1.panes[0].view).toEqual({ type: "TerminalView" });
 
     // Now update with a config including profile
-    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "CMD" });
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
     const bottom2 = useDockStore.getState().getDock("bottom")!;
-    expect(bottom2.panes[0].view).toEqual({ type: "TerminalView", profile: "CMD" });
+    expect(bottom2.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
   });
 
   it("resizeDockPane updates pane position/size", () => {

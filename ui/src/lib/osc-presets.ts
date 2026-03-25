@@ -6,6 +6,7 @@ export type OscPresetName =
   | "notify-on-fail"
   | "notify-on-complete"
   | "set-title-cwd"
+  | "set-wsl-distro"
   | "notify-osc9"
   | "notify-osc99"
   | "notify-osc777"
@@ -19,10 +20,12 @@ const presets: Record<OscPresetName, OscHook[]> = {
       osc: 7,
       run: "ide sync-cwd $path",
     },
+  ],
+  "set-wsl-distro": [
     {
       osc: 9,
       when: "message.startsWith('9;')",
-      run: "ide sync-cwd $path",
+      run: "ide set-wsl-distro $path",
     },
   ],
   "sync-branch": [

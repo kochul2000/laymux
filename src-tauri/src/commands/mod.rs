@@ -309,9 +309,9 @@ fn handle_ide_message_dispatch(
             // Skip targets that are already at the same CWD
             let target_terminals = filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
 
-            // Write cd command to target terminals (with propagation flag)
+            // Write cd command to target terminals (with propagation flag + path conversion)
             if !target_terminals.is_empty() {
-                write_to_group_terminals(&state, &target_terminals, &terminal_id, &format!(" cd {normalized_path}\n"))?;
+                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path)?;
             }
 
             // Mark targets so their OSC echo won't re-propagate
@@ -480,6 +480,21 @@ fn handle_ide_message_dispatch(
             };
             Ok(IdeResponse::ok(Some(desc)))
         }
+        IdeMessage::SetWslDistro { path, terminal_id } => {
+            // Extract WSL distro name from UNC-style path (e.g., //wsl.localhost/Ubuntu-22.04/...)
+            if let Some(distro) = extract_wsl_distro_from_path(&path) {
+                let mut terminals = state
+                    .terminals
+                    .lock()
+                    .map_err(|e| format!("Lock error: {e}"))?;
+                if let Some(session) = terminals.get_mut(&terminal_id) {
+                    session.wsl_distro = Some(distro.clone());
+                }
+                Ok(IdeResponse::ok(Some(format!("wsl-distro set: {distro}"))))
+            } else {
+                Ok(IdeResponse::ok(Some("no distro found in path".into())))
+            }
+        }
     }
 }
 
@@ -556,10 +571,66 @@ fn write_to_group_terminals(
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
             let profile = terminals.get(id).map(|t| t.config.profile.as_str()).unwrap_or("WSL");
+            // PowerShell on Windows ConPTY uses CR as Enter; ensure the command ends correctly
+            let cmd = if matches!(profile, "PowerShell" | "powershell") {
+                command.trim_end_matches('\n').to_string() + "\r"
+            } else {
+                command.to_string()
+            };
             let propagated_cmd = match profile {
-                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{command}"),
-                "CMD" | "cmd" => format!("set IDE_PROPAGATED=1 &{command}"),
+                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{cmd}"),
                 _ => format!("IDE_PROPAGATED=1 {command}"),
+            };
+            let _ = handle.write(propagated_cmd.as_bytes());
+        }
+    }
+
+    Ok(())
+}
+
+/// Write a cd command to target terminals with cross-profile path conversion.
+/// Converts the path for each target's profile (e.g., WSL→PowerShell: /mnt/c/... → C:\...).
+/// Uses WSL distro name for UNC path conversion when needed (e.g., /home/... → \\wsl.localhost\distro\...).
+fn write_cd_to_group_terminals(
+    state: &AppState,
+    target_ids: &[String],
+    source_id: &str,
+    path: &str,
+) -> Result<(), String> {
+    // Extract WSL distro name for UNC path conversion (before locking terminals)
+    let wsl_distro = find_wsl_distro(state, source_id);
+
+    let ptys = state
+        .pty_handles
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+
+    for id in target_ids {
+        if let Some(handle) = ptys.get(id) {
+            let profile = terminals
+                .get(id)
+                .map(|t| t.config.profile.as_str())
+                .unwrap_or("WSL");
+
+            // Convert path for the target profile; skip if not convertible
+            let converted = match convert_path_for_target_with_distro(
+                path,
+                profile,
+                wsl_distro.as_deref(),
+            ) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let cd_cmd = build_cd_command(&converted, profile);
+            let propagated_cmd = match profile {
+                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{cd_cmd}"),
+                _ => format!("IDE_PROPAGATED=1 {cd_cmd}"),
             };
             let _ = handle.write(propagated_cmd.as_bytes());
         }
@@ -1051,15 +1122,153 @@ fn update_terminal_cwd(state: &AppState, terminal_id: &str, cwd: &str) {
     }
 }
 
-/// Normalize various CWD path formats to Linux-native paths.
-/// `//wsl.localhost/Distro/path` → `/path`
-/// `//wsl$/Distro/path` → `/path`
-/// `file://localhost/path` → `/path` (OSC 7 format)
-/// Non-WSL paths are returned unchanged.
+/// Convert a path for a target terminal profile.
+/// Returns `None` if the path cannot be navigated from the target profile
+/// and no WSL distro is available for UNC conversion.
+///
+/// Conversion rules:
+/// - Linux `/mnt/X/...` → Windows `X:\...` (for PowerShell targets)
+/// - Windows `X:\...` → Linux `/mnt/x/...` (for WSL targets)
+/// - Same-type paths pass through unchanged
+/// - Pure Linux paths → `\\wsl.localhost\<distro>\path` for PowerShell (if distro known)
+/// - Pure Linux paths → `None` for PowerShell (if distro unknown)
+fn convert_path_for_target(path: &str, target_profile: &str) -> Option<String> {
+    convert_path_for_target_with_distro(path, target_profile, None)
+}
+
+fn convert_path_for_target_with_distro(
+    path: &str,
+    target_profile: &str,
+    wsl_distro: Option<&str>,
+) -> Option<String> {
+    let is_linux = path.starts_with('/');
+    let is_windows = path.len() >= 3
+        && path.as_bytes()[1] == b':'
+        && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/');
+
+    match target_profile {
+        "WSL" | "wsl" => {
+            if is_linux {
+                Some(path.to_string())
+            } else if is_windows {
+                // C:\Users\... → /mnt/c/Users/...
+                let drive = (path.as_bytes()[0] as char).to_ascii_lowercase();
+                let rest = path[2..].replace('\\', "/");
+                Some(format!("/mnt/{drive}{rest}"))
+            } else {
+                Some(path.to_string())
+            }
+        }
+        "PowerShell" | "powershell" => {
+            if is_windows {
+                Some(path.to_string())
+            } else if is_linux {
+                // Check for /mnt/X/... pattern (WSL mount of Windows drive)
+                if let Some(rest) = path.strip_prefix("/mnt/") {
+                    if let Some(drive_byte) = rest.as_bytes().first() {
+                        if drive_byte.is_ascii_alphabetic()
+                            && (rest.len() == 1 || rest.as_bytes()[1] == b'/')
+                        {
+                            let drive = (*drive_byte as char).to_ascii_uppercase();
+                            let tail = if rest.len() > 1 {
+                                rest[1..].replace('/', "\\")
+                            } else {
+                                "\\".to_string()
+                            };
+                            return Some(format!("{drive}:{tail}"));
+                        }
+                    }
+                }
+                // Pure Linux path — use UNC path if distro is known
+                if let Some(distro) = wsl_distro {
+                    let win_path = path.replace('/', "\\");
+                    Some(format!("\\\\wsl.localhost\\{distro}{win_path}"))
+                } else {
+                    None
+                }
+            } else {
+                Some(path.to_string())
+            }
+        }
+        _ => Some(path.to_string()),
+    }
+}
+
+/// Extract WSL distro name from a raw path (before normalization).
+/// Handles `//wsl.localhost/<distro>/path` and `//wsl$/<distro>/path` formats.
+fn extract_wsl_distro_from_path(path: &str) -> Option<String> {
+    let rest = path
+        .strip_prefix("//wsl.localhost/")
+        .or_else(|| path.strip_prefix("//wsl$/"))?;
+    let end = rest.find('/').unwrap_or(rest.len());
+    let distro = &rest[..end];
+    if distro.is_empty() {
+        None
+    } else {
+        Some(distro.to_string())
+    }
+}
+
+/// Look up the WSL distro name from any WSL terminal's stored distro info.
+fn find_wsl_distro(state: &AppState, source_id: &str) -> Option<String> {
+    let terminals = state.terminals.lock().ok()?;
+    // First try the source terminal itself
+    if let Some(session) = terminals.get(source_id) {
+        if let Some(ref distro) = session.wsl_distro {
+            return Some(distro.clone());
+        }
+    }
+    // Try other WSL terminals
+    for (_, session) in terminals.iter() {
+        if session.config.profile.eq_ignore_ascii_case("wsl") {
+            if let Some(ref distro) = session.wsl_distro {
+                return Some(distro.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Build a cd command string for the given profile.
+/// Prepends a space to avoid shell history recording.
+/// PowerShell on Windows ConPTY uses CR (`\r`) as Enter; bash uses LF (`\n`).
+fn build_cd_command(path: &str, profile: &str) -> String {
+    let eol = match profile {
+        "PowerShell" | "powershell" => "\r",
+        _ => "\n",
+    };
+    format!(" cd {path}{eol}")
+}
+
+/// Normalize CWD paths to a canonical Linux-native form.
+/// All Windows drive paths are converted to `/mnt/x/...` so that
+/// `should_skip_sync_cwd` can deduplicate OSC 7 and OSC 9;9 events.
+///
+/// Examples:
+/// - `file://localhost/mnt/c/Users` → `/mnt/c/Users`
+/// - `file://localhost/C:/Users` → `/mnt/c/Users`
+/// - `C:/Users` or `C:\Users` → `/mnt/c/Users`
+/// - `//wsl.localhost/Distro/home/user` → `/home/user`
+/// - `/home/user` → `/home/user` (already canonical)
 fn normalize_wsl_path(path: &str) -> String {
-    // file://localhost/<path> (OSC 7 CWD format from shell integration)
+    // Strip PowerShell provider prefix (safety net)
+    let path = if let Some(rest) = path.strip_prefix("file://localhost/Microsoft.PowerShell.Core/FileSystem::") {
+        rest
+    } else {
+        path
+    };
+    let path = path.strip_prefix("Microsoft.PowerShell.Core/FileSystem::").unwrap_or(path);
+
+    // file://localhost/<path> (OSC 7 CWD format)
     if let Some(rest) = path.strip_prefix("file://localhost") {
         if rest.starts_with('/') {
+            // /X:/ pattern — Windows drive from PowerShell OSC 7
+            let rb = rest.as_bytes();
+            if rb.len() >= 3 && rb[1].is_ascii_alphabetic() && rb[2] == b':' {
+                let drive = rb[1].to_ascii_lowercase() as char;
+                let tail = rest[3..].replace('\\', "/");
+                return format!("/mnt/{drive}{tail}");
+            }
             return rest.to_string();
         }
     }
@@ -1074,6 +1283,20 @@ fn normalize_wsl_path(path: &str) -> String {
         if let Some(pos) = rest.find('/') {
             return rest[pos..].to_string();
         }
+    }
+    // Bare Windows path: C:\... or C:/... → /mnt/c/...
+    let pb = path.as_bytes();
+    if pb.len() >= 3 && pb[0].is_ascii_alphabetic() && pb[1] == b':'
+        && (pb[2] == b'\\' || pb[2] == b'/')
+    {
+        let drive = (pb[0] as char).to_ascii_lowercase();
+        let tail = path[2..].replace('\\', "/");
+        return format!("/mnt/{drive}{tail}");
+    }
+    // Bare drive root: C:\ or C:
+    if pb.len() >= 2 && pb[0].is_ascii_alphabetic() && pb[1] == b':' && pb.len() <= 3 {
+        let drive = (pb[0] as char).to_ascii_lowercase();
+        return format!("/mnt/{drive}/");
     }
     path.to_string()
 }
@@ -1383,10 +1606,15 @@ mod tests {
     }
 
     #[test]
-    fn normalize_wsl_path_leaves_normal_paths_unchanged() {
+    fn normalize_wsl_path_leaves_linux_paths_unchanged() {
         assert_eq!(normalize_wsl_path("/home/user/project"), "/home/user/project");
         assert_eq!(normalize_wsl_path("~/dev"), "~/dev");
-        assert_eq!(normalize_wsl_path("C:\\Users\\user"), "C:\\Users\\user");
+    }
+
+    #[test]
+    fn normalize_wsl_path_converts_windows_to_mnt() {
+        // Windows paths are normalized to /mnt/x/... canonical form
+        assert_eq!(normalize_wsl_path("C:\\Users\\user"), "/mnt/c/Users/user");
     }
 
     #[test]
@@ -1399,6 +1627,42 @@ mod tests {
             normalize_wsl_path("file://localhost/tmp"),
             "/tmp"
         );
+    }
+
+    #[test]
+    #[test]
+    fn normalize_powershell_osc7_windows_path() {
+        // PowerShell emits: file://localhost/C:/Users/kochul → /mnt/c/Users/kochul
+        assert_eq!(
+            normalize_wsl_path("file://localhost/C:/Users/kochul"),
+            "/mnt/c/Users/kochul"
+        );
+        assert_eq!(
+            normalize_wsl_path("file://localhost/D:/Games/SteamLibrary"),
+            "/mnt/d/Games/SteamLibrary"
+        );
+        assert_eq!(
+            normalize_wsl_path("file://localhost/C:/"),
+            "/mnt/c/"
+        );
+    }
+
+    #[test]
+    fn normalize_bare_windows_path() {
+        // Bare Windows paths from OSC 9;9: C:/Users → /mnt/c/Users
+        assert_eq!(normalize_wsl_path("C:/Users"), "/mnt/c/Users");
+        assert_eq!(normalize_wsl_path("C:\\Windows"), "/mnt/c/Windows");
+        assert_eq!(normalize_wsl_path("D:\\Games\\Steam"), "/mnt/d/Games/Steam");
+    }
+
+    #[test]
+    fn normalize_osc7_and_osc99_produce_same_result() {
+        // Critical: both OSC 7 and OSC 9;9 for the same cd must normalize identically
+        // so should_skip_sync_cwd deduplicates them
+        let from_osc7 = normalize_wsl_path("file://localhost/mnt/c/Windows");
+        let from_osc99 = normalize_wsl_path("C:/Windows");
+        assert_eq!(from_osc7, from_osc99);
+        assert_eq!(from_osc7, "/mnt/c/Windows");
     }
 
     #[test]
@@ -1600,6 +1864,278 @@ mod tests {
         let state_info = detect_terminal_state(Some(&buf));
         assert!(!state_info.output_active, "10s old output should not be active");
         assert!(state_info.last_output_ms_ago >= 9000);
+    }
+
+    // --- Cross-profile path conversion tests ---
+
+    #[test]
+    fn convert_path_wsl_mnt_to_powershell() {
+        // WSL /mnt/c/... → PowerShell C:\...
+        assert_eq!(
+            convert_path_for_target("/mnt/c/Users/kochul/project", "PowerShell"),
+            Some("C:\\Users\\kochul\\project".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_mnt_drive_root_to_powershell() {
+        // WSL /mnt/c → PowerShell C:\
+        assert_eq!(
+            convert_path_for_target("/mnt/c", "PowerShell"),
+            Some("C:\\".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_mnt_various_drives() {
+        assert_eq!(
+            convert_path_for_target("/mnt/d/Games", "PowerShell"),
+            Some("D:\\Games".into())
+        );
+        assert_eq!(
+            convert_path_for_target("/mnt/e/Backup/data", "PowerShell"),
+            Some("E:\\Backup\\data".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_home_to_powershell_without_distro_returns_none() {
+        // Without distro info, pure WSL path can't be converted
+        assert_eq!(
+            convert_path_for_target("/home/kochul/python_projects", "PowerShell"),
+            None
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_home_to_powershell_with_distro_uses_unc() {
+        // With distro info, pure WSL path → UNC path
+        assert_eq!(
+            convert_path_for_target_with_distro(
+                "/home/kochul/python_projects",
+                "PowerShell",
+                Some("Ubuntu-22.04")
+            ),
+            Some("\\\\wsl.localhost\\Ubuntu-22.04\\home\\kochul\\python_projects".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_tmp_to_powershell_with_distro_uses_unc() {
+        assert_eq!(
+            convert_path_for_target_with_distro("/tmp", "PowerShell", Some("Ubuntu-22.04")),
+            Some("\\\\wsl.localhost\\Ubuntu-22.04\\tmp".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_wsl_mnt_to_powershell_ignores_distro() {
+        // /mnt/c/ paths should still convert to C:\ even when distro is available
+        assert_eq!(
+            convert_path_for_target_with_distro("/mnt/c/Users", "PowerShell", Some("Ubuntu-22.04")),
+            Some("C:\\Users".into())
+        );
+    }
+
+    #[test]
+    fn extract_wsl_distro_from_wsl_localhost_title() {
+        assert_eq!(
+            extract_wsl_distro_from_path("//wsl.localhost/Ubuntu-22.04/home/kochul"),
+            Some("Ubuntu-22.04".into())
+        );
+    }
+
+    #[test]
+    fn extract_wsl_distro_from_wsl_dollar_title() {
+        assert_eq!(
+            extract_wsl_distro_from_path("//wsl$/Ubuntu/home/user"),
+            Some("Ubuntu".into())
+        );
+    }
+
+    #[test]
+    fn extract_wsl_distro_from_non_wsl_path_returns_none() {
+        assert_eq!(extract_wsl_distro_from_path("PowerShell 7.4"), None);
+        assert_eq!(extract_wsl_distro_from_path("C:\\Windows"), None);
+        assert_eq!(extract_wsl_distro_from_path("file://localhost/home/user"), None);
+        assert_eq!(extract_wsl_distro_from_path("/home/user/project"), None);
+    }
+
+    // --- 4-direction sync conversion tests (PS→WSL, WSL→PS, WSL→WSL, PS→PS) ---
+
+    #[test]
+    fn sync_direction_ps_to_wsl_windows_drive() {
+        // PowerShell at C:\Users → WSL should get /mnt/c/Users
+        assert_eq!(
+            convert_path_for_target("C:\\Users", "WSL"),
+            Some("/mnt/c/Users".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_ps_to_wsl_forward_slash() {
+        // PowerShell OSC7 sends C:/Users (forward slash)
+        assert_eq!(
+            convert_path_for_target("C:/Users/kochul", "WSL"),
+            Some("/mnt/c/Users/kochul".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_wsl_to_ps_mnt_path() {
+        // WSL at /mnt/c/Windows → PowerShell should get C:\Windows
+        assert_eq!(
+            convert_path_for_target("/mnt/c/Windows", "PowerShell"),
+            Some("C:\\Windows".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_wsl_to_ps_home_with_distro() {
+        // WSL at /home/kochul → PowerShell should get UNC path
+        assert_eq!(
+            convert_path_for_target_with_distro("/home/kochul", "PowerShell", Some("Ubuntu-22.04")),
+            Some("\\\\wsl.localhost\\Ubuntu-22.04\\home\\kochul".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_wsl_to_ps_tmp_with_distro() {
+        assert_eq!(
+            convert_path_for_target_with_distro("/tmp/build", "PowerShell", Some("Debian")),
+            Some("\\\\wsl.localhost\\Debian\\tmp\\build".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_wsl_to_wsl_linux_path() {
+        // WSL → WSL: Linux paths pass through
+        assert_eq!(
+            convert_path_for_target("/home/kochul/project", "WSL"),
+            Some("/home/kochul/project".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_wsl_to_wsl_mnt_path() {
+        assert_eq!(
+            convert_path_for_target("/mnt/c/Windows", "WSL"),
+            Some("/mnt/c/Windows".into())
+        );
+    }
+
+    #[test]
+    fn sync_direction_ps_to_ps_windows_path() {
+        // PowerShell → PowerShell: Windows paths pass through
+        assert_eq!(
+            convert_path_for_target("C:\\Users\\kochul", "PowerShell"),
+            Some("C:\\Users\\kochul".into())
+        );
+    }
+
+    #[test]
+    #[test]
+    fn normalize_powershell_provider_path() {
+        // PowerShell at UNC path emits provider prefix
+        assert_eq!(
+            normalize_wsl_path("file://localhost/Microsoft.PowerShell.Core/FileSystem:://wsl.localhost/Ubuntu-22.04/home/kochul"),
+            "/home/kochul"
+        );
+        // Raw provider prefix (without file://localhost)
+        assert_eq!(
+            normalize_wsl_path("Microsoft.PowerShell.Core/FileSystem:://wsl.localhost/Ubuntu-22.04/tmp"),
+            "/tmp"
+        );
+        // Provider prefix with Windows path → normalized to /mnt/c/...
+        assert_eq!(
+            normalize_wsl_path("Microsoft.PowerShell.Core/FileSystem::C:\\Users\\kochul"),
+            "/mnt/c/Users/kochul"
+        );
+    }
+
+    fn extract_distro_from_osc99_path() {
+        // OSC 9;9 sends //wsl.localhost/Ubuntu-22.04/home/kochul
+        assert_eq!(
+            extract_wsl_distro_from_path("//wsl.localhost/Ubuntu-22.04/home/kochul"),
+            Some("Ubuntu-22.04".into())
+        );
+    }
+
+    #[test]
+    fn extract_distro_from_wsl_dollar_path() {
+        assert_eq!(
+            extract_wsl_distro_from_path("//wsl$/Debian/usr/local"),
+            Some("Debian".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_windows_to_wsl() {
+        // PowerShell C:\Users\kochul → WSL /mnt/c/Users/kochul
+        assert_eq!(
+            convert_path_for_target("C:\\Users\\kochul\\project", "WSL"),
+            Some("/mnt/c/Users/kochul/project".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_windows_forward_slash_to_wsl() {
+        assert_eq!(
+            convert_path_for_target("C:/Users/kochul/project", "WSL"),
+            Some("/mnt/c/Users/kochul/project".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_windows_drive_root_to_wsl() {
+        assert_eq!(
+            convert_path_for_target("C:\\", "WSL"),
+            Some("/mnt/c/".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_same_profile_linux_to_wsl() {
+        assert_eq!(
+            convert_path_for_target("/home/kochul/project", "WSL"),
+            Some("/home/kochul/project".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_same_profile_windows_to_powershell() {
+        assert_eq!(
+            convert_path_for_target("C:\\Users\\kochul", "PowerShell"),
+            Some("C:\\Users\\kochul".into())
+        );
+    }
+
+    #[test]
+    fn convert_path_lowercase_profiles() {
+        assert_eq!(
+            convert_path_for_target("/mnt/c/Users", "powershell"),
+            Some("C:\\Users".into())
+        );
+        assert_eq!(
+            convert_path_for_target("C:\\Users", "wsl"),
+            Some("/mnt/c/Users".into())
+        );
+    }
+
+    #[test]
+    fn build_cd_command_for_wsl_uses_plain_cd() {
+        assert_eq!(
+            build_cd_command("/home/kochul", "WSL"),
+            " cd /home/kochul\n"
+        );
+    }
+
+    #[test]
+    fn build_cd_command_for_powershell_uses_cr() {
+        assert_eq!(
+            build_cd_command("C:\\Users\\kochul", "PowerShell"),
+            " cd C:\\Users\\kochul\r"
+        );
     }
 
     #[test]

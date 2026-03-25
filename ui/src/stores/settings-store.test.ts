@@ -15,10 +15,9 @@ describe("settings-store", () => {
 
   it("has default profiles", () => {
     const { profiles } = useSettingsStore.getState();
-    expect(profiles).toHaveLength(3);
+    expect(profiles).toHaveLength(2);
     expect(profiles[0].name).toBe("PowerShell");
     expect(profiles[1].name).toBe("WSL");
-    expect(profiles[2].name).toBe("CMD");
   });
 
   it("has default profile set", () => {
@@ -90,17 +89,17 @@ describe("settings-store", () => {
       snapOnInput: true,
     });
     const { profiles } = useSettingsStore.getState();
-    expect(profiles).toHaveLength(4);
-    expect(profiles[3].name).toBe("Git Bash");
-    expect(profiles[3].cursorShape).toBe("bar");
-    expect(profiles[3].bellStyle).toBe("audible");
+    expect(profiles).toHaveLength(3);
+    expect(profiles[2].name).toBe("Git Bash");
+    expect(profiles[2].cursorShape).toBe("bar");
+    expect(profiles[2].bellStyle).toBe("audible");
   });
 
   it("removes a profile", () => {
-    useSettingsStore.getState().removeProfile(2); // Remove CMD
+    useSettingsStore.getState().removeProfile(1); // Remove WSL
     const { profiles } = useSettingsStore.getState();
-    expect(profiles).toHaveLength(2);
-    expect(profiles.find((p) => p.name === "CMD")).toBeUndefined();
+    expect(profiles).toHaveLength(1);
+    expect(profiles.find((p) => p.name === "WSL")).toBeUndefined();
   });
 
   it("loads settings from external data", () => {

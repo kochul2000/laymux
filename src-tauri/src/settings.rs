@@ -339,11 +339,6 @@ impl Default for Settings {
                     command_line: "wsl.exe".into(),
                     ..Profile::default()
                 },
-                Profile {
-                    name: "CMD".into(),
-                    command_line: "cmd.exe".into(),
-                    ..Profile::default()
-                },
             ],
             keybindings: Vec::new(),
             font: FontSettings::default(),
@@ -414,11 +409,54 @@ fn dirs_config_path() -> Option<PathBuf> {
 }
 
 /// Load settings from disk. Returns default settings if file doesn't exist.
+/// Applies migrations for removed features (e.g., CMD profile → PowerShell).
 pub fn load_settings() -> Settings {
     let path = settings_path();
-    match fs::read_to_string(&path) {
+    let mut settings = match fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
         Err(_) => Settings::default(),
+    };
+    migrate_settings(&mut settings);
+    settings
+}
+
+/// Apply settings migrations:
+/// - Replace CMD profile references with PowerShell in workspace panes
+/// - Remove CMD from profile list
+/// - Deduplicate workspace names
+fn migrate_settings(settings: &mut Settings) {
+    // Migrate CMD → PowerShell in workspace pane views
+    for ws in &mut settings.workspaces {
+        for pane in &mut ws.panes {
+            if let Some(profile) = pane.view.extra.get("profile").and_then(|v| v.as_str()) {
+                if profile.eq_ignore_ascii_case("cmd") {
+                    if let Some(obj) = pane.view.extra.as_object_mut() {
+                        obj.insert("profile".into(), serde_json::json!("PowerShell"));
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove CMD from profiles list
+    settings.profiles.retain(|p| !p.name.eq_ignore_ascii_case("cmd"));
+
+    // Deduplicate workspace names
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for ws in &mut settings.workspaces {
+        let base = ws.name.clone();
+        if !seen_names.insert(ws.name.clone()) {
+            // Name already used — append suffix
+            let mut n = 2;
+            loop {
+                let candidate = format!("{base} ({n})");
+                if seen_names.insert(candidate.clone()) {
+                    ws.name = candidate;
+                    break;
+                }
+                n += 1;
+            }
+        }
     }
 }
 
@@ -439,10 +477,9 @@ mod tests {
     #[test]
     fn default_settings_has_profiles() {
         let settings = Settings::default();
-        assert_eq!(settings.profiles.len(), 3);
+        assert_eq!(settings.profiles.len(), 2);
         assert_eq!(settings.profiles[0].name, "PowerShell");
         assert_eq!(settings.profiles[1].name, "WSL");
-        assert_eq!(settings.profiles[2].name, "CMD");
     }
 
     #[test]
@@ -681,5 +718,57 @@ mod tests {
         let pane: DockPaneSetting = serde_json::from_str(json).unwrap();
         assert_eq!(pane.w, 1.0);
         assert_eq!(pane.h, 1.0);
+    }
+
+    // --- Migration tests ---
+
+    #[test]
+    fn migrate_cmd_profile_to_powershell_in_workspace_panes() {
+        let mut settings = Settings::default();
+        settings.workspaces = vec![Workspace {
+            id: "ws-1".into(),
+            name: "Test".into(),
+            layout_id: "default-layout".into(),
+            panes: vec![WorkspacePane {
+                x: 0.0, y: 0.0, w: 1.0, h: 1.0,
+                view: serde_json::from_value(serde_json::json!({
+                    "type": "TerminalView",
+                    "profile": "CMD"
+                })).unwrap(),
+            }],
+        }];
+        migrate_settings(&mut settings);
+        assert_eq!(settings.workspaces[0].panes[0].view.extra["profile"], "PowerShell");
+    }
+
+    #[test]
+    fn migrate_removes_cmd_from_profiles() {
+        let mut settings = Settings::default();
+        settings.profiles.push(Profile { name: "CMD".into(), command_line: "cmd.exe".into(), ..Profile::default() });
+        assert_eq!(settings.profiles.len(), 3);
+        migrate_settings(&mut settings);
+        assert_eq!(settings.profiles.len(), 2);
+        assert!(settings.profiles.iter().all(|p| p.name != "CMD"));
+    }
+
+    #[test]
+    fn migrate_deduplicates_workspace_names() {
+        let mut settings = Settings::default();
+        settings.workspaces = vec![
+            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
+            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
+            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
+        ];
+        migrate_settings(&mut settings);
+        let names: Vec<&str> = settings.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, vec!["Dev", "Dev (2)", "Dev (3)"]);
+    }
+
+    #[test]
+    fn migrate_no_op_for_clean_settings() {
+        let mut settings = Settings::default();
+        let before = settings.clone();
+        migrate_settings(&mut settings);
+        assert_eq!(settings, before);
     }
 }

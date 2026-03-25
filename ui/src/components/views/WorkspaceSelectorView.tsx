@@ -12,7 +12,6 @@ import type { WorkspacePane } from "@/stores/types";
 const LABEL_ABBREV: Record<string, string> = {
   PowerShell: "PS",
   WSL: "WSL",
-  CMD: "CMD",
   Ubuntu: "UBT",
   Debian: "DEB",
   Browser: "WEB",

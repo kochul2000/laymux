@@ -145,15 +145,15 @@ mod tests {
     }
 
     #[test]
-    fn spawn_pty_with_cmd_profile() {
-        let session = make_test_session("CMD");
+    fn spawn_pty_with_powershell_profile() {
+        let session = make_test_session("PowerShell");
         let (tx, rx) = mpsc::channel();
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
         });
 
-        assert!(handle.is_ok(), "PTY spawn should succeed for CMD");
+        assert!(handle.is_ok(), "PTY spawn should succeed for PowerShell");
         let handle = handle.unwrap();
 
         // Write a command and expect output
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn spawn_pty_resize() {
-        let session = make_test_session("CMD");
+        let session = make_test_session("PowerShell");
         let handle = spawn_pty(&session, |_| {}).unwrap();
 
         let result = handle.resize(120, 40);
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn spawn_pty_sets_env_vars() {
-        let session = make_test_session("CMD");
+        let session = make_test_session("PowerShell");
         let (tx, rx) = mpsc::channel();
 
         let handle = spawn_pty(&session, move |data| {
@@ -196,7 +196,7 @@ mod tests {
         }).unwrap();
 
         // Check that IDE_TERMINAL_ID is set
-        let _ = handle.write(b"echo %IDE_TERMINAL_ID%\r\n");
+        let _ = handle.write(b"echo $env:IDE_TERMINAL_ID\r\n");
 
         let mut output = String::new();
         for _ in 0..20 {

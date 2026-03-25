@@ -172,6 +172,7 @@ export function TerminalView({
     // Build hooks list
     const hooks: OscHook[] = [
       ...getPresetHooks("sync-cwd"),
+      ...getPresetHooks("set-wsl-distro"),
       ...getPresetHooks("sync-branch"),
       ...getPresetHooks("notify-on-fail"),
       ...getPresetHooks("notify-on-complete"),

@@ -327,7 +327,7 @@ mod tests {
         assert!(is_wsl_profile("Debian"));
         assert!(is_wsl_profile("WSL - Ubuntu"));
         assert!(!is_wsl_profile("PowerShell"));
-        assert!(!is_wsl_profile("CMD"));
+        assert!(!is_wsl_profile("PowerShell"));
         assert!(!is_wsl_profile("Git Bash"));
     }
 

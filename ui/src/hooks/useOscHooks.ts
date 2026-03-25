@@ -113,6 +113,12 @@ function buildIdeMessage(
         title: cmd.args.join(" "),
         terminal_id: terminalId,
       };
+    case "set-wsl-distro":
+      return {
+        action: "set-wsl-distro",
+        path: cmd.args[0] ?? "",
+        terminal_id: terminalId,
+      };
     case "open-file":
       return {
         action: "open-file",
