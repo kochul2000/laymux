@@ -33,6 +33,7 @@ function makeNotification(overrides: Partial<Notification> & { id: string }): No
     level: "info",
     createdAt: Date.now(),
     readAt: null,
+    navigatedAt: null,
     ...overrides,
   };
 }

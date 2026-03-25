@@ -290,6 +290,18 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   // Save actions per ARCHITECTURE.md section 4.1
   saveWorkspace: () => {
+    const ws = get().getActiveWorkspace();
+    if (ws) {
+      // Also update the layout template so new workspaces get the saved structure
+      const updatedLayoutPanes = ws.panes.map((p) => ({
+        x: p.x, y: p.y, w: p.w, h: p.h, viewType: p.view.type,
+      }));
+      set((state) => ({
+        layouts: state.layouts.map((l) =>
+          l.id === ws.layoutId ? { ...l, panes: updatedLayoutPanes } : l,
+        ),
+      }));
+    }
     persistSession();
   },
 
