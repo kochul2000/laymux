@@ -1,9 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useUiStore, type ControlBarMode } from "@/stores/ui-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 
-export type { ControlBarMode };
+/**
+ * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
+ * - hover: 마우스 hover 시 표시, idle/타이핑/패인이탈 시 숨김 (기본값)
+ * - pinned: 항상 표시 (콘텐츠 위에 고정)
+ * - minimized: 3-dot 버튼만 표시, 클릭 시 hover로 복귀
+ *
+ * ⚠️ 모드 내부에 "열림/닫힘" 같은 서브 상태를 절대 추가하지 말 것.
+ *    모드 전환은 항상 setMode() 한번으로 완결되어야 한다.
+ */
+export type ControlBarMode = "hover" | "pinned" | "minimized";
 
 export interface PaneControlBarActions {
   onSplitH?: () => void;
@@ -18,8 +26,6 @@ interface PaneControlBarProps {
   actions: PaneControlBarActions;
   hovered: boolean;
   children: React.ReactNode;
-  /** Pane ID for persisting bar mode. If omitted, mode is local only. */
-  paneId?: string;
 }
 
 // ─── Design tokens ───────────────────────────────────────
@@ -257,57 +263,20 @@ export function PaneControlBar({
   actions,
   hovered,
   children,
-  paneId,
 }: PaneControlBarProps) {
-  const storedMode = useUiStore((s) => paneId ? s.barModes[paneId] : undefined);
-  const setBarMode = useUiStore((s) => s.setBarMode);
-  const [localMode, setLocalMode] = useState<ControlBarMode>("hover");
-  const mode = storedMode ?? localMode;
-  const setMode = (m: ControlBarMode) => {
-    if (paneId) setBarMode(paneId, m);
-    else setLocalMode(m);
-  };
-  const [minimizedOpen, setMinimizedOpen] = useState(false);
-  const minimizedBarRef = useRef<HTMLDivElement>(null);
-
-  // Close expanded bar when clicking outside
-  useEffect(() => {
-    if (!minimizedOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (minimizedBarRef.current && !minimizedBarRef.current.contains(e.target as Node)) {
-        setMinimizedOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [minimizedOpen]);
+  const [mode, setMode] = useState<ControlBarMode>("hover");
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
 
   if (mode === "minimized") {
-    // Minimized: button only, click expands the full bar in-place
+    // Minimized: 3-dot 버튼만 표시. 클릭하면 hover 모드로 복귀.
+    // ⚠️ 절대 "minimizedOpen" 같은 중간 상태를 추가하지 말 것.
+    //    minimized 안에서 바를 임시 확장하는 서브 모드는 포커스/숨김 동작을
+    //    완전히 망가뜨린다. minimize → hover 단방향 전환만 허용.
     return (
       <div className="relative h-full w-full" data-testid="pane-control-minimized">
         {children}
-        {minimizedOpen ? (
-          <div
-            ref={minimizedBarRef}
-            data-testid="pane-control-bar"
-            className="absolute right-1 top-1 z-20 flex items-center"
-            style={{
-              height: BAR_H,
-              background: barBgHover,
-              backdropFilter: "blur(8px)",
-              borderBottom: `1px solid ${sepClr}`,
-              borderLeft: `1px solid ${sepClr}`,
-              borderRadius: `0 0 0 ${RADIUS + 2}px`,
-            }}
-          >
-            <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={(m) => { setMode(m); setMinimizedOpen(false); }} />
-          </div>
-        ) : (
-          hovered && <MinimizedButton onExpand={() => setMinimizedOpen(true)} />
-        )}
+        {hovered && <MinimizedButton onExpand={() => setMode("hover")} />}
       </div>
     );
   }
