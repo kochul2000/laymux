@@ -1,0 +1,206 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/persist-session", () => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/tauri-api", () => ({
+  createTerminalSession: vi.fn().mockResolvedValue(undefined),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  resizeTerminal: vi.fn().mockResolvedValue(undefined),
+  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+  onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
+  loadSettings: vi.fn().mockResolvedValue({}),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { PaneControlBar } from "./PaneControlBar";
+import { useSettingsStore } from "@/stores/settings-store";
+
+describe("PaneControlBar", () => {
+  const defaultView = { type: "TerminalView" as const, profile: "PowerShell" };
+  const defaultActions = {
+    onSplitH: vi.fn(),
+    onSplitV: vi.fn(),
+    onClear: vi.fn(),
+    onChangeView: vi.fn(),
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  // -- Hover mode (default) --
+
+  it("does not show bar when not hovered", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+  });
+
+  it("shows bar when hovered", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+  });
+
+  it("bar contains view selector, split, clear, pin, minimize buttons", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-view-select")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-split-h")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-split-v")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-clear")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-pin")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-minimize")).toBeInTheDocument();
+  });
+
+  it("split H calls onSplitH", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-split-h"));
+    expect(defaultActions.onSplitH).toHaveBeenCalled();
+  });
+
+  it("split V calls onSplitV", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-split-v"));
+    expect(defaultActions.onSplitV).toHaveBeenCalled();
+  });
+
+  it("clear calls onClear", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-clear"));
+    expect(defaultActions.onClear).toHaveBeenCalled();
+  });
+
+  // -- Pinned mode --
+
+  it("clicking pin toggles to pinned mode", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-pin"));
+    // Now in pinned mode — bar should persist even without hover
+    expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+  });
+
+  // -- Minimized mode --
+
+  it("clicking minimize shows menu button", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument();
+  });
+
+  it("menu button expands full bar in-place", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    // Switch to minimized
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    // Click menu button — should expand the full control bar
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-control-split-h")).toBeInTheDocument();
+  });
+
+  it("clicking minimize again in expanded state collapses back to button", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    // Minimize → expand → minimize again
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    // Now bar is expanded, click minimize in the bar
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    // Should be back to just the button
+    expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+  });
+
+  // -- Delete pane --
+
+  it("shows delete button when onDelete is provided", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    // defaultActions doesn't have onDelete, so no delete button
+    expect(screen.queryByTestId("pane-control-delete")).not.toBeInTheDocument();
+  });
+
+  it("shows delete button when onDelete action exists", () => {
+    const actionsWithDelete = { ...defaultActions, onDelete: vi.fn() };
+    render(
+      <PaneControlBar currentView={defaultView} actions={actionsWithDelete} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-delete")).toBeInTheDocument();
+  });
+
+  it("calls onDelete when delete button clicked", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const actionsWithDelete = { ...defaultActions, onDelete };
+    render(
+      <PaneControlBar currentView={defaultView} actions={actionsWithDelete} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await user.click(screen.getByTestId("pane-control-delete"));
+    expect(onDelete).toHaveBeenCalled();
+  });
+
+  it("renders children content in all modes", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div data-testid="child">content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("child")).toBeInTheDocument();
+  });
+});

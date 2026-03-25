@@ -1,0 +1,330 @@
+import { useEffect, useRef } from "react";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { useTerminalStore } from "@/stores/terminal-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import {
+  createTerminalSession,
+  writeToTerminal,
+  resizeTerminal,
+  closeTerminalSession,
+  onTerminalOutput,
+  smartPaste,
+} from "@/lib/tauri-api";
+import {
+  colorSchemeToXtermTheme,
+  type WTColorScheme,
+} from "@/lib/color-scheme";
+import { processOscInOutput } from "@/hooks/useOscHooks";
+import { getPresetHooks } from "@/lib/osc-presets";
+import type { OscHook } from "@/lib/osc-parser";
+import { isIdeShortcut } from "@/lib/ide-shortcuts";
+
+import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
+
+interface TerminalViewProps {
+  instanceId: string;
+  profile: string;
+  syncGroup: string;
+  workspaceId?: string;
+  isFocused?: boolean;
+}
+
+export function TerminalView({
+  instanceId,
+  profile,
+  syncGroup,
+  workspaceId = "",
+  isFocused = false,
+}: TerminalViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const openedRef = useRef(false);
+  const isFocusedRef = useRef(isFocused);
+  isFocusedRef.current = isFocused;
+  const registerInstance = useTerminalStore((s) => s.registerInstance);
+  const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
+
+  useEffect(() => {
+    registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
+
+    // Resolve theme from settings color scheme (profile → profileDefaults → none)
+    const settingsState = useSettingsStore.getState();
+    const profileConfig = settingsState.profiles.find(
+      (p) => p.name === profile,
+    );
+    const schemeName = profileConfig?.colorScheme
+      || settingsState.profileDefaults?.colorScheme
+      || "CampbellClear";
+    const colorScheme = schemeName
+      ? settingsState.colorSchemes.find((cs) => cs.name === schemeName)
+      : undefined;
+
+    const defaultTheme = {
+      background: "#0C0C0C",
+      foreground: "#F0F0F0",
+      cursor: "#FFFFFF",
+      selectionBackground: "#232042",
+    };
+
+    const theme = colorScheme
+      ? {
+          ...defaultTheme,
+          ...colorSchemeToXtermTheme(colorScheme as unknown as WTColorScheme),
+        }
+      : defaultTheme;
+
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontSize: settingsState.font.size,
+      fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+      theme,
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
+    });
+
+    const fitAddon = new FitAddon();
+    const webLinksAddon = new WebLinksAddon();
+
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(webLinksAddon);
+
+    terminalRef.current = terminal;
+
+    // Custom key event handler: IDE shortcuts + smart paste interception.
+    // Returning false prevents xterm from consuming the event.
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (isIdeShortcut(e)) return false;
+
+      // Smart paste: intercept Ctrl+V / Ctrl+Shift+V on keydown
+      if (
+        e.type === "keydown" &&
+        (e.key === "v" || e.key === "V") &&
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey
+      ) {
+        const { convenience } = useSettingsStore.getState();
+        if (convenience.smartPaste) {
+          e.preventDefault();
+
+          // Rust reads clipboard (files, images, or text) and returns result.
+          // Use terminal.paste() to support bracketed paste mode — without it,
+          // multi-line paste executes each line as a separate command.
+          smartPaste(convenience.pasteImageDir, profile)
+            .then((result) => {
+              if (result.pasteType !== "none" && result.content) {
+                terminal.paste(result.content);
+              }
+            })
+            .catch(() => {}); // clipboard read failed — silently ignore
+
+          return false; // Block xterm from processing Ctrl+V
+        }
+      }
+
+      return true;
+    });
+
+    // Handle terminal data (user input) — send to backend PTY
+    terminal.onData((data) => {
+      writeToTerminal(instanceId, data).catch(() => {});
+    });
+
+    // Handle terminal resize — notify backend PTY
+    terminal.onResize(({ cols, rows }) => {
+      resizeTerminal(instanceId, cols, rows).catch(() => {});
+    });
+
+    // Track terminal title changes (OSC 0/2) for interactive app detection
+    terminal.onTitleChange((title) => {
+      const { updateInstanceInfo } = useTerminalStore.getState();
+      updateInstanceInfo(instanceId, {
+        title,
+        activity: detectActivityFromTitle(title),
+      });
+    });
+
+    // Build hooks list
+    const hooks: OscHook[] = [
+      ...getPresetHooks("sync-cwd"),
+      ...getPresetHooks("sync-branch"),
+      ...getPresetHooks("notify-on-fail"),
+      ...getPresetHooks("notify-on-complete"),
+      ...getPresetHooks("set-title-cwd"),
+      ...getPresetHooks("notify-osc9"),
+      ...getPresetHooks("notify-osc99"),
+      ...getPresetHooks("notify-osc777"),
+      ...getPresetHooks("track-command"),
+      ...getPresetHooks("track-command-result"),
+      ...getPresetHooks("track-command-start"),
+    ];
+
+    // Listen for terminal output from backend PTY
+    let cancelled = false;
+    let unlistenOutput: (() => void) | undefined;
+    let inAltScreen = false;
+    onTerminalOutput(instanceId, (data) => {
+      if (cancelled) return;
+      terminal.write(data);
+      const text = new TextDecoder().decode(data);
+      processOscInOutput(text, hooks, instanceId, syncGroup);
+
+      // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
+      const enterAlt = text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
+      const leaveAlt = text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
+      if (enterAlt && !leaveAlt && !inAltScreen) {
+        inAltScreen = true;
+        // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
+        const cmdMatch = text.match(/\x1b\]133;E;([^\x07]*)\x07/);
+        const cmdActivity = cmdMatch ? detectActivityFromCommand(cmdMatch[1]) : undefined;
+        if (cmdActivity) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: cmdActivity });
+        } else {
+          const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+          if (inst?.activity?.type === "interactiveApp" && inst.activity.name !== "app") {
+            // Already identified — don't overwrite
+          } else {
+            const detected = detectActivityFromTitle(inst?.title ?? "");
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              activity: detected ?? { type: "interactiveApp", name: "app" },
+            });
+          }
+        }
+      } else if (leaveAlt && !enterAlt && inAltScreen) {
+        inAltScreen = false;
+        useTerminalStore.getState().updateInstanceInfo(instanceId, {
+          activity: { type: "shell" },
+        });
+      }
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenOutput = unlisten;
+      }
+    });
+
+    // Wait for container to have actual dimensions before opening terminal.
+    // xterm.js viewport gets height 0 if opened in a zero-sized container,
+    // causing rendering artifacts (garbled first row).
+    let sessionCreated = false;
+    const resizeObserver = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0 && !sessionCreated) {
+        sessionCreated = true;
+        // Open terminal now that container has real dimensions
+        if (containerRef.current) {
+          terminal.open(containerRef.current);
+        }
+        // WebGL renderer required for custom glyph drawing (box-drawing, block
+        // elements). xterm.js v6 built-in renderer does not support customGlyphs.
+        try {
+          const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
+          terminal.loadAddon(webgl);
+          webgl.onContextLoss(() => webgl.dispose());
+        } catch {
+          // WebGL not available — fall back to default renderer
+        }
+        fitAddon.fit();
+        openedRef.current = true;
+        if (isFocusedRef.current) {
+          terminal.focus();
+        }
+        createTerminalSession(
+          instanceId,
+          profile,
+          terminal.cols,
+          terminal.rows,
+          syncGroup,
+        ).catch(() => {});
+      } else if (sessionCreated && width > 0 && height > 0) {
+        fitAddon.fit();
+      }
+    });
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      cancelled = true;
+      resizeObserver.disconnect();
+      unlistenOutput?.();
+      closeTerminalSession(instanceId).catch(() => {});
+      terminal.dispose();
+      unregisterInstance(instanceId);
+    };
+  }, [instanceId, profile, syncGroup, registerInstance, unregisterInstance]);
+
+  // Focus terminal when pane focus state changes (only if terminal is opened)
+  useEffect(() => {
+    if (isFocused && openedRef.current) {
+      terminalRef.current?.focus();
+    }
+  }, [isFocused]);
+
+  // Reactively update terminal theme when profile colorScheme or font changes
+  const currentSchemeName = useSettingsStore((s) => {
+    const prof = s.profiles?.find((p) => p.name === profile);
+    return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
+  });
+  const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
+  const font = useSettingsStore((s) => s.font ?? { face: "Cascadia Mono", size: 14, weight: "normal" });
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term?.options) return;
+
+    const scheme = currentSchemeName
+      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+      : undefined;
+
+    const defaultTheme = {
+      background: "#0C0C0C",
+      foreground: "#F0F0F0",
+      cursor: "#FFFFFF",
+      selectionBackground: "#232042",
+    };
+
+    try {
+      term.options.theme = scheme
+        ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
+        : defaultTheme;
+      term.options.fontSize = font.size;
+      term.options.fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
+    } catch { /* xterm mock may not support options setter */ }
+  }, [currentSchemeName, colorSchemes, font]);
+
+  // Resolve terminal background for padding area
+  const termBg = (() => {
+    const scheme = currentSchemeName
+      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+      : undefined;
+    return scheme?.background || "#1e1e2e";
+  })();
+
+  // Read padding from profile settings
+  const padding = useSettingsStore(
+    (s) => s.profiles.find((p) => p.name === profile)?.padding,
+  );
+  const pt = padding?.top ?? 8;
+  const pr = padding?.right ?? 8;
+  const pb = padding?.bottom ?? 8;
+  const pl = padding?.left ?? 8;
+
+  return (
+    <div
+      data-testid={`terminal-view-${instanceId}`}
+      className="h-full w-full"
+      style={{
+        background: termBg,
+        padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
+      }}
+    >
+      <div ref={containerRef} className="h-full w-full" />
+    </div>
+  );
+}

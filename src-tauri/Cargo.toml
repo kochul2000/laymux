@@ -1,0 +1,40 @@
+[package]
+name = "laymux"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal-focused IDE built with Tauri"
+default-run = "laymux"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+portable-pty = "0.8"
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+uuid = { version = "1", features = ["v4"] }
+png = "0.17"
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lib]
+name = "laymux_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "laymux"
+path = "src/main.rs"
+
+[[bin]]
+name = "ide"
+path = "src/bin/ide.rs"
+

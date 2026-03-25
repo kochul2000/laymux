@@ -1,0 +1,133 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
+
+vi.mock("@/lib/persist-session", () => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/tauri-api", () => ({
+  loadSettings: vi.fn().mockResolvedValue({
+    font: { face: "Fira Code", size: 16 },
+    defaultProfile: "WSL",
+    profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+    colorSchemes: [],
+    keybindings: [],
+    layouts: [
+      {
+        id: "layout-1",
+        name: "Saved Layout",
+        panes: [{ x: 0, y: 0, w: 1, h: 0.5, viewType: "TerminalView" }, { x: 0, y: 0.5, w: 1, h: 0.5, viewType: "TerminalView" }],
+      },
+    ],
+    workspaces: [
+      {
+        id: "ws-1",
+        name: "Saved WS",
+        layoutId: "layout-1",
+        panes: [
+          { x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },
+          { x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },
+        ],
+      },
+    ],
+    docks: [
+      { position: "left", activeView: "SettingsView", views: ["WorkspaceSelectorView", "SettingsView"], visible: false },
+      { position: "right", activeView: null, views: [], visible: true },
+    ],
+  }),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+  createTerminalSession: vi.fn().mockResolvedValue({}),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  resizeTerminal: vi.fn().mockResolvedValue(undefined),
+  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+  getSyncGroupTerminals: vi.fn().mockResolvedValue([]),
+  handleIdeMessage: vi.fn().mockResolvedValue({}),
+  onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
+  onSyncCwd: vi.fn().mockResolvedValue(() => {}),
+  onSyncBranch: vi.fn().mockResolvedValue(() => {}),
+  onIdeNotify: vi.fn().mockResolvedValue(() => {}),
+  onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
+  getListeningPorts: vi.fn().mockResolvedValue([]),
+  getGitBranch: vi.fn().mockResolvedValue(null),
+  sendOsNotification: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { useSessionPersistence } from "./useSessionPersistence";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useDockStore } from "@/stores/dock-store";
+import { loadSettings } from "@/lib/tauri-api";
+import { persistSession } from "@/lib/persist-session";
+
+describe("useSessionPersistence", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("loads settings from backend on mount", async () => {
+    const { result } = renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(loadSettings).toHaveBeenCalledTimes(1);
+    expect(result.current.loaded).toBe(true);
+  });
+
+  it("applies loaded settings to settings store", async () => {
+    renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const settingsState = useSettingsStore.getState();
+    expect(settingsState.font.face).toBe("Fira Code");
+    expect(settingsState.font.size).toBe(16);
+    expect(settingsState.defaultProfile).toBe("WSL");
+  });
+
+  it("applies loaded layouts and workspaces to workspace store", async () => {
+    renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const wsState = useWorkspaceStore.getState();
+    expect(wsState.layouts).toHaveLength(1);
+    expect(wsState.layouts[0].name).toBe("Saved Layout");
+    expect(wsState.workspaces).toHaveLength(1);
+    expect(wsState.workspaces[0].name).toBe("Saved WS");
+  });
+
+  it("provides a save function that persists to backend", async () => {
+    const { result } = renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    await act(async () => {
+      await result.current.save();
+    });
+
+    expect(persistSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads dock state from settings", async () => {
+    renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const leftDock = useDockStore.getState().getDock("left");
+    expect(leftDock?.activeView).toBe("SettingsView");
+    expect(leftDock?.visible).toBe(false);
+  });
+});

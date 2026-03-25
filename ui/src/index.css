@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base: #1e1e2e;
+  --bg-surface: #181825;
+  --bg-overlay: #313244;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --accent: #89b4fa;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --border: #313244;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Remove browser default focus outlines — IDE handles its own focus indicators */
+*:focus {
+  outline: none;
+}
+*:focus-visible {
+  outline: none;
+}
+
+body {
+  font-family: "Consolas", "Fira Code", monospace;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Hide scrollbars globally — content is still scrollable */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+

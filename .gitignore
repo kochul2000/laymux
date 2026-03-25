@@ -1,0 +1,34 @@
+# Rust
+/target/
+src-tauri/target/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.un~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Tauri
+WixTools/
+
+# Screenshots (automation debug)
+.screenshots/
+
+# Reference docs (local only)
+.reference/
+
+# Claude Code local settings (user-specific, not shared)
+.claude/settings.local.json

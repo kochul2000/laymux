@@ -1,0 +1,597 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+/// Color scheme definition (Windows Terminal compatible).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorScheme {
+    pub name: String,
+    #[serde(default)]
+    pub foreground: String,
+    #[serde(default)]
+    pub background: String,
+    #[serde(default)]
+    pub cursor_color: String,
+    #[serde(default)]
+    pub selection_background: String,
+    #[serde(default)]
+    pub black: String,
+    #[serde(default)]
+    pub red: String,
+    #[serde(default)]
+    pub green: String,
+    #[serde(default)]
+    pub yellow: String,
+    #[serde(default)]
+    pub blue: String,
+    #[serde(default)]
+    pub purple: String,
+    #[serde(default)]
+    pub cyan: String,
+    #[serde(default)]
+    pub white: String,
+    #[serde(default)]
+    pub bright_black: String,
+    #[serde(default)]
+    pub bright_red: String,
+    #[serde(default)]
+    pub bright_green: String,
+    #[serde(default)]
+    pub bright_yellow: String,
+    #[serde(default)]
+    pub bright_blue: String,
+    #[serde(default)]
+    pub bright_purple: String,
+    #[serde(default)]
+    pub bright_cyan: String,
+    #[serde(default)]
+    pub bright_white: String,
+}
+
+/// Padding settings for terminal profile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PaddingSettings {
+    #[serde(default = "default_padding_val")]
+    pub top: u16,
+    #[serde(default = "default_padding_val")]
+    pub right: u16,
+    #[serde(default = "default_padding_val")]
+    pub bottom: u16,
+    #[serde(default = "default_padding_val")]
+    pub left: u16,
+}
+
+fn default_padding_val() -> u16 {
+    8
+}
+
+impl Default for PaddingSettings {
+    fn default() -> Self {
+        Self { top: 8, right: 8, bottom: 8, left: 8 }
+    }
+}
+
+/// Terminal profile (Windows Terminal compatible).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub name: String,
+    #[serde(default)]
+    pub command_line: String,
+    #[serde(default)]
+    pub color_scheme: String,
+    #[serde(default)]
+    pub starting_directory: String,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default = "default_cursor_shape")]
+    pub cursor_shape: String,
+    #[serde(default)]
+    pub padding: PaddingSettings,
+    #[serde(default = "default_scrollback_lines")]
+    pub scrollback_lines: u32,
+    #[serde(default = "default_opacity")]
+    pub opacity: u8,
+    #[serde(default)]
+    pub tab_title: String,
+    #[serde(default = "default_bell_style")]
+    pub bell_style: String,
+    #[serde(default = "default_close_on_exit")]
+    pub close_on_exit: String,
+    #[serde(default = "default_antialiasing_mode")]
+    pub antialiasing_mode: String,
+    #[serde(default)]
+    pub suppress_application_title: bool,
+    #[serde(default = "default_true")]
+    pub snap_on_input: bool,
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            command_line: String::new(),
+            color_scheme: String::new(),
+            starting_directory: String::new(),
+            hidden: false,
+            cursor_shape: default_cursor_shape(),
+            padding: PaddingSettings::default(),
+            scrollback_lines: default_scrollback_lines(),
+            opacity: default_opacity(),
+            tab_title: String::new(),
+            bell_style: default_bell_style(),
+            close_on_exit: default_close_on_exit(),
+            antialiasing_mode: default_antialiasing_mode(),
+            suppress_application_title: false,
+            snap_on_input: true,
+        }
+    }
+}
+
+fn default_cursor_shape() -> String { "bar".into() }
+fn default_scrollback_lines() -> u32 { 9001 }
+fn default_opacity() -> u8 { 100 }
+fn default_bell_style() -> String { "audible".into() }
+fn default_close_on_exit() -> String { "automatic".into() }
+fn default_antialiasing_mode() -> String { "grayscale".into() }
+
+/// Keybinding entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Keybinding {
+    pub keys: String,
+    pub command: String,
+}
+
+/// Font settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FontSettings {
+    #[serde(default = "default_font_face")]
+    pub face: String,
+    #[serde(default = "default_font_size")]
+    pub size: u16,
+    #[serde(default = "default_font_weight")]
+    pub weight: String,
+}
+
+fn default_font_weight() -> String {
+    "normal".into()
+}
+
+fn default_font_face() -> String {
+    "Cascadia Mono".into()
+}
+
+fn default_font_size() -> u16 {
+    14
+}
+
+impl Default for FontSettings {
+    fn default() -> Self {
+        Self {
+            face: default_font_face(),
+            size: default_font_size(),
+            weight: default_font_weight(),
+        }
+    }
+}
+
+/// Layout pane definition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutPane {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub view_type: String,
+}
+
+/// Layout template.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Layout {
+    pub id: String,
+    pub name: String,
+    pub panes: Vec<LayoutPane>,
+}
+
+/// Workspace pane view config.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspacePaneView {
+    #[serde(rename = "type")]
+    pub view_type: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}
+
+/// Workspace pane definition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspacePane {
+    pub x: f64,
+    pub y: f64,
+    #[serde(default)]
+    pub w: f64,
+    #[serde(default)]
+    pub h: f64,
+    pub view: WorkspacePaneView,
+}
+
+/// Workspace definition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub layout_id: String,
+    pub panes: Vec<WorkspacePane>,
+}
+
+/// Convenience feature settings (smart paste, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConvenienceSettings {
+    #[serde(default = "default_true")]
+    pub smart_paste: bool,
+    #[serde(default)]
+    pub paste_image_dir: String,
+}
+
+impl Default for ConvenienceSettings {
+    fn default() -> Self {
+        Self {
+            smart_paste: true,
+            paste_image_dir: String::new(),
+        }
+    }
+}
+
+/// Dock configuration in settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DockSetting {
+    pub position: String,
+    #[serde(default)]
+    pub active_view: Option<String>,
+    #[serde(default)]
+    pub views: Vec<String>,
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    #[serde(default = "default_dock_size")]
+    pub size: f64,
+}
+
+fn default_dock_size() -> f64 {
+    240.0
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Root settings structure.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    #[serde(default)]
+    pub color_schemes: Vec<ColorScheme>,
+    #[serde(default)]
+    pub profiles: Vec<Profile>,
+    #[serde(default)]
+    pub keybindings: Vec<Keybinding>,
+    #[serde(default)]
+    pub font: FontSettings,
+    #[serde(default = "default_profile")]
+    pub default_profile: String,
+    #[serde(default)]
+    pub layouts: Vec<Layout>,
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
+    #[serde(default)]
+    pub docks: Vec<DockSetting>,
+    #[serde(default, alias = "claude")]
+    pub convenience: ConvenienceSettings,
+}
+
+fn default_profile() -> String {
+    "PowerShell".into()
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            color_schemes: Vec::new(),
+            profiles: vec![
+                Profile {
+                    name: "PowerShell".into(),
+                    command_line: "powershell.exe -NoLogo".into(),
+                    ..Profile::default()
+                },
+                Profile {
+                    name: "WSL".into(),
+                    command_line: "wsl.exe".into(),
+                    ..Profile::default()
+                },
+                Profile {
+                    name: "CMD".into(),
+                    command_line: "cmd.exe".into(),
+                    ..Profile::default()
+                },
+            ],
+            keybindings: Vec::new(),
+            font: FontSettings::default(),
+            default_profile: default_profile(),
+            layouts: vec![Layout {
+                id: "default-layout".into(),
+                name: "Default".into(),
+                panes: vec![LayoutPane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                }],
+            }],
+            workspaces: vec![Workspace {
+                id: "ws-default".into(),
+                name: "Default".into(),
+                layout_id: "default-layout".into(),
+                panes: vec![WorkspacePane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    view: WorkspacePaneView {
+                        view_type: "TerminalView".into(),
+                        extra: serde_json::json!({"profile": "PowerShell", "syncGroup": "Default"}),
+                    },
+                }],
+            }],
+            docks: vec![
+                DockSetting {
+                    position: "left".into(),
+                    active_view: Some("WorkspaceSelectorView".into()),
+                    views: vec!["WorkspaceSelectorView".into()],
+                    visible: true,
+                    size: default_dock_size(),
+                },
+            ],
+            convenience: ConvenienceSettings::default(),
+        }
+    }
+}
+
+/// Get the settings file path.
+pub fn settings_path() -> PathBuf {
+    // Use app-local data directory, fallback to current dir
+    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    base.join("settings.json")
+}
+
+fn dirs_config_path() -> Option<PathBuf> {
+    // On Windows: %APPDATA%/laymux
+    // On Linux: ~/.config/laymux
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|p| PathBuf::from(p).join("laymux"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(|p| PathBuf::from(p).join(".config").join("laymux"))
+    }
+}
+
+/// Load settings from disk. Returns default settings if file doesn't exist.
+pub fn load_settings() -> Settings {
+    let path = settings_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Settings::default(),
+    }
+}
+
+/// Save settings to disk.
+pub fn save_settings(settings: &Settings) -> Result<(), String> {
+    let path = settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_has_profiles() {
+        let settings = Settings::default();
+        assert_eq!(settings.profiles.len(), 3);
+        assert_eq!(settings.profiles[0].name, "PowerShell");
+        assert_eq!(settings.profiles[1].name, "WSL");
+        assert_eq!(settings.profiles[2].name, "CMD");
+    }
+
+    #[test]
+    fn default_settings_has_layout_and_workspace() {
+        let settings = Settings::default();
+        assert_eq!(settings.layouts.len(), 1);
+        assert_eq!(settings.workspaces.len(), 1);
+        assert_eq!(settings.workspaces[0].layout_id, "default-layout");
+    }
+
+    #[test]
+    fn default_font_settings() {
+        let settings = Settings::default();
+        assert_eq!(settings.font.face, "Cascadia Mono");
+        assert_eq!(settings.font.size, 14);
+    }
+
+    #[test]
+    fn serialize_deserialize_round_trip() {
+        let settings = Settings::default();
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(settings, parsed);
+    }
+
+    #[test]
+    fn deserialize_partial_settings() {
+        let json = r#"{"font": {"face": "Fira Code", "size": 16}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.font.face, "Fira Code");
+        assert_eq!(settings.font.size, 16);
+        // Defaults fill in
+        assert_eq!(settings.default_profile, "PowerShell");
+    }
+
+    #[test]
+    fn deserialize_windows_terminal_compatible() {
+        let json = r##"{
+            "profiles": [
+                {"name": "Ubuntu", "commandLine": "wsl.exe -d Ubuntu", "colorScheme": "One Dark", "startingDirectory": "~", "hidden": false}
+            ],
+            "colorSchemes": [
+                {"name": "One Dark", "foreground": "#ABB2BF", "background": "#282C34", "cursorColor": "#528BFF"}
+            ]
+        }"##;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.profiles[0].name, "Ubuntu");
+        assert_eq!(settings.profiles[0].command_line, "wsl.exe -d Ubuntu");
+        assert_eq!(settings.color_schemes[0].name, "One Dark");
+        assert_eq!(settings.color_schemes[0].foreground, "#ABB2BF");
+    }
+
+    #[test]
+    fn save_and_load_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let settings = Settings::default();
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        fs::write(&path, &json).unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        let loaded: Settings = serde_json::from_str(&content).unwrap();
+        assert_eq!(settings, loaded);
+    }
+
+    #[test]
+    fn dock_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.docks.len(), 1);
+        assert_eq!(settings.docks[0].position, "left");
+        assert_eq!(
+            settings.docks[0].active_view,
+            Some("WorkspaceSelectorView".into())
+        );
+    }
+
+    #[test]
+    fn profile_new_fields_default() {
+        let profile = Profile::default();
+        assert_eq!(profile.cursor_shape, "bar");
+        assert_eq!(profile.padding, PaddingSettings { top: 8, right: 8, bottom: 8, left: 8 });
+        assert_eq!(profile.scrollback_lines, 9001);
+        assert_eq!(profile.opacity, 100);
+        assert_eq!(profile.tab_title, "");
+        assert_eq!(profile.bell_style, "audible");
+        assert_eq!(profile.close_on_exit, "automatic");
+        assert_eq!(profile.antialiasing_mode, "grayscale");
+        assert!(!profile.suppress_application_title);
+        assert!(profile.snap_on_input);
+    }
+
+    #[test]
+    fn font_weight_default() {
+        let font = FontSettings::default();
+        assert_eq!(font.weight, "normal");
+    }
+
+    #[test]
+    fn deserialize_profile_backwards_compat() {
+        // Old-style profile with only 5 fields should still parse; new fields get defaults
+        let json = r#"{"name": "Test", "commandLine": "bash", "colorScheme": "", "startingDirectory": "", "hidden": false}"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.name, "Test");
+        assert_eq!(profile.cursor_shape, "bar");
+        assert_eq!(profile.scrollback_lines, 9001);
+        assert_eq!(profile.opacity, 100);
+        assert_eq!(profile.bell_style, "audible");
+        assert!(profile.snap_on_input);
+    }
+
+    #[test]
+    fn deserialize_profile_with_new_fields() {
+        let json = r#"{
+            "name": "Custom",
+            "commandLine": "zsh",
+            "cursorShape": "filledBox",
+            "padding": {"top": 4, "right": 4, "bottom": 4, "left": 4},
+            "scrollbackLines": 5000,
+            "opacity": 80,
+            "tabTitle": "Dev",
+            "bellStyle": "none",
+            "closeOnExit": "always",
+            "antialiasingMode": "cleartype",
+            "suppressApplicationTitle": true,
+            "snapOnInput": false
+        }"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.cursor_shape, "filledBox");
+        assert_eq!(profile.padding.top, 4);
+        assert_eq!(profile.scrollback_lines, 5000);
+        assert_eq!(profile.opacity, 80);
+        assert_eq!(profile.tab_title, "Dev");
+        assert_eq!(profile.bell_style, "none");
+        assert_eq!(profile.close_on_exit, "always");
+        assert_eq!(profile.antialiasing_mode, "cleartype");
+        assert!(profile.suppress_application_title);
+        assert!(!profile.snap_on_input);
+    }
+
+    #[test]
+    fn convenience_settings_default() {
+        let settings = Settings::default();
+        assert!(settings.convenience.smart_paste);
+        assert_eq!(settings.convenience.paste_image_dir, "");
+    }
+
+    #[test]
+    fn convenience_settings_deserialize() {
+        let json = r#"{"convenience": {"smartPaste": false, "pasteImageDir": "C:\\temp\\images"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.convenience.smart_paste);
+        assert_eq!(settings.convenience.paste_image_dir, "C:\\temp\\images");
+    }
+
+    #[test]
+    fn convenience_settings_backwards_compat_missing() {
+        // Old settings without convenience section should still parse
+        let json = r#"{"font": {"face": "Fira Code", "size": 16}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.convenience.smart_paste);
+        assert_eq!(settings.convenience.paste_image_dir, "");
+    }
+
+    #[test]
+    fn convenience_settings_claude_alias() {
+        // Old settings with "claude" key should still work via serde alias
+        let json = r#"{"claude": {"smartPaste": false, "pasteImageDir": "/tmp/img"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.convenience.smart_paste);
+        assert_eq!(settings.convenience.paste_image_dir, "/tmp/img");
+    }
+
+    #[test]
+    fn font_weight_round_trip() {
+        let font = FontSettings { face: "Fira Code".into(), size: 14, weight: "bold".into() };
+        let json = serde_json::to_string(&font).unwrap();
+        let parsed: FontSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.weight, "bold");
+    }
+}
