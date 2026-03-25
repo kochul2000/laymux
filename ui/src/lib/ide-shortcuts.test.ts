@@ -118,13 +118,13 @@ describe("isIdeShortcut", () => {
     ).toBe(true);
   });
 
-  it("returns false for Ctrl+Alt+ArrowLeft/Right (not bound)", () => {
+  it("returns true for Ctrl+Alt+ArrowLeft/Right (notification navigation)", () => {
     expect(
       isIdeShortcut(makeKeyEvent("ArrowLeft", { ctrlKey: true, altKey: true })),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isIdeShortcut(makeKeyEvent("ArrowRight", { ctrlKey: true, altKey: true })),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   // --- Case-insensitive Ctrl+Alt letter keys ---

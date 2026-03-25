@@ -8,7 +8,7 @@
  */
 
 const CTRL_SHIFT_KEYS = new Set(["U", "B", "I", "u", "b", "i"]);
-const CTRL_ALT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "ArrowUp", "ArrowDown", "N", "W", "R", "D", "n", "w", "r", "d"]);
+const CTRL_ALT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "N", "W", "R", "D", "n", "w", "r", "d"]);
 const ALT_ARROWS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 
 export function isIdeShortcut(e: KeyboardEvent): boolean {
