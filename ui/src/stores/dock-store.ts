@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "./types";
+import { removePaneAndRedistribute } from "./pane-removal";
 
 export const DOCK_MIN_SIZE = 100;
 export const DOCK_MAX_SIZE = 600;
@@ -186,43 +187,15 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
       docks: state.docks.map((d) => {
         if (d.position !== position) return d;
         const panes = d.panes ?? [];
-        if (panes.length <= 1) return d;
 
         const idx = panes.findIndex((p) => p.id === paneId);
         if (idx < 0) return d;
 
-        const removed = panes[idx];
-        const remaining = panes.filter((_, i) => i !== idx);
+        const result = removePaneAndRedistribute(panes, idx);
+        if (!result) return d;
 
-        // Absorber logic (same as workspace)
-        let bestIdx = 0;
-        let bestDist = Infinity;
-        for (let i = 0; i < remaining.length; i++) {
-          const p = remaining[i];
-          const dist = Math.abs(p.x - removed.x) + Math.abs(p.y - removed.y);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestIdx = i;
-          }
-        }
-
-        const absorber = { ...remaining[bestIdx] };
-        if (Math.abs(absorber.x - removed.x) < 0.001 && Math.abs(absorber.w - removed.w) < 0.001) {
-          absorber.y = Math.min(absorber.y, removed.y);
-          absorber.h = absorber.h + removed.h;
-        } else if (Math.abs(absorber.y - removed.y) < 0.001 && Math.abs(absorber.h - removed.h) < 0.001) {
-          absorber.x = Math.min(absorber.x, removed.x);
-          absorber.w = absorber.w + removed.w;
-        } else {
-          absorber.w = Math.max(absorber.x + absorber.w, removed.x + removed.w) - Math.min(absorber.x, removed.x);
-          absorber.h = Math.max(absorber.y + absorber.h, removed.y + removed.h) - Math.min(absorber.y, removed.y);
-          absorber.x = Math.min(absorber.x, removed.x);
-          absorber.y = Math.min(absorber.y, removed.y);
-        }
-
-        remaining[bestIdx] = absorber;
-        const newActive = remaining[0]?.view.type ?? null;
-        return { ...d, panes: remaining, activeView: newActive };
+        const newActive = result[0]?.view.type ?? null;
+        return { ...d, panes: result, activeView: newActive };
       }),
     }));
   },

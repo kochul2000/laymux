@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Layout, Workspace, WorkspacePane, ViewInstanceConfig } from "./types";
 import { persistSession } from "@/lib/persist-session";
+import { removePaneAndRedistribute } from "./pane-removal";
 
 function generateId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -200,58 +201,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   removePane: (paneIndex) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;
-    if (ws.panes.length <= 1) return;
-    if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
-    const removed = ws.panes[paneIndex];
-    const remaining = ws.panes.filter((_, i) => i !== paneIndex);
-
-    // Find the adjacent pane to absorb the removed space.
-    // Pick the pane with the closest edge.
-    let bestIdx = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const p = remaining[i];
-      const dist = Math.abs(p.x - removed.x) + Math.abs(p.y - removed.y);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-
-    // Expand the absorbing pane
-    const absorber = { ...remaining[bestIdx] };
-    // If they share the same x and width, expand vertically
-    if (
-      Math.abs(absorber.x - removed.x) < 0.001 &&
-      Math.abs(absorber.w - removed.w) < 0.001
-    ) {
-      const minY = Math.min(absorber.y, removed.y);
-      absorber.y = minY;
-      absorber.h = absorber.h + removed.h;
-    }
-    // If they share the same y and height, expand horizontally
-    else if (
-      Math.abs(absorber.y - removed.y) < 0.001 &&
-      Math.abs(absorber.h - removed.h) < 0.001
-    ) {
-      const minX = Math.min(absorber.x, removed.x);
-      absorber.x = minX;
-      absorber.w = absorber.w + removed.w;
-    }
-    // Otherwise just grow to fill (best effort)
-    else {
-      absorber.w = Math.max(absorber.w, absorber.x + absorber.w, removed.x + removed.w) - Math.min(absorber.x, removed.x);
-      absorber.h = Math.max(absorber.h, absorber.y + absorber.h, removed.y + removed.h) - Math.min(absorber.y, removed.y);
-      absorber.x = Math.min(absorber.x, removed.x);
-      absorber.y = Math.min(absorber.y, removed.y);
-    }
-
-    remaining[bestIdx] = absorber;
+    const result = removePaneAndRedistribute(ws.panes, paneIndex);
+    if (!result) return;
 
     set((state) => ({
       workspaces: state.workspaces.map((w) =>
-        w.id === ws.id ? { ...w, panes: remaining } : w,
+        w.id === ws.id ? { ...w, panes: result } : w,
       ),
     }));
   },
