@@ -24,7 +24,26 @@ import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isIdeShortcut } from "@/lib/ide-shortcuts";
 
-import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle } from "@/lib/activity-detection";
+import { useNotificationStore } from "@/stores/notification-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { OutputIdleDetector } from "@/lib/output-idle-detector";
+
+/** Default silence timeout for output idle detection (ms). */
+const OUTPUT_IDLE_TIMEOUT_MS = 5000;
+
+/** Resolve the workspace ID for a terminal instance (for notifications). */
+function resolveWorkspaceId(terminalId: string): string {
+  const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+  const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
+  if (inst?.workspaceId) return inst.workspaceId;
+  // Fall back: find workspace by syncGroup name match
+  if (inst?.syncGroup) {
+    const ws = workspaces.find((w) => w.name === inst.syncGroup);
+    if (ws) return ws.id;
+  }
+  return activeWorkspaceId;
+}
 
 interface TerminalViewProps {
   instanceId: string;
@@ -160,15 +179,42 @@ export function TerminalView({
       resizeTerminal(instanceId, cols, rows).catch(() => {});
     });
 
-    // Track terminal title changes (OSC 0/2) for interactive app detection
+    // Claude task transition state — tracked from both onTitleChange (garbled encoding)
+    // and raw PTY output (correct UTF-8 via stream decoder).
+    let previousClaudeTitle: string | undefined;
+
+    // Track terminal title changes (OSC 0/2) for interactive app detection + Claude transitions
     terminal.onTitleChange((title) => {
-      const { updateInstanceInfo } = useTerminalStore.getState();
+      const { updateInstanceInfo, instances } = useTerminalStore.getState();
+      const instance = instances.find((i) => i.id === instanceId);
       const detected = detectActivityFromTitle(title);
-      // Only update activity if detection returned a result; preserve existing activity otherwise
+      const currentActivity = detected ?? instance?.activity;
+
+      // Claude task transition (handles garbled encoding from xterm.js)
+      const transition = detectClaudeTaskTransition(previousClaudeTitle ?? instance?.title, title, currentActivity);
+      previousClaudeTitle = title;
+
       updateInstanceInfo(instanceId, {
         title,
         ...(detected ? { activity: detected } : {}),
       });
+
+      if (transition === "completed") {
+        updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
+        const taskDesc = extractClaudeTaskDesc(title);
+        // Skip notification for generic idle titles (e.g., startup "Claude Code")
+        if (!isGenericClaudeTitle(taskDesc)) {
+          const wsId = resolveWorkspaceId(instanceId);
+          useNotificationStore.getState().addNotification({
+            terminalId: instanceId, workspaceId: wsId, message: taskDesc || "Claude task completed", level: "success",
+          });
+        }
+      } else if (transition === "started") {
+        const taskDesc = extractClaudeTaskDesc(title);
+        updateInstanceInfo(instanceId, {
+          lastCommand: taskDesc || "Claude task", lastExitCode: undefined, lastCommandAt: Date.now(),
+        });
+      }
     });
 
     // Build hooks list
@@ -187,6 +233,32 @@ export function TerminalView({
       ...getPresetHooks("track-command-start"),
     ];
 
+    // Output idle detector (monitor-silence): fires when terminal output
+    // stops for OUTPUT_IDLE_TIMEOUT_MS while activity is "running".
+    const idleDetector = new OutputIdleDetector(OUTPUT_IDLE_TIMEOUT_MS, () => {
+      const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      // Only fire for "running" activity (not shell, not Claude/interactive apps)
+      if (inst?.activity?.type !== "running") return;
+      // Mark command as completed
+      useTerminalStore.getState().updateInstanceInfo(instanceId, {
+        lastExitCode: 0,
+        lastCommandAt: Date.now(),
+        activity: { type: "shell" },
+      });
+      const wsId = resolveWorkspaceId(instanceId);
+      const cmdDesc = inst.lastCommand || "Command";
+      useNotificationStore.getState().addNotification({
+        terminalId: instanceId,
+        workspaceId: wsId,
+        message: `${cmdDesc} completed`,
+        level: "success",
+      });
+    });
+
+    // Persistent TextDecoder with stream mode to handle UTF-8 characters
+    // split across PTY output chunks (e.g., ✳ = E2 9C B3 may arrive as two chunks).
+    const streamDecoder = new TextDecoder("utf-8", { fatal: false });
+
     // Listen for terminal output from backend PTY
     let cancelled = false;
     let unlistenOutput: (() => void) | undefined;
@@ -194,8 +266,52 @@ export function TerminalView({
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
       terminal.write(data);
-      const text = new TextDecoder().decode(data);
+      const text = streamDecoder.decode(data, { stream: true });
       processOscInOutput(text, hooks, instanceId, syncGroup);
+
+      // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
+      const osc0Matches = text.match(/\x1b\]0;([^\x07]*)\x07/g);
+      if (osc0Matches) {
+        for (const oscStr of osc0Matches) {
+          const titleMatch = oscStr.match(/\x1b\]0;([^\x07]*)\x07/);
+          if (!titleMatch) continue;
+          const rawTitle = titleMatch[1];
+          const inst0 = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+          const currentActivity = inst0?.activity;
+          const transition = detectClaudeTaskTransition(previousClaudeTitle, rawTitle, currentActivity);
+          previousClaudeTitle = rawTitle;
+
+          if (transition === "completed") {
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              lastExitCode: 0,
+              lastCommandAt: Date.now(),
+            });
+            const taskDesc = extractClaudeTaskDesc(rawTitle);
+            if (!isGenericClaudeTitle(taskDesc)) {
+              const wsId = resolveWorkspaceId(instanceId);
+              useNotificationStore.getState().addNotification({
+                terminalId: instanceId,
+                workspaceId: wsId,
+                message: taskDesc || "Claude task completed",
+                level: "success",
+              });
+            }
+          } else if (transition === "started") {
+            const taskDesc = extractClaudeTaskDesc(rawTitle);
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              lastCommand: taskDesc || "Claude task",
+              lastExitCode: undefined,
+              lastCommandAt: Date.now(),
+            });
+          }
+        }
+      }
+
+      // Feed idle detector on every output chunk
+      const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      if (inst?.activity?.type === "running") {
+        idleDetector.recordOutput();
+      }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
       const enterAlt = text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
@@ -297,6 +413,7 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
       unlistenOutput?.();

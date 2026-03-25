@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand } from "./activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -100,5 +100,103 @@ describe("detectActivityFromCommand", () => {
 
   it("returns undefined for empty command", () => {
     expect(detectActivityFromCommand("")).toBeUndefined();
+  });
+});
+
+describe("detectClaudeTaskTransition", () => {
+  const claudeActivity = { type: "interactiveApp" as const, name: "Claude" };
+  const vimActivity = { type: "interactiveApp" as const, name: "vim" };
+  const shellActivity = { type: "shell" as const };
+
+  it("detects completed: spinner → ✳ with Claude activity", () => {
+    expect(detectClaudeTaskTransition("✶ Working on feature", "✳ Feature done", claudeActivity)).toBe("completed");
+  });
+
+  it("detects started: ✳ → spinner with Claude activity", () => {
+    expect(detectClaudeTaskTransition("✳ Claude Code", "✶ Working on task", claudeActivity)).toBe("started");
+  });
+
+  it("returns null for same state: spinner → spinner (still working)", () => {
+    expect(detectClaudeTaskTransition("✶ Task A", "✻ Task B", claudeActivity)).toBeNull();
+  });
+
+  it("returns null for same state ✳ → ✳ (still idle)", () => {
+    expect(detectClaudeTaskTransition("✳ Claude Code", "✳ Something else", claudeActivity)).toBeNull();
+  });
+
+  it("returns null for non-Claude activity even with matching prefixes", () => {
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", vimActivity)).toBeNull();
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", shellActivity)).toBeNull();
+  });
+
+  it("returns null when activity is undefined", () => {
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", undefined)).toBeNull();
+  });
+
+  it("does not return started on first title set (previousTitle undefined)", () => {
+    expect(detectClaudeTaskTransition(undefined, "✶ Starting task", claudeActivity)).toBeNull();
+  });
+
+  it("returns null for titles without spinner or ✳ prefix", () => {
+    // Both non-idle, non-spinner plain text → both treated as "working" → null
+    expect(detectClaudeTaskTransition("Claude Code", "Something", claudeActivity)).toBeNull();
+  });
+
+  it("detects completed with various spinner characters", () => {
+    expect(detectClaudeTaskTransition("✻ Building", "✳ Done", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("✽ Running", "✳ Done", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("✢ Testing", "✳ Done", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("· Thinking", "✳ Done", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("* Working", "✳ Done", claudeActivity)).toBe("completed");
+  });
+
+  it("detects completed when previousTitle is spinner and new is ✳ Claude Code (idle)", () => {
+    expect(detectClaudeTaskTransition("✶ Building project", "✳ Claude Code", claudeActivity)).toBe("completed");
+  });
+
+  // Garbled encoding tests (Windows CP949 path)
+  it("detects completed with garbled ✳ encoding", () => {
+    const garbledIdle = "\udce2\uc454 Claude Code";
+    const garbledWorking = "\udce2\uc7fc Claude Code";
+    expect(detectClaudeTaskTransition(garbledWorking, garbledIdle, claudeActivity)).toBe("completed");
+  });
+
+  it("detects started with garbled encoding", () => {
+    const garbledIdle = "\udce2\uc454 Claude Code";
+    const garbledWorking = "\udce2\uc7fc Working on task";
+    expect(detectClaudeTaskTransition(garbledIdle, garbledWorking, claudeActivity)).toBe("started");
+  });
+});
+
+describe("extractClaudeTaskDesc", () => {
+  it("strips ✳ prefix", () => {
+    expect(extractClaudeTaskDesc("✳ Build project")).toBe("Build project");
+  });
+
+  it("strips garbled ✳ prefix", () => {
+    expect(extractClaudeTaskDesc("\udce2\uc454 Build project")).toBe("Build project");
+  });
+
+  it("strips spinner prefix", () => {
+    expect(extractClaudeTaskDesc("✶ Working")).toBe("Working");
+  });
+
+  it("returns empty for prefix-only title", () => {
+    expect(extractClaudeTaskDesc("✳")).toBe("");
+  });
+});
+
+describe("isGenericClaudeTitle", () => {
+  it("returns true for Claude Code", () => {
+    expect(isGenericClaudeTitle("Claude Code")).toBe(true);
+  });
+
+  it("returns true for empty string", () => {
+    expect(isGenericClaudeTitle("")).toBe(true);
+  });
+
+  it("returns false for actual task description", () => {
+    expect(isGenericClaudeTitle("Build project")).toBe(false);
+    expect(isGenericClaudeTitle("Basic arithmetic")).toBe(false);
   });
 });
