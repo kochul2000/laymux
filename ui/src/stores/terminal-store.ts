@@ -42,7 +42,7 @@ interface TerminalStoreState {
   getTerminalsForWorkspace: (workspaceId: string) => TerminalInstance[];
   updateInstanceInfo: (
     id: string,
-    info: Partial<Pick<TerminalInstance, "cwd" | "branch" | "title" | "lastCommand" | "lastExitCode" | "lastCommandAt" | "activity" | "outputActive">>,
+    info: Partial<Pick<TerminalInstance, "cwd" | "branch" | "title" | "lastCommand" | "lastExitCode" | "lastCommandAt" | "activity" | "outputActive" | "syncGroup">>,
   ) => void;
   updateTerminalActivity: (id: string) => void;
   setTerminalFocus: (id: string) => void;

@@ -215,6 +215,52 @@ describe("TerminalView", () => {
     expect(mockFocus).not.toHaveBeenCalled();
   });
 
+  // -- syncGroup change (workspace rename) should NOT recreate terminal --
+
+  it("does not destroy and recreate terminal when syncGroup changes", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-sg1" profile="PowerShell" syncGroup="OldName" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+    });
+    expect(mockCloseTerminalSession).not.toHaveBeenCalled();
+
+    mockCreateTerminalSession.mockClear();
+    mockCloseTerminalSession.mockClear();
+
+    // Rerender with a new syncGroup (simulates workspace rename)
+    rerender(
+      <TerminalView instanceId="t-sg1" profile="PowerShell" syncGroup="NewName" />,
+    );
+
+    // Terminal must NOT be destroyed or recreated
+    expect(mockCloseTerminalSession).not.toHaveBeenCalled();
+    expect(mockCreateTerminalSession).not.toHaveBeenCalled();
+  });
+
+  it("updates terminal store syncGroup when prop changes without remount", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-sg2" profile="PowerShell" syncGroup="GroupA" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+    });
+
+    expect(useTerminalStore.getState().instances[0].syncGroup).toBe("GroupA");
+
+    rerender(
+      <TerminalView instanceId="t-sg2" profile="PowerShell" syncGroup="GroupB" />,
+    );
+
+    // Store should reflect the new syncGroup
+    expect(useTerminalStore.getState().instances[0].syncGroup).toBe("GroupB");
+    // But terminal should NOT have been recreated
+    expect(mockCloseTerminalSession).not.toHaveBeenCalled();
+  });
+
   // -- Smart Paste --
 
   it("intercepts Ctrl+V and calls smartPaste when enabled", async () => {

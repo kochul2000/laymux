@@ -228,6 +228,84 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  describe("Workspace operations do not disrupt pane identity", () => {
+    it("renameWorkspace preserves all pane IDs of the renamed workspace", () => {
+      // Set up a workspace with multiple panes
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsBefore = before.panes.map((p) => p.id);
+
+      useWorkspaceStore.getState().renameWorkspace(before.id, "NewName");
+
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsAfter = after.panes.map((p) => p.id);
+      expect(paneIdsAfter).toEqual(paneIdsBefore);
+    });
+
+    it("renameWorkspace does not change pane structure (x/y/w/h/view)", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const structureBefore = before.panes.map(({ x, y, w, h, view }) => ({ x, y, w, h, view }));
+
+      useWorkspaceStore.getState().renameWorkspace(before.id, "Renamed");
+
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const structureAfter = after.panes.map(({ x, y, w, h, view }) => ({ x, y, w, h, view }));
+      expect(structureAfter).toEqual(structureBefore);
+    });
+
+    it("addWorkspace does not change existing workspace pane IDs", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsBefore = before.panes.map((p) => p.id);
+
+      useWorkspaceStore.getState().addWorkspace("Second", useWorkspaceStore.getState().layouts[0].id);
+
+      const after = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === before.id)!;
+      expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
+    });
+
+    it("removeWorkspace (non-active) does not change active workspace pane IDs", () => {
+      const { layouts } = useWorkspaceStore.getState();
+      useWorkspaceStore.getState().addWorkspace("ToRemove", layouts[0].id);
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsBefore = active.panes.map((p) => p.id);
+
+      const toRemove = useWorkspaceStore.getState().workspaces.find((ws) => ws.id !== active.id)!;
+      useWorkspaceStore.getState().removeWorkspace(toRemove.id);
+
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
+    });
+
+    it("duplicateWorkspace does not change source workspace pane IDs", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const source = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsBefore = source.panes.map((p) => p.id);
+
+      useWorkspaceStore.getState().duplicateWorkspace(source.id);
+
+      const after = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === source.id)!;
+      expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
+    });
+
+    it("renaming a non-active workspace does not change active workspace pane IDs", () => {
+      const { layouts } = useWorkspaceStore.getState();
+      useWorkspaceStore.getState().addWorkspace("Other", layouts[0].id);
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const paneIdsBefore = active.panes.map((p) => p.id);
+
+      const other = useWorkspaceStore.getState().workspaces.find((ws) => ws.id !== active.id)!;
+      useWorkspaceStore.getState().renameWorkspace(other.id, "RenamedOther");
+
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
+    });
+  });
+
   describe("ID uniqueness after session restore", () => {
     it("new workspace IDs never collide with restored workspace IDs", () => {
       // Simulate session restoration: setState with workspaces that have specific IDs

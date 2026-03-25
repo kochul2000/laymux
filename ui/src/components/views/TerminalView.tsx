@@ -70,6 +70,8 @@ export function TerminalView({
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
   onKeyboardActivityRef.current = onKeyboardActivity;
   isFocusedRef.current = isFocused;
+  const syncGroupRef = useRef(syncGroup);
+  syncGroupRef.current = syncGroup;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -267,7 +269,7 @@ export function TerminalView({
       if (cancelled) return;
       terminal.write(data);
       const text = streamDecoder.decode(data, { stream: true });
-      processOscInOutput(text, hooks, instanceId, syncGroup);
+      processOscInOutput(text, hooks, instanceId, syncGroupRef.current);
 
       // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
       const osc0Matches = text.match(/\x1b\]0;([^\x07]*)\x07/g);
@@ -421,7 +423,15 @@ export function TerminalView({
       terminal.dispose();
       unregisterInstance(instanceId);
     };
-  }, [instanceId, profile, syncGroup, registerInstance, unregisterInstance]);
+  // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
+  // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId, profile, registerInstance, unregisterInstance]);
+
+  // Lightweight update when syncGroup changes — no terminal recreation
+  useEffect(() => {
+    useTerminalStore.getState().updateInstanceInfo(instanceId, { syncGroup });
+  }, [instanceId, syncGroup]);
 
   // Focus terminal when pane focus state changes (only if terminal is opened)
   useEffect(() => {
