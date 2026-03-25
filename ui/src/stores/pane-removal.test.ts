@@ -39,7 +39,7 @@ function validateLayout(panes: TestPane[]) {
       const overlapX = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
       const overlapY = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
       const overlapArea = overlapX * overlapY;
-      expect(overlapArea).toBeLessThan(EPSILON, `Panes ${a.id} and ${b.id} overlap`);
+      expect(overlapArea, `Panes ${a.id} and ${b.id} overlap`).toBeLessThan(EPSILON);
     }
   }
 }

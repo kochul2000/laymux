@@ -99,7 +99,6 @@ export function WorkspaceArea() {
                 )}
 
               <PaneControlBar
-                paneId={pane.id}
                 currentView={pane.view}
                 hovered={isActive && isHovered}
                 actions={{

@@ -127,7 +127,6 @@ export function Dock({
           />
         )}
         <PaneControlBar
-          paneId={singlePaneId ?? `dock-${position}`}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHovered}
           actions={{
@@ -243,7 +242,6 @@ function DockGrid({
             }}
           >
             <PaneControlBar
-              paneId={pane.id}
               currentView={pane.view}
               hovered={isHovered}
               actions={{

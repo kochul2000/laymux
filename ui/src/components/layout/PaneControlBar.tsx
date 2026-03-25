@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 
