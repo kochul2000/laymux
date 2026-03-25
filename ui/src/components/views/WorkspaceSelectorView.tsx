@@ -200,7 +200,9 @@ function WorkspaceItem({
                         className="shrink-0 rounded px-1 text-[9px]"
                         style={{
                           color: actInfo.color,
-                          background: ts.activity?.type === "interactiveApp" ? "rgba(137,180,250,0.12)" : "rgba(255,255,255,0.04)",
+                          background: ts.activity?.type === "interactiveApp"
+                            ? (ts.activity?.name === "Claude" ? "rgba(217,119,87,0.15)" : "rgba(137,180,250,0.12)")
+                            : "rgba(255,255,255,0.04)",
                           minWidth: 52,
                           textAlign: "center",
                           display: "inline-block",

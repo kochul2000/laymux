@@ -9,6 +9,7 @@ import {
   formatRelativeTime,
   formatPorts,
   formatCommand,
+  formatActivity,
 } from "./workspace-summary";
 import type { TerminalInstance } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
@@ -292,6 +293,43 @@ describe("formatPorts", () => {
 
   it("respects custom maxDisplay", () => {
     expect(formatPorts([3000, 8080, 9090], 2)).toBe(":3000  :8080  +1");
+  });
+});
+
+describe("formatActivity", () => {
+  it("returns 'shell' with secondary color for undefined activity", () => {
+    const result = formatActivity(undefined);
+    expect(result.label).toBe("shell");
+    expect(result.color).toBe("var(--text-secondary)");
+  });
+
+  it("returns 'shell' for shell activity type", () => {
+    const result = formatActivity({ type: "shell" });
+    expect(result.label).toBe("shell");
+  });
+
+  it("returns 'running' with yellow for running activity", () => {
+    const result = formatActivity({ type: "running" });
+    expect(result.label).toBe("running");
+    expect(result.color).toBe("var(--yellow)");
+  });
+
+  it("returns app name with accent for generic interactive app", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "neovim" });
+    expect(result.label).toBe("neovim");
+    expect(result.color).toBe("var(--accent)");
+  });
+
+  it("returns 'app' for interactive app without name", () => {
+    const result = formatActivity({ type: "interactiveApp" });
+    expect(result.label).toBe("app");
+    expect(result.color).toBe("var(--accent)");
+  });
+
+  it("returns Claude brand color (#D97757) for Claude app", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" });
+    expect(result.label).toBe("Claude");
+    expect(result.color).toBe("#D97757");
   });
 });
 
