@@ -23,7 +23,10 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
   if (title.includes("/") || title.includes("\\")) return undefined;
 
   for (const app of INTERACTIVE_APPS) {
-    if (title.includes(app.title)) {
+    // Use word boundary matching to avoid false positives
+    // e.g. "vi" should not match "Review", "vim" should not match "environment"
+    const pattern = new RegExp(`(?:^|[\\s\\-:])${app.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[\\s\\-:])`);
+    if (pattern.test(title) || title === app.title) {
       return { type: "interactiveApp", name: app.name };
     }
   }

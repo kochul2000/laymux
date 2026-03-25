@@ -54,6 +54,20 @@ describe("processOscInOutput", () => {
     expect(call.message).toContain("Command failed");
   });
 
+  it("passes --level flag in notify message", () => {
+    const levelHooks: OscHook[] = [
+      { osc: 133, param: "D", when: "exitCode === '0'", run: "ide notify --level success 'Command completed'" },
+      { osc: 133, param: "D", when: "exitCode !== '0'", run: "ide notify --level error 'Command failed (exit $exitCode)'" },
+    ];
+    const output = "\x1b]133;D;0\x07";
+    processOscInOutput(output, levelHooks, "t1", "g1");
+
+    expect(mockHandleIdeMessage).toHaveBeenCalledTimes(1);
+    const call = JSON.parse(mockHandleIdeMessage.mock.calls[0][0]);
+    expect(call.action).toBe("notify");
+    expect(call.level).toBe("success");
+  });
+
   it("does not trigger notify for exit code 0", () => {
     const output = "\x1b]133;D;0\x07";
     processOscInOutput(output, hooks, "t1", "g1");

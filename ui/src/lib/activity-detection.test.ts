@@ -26,6 +26,19 @@ describe("detectActivityFromTitle", () => {
     expect(detectActivityFromTitle("")).toBeUndefined();
   });
 
+  it("does not false-positive on app names embedded in words", () => {
+    expect(detectActivityFromTitle("Review current directory structure")).toBeUndefined();
+    expect(detectActivityFromTitle("✳ Review code changes")).toBeUndefined();
+    expect(detectActivityFromTitle("navigation helper")).toBeUndefined();
+    expect(detectActivityFromTitle("environment variables")).toBeUndefined();
+  });
+
+  it("detects app names with surrounding delimiters", () => {
+    expect(detectActivityFromTitle("vim - file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromTitle("vi file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromTitle("running:vim")).toEqual({ type: "interactiveApp", name: "vim" });
+  });
+
   it("returns undefined for path-like titles containing app names", () => {
     expect(detectActivityFromTitle("//wsl.localhost/Ubuntu/home/user/python_projects")).toBeUndefined();
     expect(detectActivityFromTitle("/home/user/vim-config")).toBeUndefined();

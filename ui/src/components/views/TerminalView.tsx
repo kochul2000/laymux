@@ -163,9 +163,11 @@ export function TerminalView({
     // Track terminal title changes (OSC 0/2) for interactive app detection
     terminal.onTitleChange((title) => {
       const { updateInstanceInfo } = useTerminalStore.getState();
+      const detected = detectActivityFromTitle(title);
+      // Only update activity if detection returned a result; preserve existing activity otherwise
       updateInstanceInfo(instanceId, {
         title,
-        activity: detectActivityFromTitle(title),
+        ...(detected ? { activity: detected } : {}),
       });
     });
 

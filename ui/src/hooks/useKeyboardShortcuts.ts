@@ -5,6 +5,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
+import { findNotificationNavTarget } from "@/lib/notification-navigation";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -21,6 +22,29 @@ function switchWorkspace(id: string) {
   if (focusedPaneIndex === null) {
     setFocusedPane(0);
   }
+}
+
+/** Navigate to a pane by notification direction, consuming matched notifications. */
+function navigateByNotification(direction: "recent" | "oldest") {
+  const { notifications, markNotificationsNavigated } =
+    useNotificationStore.getState();
+  const target = findNotificationNavTarget(notifications, direction);
+  if (!target) return;
+
+  // Switch workspace if needed
+  useWorkspaceStore.getState().setActiveWorkspace(target.workspaceId);
+  useDockStore.getState().setFocusedDock(null);
+
+  // Find the pane index from terminalId (terminal-{paneId} pattern)
+  const paneId = target.terminalId.replace(/^terminal-/, "");
+  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  if (ws) {
+    const paneIndex = ws.panes.findIndex((p) => p.id === paneId);
+    useGridStore.getState().setFocusedPane(paneIndex >= 0 ? paneIndex : 0);
+  }
+
+  // Mark only the target notifications as navigated (independent of readAt/auto-dismiss)
+  markNotificationsNavigated(target.notificationIds);
 }
 
 export function useKeyboardShortcuts() {
@@ -160,6 +184,20 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           const last = workspaces.at(-1);
           if (last) switchWorkspace(last.id);
+          return;
+        }
+
+        // Ctrl+Alt+ArrowLeft: jump to most recent notification pane
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          navigateByNotification("recent");
+          return;
+        }
+
+        // Ctrl+Alt+ArrowRight: jump to oldest notification pane
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          navigateByNotification("oldest");
           return;
         }
 

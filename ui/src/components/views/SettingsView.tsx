@@ -1018,6 +1018,8 @@ const defaultKeybindings: KeybindingDef[] = [
   { id: "sidebar.toggle",       label: "사이드바 토글",             defaultKeys: "Ctrl+Shift+B",   group: "UI" },
   { id: "notifications.toggle", label: "알림 패널 토글",            defaultKeys: "Ctrl+Shift+I",   group: "UI" },
   { id: "notifications.unread", label: "읽지 않은 알림으로 이동",    defaultKeys: "Ctrl+Shift+U",   group: "UI" },
+  { id: "notifications.recent", label: "최근 알림 Pane으로 이동",   defaultKeys: "Ctrl+Alt+Left",  group: "UI" },
+  { id: "notifications.oldest", label: "오래된 알림 Pane으로 이동",  defaultKeys: "Ctrl+Alt+Right", group: "UI" },
   { id: "settings.open",        label: "설정 열기",                 defaultKeys: "Ctrl+,",         group: "UI" },
 ];
 

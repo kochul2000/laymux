@@ -101,12 +101,17 @@ function buildIdeMessage(
         terminal_id: terminalId,
         group_id: groupId,
       };
-    case "notify":
-      return {
+    case "notify": {
+      const notifyMsg: Record<string, unknown> = {
         action: "notify",
         message: cmd.args.join(" "),
         terminal_id: terminalId,
       };
+      if (typeof cmd.flags.level === "string") {
+        notifyMsg.level = cmd.flags.level;
+      }
+      return notifyMsg;
+    }
     case "set-tab-title":
       return {
         action: "set-tab-title",

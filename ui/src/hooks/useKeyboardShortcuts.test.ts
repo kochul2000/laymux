@@ -381,6 +381,249 @@ describe("useKeyboardShortcuts", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
 
+  // --- Ctrl+Alt+ArrowLeft/Right: notification-based pane navigation ---
+  describe("Ctrl+Alt+ArrowLeft (most recent notification)", () => {
+    it("navigates to pane with most recent unread notification", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "older", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      // Should focus pane index 1 (p2 has the most recent notification)
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    it("switches workspace when notification is in a different workspace", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-1",
+            name: "WS1",
+            layoutId: "default-layout",
+            panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          },
+          {
+            id: "ws-2",
+            name: "WS2",
+            layoutId: "default-layout",
+            panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          },
+        ],
+        activeWorkspaceId: "ws-1",
+      });
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "terminal-p2",
+        workspaceId: "ws-2",
+        message: "alert in ws-2",
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    });
+
+    it("marks only target pane notifications as navigated", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 alert", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 alert", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      const notifs = useNotificationStore.getState().notifications;
+      // p1 notification should still be un-navigated
+      expect(notifs.find((n) => n.terminalId === "terminal-p1")!.navigatedAt).toBeNull();
+      // p2 notification (most recent) should be navigated
+      expect(notifs.find((n) => n.terminalId === "terminal-p2")!.navigatedAt).not.toBeNull();
+    });
+
+    it("marks consecutive same-terminal notifications as navigated", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 old", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 middle", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+          { id: "n3", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 recent", level: "info", createdAt: 300, readAt: null, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      const notifs = useNotificationStore.getState().notifications;
+      // Sorted desc: n3(p1,300), n2(p2,200), n1(p1,100)
+      // Only n3 is consecutive from top (n2 breaks it)
+      expect(notifs[2].navigatedAt).not.toBeNull(); // n3 (p1 recent) — navigated
+      expect(notifs[1].navigatedAt).toBeNull();     // n2 (p2) — still un-navigated
+      expect(notifs[0].navigatedAt).toBeNull();     // n1 (p1 old) — still un-navigated
+    });
+
+    it("navigates to auto-dismissed (read) notifications that were not navigated", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      // Notifications are already read (auto-dismissed) but not yet navigated
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 100, readAt: 105, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 200, readAt: 205, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      // Should still navigate (readAt doesn't prevent navigation)
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[1].navigatedAt).not.toBeNull();
+      expect(notifs[0].navigatedAt).toBeNull();
+    });
+
+    it("does nothing when no unread notifications exist", () => {
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+
+      // Should remain on default workspace, no crash
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+    });
+  });
+
+  describe("Ctrl+Alt+ArrowRight (oldest notification)", () => {
+    it("navigates to pane with oldest unread notification", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "oldest", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowRight", { ctrlKey: true, altKey: true });
+
+      // Should focus pane index 0 (p1 has the oldest notification)
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    });
+
+    it("marks consecutive oldest same-terminal notifications as read", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            layoutId: "default-layout",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+
+      useNotificationStore.setState({
+        notifications: [
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 first", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
+          { id: "n2", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 second", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+          { id: "n3", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 third", level: "info", createdAt: 300, readAt: null, navigatedAt: null },
+        ],
+      });
+
+      renderHook(() => useKeyboardShortcuts());
+      fireKey("ArrowRight", { ctrlKey: true, altKey: true });
+
+      const notifs = useNotificationStore.getState().notifications;
+      // Sorted asc: n1(p1,100), n2(p1,200), n3(p2,300)
+      // n1, n2 consecutive from p1 — both navigated
+      expect(notifs[0].navigatedAt).not.toBeNull(); // n1
+      expect(notifs[1].navigatedAt).not.toBeNull(); // n2
+      expect(notifs[2].navigatedAt).toBeNull();     // n3 — still un-navigated
+    });
+  });
+
   // --- Old Ctrl+single-key shortcuts should NOT work ---
   it("Ctrl+[ does NOT switch workspace (shell territory)", () => {
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");

@@ -10,6 +10,8 @@ export interface Notification {
   level: NotificationLevel;
   createdAt: number;
   readAt: number | null;
+  /** Set when consumed via notification navigation (Ctrl+Alt+Arrow). Independent of readAt. */
+  navigatedAt: number | null;
 }
 
 let notifId = 0;
@@ -24,6 +26,8 @@ interface NotificationStoreState {
     level?: NotificationLevel;
   }) => void;
   markWorkspaceAsRead: (workspaceId: string) => void;
+  markNotificationsAsRead: (ids: string[]) => void;
+  markNotificationsNavigated: (ids: string[]) => void;
   getUnreadCount: (workspaceId: string) => number;
   getLatestNotification: (workspaceId: string) => Notification | undefined;
 }
@@ -41,6 +45,7 @@ export const useNotificationStore = create<NotificationStoreState>()(
         level: level ?? "info",
         createdAt: Date.now(),
         readAt: null,
+        navigatedAt: null,
       };
       set((state) => ({
         notifications: [...state.notifications, notification],
@@ -53,6 +58,28 @@ export const useNotificationStore = create<NotificationStoreState>()(
         notifications: state.notifications.map((n) =>
           n.workspaceId === workspaceId && n.readAt === null
             ? { ...n, readAt: now }
+            : n,
+        ),
+      }));
+    },
+
+    markNotificationsAsRead: (ids) => {
+      const idSet = new Set(ids);
+      const now = Date.now();
+      set((state) => ({
+        notifications: state.notifications.map((n) =>
+          idSet.has(n.id) && n.readAt === null ? { ...n, readAt: now } : n,
+        ),
+      }));
+    },
+
+    markNotificationsNavigated: (ids) => {
+      const idSet = new Set(ids);
+      const now = Date.now();
+      set((state) => ({
+        notifications: state.notifications.map((n) =>
+          idSet.has(n.id) && n.navigatedAt === null
+            ? { ...n, navigatedAt: now, readAt: n.readAt ?? now }
             : n,
         ),
       }));
