@@ -46,4 +46,17 @@ body {
   height: 0;
 }
 
+/* Terminal: default cursor instead of I-beam */
+.xterm .xterm-viewport,
+.xterm .xterm-screen {
+  cursor: default !important;
+}
+
+/* Terminal: hide mouse cursor while typing */
+.terminal-typing,
+.terminal-typing .xterm .xterm-viewport,
+.terminal-typing .xterm .xterm-screen {
+  cursor: none !important;
+}
+
 

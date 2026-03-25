@@ -135,16 +135,17 @@ export function TerminalView({
       return true;
     });
 
-    // Hide mouse cursor + control bar when user starts typing
+    // Hide mouse cursor + control bar when user starts typing.
+    // xterm captures keyboard events in its internal textarea, so we must use
+    // terminal.onKey (not DOM keydown on the container).
     const outerEl = containerRef.current?.parentElement;
-    const handleKeyDown = () => {
-      if (outerEl) outerEl.style.cursor = "none";
+    terminal.onKey(() => {
+      outerEl?.classList.add("terminal-typing");
       onKeyboardActivityRef.current?.();
-    };
+    });
     const handleMouseMove = () => {
-      if (outerEl) outerEl.style.cursor = "";
+      outerEl?.classList.remove("terminal-typing");
     };
-    outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
 
     // Copy-on-select: auto-copy to clipboard when text is selected
@@ -301,7 +302,6 @@ export function TerminalView({
       cancelled = true;
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
@@ -373,7 +373,6 @@ export function TerminalView({
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
-        cursor: "default",
       }}
     >
       <div ref={containerRef} className="h-full w-full" />
