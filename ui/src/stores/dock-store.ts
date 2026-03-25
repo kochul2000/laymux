@@ -25,7 +25,7 @@ interface DockStoreState {
   focusedDock: DockPosition | null;
 
   getDock: (position: DockPosition) => DockState | undefined;
-  setDockActiveView: (position: DockPosition, view: ViewType) => void;
+  setDockActiveView: (position: DockPosition, view: ViewType, viewConfig?: ViewInstanceConfig) => void;
   toggleDockVisible: (position: DockPosition) => void;
   toggleLayoutMode: () => void;
   setDockSize: (position: DockPosition, size: number) => void;
@@ -69,20 +69,21 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
     return get().docks.find((d) => d.position === position);
   },
 
-  setDockActiveView: (position, view) => {
+  setDockActiveView: (position, view, viewConfig) => {
+    const effectiveView: ViewInstanceConfig = viewConfig ?? { type: view };
     set((state) => ({
       docks: state.docks.map((d) => {
         if (d.position !== position) return d;
         const panes = d.panes ?? [];
         if (panes.length > 0) {
           const newPanes = [...panes];
-          newPanes[0] = { ...newPanes[0], view: { type: view } };
+          newPanes[0] = { ...newPanes[0], view: effectiveView };
           return { ...d, activeView: view, panes: newPanes };
         }
         return {
           ...d,
           activeView: view,
-          panes: [{ id: generateId("dp"), view: { type: view }, x: 0, y: 0, w: 1, h: 1 }],
+          panes: [{ id: generateId("dp"), view: effectiveView, x: 0, y: 0, w: 1, h: 1 }],
         };
       }),
     }));

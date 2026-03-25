@@ -42,6 +42,15 @@ describe("WorkspaceStore", () => {
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
   });
 
+  it("addWorkspace does not include profile in pane view (uses defaults from ViewRenderer)", () => {
+    // Layout only stores viewType, not profile. ViewRenderer resolves the actual profile.
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("New", layouts[0].id);
+    const ws = useWorkspaceStore.getState().workspaces[1];
+    // Pane view should have type only — profile resolution is ViewRenderer's job
+    expect(ws.panes[0].view.type).toBe("EmptyView");
+  });
+
   it("removes a workspace", () => {
     const { addWorkspace, layouts } = useWorkspaceStore.getState();
     addWorkspace("ToRemove", layouts[0].id);
@@ -170,6 +179,19 @@ describe("WorkspaceStore", () => {
     it("triggers persistence to settings.json", () => {
       useWorkspaceStore.getState().saveAndPropagate();
       expect(persistSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves view config (including profile) when propagating to other workspaces", () => {
+      const { layouts } = useWorkspaceStore.getState();
+      useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
+
+      // Set profile on current workspace's pane
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      useWorkspaceStore.getState().saveAndPropagate();
+
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      expect(ws2.panes[0].view.type).toBe("TerminalView");
+      expect(ws2.panes[0].view.profile).toBe("WSL");
     });
   });
 

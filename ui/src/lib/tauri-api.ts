@@ -171,12 +171,22 @@ export interface SettingsWorkspace {
   }[];
 }
 
+export interface DockPaneSetting {
+  id: string;
+  view: { type: string; [key: string]: unknown };
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface DockSetting {
   position: string;
   activeView: string | null;
   views: string[];
   visible: boolean;
   size?: number;
+  panes?: DockPaneSetting[];
 }
 
 export interface SmartPasteResult {
@@ -190,6 +200,11 @@ export async function smartPaste(
   profile: string,
 ): Promise<SmartPasteResult> {
   return invoke("smart_paste", { imageDir, profile });
+}
+
+/** Write text to the system clipboard via Tauri backend. */
+export async function clipboardWriteText(text: string): Promise<void> {
+  return invoke("clipboard_write_text", { text });
 }
 
 /** Listen for terminal output events from the backend. */

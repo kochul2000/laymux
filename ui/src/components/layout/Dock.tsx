@@ -11,7 +11,7 @@ interface DockProps {
   activeView: ViewType | null;
   views: ViewType[];
   panes: DockPane[];
-  onSwitchView?: (view: ViewType) => void;
+  onSwitchView?: (view: ViewType, viewConfig?: ViewInstanceConfig) => void;
   onSplitPane?: (direction: "horizontal" | "vertical", paneId?: string) => void;
   onRemovePane?: (paneId: string) => void;
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
@@ -128,16 +128,21 @@ export function Dock({
           actions={{
             onSplitH: onSplitPane ? () => onSplitPane("horizontal", singlePaneId) : undefined,
             onSplitV: onSplitPane ? () => onSplitPane("vertical", singlePaneId) : undefined,
-            onClear: singlePaneId && onSetPaneView ? () => onSetPaneView(singlePaneId, { type: "EmptyView" }) : undefined,
+            onClear: activeView && activeView !== "EmptyView"
+              ? singlePaneId && onSetPaneView
+                ? () => onSetPaneView(singlePaneId, { type: "EmptyView" })
+                : onSwitchView ? () => onSwitchView("EmptyView") : undefined
+              : undefined,
           }}
         >
           <ViewRenderer
             viewType={activeView}
+            viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
             onSelectView={
               singlePaneId
                 ? (config) => onSetPaneView?.(singlePaneId, config)
-                : onSwitchView ? (config) => onSwitchView(config.type) : undefined
+                : onSwitchView ? (config) => onSwitchView(config.type, config) : undefined
             }
             emptyViewContext="dock"
           />
@@ -238,6 +243,10 @@ function DockGrid({
                 paneId={pane.id}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
                 emptyViewContext="dock"
+                onKeyboardActivity={() => {
+                  setHoveredPane(null);
+                  if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                }}
               />
             </PaneControlBar>
           </div>

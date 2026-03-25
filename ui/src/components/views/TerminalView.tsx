@@ -13,6 +13,7 @@ import {
   closeTerminalSession,
   onTerminalOutput,
   smartPaste,
+  clipboardWriteText,
 } from "@/lib/tauri-api";
 import {
   colorSchemeToXtermTheme,
@@ -31,6 +32,8 @@ interface TerminalViewProps {
   syncGroup: string;
   workspaceId?: string;
   isFocused?: boolean;
+  /** Called when user starts typing — parent can hide control bar / hover state. */
+  onKeyboardActivity?: () => void;
 }
 
 export function TerminalView({
@@ -39,11 +42,14 @@ export function TerminalView({
   syncGroup,
   workspaceId = "",
   isFocused = false,
+  onKeyboardActivity,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
+  const onKeyboardActivityRef = useRef(onKeyboardActivity);
+  onKeyboardActivityRef.current = onKeyboardActivity;
   isFocusedRef.current = isFocused;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
@@ -129,6 +135,26 @@ export function TerminalView({
       return true;
     });
 
+    // Hide mouse cursor + control bar when user starts typing
+    const outerEl = containerRef.current?.parentElement;
+    const handleKeyDown = () => {
+      if (outerEl) outerEl.style.cursor = "none";
+      onKeyboardActivityRef.current?.();
+    };
+    const handleMouseMove = () => {
+      if (outerEl) outerEl.style.cursor = "";
+    };
+    outerEl?.addEventListener("keydown", handleKeyDown);
+    outerEl?.addEventListener("mousemove", handleMouseMove);
+
+    // Copy-on-select: auto-copy to clipboard when text is selected
+    terminal.onSelectionChange(() => {
+      const { convenience: conv } = useSettingsStore.getState();
+      if (conv.copyOnSelect && terminal.hasSelection()) {
+        clipboardWriteText(terminal.getSelection()).catch(() => {});
+      }
+    });
+
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
       writeToTerminal(instanceId, data).catch(() => {});
@@ -208,6 +234,28 @@ export function TerminalView({
       }
     });
 
+    // Right-click: copy selection or paste (no context menu in terminal)
+    const outerContainer = containerRef.current?.parentElement;
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (terminal.hasSelection()) {
+        // Selection exists → copy to clipboard via Tauri, then clear
+        clipboardWriteText(terminal.getSelection()).catch(() => {});
+        terminal.clearSelection();
+      } else {
+        // No selection → paste directly to PTY (no bracketed paste = no paste highlight block)
+        const { convenience: conv } = useSettingsStore.getState();
+        smartPaste(conv.pasteImageDir, profile)
+          .then((result) => {
+            if (result.pasteType !== "none" && result.content) {
+              writeToTerminal(instanceId, result.content);
+            }
+          })
+          .catch(() => {});
+      }
+    };
+    outerContainer?.addEventListener("contextmenu", handleContextMenu);
+
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
@@ -252,6 +300,9 @@ export function TerminalView({
     return () => {
       cancelled = true;
       resizeObserver.disconnect();
+      outerContainer?.removeEventListener("contextmenu", handleContextMenu);
+      outerEl?.removeEventListener("keydown", handleKeyDown);
+      outerEl?.removeEventListener("mousemove", handleMouseMove);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
@@ -322,6 +373,7 @@ export function TerminalView({
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
+        cursor: "default",
       }}
     >
       <div ref={containerRef} className="h-full w-full" />

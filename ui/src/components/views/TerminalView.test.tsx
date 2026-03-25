@@ -8,9 +8,13 @@ import { useSettingsStore } from "@/stores/settings-store";
 const mockOnData = vi.fn();
 const mockOnResize = vi.fn();
 const mockOnTitleChange = vi.fn();
+const mockOnSelectionChange = vi.fn();
 const mockFocus = vi.fn();
 const mockBlur = vi.fn();
 const mockPaste = vi.fn();
+const mockHasSelection = vi.fn().mockReturnValue(false);
+const mockGetSelection = vi.fn().mockReturnValue("");
+const mockClearSelection = vi.fn();
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
@@ -22,10 +26,14 @@ vi.mock("@xterm/xterm", () => ({
     onData = mockOnData;
     onResize = mockOnResize;
     onTitleChange = mockOnTitleChange;
+    onSelectionChange = mockOnSelectionChange;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     focus = mockFocus;
     blur = mockBlur;
     paste = mockPaste;
+    hasSelection = mockHasSelection;
+    getSelection = mockGetSelection;
+    clearSelection = mockClearSelection;
     dispose = vi.fn();
     loadAddon = vi.fn();
     cols = 80;
@@ -57,6 +65,7 @@ const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "" });
+const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
@@ -65,6 +74,7 @@ vi.mock("@/lib/tauri-api", () => ({
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
   onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
+  clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
 }));
 
 describe("TerminalView", () => {
@@ -262,7 +272,7 @@ describe("TerminalView", () => {
   it("does not intercept Ctrl+V when smart paste disabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { smartPaste: false, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const },
+      convenience: { smartPaste: false, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: false },
     });
 
     render(
@@ -295,5 +305,136 @@ describe("TerminalView", () => {
     const result = capturedKeyHandler!(event);
     expect(result).toBe(true);
     expect(mockSmartPaste).not.toHaveBeenCalled();
+  });
+
+  // -- Right-click behavior --
+
+  it("right-click pastes when no text is selected", async () => {
+    mockSmartPaste.mockResolvedValue({ pasteType: "text", content: "pasted text" });
+    mockHasSelection.mockReturnValue(false);
+
+    render(
+      <TerminalView instanceId="t-rc1" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-rc1");
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    await vi.waitFor(() => {
+      expect(mockSmartPaste).toHaveBeenCalledWith("", "PowerShell");
+    });
+
+    // Right-click paste writes directly to PTY (no bracketed paste block)
+    await vi.waitFor(() => {
+      expect(mockWriteToTerminal).toHaveBeenCalledWith("t-rc1", "pasted text");
+    });
+  });
+
+  it("right-click copies selection when text is selected", async () => {
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("selected text");
+
+    render(
+      <TerminalView instanceId="t-rc2" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-rc2");
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    await vi.waitFor(() => {
+      expect(mockClipboardWriteText).toHaveBeenCalledWith("selected text");
+    });
+
+    // Should NOT paste when there is a selection
+    expect(mockSmartPaste).not.toHaveBeenCalled();
+    // Should clear selection after copy
+    expect(mockClearSelection).toHaveBeenCalled();
+  });
+
+  it("right-click prevents default context menu", async () => {
+    mockHasSelection.mockReturnValue(false);
+    mockSmartPaste.mockResolvedValue({ pasteType: "none", content: "" });
+
+    render(
+      <TerminalView instanceId="t-rc3" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-rc3");
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    container.dispatchEvent(event);
+
+    expect(preventDefaultSpy).toHaveBeenCalled();
+  });
+
+  // -- copyOnSelect --
+
+  it("auto-copies selection when copyOnSelect is enabled", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+    });
+
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("auto-copied text");
+
+    render(
+      <TerminalView instanceId="t-cos1" profile="PowerShell" syncGroup="" />,
+    );
+
+    // onSelectionChange should have been registered
+    expect(mockOnSelectionChange).toHaveBeenCalled();
+
+    // Invoke the captured selection change callback
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+
+    await vi.waitFor(() => {
+      expect(mockClipboardWriteText).toHaveBeenCalledWith("auto-copied text");
+    });
+  });
+
+  it("does not auto-copy when copyOnSelect is disabled", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: false },
+    });
+
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("some text");
+
+    render(
+      <TerminalView instanceId="t-cos2" profile="PowerShell" syncGroup="" />,
+    );
+
+    // onSelectionChange should have been registered
+    expect(mockOnSelectionChange).toHaveBeenCalled();
+
+    // Invoke the selection change callback
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+
+    // Should NOT copy — copyOnSelect is disabled
+    expect(mockClipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-copy when selection is empty (copyOnSelect enabled)", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+    });
+
+    mockHasSelection.mockReturnValue(false);
+
+    render(
+      <TerminalView instanceId="t-cos3" profile="PowerShell" syncGroup="" />,
+    );
+
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+
+    expect(mockClipboardWriteText).not.toHaveBeenCalled();
   });
 });

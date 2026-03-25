@@ -220,7 +220,7 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads convenience settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false, pasteImageDir: "/tmp/images", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const },
+      convenience: { smartPaste: false, pasteImageDir: "/tmp/images", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: false },
     });
     const { convenience } = useSettingsStore.getState();
     expect(convenience.smartPaste).toBe(false);

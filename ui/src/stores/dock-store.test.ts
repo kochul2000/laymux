@@ -116,6 +116,26 @@ describe("DockStore", () => {
     expect(updated.panes[0].view.type).toBe("SettingsView");
   });
 
+  it("setDockActiveView preserves full ViewInstanceConfig when given", () => {
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
+    const bottom = useDockStore.getState().getDock("bottom")!;
+    expect(bottom.activeView).toBe("TerminalView");
+    expect(bottom.panes).toHaveLength(1);
+    expect(bottom.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
+  });
+
+  it("setDockActiveView with viewConfig updates existing pane's full config", () => {
+    // First set to TerminalView
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView");
+    const bottom1 = useDockStore.getState().getDock("bottom")!;
+    expect(bottom1.panes[0].view).toEqual({ type: "TerminalView" });
+
+    // Now update with a config including profile
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "CMD" });
+    const bottom2 = useDockStore.getState().getDock("bottom")!;
+    expect(bottom2.panes[0].view).toEqual({ type: "TerminalView", profile: "CMD" });
+  });
+
   it("resizeDockPane updates pane position/size", () => {
     useDockStore.getState().splitDockPane("left", "horizontal");
     const left = useDockStore.getState().getDock("left")!;

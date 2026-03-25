@@ -133,6 +133,7 @@ fn settings_round_trip_with_full_config() {
                 views: vec!["WorkspaceSelectorView".into(), "SettingsView".into()],
                 visible: true,
                 size: 240.0,
+                panes: Vec::new(),
             },
             DockSetting {
                 position: "bottom".into(),
@@ -140,6 +141,7 @@ fn settings_round_trip_with_full_config() {
                 views: vec![],
                 visible: false,
                 size: 240.0,
+                panes: Vec::new(),
             },
         ],
         convenience: ConvenienceSettings::default(),
@@ -371,10 +373,10 @@ fn settings_workspace_pane_view_extra_data_preserved() {
 fn settings_dock_all_positions() {
     let settings = Settings {
         docks: vec![
-            DockSetting { position: "top".into(), active_view: None, views: vec![], visible: true, size: 240.0 },
-            DockSetting { position: "bottom".into(), active_view: None, views: vec![], visible: true, size: 240.0 },
-            DockSetting { position: "left".into(), active_view: Some("WorkspaceSelectorView".into()), views: vec!["WorkspaceSelectorView".into()], visible: true, size: 240.0 },
-            DockSetting { position: "right".into(), active_view: Some("SettingsView".into()), views: vec!["SettingsView".into()], visible: false, size: 240.0 },
+            DockSetting { position: "top".into(), active_view: None, views: vec![], visible: true, size: 240.0, panes: Vec::new() },
+            DockSetting { position: "bottom".into(), active_view: None, views: vec![], visible: true, size: 240.0, panes: Vec::new() },
+            DockSetting { position: "left".into(), active_view: Some("WorkspaceSelectorView".into()), views: vec!["WorkspaceSelectorView".into()], visible: true, size: 240.0, panes: Vec::new() },
+            DockSetting { position: "right".into(), active_view: Some("SettingsView".into()), views: vec!["SettingsView".into()], visible: false, size: 240.0, panes: Vec::new() },
         ],
         ..Settings::default()
     };

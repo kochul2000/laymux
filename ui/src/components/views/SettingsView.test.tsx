@@ -334,6 +334,17 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
   });
 
+  it("toggling copy on select updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("copy-on-select-toggle");
+    // Default is true, clicking should set to false
+    await user.click(toggle);
+    expect(useSettingsStore.getState().convenience.copyOnSelect).toBe(false);
+  });
+
   it("shows paste image dir input", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

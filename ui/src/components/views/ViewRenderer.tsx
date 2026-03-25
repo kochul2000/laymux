@@ -1,4 +1,5 @@
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
+import { useSettingsStore } from "@/stores/settings-store";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { TerminalView } from "./TerminalView";
@@ -14,9 +15,11 @@ interface ViewRendererProps {
   paneId?: string;
   emptyViewContext?: EmptyViewContext;
   isFocused?: boolean;
+  onKeyboardActivity?: () => void;
 }
 
-export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused }: ViewRendererProps) {
+export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   switch (viewType) {
     case "WorkspaceSelectorView":
       return (
@@ -38,9 +41,10 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
         <div data-testid="view-terminal" className="h-full">
           <TerminalView
             instanceId={instanceId}
-            profile={(viewConfig?.profile as string) ?? "PowerShell"}
+            profile={(viewConfig?.profile as string) || defaultProfile || "PowerShell"}
             syncGroup={effectiveSyncGroup}
             isFocused={isFocused}
+            onKeyboardActivity={onKeyboardActivity}
           />
         </div>
       );

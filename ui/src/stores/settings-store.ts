@@ -47,6 +47,8 @@ export interface ConvenienceSettings {
   hoverIdleSeconds: number;
   /** When to auto-dismiss notifications as read. */
   notificationDismiss: NotificationDismissMode;
+  /** Automatically copy text to clipboard when selected in terminal. */
+  copyOnSelect: boolean;
 }
 
 export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
@@ -363,7 +365,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
 
   setFont: (font) => set({ font }),
 
@@ -455,7 +457,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
     // Ensure convenience settings have all fields (backwards compat, also accepts "claude" alias)
     const convSource = data.convenience ?? (data as { claude?: ConvenienceSettings }).claude;
     const convenience = convSource
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, ...(convSource as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(convSource as Partial<ConvenienceSettings>) }
       : undefined;
 
     set((state) => ({

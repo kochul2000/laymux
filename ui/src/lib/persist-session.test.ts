@@ -75,4 +75,26 @@ describe("persistSession", () => {
     expect(savedArg.font.face).toBe("Fira Code");
     expect(savedArg.font.size).toBe(18);
   });
+
+  it("preserves dock panes with view config through save", async () => {
+    // Set up a dock pane with a profile (TerminalView with WSL)
+    useDockStore.getState().setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
+      type: "TerminalView",
+      profile: "WSL",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock).toBeDefined();
+    expect(leftDock.panes).toBeDefined();
+    expect(leftDock.panes.length).toBeGreaterThan(0);
+    expect(leftDock.panes[0].view.type).toBe("TerminalView");
+    expect(leftDock.panes[0].view.profile).toBe("WSL");
+    expect(leftDock.panes[0].x).toBe(0);
+    expect(leftDock.panes[0].y).toBe(0);
+    expect(leftDock.panes[0].w).toBe(1);
+    expect(leftDock.panes[0].h).toBe(1);
+  });
 });

@@ -305,13 +305,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         if (w.id === ws.id) return w;
         return {
           ...w,
-          panes: updatedLayoutPanes.map((lp) => ({
+          panes: ws.panes.map((p) => ({
             id: generateId("pane"),
-            x: lp.x,
-            y: lp.y,
-            w: lp.w,
-            h: lp.h,
-            view: { type: lp.viewType },
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            view: { ...p.view },
           })),
         };
       }),

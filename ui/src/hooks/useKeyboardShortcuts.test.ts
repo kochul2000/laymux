@@ -439,4 +439,89 @@ describe("useKeyboardShortcuts", () => {
     const newWs = useWorkspaceStore.getState().workspaces[1];
     expect(newWs.layoutId).toBe("default-layout");
   });
+
+  // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---
+  it("Ctrl+Alt+n (lowercase) creates new workspace", () => {
+    renderHook(() => useKeyboardShortcuts());
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+
+    fireKey("n", { ctrlKey: true, altKey: true });
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    const newWs = useWorkspaceStore.getState().workspaces[1];
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(newWs.id);
+  });
+
+  it("Ctrl+Alt+d (lowercase) duplicates current workspace", () => {
+    renderHook(() => useKeyboardShortcuts());
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+
+    fireKey("d", { ctrlKey: true, altKey: true });
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    const newWs = useWorkspaceStore.getState().workspaces[1];
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(newWs.id);
+  });
+
+  it("Ctrl+Alt+w (lowercase) closes current workspace", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("w", { ctrlKey: true, altKey: true });
+
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+  });
+
+  it("Ctrl+Alt+r (lowercase) triggers rename of active workspace", () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("r", { ctrlKey: true, altKey: true });
+
+    expect(promptSpy).toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed WS");
+    promptSpy.mockRestore();
+  });
+
+  // --- Lowercase Ctrl+Shift letter keys (case-insensitive) ---
+  it("Ctrl+Shift+b (lowercase) toggles left dock sidebar", () => {
+    renderHook(() => useKeyboardShortcuts());
+    const before = useDockStore.getState().getDock("left")?.visible;
+
+    fireKey("b", { ctrlKey: true, shiftKey: true });
+
+    expect(useDockStore.getState().getDock("left")?.visible).toBe(!before);
+  });
+
+  it("Ctrl+Shift+i (lowercase) toggles notification panel", () => {
+    renderHook(() => useKeyboardShortcuts());
+
+    expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+
+    fireKey("i", { ctrlKey: true, shiftKey: true });
+    expect(useUiStore.getState().notificationPanelOpen).toBe(true);
+  });
+
+  it("Ctrl+Shift+u (lowercase) jumps to workspace with unread notifications", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+
+    useNotificationStore.getState().addNotification({
+      terminalId: "t1",
+      workspaceId: ws2.id,
+      message: "Build done",
+    });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("u", { ctrlKey: true, shiftKey: true });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+  });
 });

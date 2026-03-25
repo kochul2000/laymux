@@ -61,8 +61,10 @@ export function useKeyboardShortcuts() {
 
       // Ctrl+Shift shortcuts (non-workspace: sidebar, notifications)
       if (e.shiftKey && !e.altKey) {
+        const shiftKey = e.key.toUpperCase();
+
         // Ctrl+Shift+U: jump to most recent unread notification workspace
-        if (e.key === "U") {
+        if (shiftKey === "U") {
           e.preventDefault();
           const { notifications } = useNotificationStore.getState();
           const unread = [...notifications]
@@ -75,14 +77,14 @@ export function useKeyboardShortcuts() {
         }
 
         // Ctrl+Shift+B: toggle sidebar
-        if (e.key === "B") {
+        if (shiftKey === "B") {
           e.preventDefault();
           useDockStore.getState().toggleDockVisible("left");
           return;
         }
 
         // Ctrl+Shift+I: toggle notification panel
-        if (e.key === "I") {
+        if (shiftKey === "I") {
           e.preventDefault();
           useUiStore.getState().toggleNotificationPanel();
           return;
@@ -93,8 +95,10 @@ export function useKeyboardShortcuts() {
 
       // Ctrl+Alt shortcuts (all workspace operations)
       if (e.altKey && !e.shiftKey) {
+        const altKey = e.key.toUpperCase();
+
         // Ctrl+Alt+N: new workspace with default (first) layout
-        if (e.key === "N") {
+        if (altKey === "N") {
           e.preventDefault();
           const { layouts, addWorkspace } = useWorkspaceStore.getState();
           const defaultLayout = layouts[0];
@@ -109,7 +113,7 @@ export function useKeyboardShortcuts() {
         }
 
         // Ctrl+Alt+D: duplicate current workspace
-        if (e.key === "D") {
+        if (altKey === "D") {
           e.preventDefault();
           const { duplicateWorkspace } = useWorkspaceStore.getState();
           duplicateWorkspace(activeWorkspaceId);
@@ -120,7 +124,7 @@ export function useKeyboardShortcuts() {
         }
 
         // Ctrl+Alt+W: close current workspace
-        if (e.key === "W") {
+        if (altKey === "W") {
           e.preventDefault();
           if (workspaces.length > 1) {
             removeWorkspace(activeWorkspaceId);
@@ -129,7 +133,7 @@ export function useKeyboardShortcuts() {
         }
 
         // Ctrl+Alt+R: rename current workspace
-        if (e.key === "R") {
+        if (altKey === "R") {
           e.preventDefault();
           const current = workspaces.find((ws) => ws.id === activeWorkspaceId);
           if (current) {

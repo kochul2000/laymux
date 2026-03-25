@@ -536,6 +536,7 @@ fn resolve_target_terminals(
 
 /// Write a command to all target terminals via their PTY handles.
 /// Prepends a space to avoid shell history, and sets IDE_PROPAGATED=1.
+/// Uses profile-appropriate syntax for each target terminal.
 fn write_to_group_terminals(
     state: &AppState,
     target_ids: &[String],
@@ -547,10 +548,19 @@ fn write_to_group_terminals(
         .lock()
         .map_err(|e| format!("Lock error: {e}"))?;
 
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
-            // Write with IDE_PROPAGATED=1 to prevent loop
-            let propagated_cmd = format!("IDE_PROPAGATED=1 {command}");
+            let profile = terminals.get(id).map(|t| t.config.profile.as_str()).unwrap_or("WSL");
+            let propagated_cmd = match profile {
+                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{command}"),
+                "CMD" | "cmd" => format!("set IDE_PROPAGATED=1 &{command}"),
+                _ => format!("IDE_PROPAGATED=1 {command}"),
+            };
             let _ = handle.write(propagated_cmd.as_bytes());
         }
     }
@@ -1092,6 +1102,23 @@ fn cleanup_stale_propagations(state: &AppState) {
 #[tauri::command]
 pub fn smart_paste(image_dir: String, profile: String) -> Result<crate::clipboard::SmartPasteResult, String> {
     crate::clipboard::smart_paste(&image_dir, &profile)
+}
+
+/// Tauri command: write text to the system clipboard.
+#[tauri::command]
+pub fn clipboard_write_text(text: String) -> Result<(), String> {
+    clipboard_write_text_platform(&text)
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_write_text_platform(text: &str) -> Result<(), String> {
+    clipboard_win::set_clipboard(clipboard_win::formats::Unicode, text)
+        .map_err(|e| format!("Clipboard write failed: {e}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
+    Err("Clipboard write not implemented on this platform".into())
 }
 
 #[cfg(test)]

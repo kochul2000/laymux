@@ -117,6 +117,10 @@ export function WorkspaceArea() {
                   workspaceName={ws.name}
                   paneId={pane.id}
                   isFocused={isFocused}
+                  onKeyboardActivity={() => {
+                    setHoveredPane(null);
+                    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                  }}
                 />
               </PaneControlBar>
 

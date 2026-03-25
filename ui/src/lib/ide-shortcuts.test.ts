@@ -126,4 +126,48 @@ describe("isIdeShortcut", () => {
       isIdeShortcut(makeKeyEvent("ArrowRight", { ctrlKey: true, altKey: true })),
     ).toBe(false);
   });
+
+  // --- Case-insensitive Ctrl+Alt letter keys ---
+  it("returns true for Ctrl+Alt+n (lowercase, new workspace)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("n", { ctrlKey: true, altKey: true })),
+    ).toBe(true);
+  });
+
+  it("returns true for Ctrl+Alt+w (lowercase, close workspace)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("w", { ctrlKey: true, altKey: true })),
+    ).toBe(true);
+  });
+
+  it("returns true for Ctrl+Alt+r (lowercase, rename workspace)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("r", { ctrlKey: true, altKey: true })),
+    ).toBe(true);
+  });
+
+  it("returns true for Ctrl+Alt+d (lowercase, duplicate workspace)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("d", { ctrlKey: true, altKey: true })),
+    ).toBe(true);
+  });
+
+  // --- Case-insensitive Ctrl+Shift letter keys ---
+  it("returns true for Ctrl+Shift+u (lowercase, jump to unread)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("u", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+  });
+
+  it("returns true for Ctrl+Shift+b (lowercase, toggle sidebar)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("b", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+  });
+
+  it("returns true for Ctrl+Shift+i (lowercase, toggle notification panel)", () => {
+    expect(
+      isIdeShortcut(makeKeyEvent("i", { ctrlKey: true, shiftKey: true })),
+    ).toBe(true);
+  });
 });

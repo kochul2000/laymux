@@ -234,6 +234,9 @@ pub struct ConvenienceSettings {
     pub smart_paste: bool,
     #[serde(default)]
     pub paste_image_dir: String,
+    /// Automatically copy text to clipboard when selected in terminal.
+    #[serde(default = "default_true")]
+    pub copy_on_select: bool,
 }
 
 impl Default for ConvenienceSettings {
@@ -241,8 +244,31 @@ impl Default for ConvenienceSettings {
         Self {
             smart_paste: true,
             paste_image_dir: String::new(),
+            copy_on_select: true,
         }
     }
+}
+
+/// Dock pane definition (persisted view config with position).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DockPaneSetting {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub view: serde_json::Value,
+    #[serde(default)]
+    pub x: f64,
+    #[serde(default)]
+    pub y: f64,
+    #[serde(default = "default_one")]
+    pub w: f64,
+    #[serde(default = "default_one")]
+    pub h: f64,
+}
+
+fn default_one() -> f64 {
+    1.0
 }
 
 /// Dock configuration in settings.
@@ -258,6 +284,8 @@ pub struct DockSetting {
     pub visible: bool,
     #[serde(default = "default_dock_size")]
     pub size: f64,
+    #[serde(default)]
+    pub panes: Vec<DockPaneSetting>,
 }
 
 fn default_dock_size() -> f64 {
@@ -353,6 +381,7 @@ impl Default for Settings {
                     views: vec!["WorkspaceSelectorView".into()],
                     visible: true,
                     size: default_dock_size(),
+                    panes: Vec::new(),
                 },
             ],
             convenience: ConvenienceSettings::default(),
@@ -559,6 +588,7 @@ mod tests {
         let settings = Settings::default();
         assert!(settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "");
+        assert!(settings.convenience.copy_on_select);
     }
 
     #[test]
@@ -567,6 +597,20 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(!settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "C:\\temp\\images");
+    }
+
+    #[test]
+    fn copy_on_select_deserialize() {
+        let json = r#"{"convenience": {"copyOnSelect": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.convenience.copy_on_select);
+    }
+
+    #[test]
+    fn copy_on_select_defaults_true_when_missing() {
+        let json = r#"{"convenience": {"smartPaste": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.convenience.copy_on_select);
     }
 
     #[test]
@@ -593,5 +637,49 @@ mod tests {
         let json = serde_json::to_string(&font).unwrap();
         let parsed: FontSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.weight, "bold");
+    }
+
+    #[test]
+    fn dock_panes_round_trip() {
+        let dock = DockSetting {
+            position: "left".into(),
+            active_view: Some("TerminalView".into()),
+            views: vec!["TerminalView".into()],
+            visible: true,
+            size: 240.0,
+            panes: vec![DockPaneSetting {
+                id: "dp-abc123".into(),
+                view: serde_json::json!({"type": "TerminalView", "profile": "WSL"}),
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            }],
+        };
+        let json = serde_json::to_string_pretty(&dock).unwrap();
+        let parsed: DockSetting = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.panes.len(), 1);
+        assert_eq!(parsed.panes[0].id, "dp-abc123");
+        assert_eq!(parsed.panes[0].view["type"], "TerminalView");
+        assert_eq!(parsed.panes[0].view["profile"], "WSL");
+        assert_eq!(parsed.panes[0].x, 0.0);
+        assert_eq!(parsed.panes[0].y, 0.0);
+        assert_eq!(parsed.panes[0].w, 1.0);
+        assert_eq!(parsed.panes[0].h, 1.0);
+    }
+
+    #[test]
+    fn dock_panes_default_empty_when_missing() {
+        let json = r#"{"position": "right", "views": []}"#;
+        let dock: DockSetting = serde_json::from_str(json).unwrap();
+        assert!(dock.panes.is_empty());
+    }
+
+    #[test]
+    fn dock_pane_defaults_w_h_to_one() {
+        let json = r#"{"id": "dp-1", "view": {"type": "EmptyView"}, "x": 0.0, "y": 0.0}"#;
+        let pane: DockPaneSetting = serde_json::from_str(json).unwrap();
+        assert_eq!(pane.w, 1.0);
+        assert_eq!(pane.h, 1.0);
     }
 }
