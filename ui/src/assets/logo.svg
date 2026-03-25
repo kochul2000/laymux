@@ -1,0 +1,11 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" fill="black"/>
+<path d="M54 25H27L58 56L27 91.5H54L85 56L54 25Z" fill="#F50A3C"/>
+<path d="M89 91.5H62L75.0986 76.5H102.099L89 91.5Z" fill="#F50A3C"/>
+<path d="M50 26H23L54 57L23 92.5H50L81 57L50 26Z" fill="white"/>
+<path d="M85 92.5H58L71.0986 77.5H98.0986L85 92.5Z" fill="white"/>
+<g style="mix-blend-mode:plus-lighter">
+<path d="M45 29H18L49 60L18 95.5H45L76 60L45 29Z" fill="#0AF1F5"/>
+<path d="M80 95.5H53L66.0986 80.5H93.0986L80 95.5Z" fill="#0AF1F5"/>
+</g>
+</svg>

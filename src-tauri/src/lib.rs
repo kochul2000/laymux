@@ -12,6 +12,7 @@ pub mod state;
 pub mod terminal;
 
 use std::sync::Arc;
+use tauri::image::Image;
 use tauri::Manager;
 
 pub fn run() {
@@ -60,6 +61,13 @@ pub fn run() {
                     Err(e) => eprintln!("Warning: Automation server failed to start: {e}"),
                 }
             });
+
+            // Set window icon (for taskbar in dev mode)
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    let _ = window.set_icon(icon);
+                }
+            }
 
             app.manage(app_state);
             Ok(())

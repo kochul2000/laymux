@@ -4,6 +4,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import type { DockPosition } from "@/stores/types";
+import logoSvg from "@/assets/logo.svg";
 
 /** Window control helpers — lazy-loaded to avoid SSR/test issues */
 async function getWindow() {
@@ -98,12 +99,12 @@ export function GridEditToolbar() {
     >
       {/* Left: App controls (non-draggable) */}
       <div className="flex shrink-0 items-center gap-1.5 px-2">
-        <span
-          className="mr-0.5 text-xs font-bold tracking-wide"
-          style={{ color: "var(--accent)" }}
-        >
-          LAYMUX
-        </span>
+        <img
+          src={logoSvg}
+          alt="Laymux"
+          style={{ height: 16, width: 16, marginLeft: 4, marginRight: 4 }}
+          draggable={false}
+        />
 
         <div className="mx-1" style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
 
