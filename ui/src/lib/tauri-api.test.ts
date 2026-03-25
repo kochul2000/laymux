@@ -61,6 +61,7 @@ describe("tauri-api", () => {
         cols: 80,
         rows: 24,
         syncGroup: "default",
+        workspaceCwd: "",
       });
       expect(result).toEqual(mockResult);
     });

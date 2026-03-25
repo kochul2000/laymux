@@ -24,6 +24,7 @@ pub fn create_terminal_session(
     cols: u16,
     rows: u16,
     sync_group: String,
+    workspace_cwd: String,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -38,6 +39,9 @@ pub fn create_terminal_session(
         if let Some(port) = *port_lock {
             env.push(("IDE_AUTOMATION_PORT".to_string(), port.to_string()));
         }
+    }
+    if !workspace_cwd.is_empty() {
+        env.push(("IDE_WORKSPACE_CWD".to_string(), workspace_cwd));
     }
 
     let config = TerminalConfig {

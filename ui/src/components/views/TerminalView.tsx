@@ -50,6 +50,7 @@ interface TerminalViewProps {
   profile: string;
   syncGroup: string;
   workspaceId?: string;
+  workspaceCwd?: string;
   isFocused?: boolean;
   /** Called when user starts typing — parent can hide control bar / hover state. */
   onKeyboardActivity?: () => void;
@@ -60,6 +61,7 @@ export function TerminalView({
   profile,
   syncGroup,
   workspaceId = "",
+  workspaceCwd = "",
   isFocused = false,
   onKeyboardActivity,
 }: TerminalViewProps) {
@@ -404,6 +406,7 @@ export function TerminalView({
           terminal.cols,
           terminal.rows,
           syncGroup,
+          workspaceCwd,
         ).catch(() => {});
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();

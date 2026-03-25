@@ -132,6 +132,7 @@ describe("TerminalView", () => {
         80,
         24,
         "grp",
+        "",
       );
     });
   });

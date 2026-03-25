@@ -49,6 +49,7 @@ interface WorkspaceState {
   duplicateWorkspace: (id: string) => void;
   removeWorkspace: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
+  setWorkspaceCwd: (id: string, cwd: string | undefined) => void;
 
   // Pane manipulation
   splitPane: (paneIndex: number, direction: "horizontal" | "vertical") => void;
@@ -119,6 +120,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       id: generateId("ws"),
       name: `${source.name} Copy`,
       layoutId: source.layoutId,
+      cwd: source.cwd,
       panes: source.panes.map((p) => ({
         id: generateId("pane"),
         x: p.x,
@@ -150,6 +152,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((state) => ({
       workspaces: state.workspaces.map((ws) =>
         ws.id === id ? { ...ws, name: uniqueName } : ws,
+      ),
+    }));
+  },
+
+  setWorkspaceCwd: (id, cwd) => {
+    set((state) => ({
+      workspaces: state.workspaces.map((ws) =>
+        ws.id === id ? { ...ws, cwd } : ws,
       ),
     }));
   },

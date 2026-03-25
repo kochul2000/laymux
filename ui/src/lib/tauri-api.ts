@@ -19,6 +19,7 @@ export async function createTerminalSession(
   cols: number,
   rows: number,
   syncGroup: string,
+  workspaceCwd: string = "",
 ): Promise<TerminalSessionResult> {
   return invoke("create_terminal_session", {
     id,
@@ -26,6 +27,7 @@ export async function createTerminalSession(
     cols,
     rows,
     syncGroup,
+    workspaceCwd,
   });
 }
 
@@ -162,6 +164,7 @@ export interface SettingsWorkspace {
   id: string;
   name: string;
   layoutId: string;
+  cwd?: string;
   panes: {
     x: number;
     y: number;

@@ -75,6 +75,7 @@ export async function persistSession(): Promise<void> {
       id: ws.id,
       name: ws.name,
       layoutId: ws.layoutId,
+      ...(ws.cwd ? { cwd: ws.cwd } : {}),
       panes: ws.panes.map((p) => ({
         x: p.x,
         y: p.y,

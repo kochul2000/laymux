@@ -12,13 +12,14 @@ interface ViewRendererProps {
   viewConfig?: ViewInstanceConfig;
   onSelectView?: (config: ViewInstanceConfig) => void;
   workspaceName?: string;
+  workspaceCwd?: string;
   paneId?: string;
   emptyViewContext?: EmptyViewContext;
   isFocused?: boolean;
   onKeyboardActivity?: () => void;
 }
 
-export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
+export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, workspaceCwd, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   switch (viewType) {
     case "WorkspaceSelectorView":
@@ -43,6 +44,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
             instanceId={instanceId}
             profile={(viewConfig?.profile as string) || defaultProfile || "PowerShell"}
             syncGroup={effectiveSyncGroup}
+            workspaceCwd={workspaceCwd}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
           />

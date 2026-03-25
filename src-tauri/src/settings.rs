@@ -223,6 +223,8 @@ pub struct Workspace {
     pub id: String,
     pub name: String,
     pub layout_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub panes: Vec<WorkspacePane>,
 }
 
@@ -358,6 +360,7 @@ impl Default for Settings {
                 id: "ws-default".into(),
                 name: "Default".into(),
                 layout_id: "default-layout".into(),
+                cwd: None,
                 panes: vec![WorkspacePane {
                     x: 0.0,
                     y: 0.0,
@@ -720,6 +723,48 @@ mod tests {
         assert_eq!(pane.h, 1.0);
     }
 
+    // --- Workspace CWD tests ---
+
+    #[test]
+    fn workspace_cwd_defaults_none() {
+        let json = r#"{"id": "ws-1", "name": "Test", "layoutId": "l", "panes": []}"#;
+        let ws: Workspace = serde_json::from_str(json).unwrap();
+        assert_eq!(ws.cwd, None);
+    }
+
+    #[test]
+    fn workspace_cwd_round_trip() {
+        let ws = Workspace {
+            id: "ws-1".into(),
+            name: "Test".into(),
+            layout_id: "l".into(),
+            cwd: Some("/home/user/project".into()),
+            panes: vec![],
+        };
+        let json = serde_json::to_string(&ws).unwrap();
+        let parsed: Workspace = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cwd, Some("/home/user/project".into()));
+    }
+
+    #[test]
+    fn workspace_cwd_skip_serializing_none() {
+        let ws = Workspace {
+            id: "ws-1".into(),
+            name: "Test".into(),
+            layout_id: "l".into(),
+            cwd: None,
+            panes: vec![],
+        };
+        let json = serde_json::to_string(&ws).unwrap();
+        assert!(!json.contains("cwd"));
+    }
+
+    #[test]
+    fn default_workspace_has_no_cwd() {
+        let settings = Settings::default();
+        assert_eq!(settings.workspaces[0].cwd, None);
+    }
+
     // --- Migration tests ---
 
     #[test]
@@ -729,6 +774,7 @@ mod tests {
             id: "ws-1".into(),
             name: "Test".into(),
             layout_id: "default-layout".into(),
+            cwd: None,
             panes: vec![WorkspacePane {
                 x: 0.0, y: 0.0, w: 1.0, h: 1.0,
                 view: serde_json::from_value(serde_json::json!({
@@ -755,9 +801,9 @@ mod tests {
     fn migrate_deduplicates_workspace_names() {
         let mut settings = Settings::default();
         settings.workspaces = vec![
-            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
-            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
-            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
+            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: "l".into(), cwd: None, panes: vec![] },
+            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: "l".into(), cwd: None, panes: vec![] },
+            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: "l".into(), cwd: None, panes: vec![] },
         ];
         migrate_settings(&mut settings);
         let names: Vec<&str> = settings.workspaces.iter().map(|w| w.name.as_str()).collect();

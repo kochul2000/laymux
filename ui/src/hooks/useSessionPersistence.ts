@@ -79,6 +79,7 @@ export function useSessionPersistence() {
             id: ws.id,
             name: ws.name,
             layoutId: ws.layoutId,
+            ...(ws.cwd ? { cwd: ws.cwd } : {}),
             panes: ws.panes.map((p) => ({
               id: `loaded-pane-${++paneCounter}`,
               x: p.x,

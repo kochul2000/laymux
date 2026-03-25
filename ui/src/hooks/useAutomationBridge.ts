@@ -58,6 +58,11 @@ const handlers: HandlerMap = {
       useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
       return ok({ renamed: p.id });
     },
+    setCwd: (p) => {
+      const cwd = p.cwd === null || p.cwd === undefined ? undefined : (p.cwd as string);
+      useWorkspaceStore.getState().setWorkspaceCwd(p.id as string, cwd);
+      return ok({ id: p.id, cwd });
+    },
     save: () => {
       useWorkspaceStore.getState().saveWorkspace();
       return ok({ saved: true });

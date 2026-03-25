@@ -165,6 +165,19 @@ fn shell_integration_powershell() -> String {
     // [Console]::Write() fails in ConPTY context, so we avoid it.
     // Avoids double quotes — they get mangled by Windows cmd-line argument escaping.
     r#"
+Remove-Item Alias:cd -Force -ErrorAction SilentlyContinue
+function cd {
+    param([Parameter(Position=0, ValueFromRemainingArguments)]$Path)
+    if ($null -eq $Path -or $Path.Count -eq 0) { Set-Location $HOME; return }
+    if ($Path[0] -eq '=') {
+        $t = $env:IDE_WORKSPACE_CWD
+        if (-not $t) { $t = $HOME }
+        Set-Location $t
+    } else { Set-Location @Path }
+}
+if ($env:IDE_WORKSPACE_CWD -and (Test-Path $env:IDE_WORKSPACE_CWD)) {
+    Set-Location $env:IDE_WORKSPACE_CWD
+}
 $global:__lmx_e = [string][char]27
 $global:__lmx_b = [string][char]7
 $global:__lmx_f = $true
@@ -206,6 +219,22 @@ fn shell_integration_bash_with_env(env: &[(String, String)]) -> String {
     // Set IDE_AUTOMATION_HOST to the Windows host IP (gateway from WSL2 perspective)
     // so tools running inside WSL can reach the Automation API on the Windows side.
     script.push_str("export IDE_AUTOMATION_HOST=$(ip route show default 2>/dev/null | awk '{print $3}' || echo '127.0.0.1')\n");
+
+    // Workspace home directory shortcut: `cd =` navigates to workspace CWD
+    script.push_str(
+        r#"
+cd() {
+  if [ "$1" = "=" ]; then
+    builtin cd "${IDE_WORKSPACE_CWD:-$HOME}"
+  else
+    builtin cd "$@"
+  fi
+}
+if [ -n "$IDE_WORKSPACE_CWD" ] && [ -d "$IDE_WORKSPACE_CWD" ]; then
+  builtin cd "$IDE_WORKSPACE_CWD"
+fi
+"#,
+    );
 
     script.push_str(
         r#"
@@ -379,6 +408,85 @@ mod tests {
         assert!(
             init.contains("trap") && init.contains("DEBUG"),
             "Preexec should use trap DEBUG"
+        );
+    }
+
+    // --- Workspace CWD shell integration tests ---
+
+    #[test]
+    fn bash_init_includes_cd_override() {
+        let script = shell_integration_bash();
+        assert!(script.contains("cd() {"), "Bash init should define cd() function");
+        assert!(script.contains("builtin cd"), "cd override should use builtin cd");
+    }
+
+    #[test]
+    fn bash_cd_override_handles_equals() {
+        let script = shell_integration_bash();
+        assert!(
+            script.contains(r#""$1" = "=""#),
+            "cd override should check for = argument"
+        );
+        assert!(
+            script.contains("IDE_WORKSPACE_CWD"),
+            "cd override should reference IDE_WORKSPACE_CWD"
+        );
+    }
+
+    #[test]
+    fn bash_cd_override_falls_through() {
+        let script = shell_integration_bash();
+        assert!(
+            script.contains(r#"builtin cd "$@""#),
+            "cd override should fall through to builtin cd for normal args"
+        );
+    }
+
+    #[test]
+    fn bash_init_auto_cd_when_workspace_cwd_set() {
+        let script = shell_integration_bash();
+        assert!(
+            script.contains(r#"if [ -n "$IDE_WORKSPACE_CWD" ] && [ -d "$IDE_WORKSPACE_CWD" ]"#),
+            "Bash init should auto-cd when IDE_WORKSPACE_CWD is set and directory exists"
+        );
+        assert!(
+            script.contains(r#"builtin cd "$IDE_WORKSPACE_CWD""#),
+            "Bash init should cd to workspace CWD"
+        );
+    }
+
+    #[test]
+    fn powershell_init_includes_cd_override() {
+        let script = shell_integration_powershell();
+        assert!(
+            script.contains("function cd {"),
+            "PowerShell init should define cd function"
+        );
+        assert!(
+            script.contains("Remove-Item Alias:cd"),
+            "PowerShell init should remove built-in cd alias"
+        );
+    }
+
+    #[test]
+    fn powershell_cd_override_handles_equals() {
+        let script = shell_integration_powershell();
+        assert!(
+            script.contains("'='"),
+            "PowerShell cd override should check for = argument"
+        );
+        assert!(
+            script.contains("IDE_WORKSPACE_CWD"),
+            "PowerShell cd override should reference IDE_WORKSPACE_CWD"
+        );
+    }
+
+    #[test]
+    fn powershell_init_auto_cd_to_workspace_cwd() {
+        let script = shell_integration_powershell();
+        assert!(
+            script.contains("Test-Path $env:IDE_WORKSPACE_CWD"),
+            "PowerShell init should check workspace CWD exists before auto-cd"
         );
     }
 

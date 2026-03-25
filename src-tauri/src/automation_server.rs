@@ -73,6 +73,11 @@ pub struct RenameWorkspaceBody {
 }
 
 #[derive(Deserialize)]
+pub struct SetWorkspaceCwdBody {
+    pub cwd: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct EditModeBody {
     pub enabled: bool,
 }
@@ -231,6 +236,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET",    "/api/v1/workspaces/active"),
     ("POST",   "/api/v1/workspaces/active"),
     ("PUT",    "/api/v1/workspaces/{id}"),
+    ("PUT",    "/api/v1/workspaces/{id}/cwd"),
     ("DELETE", "/api/v1/workspaces/{id}"),
     ("POST",   "/api/v1/workspaces/save"),
     ("POST",   "/api/v1/workspaces/revert"),
@@ -276,6 +282,7 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/workspaces/active", get(workspaces_get_active))
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
+        .route("/api/v1/workspaces/{id}/cwd", put(workspaces_set_cwd))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
         .route("/api/v1/workspaces/save", post(workspaces_save))
         .route("/api/v1/workspaces/revert", post(workspaces_revert))
@@ -356,6 +363,11 @@ async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/workspaces/{id}",
                 "description": "Rename a workspace.",
                 "body": { "name": "string — new name" }
+            },
+            {
+                "method": "PUT", "path": "/api/v1/workspaces/{id}/cwd",
+                "description": "Set workspace home directory (CWD). Pass null to clear.",
+                "body": { "cwd": "string|null — workspace home directory path" }
             },
             {
                 "method": "DELETE", "path": "/api/v1/workspaces/{id}",
@@ -706,6 +718,25 @@ async fn workspaces_rename(
         "workspaces",
         "rename",
         serde_json::json!({ "id": id, "name": body.name }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+async fn workspaces_set_cwd(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+    Json(body): Json<SetWorkspaceCwdBody>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "workspaces",
+        "setCwd",
+        serde_json::json!({ "id": id, "cwd": body.cwd }),
     )
     .await
     {
