@@ -194,6 +194,7 @@ function prompt {
 }
 
 /// Bash shell integration script for WSL (without env injection).
+#[cfg(test)]
 fn shell_integration_bash() -> String {
     shell_integration_bash_with_env(&[])
 }

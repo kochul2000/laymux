@@ -1202,6 +1202,7 @@ fn update_terminal_cwd(state: &AppState, terminal_id: &str, cwd: &str) {
 /// - Same-type paths pass through unchanged
 /// - Pure Linux paths → `\\wsl.localhost\<distro>\path` for PowerShell (if distro known)
 /// - Pure Linux paths → `None` for PowerShell (if distro unknown)
+#[cfg(test)]
 fn convert_path_for_target(path: &str, target_profile: &str) -> Option<String> {
     convert_path_for_target_with_distro(path, target_profile, None)
 }
