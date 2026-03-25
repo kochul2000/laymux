@@ -91,6 +91,8 @@ pub fn run() {
             commands::get_terminal_states,
             commands::smart_paste,
             commands::clipboard_write_text,
+            commands::set_terminal_cwd_receive,
+            commands::update_terminal_sync_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

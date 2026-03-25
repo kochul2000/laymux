@@ -19,6 +19,8 @@ export interface PaneControlBarActions {
   onClear?: () => void;
   onDelete?: () => void;
   onChangeView?: (config: ViewInstanceConfig) => void;
+  onToggleCwdSend?: () => void;
+  onToggleCwdReceive?: () => void;
 }
 
 interface PaneControlBarProps {
@@ -160,6 +162,48 @@ function BarContent({
       {actions.onChangeView && (
         <ViewSelect currentView={currentView} onChange={actions.onChangeView} />
       )}
+
+      {currentView.type === "TerminalView" && actions.onToggleCwdSend && (() => {
+        const isOn = (currentView.cwdSend ?? true) as boolean;
+        return (
+          <>
+            <Sep />
+            <BarBtn
+              testId="pane-control-cwd-send"
+              onClick={actions.onToggleCwdSend}
+              title={isOn ? "CWD Send (on)" : "CWD Send (off)"}
+              active={isOn}
+              style={isOn ? undefined : { opacity: 0.4 }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M4 5l3-3 3 3Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"
+                  fill={isOn ? "currentColor" : "none"} />
+                <path d="M7 5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+            </BarBtn>
+          </>
+        );
+      })()}
+      {currentView.type === "TerminalView" && actions.onToggleCwdReceive && (() => {
+        const isOn = (currentView.cwdReceive ?? true) as boolean;
+        return (
+          <BarBtn
+            testId="pane-control-cwd-receive"
+            onClick={actions.onToggleCwdReceive}
+            title={isOn ? "CWD Receive (on)" : "CWD Receive (off)"}
+            active={isOn}
+            style={isOn ? undefined : { opacity: 0.4 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M4 7l3 3 3-3Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"
+                fill={isOn ? "currentColor" : "none"} />
+              <path d="M7 2v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </BarBtn>
+        );
+      })()}
 
       <Sep />
 

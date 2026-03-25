@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
@@ -43,6 +44,10 @@ export function Dock({
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWsName = useWorkspaceStore((s) => {
+    const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
+    return ws?.name ?? "";
+  });
 
   const [singleHovered, setSingleHovered] = useState(false);
   const singleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,12 +138,19 @@ export function Dock({
                 ? () => onSetPaneView(singlePaneId, { type: "EmptyView" })
                 : onSwitchView ? () => onSwitchView("EmptyView") : undefined
               : undefined,
+            onToggleCwdSend: singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              ? () => onSetPaneView(singlePaneId, { ...panes[0].view, cwdSend: !((panes[0].view.cwdSend as boolean) ?? true) })
+              : undefined,
+            onToggleCwdReceive: singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              ? () => onSetPaneView(singlePaneId, { ...panes[0].view, cwdReceive: !((panes[0].view.cwdReceive as boolean) ?? true) })
+              : undefined,
           }}
         >
           <ViewRenderer
             viewType={activeView}
             viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
+            workspaceName={activeWsName}
             onSelectView={
               singlePaneId
                 ? (config) => onSetPaneView?.(singlePaneId, config)
@@ -173,6 +185,10 @@ function DockGrid({
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWsName = useWorkspaceStore((s) => {
+    const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
+    return ws?.name ?? "";
+  });
 
   const handlePaneHoverActivity = useCallback((paneId: string) => {
     setHoveredPane(paneId);
@@ -235,12 +251,19 @@ function DockGrid({
                 onSplitV: onSplitPane ? () => onSplitPane("vertical", pane.id) : undefined,
                 onClear: () => onSetPaneView?.(pane.id, { type: "EmptyView" }),
                 onDelete: panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
+                onToggleCwdSend: onSetPaneView && pane.view.type === "TerminalView"
+                  ? () => onSetPaneView(pane.id, { ...pane.view, cwdSend: !((pane.view.cwdSend as boolean) ?? true) })
+                  : undefined,
+                onToggleCwdReceive: onSetPaneView && pane.view.type === "TerminalView"
+                  ? () => onSetPaneView(pane.id, { ...pane.view, cwdReceive: !((pane.view.cwdReceive as boolean) ?? true) })
+                  : undefined,
               }}
             >
               <ViewRenderer
                 viewType={pane.view.type}
                 viewConfig={pane.view}
                 paneId={pane.id}
+                workspaceName={activeWsName}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
                 emptyViewContext="dock"
                 onKeyboardActivity={() => {

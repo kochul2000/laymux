@@ -77,6 +77,8 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
   clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
+  setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
+  updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("TerminalView", () => {

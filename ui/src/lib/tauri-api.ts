@@ -207,6 +207,16 @@ export async function clipboardWriteText(text: string): Promise<void> {
   return invoke("clipboard_write_text", { text });
 }
 
+/** Update whether a terminal accepts CWD sync from other terminals. */
+export async function setTerminalCwdReceive(terminalId: string, receive: boolean): Promise<void> {
+  return invoke("set_terminal_cwd_receive", { terminalId, receive });
+}
+
+/** Move a terminal to a different sync group in the backend. */
+export async function updateTerminalSyncGroup(terminalId: string, newGroup: string): Promise<void> {
+  return invoke("update_terminal_sync_group", { terminalId, newGroup });
+}
+
 /** Listen for terminal output events from the backend. */
 export function onTerminalOutput(
   terminalId: string,

@@ -14,6 +14,8 @@ import {
   onTerminalOutput,
   smartPaste,
   clipboardWriteText,
+  setTerminalCwdReceive,
+  updateTerminalSyncGroup,
 } from "@/lib/tauri-api";
 import {
   colorSchemeToXtermTheme,
@@ -49,6 +51,8 @@ interface TerminalViewProps {
   instanceId: string;
   profile: string;
   syncGroup: string;
+  cwdSend?: boolean;
+  cwdReceive?: boolean;
   workspaceId?: string;
   isFocused?: boolean;
   /** Called when user starts typing — parent can hide control bar / hover state. */
@@ -59,6 +63,8 @@ export function TerminalView({
   instanceId,
   profile,
   syncGroup,
+  cwdSend = true,
+  cwdReceive = true,
   workspaceId = "",
   isFocused = false,
   onKeyboardActivity,
@@ -72,6 +78,8 @@ export function TerminalView({
   isFocusedRef.current = isFocused;
   const syncGroupRef = useRef(syncGroup);
   syncGroupRef.current = syncGroup;
+  const cwdSendRef = useRef(cwdSend);
+  cwdSendRef.current = cwdSend;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -279,7 +287,9 @@ export function TerminalView({
       if (cancelled) return;
       terminal.write(data);
       const text = streamDecoder.decode(data, { stream: true });
-      processOscInOutput(text, hooks, instanceId, syncGroupRef.current);
+      processOscInOutput(text, hooks, instanceId, syncGroupRef.current, {
+        skipSyncCwd: !cwdSendRef.current,
+      });
 
       // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
       const osc0Matches = text.match(/\x1b\]0;([^\x07]*)\x07/g);
@@ -443,7 +453,13 @@ export function TerminalView({
   // Lightweight update when syncGroup changes — no terminal recreation
   useEffect(() => {
     useTerminalStore.getState().updateInstanceInfo(instanceId, { syncGroup });
+    updateTerminalSyncGroup(instanceId, syncGroup).catch(() => {});
   }, [instanceId, syncGroup]);
+
+  // Update backend when cwdReceive changes
+  useEffect(() => {
+    setTerminalCwdReceive(instanceId, cwdReceive).catch(() => {});
+  }, [instanceId, cwdReceive]);
 
   // Focus terminal when pane focus state changes (only if terminal is opened)
   useEffect(() => {

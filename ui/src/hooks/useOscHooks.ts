@@ -17,6 +17,7 @@ export function processOscInOutput(
   hooks: OscHook[],
   terminalId: string,
   groupId: string,
+  options?: { skipSyncCwd?: boolean },
 ): void {
   if (hooks.length === 0) return;
 
@@ -70,6 +71,7 @@ export function processOscInOutput(
       // Convert parsed command to IdeMessage JSON and send via IPC
       const message = buildIdeMessage(parsed, terminalId, groupId);
       if (message) {
+        if (options?.skipSyncCwd && message.action === "sync-cwd") continue;
         handleIdeMessage(JSON.stringify(message)).catch(() => {});
       }
     }

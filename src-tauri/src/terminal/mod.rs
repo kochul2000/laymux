@@ -61,6 +61,13 @@ pub struct TerminalSession {
     /// Used for cross-profile path conversion (e.g., /home/... → \\wsl.localhost\distro\...).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wsl_distro: Option<String>,
+    /// Whether this terminal accepts CWD sync from other terminals.
+    #[serde(default = "default_true")]
+    pub cwd_receive: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl TerminalSession {
@@ -73,6 +80,7 @@ impl TerminalSession {
             branch: None,
             command_running: false,
             wsl_distro: None,
+            cwd_receive: true,
         }
     }
 

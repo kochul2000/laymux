@@ -43,6 +43,8 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
             instanceId={instanceId}
             profile={(viewConfig?.profile as string) || defaultProfile || "PowerShell"}
             syncGroup={effectiveSyncGroup}
+            cwdSend={(viewConfig?.cwdSend as boolean) ?? true}
+            cwdReceive={(viewConfig?.cwdReceive as boolean) ?? true}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
           />

@@ -239,6 +239,60 @@ pub fn get_sync_group_terminals(
         .unwrap_or_default())
 }
 
+#[tauri::command]
+pub fn set_terminal_cwd_receive(
+    terminal_id: String,
+    receive: bool,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let mut terminals = state
+        .terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    if let Some(session) = terminals.get_mut(&terminal_id) {
+        session.cwd_receive = receive;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_terminal_sync_group(
+    terminal_id: String,
+    new_group: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let mut groups = state
+        .sync_groups
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+
+    // Remove from all existing groups
+    let empty_groups: Vec<String> = groups
+        .iter_mut()
+        .filter_map(|(name, group)| {
+            group.remove_terminal(&terminal_id);
+            if group.terminal_ids.is_empty() {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    for name in empty_groups {
+        groups.remove(&name);
+    }
+
+    // Add to new group (if non-empty)
+    if !new_group.is_empty() {
+        groups
+            .entry(new_group.clone())
+            .or_insert_with(|| crate::terminal::SyncGroup::new(new_group))
+            .add_terminal(terminal_id);
+    }
+
+    Ok(())
+}
+
 /// Inner handler that processes IDE messages. Used by both the Tauri command
 /// and the IPC socket server so that all message routes share the same logic.
 pub fn handle_ide_message_inner(
@@ -303,8 +357,11 @@ fn handle_ide_message_dispatch(
 
             let all_targets = resolve_target_terminals(&state, &terminal_id, &group_id, all, target_group.as_deref())?;
 
+            // Skip targets that have cwd_receive disabled
+            let receiving_targets = filter_targets_cwd_receive(&state, &all_targets);
+
             // Skip targets that have a command running (e.g., interactive apps like Claude Code)
-            let idle_targets = filter_targets_not_busy(&state, &all_targets);
+            let idle_targets = filter_targets_not_busy(&state, &receiving_targets);
 
             // Skip targets that are already at the same CWD
             let target_terminals = filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
@@ -893,6 +950,19 @@ fn should_skip_sync_cwd(state: &AppState, terminal_id: &str, normalized_path: &s
 /// Checks the terminal output buffer for the last OSC 133 marker:
 /// - OSC 133;C (preexec) = command is running → exclude
 /// - OSC 133;D (exit code) = at shell prompt → include
+/// Filter out terminals that have cwd_receive disabled.
+fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<String> {
+    if let Ok(terminals) = state.terminals.lock() {
+        targets
+            .iter()
+            .filter(|id| terminals.get(id.as_str()).map_or(true, |s| s.cwd_receive))
+            .cloned()
+            .collect()
+    } else {
+        targets.to_vec()
+    }
+}
+
 /// This is more reliable than the async `command_running` flag because it
 /// reads from the actual terminal output (ground truth), avoiding race conditions.
 fn filter_targets_not_busy(state: &AppState, targets: &[String]) -> Vec<String> {

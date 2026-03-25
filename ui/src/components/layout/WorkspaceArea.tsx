@@ -108,6 +108,12 @@ export function WorkspaceArea() {
                   onSplitV: isActive ? () => splitPane(i, "vertical") : undefined,
                   onClear: isActive ? () => setPaneView(i, { type: "EmptyView" }) : undefined,
                   onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
+                  onToggleCwdSend: isActive && pane.view.type === "TerminalView"
+                    ? () => setPaneView(i, { ...pane.view, cwdSend: !((pane.view.cwdSend as boolean) ?? true) })
+                    : undefined,
+                  onToggleCwdReceive: isActive && pane.view.type === "TerminalView"
+                    ? () => setPaneView(i, { ...pane.view, cwdReceive: !((pane.view.cwdReceive as boolean) ?? true) })
+                    : undefined,
                 }}
               >
                 <ViewRenderer
