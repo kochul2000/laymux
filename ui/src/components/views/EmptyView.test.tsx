@@ -91,6 +91,12 @@ describe("EmptyView", () => {
     );
   });
 
+  it("grabs DOM focus when isFocused becomes true", () => {
+    const { container } = render(<EmptyView isFocused={true} />);
+    const wrapper = container.querySelector("[data-testid='empty-view']")!;
+    expect(document.activeElement).toBe(wrapper);
+  });
+
   it("shows all views including dock views in any context", () => {
     render(<EmptyView context="pane" />);
     expect(screen.getByTestId("empty-view-workspace-selector")).toBeInTheDocument();
