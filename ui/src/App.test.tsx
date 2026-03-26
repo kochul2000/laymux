@@ -8,7 +8,7 @@ vi.mock("@/lib/tauri-api", () => {
   return {
     onSyncCwd: vi.fn().mockResolvedValue(unlisten),
     onSyncBranch: vi.fn().mockResolvedValue(unlisten),
-    onIdeNotify: vi.fn().mockResolvedValue(unlisten),
+    onLxNotify: vi.fn().mockResolvedValue(unlisten),
     onSetTabTitle: vi.fn().mockResolvedValue(unlisten),
     onCommandStatus: vi.fn().mockResolvedValue(unlisten),
     createTerminalSession: vi.fn().mockResolvedValue({}),

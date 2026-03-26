@@ -1,17 +1,17 @@
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
 
-use crate::ide_cli::{IdeMessage, IdeResponse};
+use crate::cli::{LxMessage, LxResponse};
 
 /// Handle a single IPC connection by reading JSON messages and returning responses.
-/// Each line is a JSON IdeMessage; the response is a JSON IdeResponse on one line.
+/// Each line is a JSON LxMessage; the response is a JSON LxResponse on one line.
 pub fn handle_ipc_stream<R: BufRead, W: Write, F>(
     reader: &mut R,
     writer: &mut W,
     handler: F,
 ) -> Result<(), String>
 where
-    F: Fn(IdeMessage) -> IdeResponse,
+    F: Fn(LxMessage) -> LxResponse,
 {
     let mut line = String::new();
     loop {
@@ -24,9 +24,9 @@ where
                     continue;
                 }
 
-                let response = match serde_json::from_str::<IdeMessage>(trimmed) {
+                let response = match serde_json::from_str::<LxMessage>(trimmed) {
                     Ok(message) => handler(message),
-                    Err(e) => IdeResponse::err(format!("Parse error: {e}")),
+                    Err(e) => LxResponse::err(format!("Parse error: {e}")),
                 };
 
                 let response_json = serde_json::to_string(&response)
@@ -48,12 +48,12 @@ pub fn socket_path(session_id: &str) -> String {
     #[cfg(target_os = "windows")]
     {
         // Windows named pipe
-        format!(r"\\.\pipe\ide-{session_id}")
+        format!(r"\\.\pipe\lx-{session_id}")
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        format!("/tmp/ide-{session_id}.sock")
+        format!("/tmp/lx-{session_id}.sock")
     }
 }
 
@@ -64,7 +64,7 @@ pub fn start_ipc_server<F>(
     handler: Arc<F>,
 ) -> Result<String, String>
 where
-    F: Fn(IdeMessage) -> IdeResponse + Send + Sync + 'static,
+    F: Fn(LxMessage) -> LxResponse + Send + Sync + 'static,
 {
     #[cfg(not(target_os = "windows"))]
     let path = socket_path(&session_id);
@@ -158,15 +158,15 @@ mod tests {
         let mut output = Vec::new();
 
         let result = handle_ipc_stream(&mut reader, &mut output, |msg| match msg {
-            IdeMessage::Notify { message, .. } => {
-                IdeResponse::ok(Some(format!("got: {message}")))
+            LxMessage::Notify { message, .. } => {
+                LxResponse::ok(Some(format!("got: {message}")))
             }
-            _ => IdeResponse::err("unexpected".into()),
+            _ => LxResponse::err("unexpected".into()),
         });
 
         assert!(result.is_ok());
         let response_str = String::from_utf8(output).unwrap();
-        let response: IdeResponse = serde_json::from_str(response_str.trim()).unwrap();
+        let response: LxResponse = serde_json::from_str(response_str.trim()).unwrap();
         assert!(response.success);
         assert_eq!(response.data, Some("got: hello".into()));
     }
@@ -177,12 +177,12 @@ mod tests {
         let mut output = Vec::new();
 
         let result = handle_ipc_stream(&mut reader, &mut output, |_| {
-            IdeResponse::ok(None)
+            LxResponse::ok(None)
         });
 
         assert!(result.is_ok());
         let response_str = String::from_utf8(output).unwrap();
-        let response: IdeResponse = serde_json::from_str(response_str.trim()).unwrap();
+        let response: LxResponse = serde_json::from_str(response_str.trim()).unwrap();
         assert!(!response.success);
         assert!(response.error.unwrap().contains("Parse error"));
     }
@@ -193,7 +193,7 @@ mod tests {
         let mut output = Vec::new();
 
         let result = handle_ipc_stream(&mut reader, &mut output, |_| {
-            IdeResponse::ok(None)
+            LxResponse::ok(None)
         });
 
         assert!(result.is_ok());
@@ -211,8 +211,8 @@ mod tests {
         let mut output = Vec::new();
 
         let result = handle_ipc_stream(&mut reader, &mut output, |msg| match msg {
-            IdeMessage::Notify { message, .. } => IdeResponse::ok(Some(message)),
-            _ => IdeResponse::err("unexpected".into()),
+            LxMessage::Notify { message, .. } => LxResponse::ok(Some(message)),
+            _ => LxResponse::err("unexpected".into()),
         });
 
         assert!(result.is_ok());

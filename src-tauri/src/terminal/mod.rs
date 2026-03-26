@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Detected activity state of a terminal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +27,15 @@ pub struct TerminalStateInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConfig {
     pub profile: String,
+    /// The shell command line (e.g. "wsl.exe -d Ubuntu", "powershell.exe -NoLogo").
+    /// Used to detect shell type and spawn the PTY process.
+    /// If empty, falls back to profile name-based resolution.
+    #[serde(default)]
+    pub command_line: String,
+    /// Command to run after shell initialization (e.g. "cd ~/project && conda activate myenv").
+    /// Appended to the shell init script for WSL/PowerShell profiles.
+    #[serde(default)]
+    pub startup_command: String,
     pub cols: u16,
     pub rows: u16,
     pub sync_group: String,
@@ -36,6 +46,8 @@ impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
             profile: "PowerShell".into(),
+            command_line: "powershell.exe -NoLogo".into(),
+            startup_command: String::new(),
             cols: 80,
             rows: 24,
             sync_group: String::new(),
@@ -84,22 +96,52 @@ impl TerminalSession {
         }
     }
 
+    /// Legacy wrapper: resolve by profile name (for backward compat).
     pub fn profile_to_command(profile: &str) -> (String, Vec<String>) {
         Self::profile_to_command_with_env(profile, &[])
     }
 
-    /// Build command for the given profile, injecting env vars into the shell init script.
-    /// For WSL, env vars are exported inside the bash init script so they are visible
-    /// even when WSL interop is disabled.
+    /// Legacy wrapper: resolve by profile name with env injection.
     pub fn profile_to_command_with_env(profile: &str, env: &[(String, String)]) -> (String, Vec<String>) {
-        match profile {
-            "WSL" | "wsl" => {
-                let init = shell_integration_bash_with_env(env);
-                // Write init script to a temp file and use --rcfile to load it.
-                // The old approach (`bash -c "INIT; exec bash -i"`) lost the functions
-                // because `exec` replaced the process. Writing to a file and using
-                // --rcfile ensures the integration persists in the interactive session.
-                let init_file = std::env::temp_dir().join("laymux_bash_init.sh");
+        let command_line = match profile {
+            "WSL" | "wsl" => "wsl.exe",
+            "PowerShell" | "powershell" => "powershell.exe -NoLogo",
+            other => other,
+        };
+        Self::command_line_to_command_with_env(command_line, env)
+    }
+
+    /// Convenience wrapper without env injection.
+    pub fn command_line_to_command(command_line: &str) -> (String, Vec<String>) {
+        Self::command_line_to_command_with_startup(command_line, &[], "")
+    }
+
+    /// Build command with env injection (no startup command).
+    pub fn command_line_to_command_with_env(command_line: &str, env: &[(String, String)]) -> (String, Vec<String>) {
+        Self::command_line_to_command_with_startup(command_line, env, "")
+    }
+
+    /// Build command from a command_line string, detecting shell type from the executable.
+    /// Injects shell integration (OSC sequences) for known shells (WSL/bash, PowerShell).
+    /// If `startup_command` is non-empty, appends it to the shell init script.
+    pub fn command_line_to_command_with_startup(
+        command_line: &str,
+        env: &[(String, String)],
+        startup_command: &str,
+    ) -> (String, Vec<String>) {
+        let parts: Vec<&str> = command_line.split_whitespace().collect();
+        let executable = parts.first().copied().unwrap_or("powershell.exe");
+        let extra_args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+        match detect_shell_type(executable) {
+            ShellType::Wsl => {
+                let mut init = shell_integration_bash_with_env(env);
+                if !startup_command.is_empty() {
+                    init.push('\n');
+                    init.push_str(startup_command);
+                }
+                let seq = INIT_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let init_file = std::env::temp_dir().join(format!("laymux_bash_init_{}.sh", seq));
                 let _ = std::fs::write(&init_file, &init);
                 let win_path = init_file.to_string_lossy().replace('\\', "/");
                 let wsl_path = if win_path.len() >= 2 && win_path.as_bytes()[1] == b':' {
@@ -108,21 +150,24 @@ impl TerminalSession {
                 } else {
                     win_path.to_string()
                 };
-                (
-                    "wsl.exe".into(),
-                    vec![
-                        "--".into(),
-                        "bash".into(),
-                        "--rcfile".into(),
-                        wsl_path,
-                        "-i".into(),
-                    ],
-                )
+                let mut args = extra_args;
+                args.extend([
+                    "--".into(),
+                    "bash".into(),
+                    "--rcfile".into(),
+                    wsl_path,
+                    "-i".into(),
+                ]);
+                (executable.into(), args)
             }
-            "PowerShell" | "powershell" => {
-                let init = shell_integration_powershell();
+            ShellType::PowerShell => {
+                let mut init = shell_integration_powershell();
+                if !startup_command.is_empty() {
+                    init.push_str("\n");
+                    init.push_str(startup_command);
+                }
                 (
-                    "powershell.exe".into(),
+                    executable.into(),
                     vec![
                         "-NoLogo".into(),
                         "-NoExit".into(),
@@ -131,8 +176,37 @@ impl TerminalSession {
                     ],
                 )
             }
-            _ => ("powershell.exe".into(), vec!["-NoLogo".into()]),
+            ShellType::Other => {
+                (executable.into(), extra_args)
+            }
         }
+    }
+}
+
+enum ShellType {
+    Wsl,
+    PowerShell,
+    Other,
+}
+
+/// Monotonic counter for unique bash init file names.
+static INIT_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Detect shell type from the executable path/name.
+/// Strips directory and .exe extension, then matches against known shells.
+fn detect_shell_type(executable: &str) -> ShellType {
+    let filename = executable
+        .rsplit(&['/', '\\'])
+        .next()
+        .unwrap_or(executable);
+    let name = filename
+        .strip_suffix(".exe")
+        .unwrap_or(filename)
+        .to_lowercase();
+    match name.as_str() {
+        "wsl" => ShellType::Wsl,
+        "powershell" | "pwsh" => ShellType::PowerShell,
+        _ => ShellType::Other,
     }
 }
 
@@ -212,9 +286,9 @@ fn shell_integration_bash_with_env(env: &[(String, String)]) -> String {
         script.push_str(&format!("export {}='{}'\n", key, escaped));
     }
 
-    // Set IDE_AUTOMATION_HOST to the Windows host IP (gateway from WSL2 perspective)
+    // Set LX_AUTOMATION_HOST to the Windows host IP (gateway from WSL2 perspective)
     // so tools running inside WSL can reach the Automation API on the Windows side.
-    script.push_str("export IDE_AUTOMATION_HOST=$(ip route show default 2>/dev/null | awk '{print $3}' || echo '127.0.0.1')\n");
+    script.push_str("export LX_AUTOMATION_HOST=$(ip route show default 2>/dev/null | awk '{print $3}' || echo '127.0.0.1')\n");
 
     script.push_str(
         r#"
@@ -250,6 +324,8 @@ mod tests {
     fn creates_session_with_config() {
         let config = TerminalConfig {
             profile: "WSL".into(),
+            command_line: "wsl.exe".into(),
+            startup_command: String::new(),
             cols: 120,
             rows: 40,
             sync_group: "project-a".into(),
@@ -285,6 +361,150 @@ mod tests {
     }
 
     #[test]
+    fn command_line_detects_wsl() {
+        let (cmd, args) = TerminalSession::command_line_to_command("wsl.exe");
+        assert_eq!(cmd, "wsl.exe");
+        assert!(args.contains(&"--".to_string()));
+        assert!(args.contains(&"bash".to_string()));
+        assert!(args.contains(&"--rcfile".to_string()));
+        assert!(args.contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn command_line_detects_wsl_with_distro() {
+        let (cmd, args) = TerminalSession::command_line_to_command("wsl.exe -d Ubuntu");
+        assert_eq!(cmd, "wsl.exe");
+        // Extra args should come before --
+        let dash_pos = args.iter().position(|a| a == "--").unwrap();
+        let d_pos = args.iter().position(|a| a == "-d").unwrap();
+        let ubuntu_pos = args.iter().position(|a| a == "Ubuntu").unwrap();
+        assert!(d_pos < dash_pos, "-d should come before --");
+        assert!(ubuntu_pos < dash_pos, "Ubuntu should come before --");
+        assert!(args.contains(&"bash".to_string()));
+        assert!(args.contains(&"--rcfile".to_string()));
+    }
+
+    #[test]
+    fn command_line_detects_wsl_bare_name() {
+        let (cmd, _args) = TerminalSession::command_line_to_command("wsl");
+        assert_eq!(cmd, "wsl");
+    }
+
+    #[test]
+    fn command_line_detects_powershell() {
+        let (cmd, args) = TerminalSession::command_line_to_command("powershell.exe -NoLogo");
+        assert_eq!(cmd, "powershell.exe");
+        assert!(args.contains(&"-NoExit".to_string()));
+        assert!(args.contains(&"-Command".to_string()));
+    }
+
+    #[test]
+    fn command_line_detects_pwsh() {
+        let (cmd, args) = TerminalSession::command_line_to_command("pwsh.exe");
+        assert_eq!(cmd, "pwsh.exe");
+        assert!(args.contains(&"-NoExit".to_string()));
+        assert!(args.contains(&"-Command".to_string()));
+    }
+
+    #[test]
+    fn command_line_detects_full_path_wsl() {
+        let (cmd, _args) = TerminalSession::command_line_to_command("C:\\Windows\\System32\\wsl.exe");
+        assert_eq!(cmd, "C:\\Windows\\System32\\wsl.exe");
+        assert!(_args.contains(&"bash".to_string()));
+    }
+
+    #[test]
+    fn command_line_unknown_passes_through() {
+        let (cmd, args) = TerminalSession::command_line_to_command("cmd.exe /K echo hello");
+        assert_eq!(cmd, "cmd.exe");
+        assert_eq!(args, vec!["/K", "echo", "hello"]);
+    }
+
+    #[test]
+    fn command_line_wsl_with_env_injects() {
+        let env = vec![("LX_AUTOMATION_PORT".into(), "19280".into())];
+        let (cmd, args) = TerminalSession::command_line_to_command_with_env("wsl.exe -d Ubuntu", &env);
+        assert_eq!(cmd, "wsl.exe");
+        assert!(args.contains(&"-d".to_string()));
+        assert!(args.contains(&"Ubuntu".to_string()));
+        assert!(args.contains(&"--rcfile".to_string()));
+        // Extract rcfile path from args and verify init file contents
+        let rcfile_pos = args.iter().position(|a| a == "--rcfile").unwrap();
+        let rcfile_wsl_path = &args[rcfile_pos + 1];
+        // Convert WSL path back to Windows path for reading
+        let win_path = if rcfile_wsl_path.starts_with("/mnt/") {
+            let drive = rcfile_wsl_path.chars().nth(5).unwrap();
+            format!("{}:{}", drive.to_uppercase(), &rcfile_wsl_path[6..])
+        } else {
+            rcfile_wsl_path.clone()
+        };
+        let content = std::fs::read_to_string(&win_path).unwrap();
+        assert!(content.contains("export LX_AUTOMATION_PORT='19280'"));
+    }
+
+    #[test]
+    fn wsl_startup_command_appended_to_init() {
+        let (_, args) = TerminalSession::command_line_to_command_with_startup(
+            "wsl.exe", &[], "cd ~/project && conda activate myenv",
+        );
+        let rcfile_pos = args.iter().position(|a| a == "--rcfile").unwrap();
+        let rcfile_wsl_path = &args[rcfile_pos + 1];
+        let win_path = if rcfile_wsl_path.starts_with("/mnt/") {
+            let drive = rcfile_wsl_path.chars().nth(5).unwrap();
+            format!("{}:{}", drive.to_uppercase(), &rcfile_wsl_path[6..])
+        } else {
+            rcfile_wsl_path.clone()
+        };
+        let content = std::fs::read_to_string(&win_path).unwrap();
+        assert!(content.contains("cd ~/project && conda activate myenv"),
+            "Startup command should be at end of init script");
+        // Shell integration should still be present
+        assert!(content.contains("PROMPT_COMMAND"));
+    }
+
+    #[test]
+    fn wsl_empty_startup_command_no_extra_lines() {
+        let (_, args_without) = TerminalSession::command_line_to_command_with_startup(
+            "wsl.exe", &[], "",
+        );
+        let (_, args_with_env) = TerminalSession::command_line_to_command("wsl.exe");
+        // Both should produce rcfile-based args
+        assert!(args_without.contains(&"--rcfile".to_string()));
+        assert!(args_with_env.contains(&"--rcfile".to_string()));
+    }
+
+    #[test]
+    fn powershell_startup_command_appended() {
+        let (_, args) = TerminalSession::command_line_to_command_with_startup(
+            "powershell.exe", &[], "Set-Location C:\\Projects",
+        );
+        let cmd_arg = args.last().unwrap();
+        assert!(cmd_arg.contains("Set-Location C:\\Projects"),
+            "Startup command should be appended to PowerShell init");
+        assert!(cmd_arg.contains("prompt"), "Shell integration should still be present");
+    }
+
+    #[test]
+    fn powershell_empty_startup_command_unchanged() {
+        let (_, args_with) = TerminalSession::command_line_to_command_with_startup(
+            "powershell.exe", &[], "",
+        );
+        let (_, args_without) = TerminalSession::command_line_to_command("powershell.exe");
+        // Both should have -Command with the same content
+        assert_eq!(args_with.last(), args_without.last());
+    }
+
+    #[test]
+    fn other_shell_startup_command_ignored() {
+        // For unknown shells, startup_command has no effect (no init script to append to)
+        let (cmd, args) = TerminalSession::command_line_to_command_with_startup(
+            "cmd.exe /K", &[], "echo hello",
+        );
+        assert_eq!(cmd, "cmd.exe");
+        assert_eq!(args, vec!["/K"]);
+    }
+
+    #[test]
     fn powershell_profile_injects_shell_integration() {
         let (cmd, args) = TerminalSession::profile_to_command("PowerShell");
         assert_eq!(cmd, "powershell.exe");
@@ -315,12 +535,12 @@ mod tests {
     #[test]
     fn bash_init_exports_env_vars() {
         let env = vec![
-            ("IDE_AUTOMATION_PORT".into(), "19280".into()),
-            ("IDE_TERMINAL_ID".into(), "t1".into()),
+            ("LX_AUTOMATION_PORT".into(), "19280".into()),
+            ("LX_TERMINAL_ID".into(), "t1".into()),
         ];
         let script = shell_integration_bash_with_env(&env);
-        assert!(script.contains("export IDE_AUTOMATION_PORT='19280'"), "Should export port");
-        assert!(script.contains("export IDE_TERMINAL_ID='t1'"), "Should export terminal ID");
+        assert!(script.contains("export LX_AUTOMATION_PORT='19280'"), "Should export port");
+        assert!(script.contains("export LX_TERMINAL_ID='t1'"), "Should export terminal ID");
         // Shell integration should still be present
         assert!(script.contains("PROMPT_COMMAND"));
         assert!(script.contains("__laymux_prompt_pre"));
@@ -342,14 +562,21 @@ mod tests {
 
     #[test]
     fn wsl_command_with_env_writes_init_file() {
-        let env = vec![("IDE_AUTOMATION_PORT".into(), "19280".into())];
+        let env = vec![("LX_AUTOMATION_PORT".into(), "19280".into())];
         let (cmd, args) = TerminalSession::profile_to_command_with_env("WSL", &env);
         assert_eq!(cmd, "wsl.exe");
         assert!(args.contains(&"--rcfile".to_string()));
-        // Verify the init file contains the env export
-        let init_file = std::env::temp_dir().join("laymux_bash_init.sh");
-        let content = std::fs::read_to_string(&init_file).unwrap();
-        assert!(content.contains("export IDE_AUTOMATION_PORT='19280'"));
+        // Extract rcfile path from args and verify init file contents
+        let rcfile_pos = args.iter().position(|a| a == "--rcfile").unwrap();
+        let rcfile_wsl_path = &args[rcfile_pos + 1];
+        let win_path = if rcfile_wsl_path.starts_with("/mnt/") {
+            let drive = rcfile_wsl_path.chars().nth(5).unwrap();
+            format!("{}:{}", drive.to_uppercase(), &rcfile_wsl_path[6..])
+        } else {
+            rcfile_wsl_path.clone()
+        };
+        let content = std::fs::read_to_string(&win_path).unwrap();
+        assert!(content.contains("export LX_AUTOMATION_PORT='19280'"));
     }
 
     #[test]

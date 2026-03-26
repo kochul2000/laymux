@@ -35,6 +35,6 @@ name = "laymux"
 path = "src/main.rs"
 
 [[bin]]
-name = "ide"
-path = "src/bin/ide.rs"
+name = "lx"
+path = "src/bin/lx.rs"
 

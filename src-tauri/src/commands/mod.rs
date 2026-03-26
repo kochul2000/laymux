@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::automation_server::AutomationResponse;
-use crate::ide_cli::{IdeMessage, IdeResponse};
+use crate::cli::{LxMessage, LxResponse};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty;
 use crate::state::AppState;
@@ -27,21 +27,29 @@ pub fn create_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
-    // Inject IDE_SOCKET and IDE_AUTOMATION_PORT env vars
+    // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock() {
         if let Some(ref socket_path) = *path_lock {
-            env.push(("IDE_SOCKET".to_string(), socket_path.clone()));
+            env.push(("LX_SOCKET".to_string(), socket_path.clone()));
         }
     }
     if let Ok(port_lock) = state.automation_port.lock() {
         if let Some(port) = *port_lock {
-            env.push(("IDE_AUTOMATION_PORT".to_string(), port.to_string()));
+            env.push(("LX_AUTOMATION_PORT".to_string(), port.to_string()));
         }
     }
 
+    // Look up the profile's command_line and startup_command from settings
+    let settings = crate::settings::load_settings();
+    let matched_profile = settings.profiles.iter().find(|p| p.name == profile);
+    let command_line = matched_profile.map(|p| p.command_line.clone()).unwrap_or_default();
+    let startup_command = matched_profile.map(|p| p.startup_command.clone()).unwrap_or_default();
+
     let config = TerminalConfig {
         profile,
+        command_line,
+        startup_command,
         cols,
         rows,
         sync_group: sync_group.clone(),
@@ -91,6 +99,8 @@ pub fn create_terminal_session(
     // Store session and PTY handle
     let result = TerminalSession::new(id.clone(), TerminalConfig {
         profile: session.config.profile.clone(),
+        command_line: session.config.command_line.clone(),
+        startup_command: session.config.startup_command.clone(),
         cols: session.config.cols,
         rows: session.config.rows,
         sync_group: session.config.sync_group.clone(),
@@ -295,36 +305,36 @@ pub fn update_terminal_sync_group(
 
 /// Inner handler that processes IDE messages. Used by both the Tauri command
 /// and the IPC socket server so that all message routes share the same logic.
-pub fn handle_ide_message_inner(
+pub fn handle_lx_message_inner(
     message_json: &str,
     state: &AppState,
     app: &AppHandle,
-) -> Result<IdeResponse, String> {
-    let message: IdeMessage =
+) -> Result<LxResponse, String> {
+    let message: LxMessage =
         serde_json::from_str(message_json).map_err(|e| format!("Parse error: {e}"))?;
 
-    handle_ide_message_dispatch(state, app, message)
+    handle_lx_message_dispatch(state, app, message)
 }
 
 #[tauri::command]
-pub fn handle_ide_message(
+pub fn handle_lx_message(
     message_json: String,
     state: State<Arc<AppState>>,
     app: AppHandle,
-) -> Result<IdeResponse, String> {
-    let message: IdeMessage =
+) -> Result<LxResponse, String> {
+    let message: LxMessage =
         serde_json::from_str(&message_json).map_err(|e| format!("Parse error: {e}"))?;
 
-    handle_ide_message_dispatch(&state, &app, message)
+    handle_lx_message_dispatch(&state, &app, message)
 }
 
-fn handle_ide_message_dispatch(
+fn handle_lx_message_dispatch(
     state: &AppState,
     app: &AppHandle,
-    message: IdeMessage,
-) -> Result<IdeResponse, String> {
+    message: LxMessage,
+) -> Result<LxResponse, String> {
     match message {
-        IdeMessage::SyncCwd {
+        LxMessage::SyncCwd {
             path,
             terminal_id,
             group_id,
@@ -335,7 +345,7 @@ fn handle_ide_message_dispatch(
 
             // Check if this is an echo from a propagated command — suppress to prevent loop
             if is_propagated(&state, &terminal_id)? {
-                return Ok(IdeResponse::ok(Some(format!(
+                return Ok(LxResponse::ok(Some(format!(
                     "sync-cwd {} suppressed (propagated)",
                     path
                 ))));
@@ -346,7 +356,7 @@ fn handle_ide_message_dispatch(
 
             // Skip if CWD hasn't actually changed for this terminal
             if should_skip_sync_cwd(&state, &terminal_id, &normalized_path) {
-                return Ok(IdeResponse::ok(Some(format!(
+                return Ok(LxResponse::ok(Some(format!(
                     "sync-cwd {} skipped (unchanged)",
                     normalized_path
                 ))));
@@ -389,14 +399,14 @@ fn handle_ide_message_dispatch(
                 "targets": all_targets,
             }));
 
-            Ok(IdeResponse::ok(Some(format!(
+            Ok(LxResponse::ok(Some(format!(
                 "sync-cwd {} to {} terminals ({} already at cwd)",
                 normalized_path,
                 target_terminals.len(),
                 all_targets.len() - target_terminals.len()
             ))))
         }
-        IdeMessage::SyncBranch {
+        LxMessage::SyncBranch {
             branch,
             terminal_id,
             group_id,
@@ -417,12 +427,12 @@ fn handle_ide_message_dispatch(
                 .map(|g| g.terminal_ids.len())
                 .unwrap_or(0);
 
-            Ok(IdeResponse::ok(Some(format!(
+            Ok(LxResponse::ok(Some(format!(
                 "sync-branch {} to {} terminals",
                 branch, count
             ))))
         }
-        IdeMessage::Notify { message, terminal_id, level } => {
+        LxMessage::Notify { message, terminal_id, level } => {
             // Emit notification to frontend
             let mut payload = serde_json::json!({
                 "message": message,
@@ -431,11 +441,11 @@ fn handle_ide_message_dispatch(
             if let Some(ref lvl) = level {
                 payload["level"] = serde_json::json!(lvl);
             }
-            let _ = app.emit("ide-notify", payload);
+            let _ = app.emit("lx-notify", payload);
 
-            Ok(IdeResponse::ok(Some(format!("notification: {}", message))))
+            Ok(LxResponse::ok(Some(format!("notification: {}", message))))
         }
-        IdeMessage::SetTabTitle { title, terminal_id } => {
+        LxMessage::SetTabTitle { title, terminal_id } => {
             let mut terminals = state
                 .terminals
                 .lock()
@@ -449,9 +459,9 @@ fn handle_ide_message_dispatch(
                 "terminalId": terminal_id,
             }));
 
-            Ok(IdeResponse::ok(Some(format!("title set: {}", title))))
+            Ok(LxResponse::ok(Some(format!("title set: {}", title))))
         }
-        IdeMessage::GetCwd { terminal_id } => {
+        LxMessage::GetCwd { terminal_id } => {
             let terminals = state
                 .terminals
                 .lock()
@@ -460,9 +470,9 @@ fn handle_ide_message_dispatch(
                 .get(&terminal_id)
                 .and_then(|s| s.cwd.clone())
                 .unwrap_or_default();
-            Ok(IdeResponse::ok(Some(cwd)))
+            Ok(LxResponse::ok(Some(cwd)))
         }
-        IdeMessage::GetBranch { terminal_id } => {
+        LxMessage::GetBranch { terminal_id } => {
             let terminals = state
                 .terminals
                 .lock()
@@ -471,9 +481,9 @@ fn handle_ide_message_dispatch(
                 .get(&terminal_id)
                 .and_then(|s| s.branch.clone())
                 .unwrap_or_default();
-            Ok(IdeResponse::ok(Some(branch)))
+            Ok(LxResponse::ok(Some(branch)))
         }
-        IdeMessage::SendCommand { command, group } => {
+        LxMessage::SendCommand { command, group } => {
             let groups = state
                 .sync_groups
                 .lock()
@@ -486,21 +496,21 @@ fn handle_ide_message_dispatch(
 
             write_to_group_terminals(&state, &target_ids, "", &format!("{command}\n"))?;
 
-            Ok(IdeResponse::ok(Some(format!(
+            Ok(LxResponse::ok(Some(format!(
                 "sent '{}' to {} terminals in group '{}'",
                 command, target_ids.len(), group
             ))))
         }
-        IdeMessage::OpenFile { path, terminal_id } => {
+        LxMessage::OpenFile { path, terminal_id } => {
             // Emit open-file event to frontend
             let _ = app.emit("open-file", serde_json::json!({
                 "path": path,
                 "terminalId": terminal_id,
             }));
 
-            Ok(IdeResponse::ok(Some(format!("open-file: {}", path))))
+            Ok(LxResponse::ok(Some(format!("open-file: {}", path))))
         }
-        IdeMessage::SetCommandStatus { terminal_id, command, exit_code } => {
+        LxMessage::SetCommandStatus { terminal_id, command, exit_code } => {
             // Update command_running state on the terminal session.
             // command present (no exit_code) → command started → running = true
             // exit_code present → command finished → running = false
@@ -535,9 +545,9 @@ fn handle_ide_message_dispatch(
                 (None, Some(code)) => format!("exit code {}", code),
                 (None, None) => "no-op".to_string(),
             };
-            Ok(IdeResponse::ok(Some(desc)))
+            Ok(LxResponse::ok(Some(desc)))
         }
-        IdeMessage::SetWslDistro { path, terminal_id } => {
+        LxMessage::SetWslDistro { path, terminal_id } => {
             // Extract WSL distro name from UNC-style path (e.g., //wsl.localhost/Ubuntu-22.04/...)
             if let Some(distro) = extract_wsl_distro_from_path(&path) {
                 let mut terminals = state
@@ -547,9 +557,9 @@ fn handle_ide_message_dispatch(
                 if let Some(session) = terminals.get_mut(&terminal_id) {
                     session.wsl_distro = Some(distro.clone());
                 }
-                Ok(IdeResponse::ok(Some(format!("wsl-distro set: {distro}"))))
+                Ok(LxResponse::ok(Some(format!("wsl-distro set: {distro}"))))
             } else {
-                Ok(IdeResponse::ok(Some("no distro found in path".into())))
+                Ok(LxResponse::ok(Some("no distro found in path".into())))
             }
         }
     }
@@ -607,7 +617,7 @@ fn resolve_target_terminals(
 }
 
 /// Write a command to all target terminals via their PTY handles.
-/// Prepends a space to avoid shell history, and sets IDE_PROPAGATED=1.
+/// Prepends a space to avoid shell history, and sets LX_PROPAGATED=1.
 /// Uses profile-appropriate syntax for each target terminal.
 fn write_to_group_terminals(
     state: &AppState,
@@ -635,8 +645,8 @@ fn write_to_group_terminals(
                 command.to_string()
             };
             let propagated_cmd = match profile {
-                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{cmd}"),
-                _ => format!("IDE_PROPAGATED=1 {command}"),
+                "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cmd}"),
+                _ => format!("LX_PROPAGATED=1 {command}"),
             };
             let _ = handle.write(propagated_cmd.as_bytes());
         }
@@ -686,8 +696,8 @@ fn write_cd_to_group_terminals(
 
             let cd_cmd = build_cd_command(&converted, profile);
             let propagated_cmd = match profile {
-                "PowerShell" | "powershell" => format!("$env:IDE_PROPAGATED='1';{cd_cmd}"),
-                _ => format!("IDE_PROPAGATED=1 {cd_cmd}"),
+                "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cd_cmd}"),
+                _ => format!("LX_PROPAGATED=1 {cd_cmd}"),
             };
             let _ = handle.write(propagated_cmd.as_bytes());
         }
@@ -1568,7 +1578,7 @@ mod tests {
         let targets = resolve_target_terminals(&state, "t1", "g1", false, None).unwrap();
         assert_eq!(targets, vec!["t2", "t3"]);
 
-        // Mark targets as propagated (simulating handle_ide_message behavior)
+        // Mark targets as propagated (simulating handle_lx_message behavior)
         mark_propagated(&state, &targets).unwrap();
 
         // Step 2: T2's echo triggers sync-cwd — should be suppressed

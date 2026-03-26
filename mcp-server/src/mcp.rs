@@ -158,8 +158,8 @@ pub fn handle_request(req: &Value, base_url: &str) -> Option<Value> {
 
 /// Resolve the Automation API base URL from environment variables.
 pub fn resolve_base_url() -> String {
-    let host = std::env::var("IDE_AUTOMATION_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("IDE_AUTOMATION_PORT").unwrap_or_else(|_| "19280".into());
+    let host = std::env::var("LX_AUTOMATION_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let port = std::env::var("LX_AUTOMATION_PORT").unwrap_or_else(|_| "19280".into());
     format!("http://{}:{}", host, port)
 }
 

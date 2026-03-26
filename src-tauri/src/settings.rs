@@ -79,6 +79,9 @@ pub struct Profile {
     pub name: String,
     #[serde(default)]
     pub command_line: String,
+    /// Command to run after shell initialization (e.g. "cd ~/project && conda activate myenv").
+    #[serde(default)]
+    pub startup_command: String,
     #[serde(default)]
     pub color_scheme: String,
     #[serde(default)]
@@ -112,6 +115,7 @@ impl Default for Profile {
         Self {
             name: String::new(),
             command_line: String::new(),
+            startup_command: String::new(),
             color_scheme: String::new(),
             starting_directory: String::new(),
             hidden: false,

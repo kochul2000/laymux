@@ -1,4 +1,4 @@
-use laymux_lib::ide_cli::{IdeMessage, IdeResponse};
+use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
     ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding, Layout, LayoutPane,
     Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
@@ -354,8 +354,8 @@ fn settings_workspace_pane_view_extra_data_preserved() {
                 "profile": "WSL",
                 "syncGroup": "myGroup",
                 "hooks": [
-                    {"osc": 7, "run": "ide sync-cwd $path"},
-                    {"osc": 133, "param": "D", "when": "exitCode !== '0'", "run": "ide notify 'fail'"}
+                    {"osc": 7, "run": "lx sync-cwd $path"},
+                    {"osc": 133, "param": "D", "when": "exitCode !== '0'", "run": "lx notify 'fail'"}
                 ]
             }),
         },
@@ -741,7 +741,7 @@ fn sync_group_terminal_can_exist_in_one_group_only_by_convention() {
 #[test]
 fn ide_message_sync_cwd_all_variants() {
     // Default (group-scoped)
-    let msg1 = IdeMessage::SyncCwd {
+    let msg1 = LxMessage::SyncCwd {
         path: "/home/user".into(),
         terminal_id: "t1".into(),
         group_id: "g1".into(),
@@ -750,7 +750,7 @@ fn ide_message_sync_cwd_all_variants() {
     };
 
     // All terminals
-    let msg2 = IdeMessage::SyncCwd {
+    let msg2 = LxMessage::SyncCwd {
         path: "/tmp".into(),
         terminal_id: "t1".into(),
         group_id: "g1".into(),
@@ -759,7 +759,7 @@ fn ide_message_sync_cwd_all_variants() {
     };
 
     // Specific target group
-    let msg3 = IdeMessage::SyncCwd {
+    let msg3 = LxMessage::SyncCwd {
         path: "/opt".into(),
         terminal_id: "t1".into(),
         group_id: "g1".into(),
@@ -769,7 +769,7 @@ fn ide_message_sync_cwd_all_variants() {
 
     for msg in [&msg1, &msg2, &msg3] {
         let json = serde_json::to_string(msg).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+        let parsed: LxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, &parsed);
     }
 }
@@ -789,7 +789,7 @@ fn ide_message_sync_cwd_with_special_paths() {
     ];
 
     for path in special_paths {
-        let msg = IdeMessage::SyncCwd {
+        let msg = LxMessage::SyncCwd {
             path: path.to_string(),
             terminal_id: "t1".into(),
             group_id: "g1".into(),
@@ -797,7 +797,7 @@ fn ide_message_sync_cwd_with_special_paths() {
             target_group: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+        let parsed: LxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, parsed, "Failed for path: {path}");
     }
 }
@@ -815,13 +815,13 @@ fn ide_message_notify_with_special_content() {
     ];
 
     for message in &messages {
-        let msg = IdeMessage::Notify {
+        let msg = LxMessage::Notify {
             message: message.clone(),
             terminal_id: "t1".into(),
             level: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+        let parsed: LxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, parsed);
     }
 }
@@ -836,12 +836,12 @@ fn ide_message_set_tab_title_empty_and_long() {
     ];
 
     for title in &titles {
-        let msg = IdeMessage::SetTabTitle {
+        let msg = LxMessage::SetTabTitle {
             title: title.clone(),
             terminal_id: "t1".into(),
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+        let parsed: LxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, parsed);
     }
 }
@@ -860,12 +860,12 @@ fn ide_message_send_command_with_complex_commands() {
     ];
 
     for cmd in commands {
-        let msg = IdeMessage::SendCommand {
+        let msg = LxMessage::SendCommand {
             command: cmd.to_string(),
             group: "g1".into(),
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+        let parsed: LxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, parsed);
     }
 }
@@ -874,9 +874,9 @@ fn ide_message_send_command_with_complex_commands() {
 fn ide_message_deserialization_missing_optional_fields() {
     // SyncCwd without optional fields should get defaults
     let json = r#"{"action":"sync-cwd","path":"/foo","terminal_id":"t1","group_id":"g1"}"#;
-    let msg: IdeMessage = serde_json::from_str(json).unwrap();
+    let msg: LxMessage = serde_json::from_str(json).unwrap();
     match msg {
-        IdeMessage::SyncCwd { all, target_group, .. } => {
+        LxMessage::SyncCwd { all, target_group, .. } => {
             assert!(!all);
             assert!(target_group.is_none());
         }
@@ -887,7 +887,7 @@ fn ide_message_deserialization_missing_optional_fields() {
 #[test]
 fn ide_message_deserialization_unknown_action_fails() {
     let json = r#"{"action":"unknown-action","foo":"bar"}"#;
-    let result: Result<IdeMessage, _> = serde_json::from_str(json);
+    let result: Result<LxMessage, _> = serde_json::from_str(json);
     assert!(result.is_err());
 }
 
@@ -895,35 +895,35 @@ fn ide_message_deserialization_unknown_action_fails() {
 fn ide_message_deserialization_missing_required_fields_fails() {
     // SyncCwd without path
     let json = r#"{"action":"sync-cwd","terminal_id":"t1","group_id":"g1"}"#;
-    let result: Result<IdeMessage, _> = serde_json::from_str(json);
+    let result: Result<LxMessage, _> = serde_json::from_str(json);
     assert!(result.is_err());
 
     // Notify without message
     let json = r#"{"action":"notify","terminal_id":"t1"}"#;
-    let result: Result<IdeMessage, _> = serde_json::from_str(json);
+    let result: Result<LxMessage, _> = serde_json::from_str(json);
     assert!(result.is_err());
 
     // SendCommand without group
     let json = r#"{"action":"send-command","command":"ls"}"#;
-    let result: Result<IdeMessage, _> = serde_json::from_str(json);
+    let result: Result<LxMessage, _> = serde_json::from_str(json);
     assert!(result.is_err());
 }
 
 #[test]
 fn ide_response_serialization() {
-    let ok_resp = IdeResponse::ok(Some("done".into()));
+    let ok_resp = LxResponse::ok(Some("done".into()));
     let json = serde_json::to_string(&ok_resp).unwrap();
     assert!(json.contains("\"success\":true"));
     assert!(json.contains("\"data\":\"done\""));
     assert!(json.contains("\"error\":null"));
 
-    let err_resp = IdeResponse::err("not found".into());
+    let err_resp = LxResponse::err("not found".into());
     let json = serde_json::to_string(&err_resp).unwrap();
     assert!(json.contains("\"success\":false"));
     assert!(json.contains("\"data\":null"));
     assert!(json.contains("\"error\":\"not found\""));
 
-    let no_data_resp = IdeResponse::ok(None);
+    let no_data_resp = LxResponse::ok(None);
     let json = serde_json::to_string(&no_data_resp).unwrap();
     assert!(json.contains("\"data\":null"));
 }

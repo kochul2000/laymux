@@ -12,7 +12,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { parseOsc, matchHook, type OscHook, type OscEvent } from "@/lib/osc-parser";
 import { getPresetHooks } from "@/lib/osc-presets";
-import { parseIdeCommand, expandHookCommand } from "@/lib/ide-commands";
+import { parseLxCommand, expandHookCommand } from "@/lib/lx-commands";
 
 // ============================================================================
 // Workspace Store E2E Tests
@@ -553,7 +553,7 @@ describe("Notification Store E2E", () => {
 /** Helper: build a full Profile with defaults for test mocks. */
 function makeTestProfile(overrides: { name: string; commandLine: string; colorScheme?: string; startingDirectory?: string; hidden?: boolean }): import("@/stores/settings-store").Profile {
   return {
-    colorScheme: "", startingDirectory: "", hidden: false,
+    colorScheme: "", startingDirectory: "", hidden: false, startupCommand: "",
     cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
     scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
     closeOnExit: "automatic", antialiasingMode: "grayscale",
@@ -744,7 +744,7 @@ describe("OSC Parser E2E", () => {
 
   describe("matchHook", () => {
     it("should match hook by OSC code only", () => {
-      const hooks: OscHook[] = [{ osc: 7, run: "ide sync-cwd $path" }];
+      const hooks: OscHook[] = [{ osc: 7, run: "lx sync-cwd $path" }];
       const event: OscEvent = { code: 7, data: "/home/user" };
       const matched = matchHook(hooks, event);
       expect(matched.length).toBe(1);
@@ -791,7 +791,7 @@ describe("OSC Parser E2E", () => {
           osc: 133,
           param: "E",
           when: "command.startsWith('git switch') || command.startsWith('git checkout')",
-          run: "ide sync-branch",
+          run: "lx sync-branch",
         },
       ];
 
@@ -920,83 +920,83 @@ describe("OSC Presets E2E", () => {
 });
 
 // ============================================================================
-// IDE Command Parser E2E Tests
+// Lx Command Parser E2E Tests
 // ============================================================================
 
-describe("IDE Command Parser E2E", () => {
-  describe("parseIdeCommand", () => {
+describe("Lx Command Parser E2E", () => {
+  describe("parseLxCommand", () => {
     it("should parse basic sync-cwd command", () => {
-      const result = parseIdeCommand("ide sync-cwd /home/user/project");
+      const result = parseLxCommand("lx sync-cwd /home/user/project");
       expect(result).not.toBeNull();
       expect(result!.action).toBe("sync-cwd");
       expect(result!.args).toEqual(["/home/user/project"]);
     });
 
     it("should parse command with flags", () => {
-      const result = parseIdeCommand("ide sync-cwd /foo --all");
+      const result = parseLxCommand("lx sync-cwd /foo --all");
       expect(result!.action).toBe("sync-cwd");
       expect(result!.args).toEqual(["/foo"]);
       expect(result!.flags["all"]).toBe(true);
     });
 
     it("should parse command with flag value", () => {
-      const result = parseIdeCommand("ide sync-cwd /foo --group mygroup");
+      const result = parseLxCommand("lx sync-cwd /foo --group mygroup");
       expect(result!.action).toBe("sync-cwd");
       expect(result!.args).toEqual(["/foo"]);
       expect(result!.flags["group"]).toBe("mygroup");
     });
 
     it("should parse send-command with quoted string", () => {
-      const result = parseIdeCommand("ide send-command \"echo hello world\" --group g1");
+      const result = parseLxCommand("lx send-command \"echo hello world\" --group g1");
       expect(result!.action).toBe("send-command");
       expect(result!.args).toEqual(["echo hello world"]);
       expect(result!.flags["group"]).toBe("g1");
     });
 
     it("should parse single-quoted strings", () => {
-      const result = parseIdeCommand("ide notify '빌드 완료'");
+      const result = parseLxCommand("lx notify '빌드 완료'");
       expect(result!.action).toBe("notify");
       expect(result!.args).toEqual(["빌드 완료"]);
     });
 
-    it("should return null for non-ide commands", () => {
-      expect(parseIdeCommand("git status")).toBeNull();
-      expect(parseIdeCommand("ls -la")).toBeNull();
-      expect(parseIdeCommand("")).toBeNull();
+    it("should return null for non-lx commands", () => {
+      expect(parseLxCommand("git status")).toBeNull();
+      expect(parseLxCommand("ls -la")).toBeNull();
+      expect(parseLxCommand("")).toBeNull();
     });
 
-    it("should return null for 'ide' alone", () => {
-      expect(parseIdeCommand("ide")).toBeNull();
-      expect(parseIdeCommand("ide ")).toBeNull();
+    it("should return null for 'lx' alone", () => {
+      expect(parseLxCommand("lx")).toBeNull();
+      expect(parseLxCommand("lx ")).toBeNull();
     });
 
     it("should handle multiple args", () => {
-      const result = parseIdeCommand("ide open-file /path/to/file.rs");
+      const result = parseLxCommand("lx open-file /path/to/file.rs");
       expect(result!.action).toBe("open-file");
       expect(result!.args).toEqual(["/path/to/file.rs"]);
     });
 
     it("should handle multiple flags", () => {
-      const result = parseIdeCommand("ide sync-cwd /foo --all --group mygroup --verbose");
+      const result = parseLxCommand("lx sync-cwd /foo --all --group mygroup --verbose");
       expect(result!.flags["all"]).toBe(true);
       expect(result!.flags["group"]).toBe("mygroup");
       expect(result!.flags["verbose"]).toBe(true);
     });
 
     it("should handle no args and no flags", () => {
-      const result = parseIdeCommand("ide get-cwd");
+      const result = parseLxCommand("lx get-cwd");
       expect(result!.action).toBe("get-cwd");
       expect(result!.args).toEqual([]);
       expect(Object.keys(result!.flags)).toEqual([]);
     });
 
     it("should handle path with spaces in quotes", () => {
-      const result = parseIdeCommand('ide sync-cwd "/path/with spaces/project"');
+      const result = parseLxCommand('lx sync-cwd "/path/with spaces/project"');
       expect(result!.args).toEqual(["/path/with spaces/project"]);
     });
 
     it("should handle extra whitespace", () => {
-      const result = parseIdeCommand("ide   sync-cwd   /foo   --all  ");
+      const result = parseLxCommand("lx   sync-cwd   /foo   --all  ");
       expect(result!.action).toBe("sync-cwd");
       expect(result!.args).toEqual(["/foo"]);
       expect(result!.flags["all"]).toBe(true);
@@ -1005,8 +1005,8 @@ describe("IDE Command Parser E2E", () => {
 
   describe("expandHookCommand", () => {
     it("should expand $path variable", () => {
-      const result = expandHookCommand("ide sync-cwd $path", { path: "/home/user" });
-      expect(result).toBe("ide sync-cwd /home/user");
+      const result = expandHookCommand("lx sync-cwd $path", { path: "/home/user" });
+      expect(result).toBe("lx sync-cwd /home/user");
     });
 
     it("should expand multiple variables", () => {
@@ -1019,8 +1019,8 @@ describe("IDE Command Parser E2E", () => {
     });
 
     it("should leave unknown variables as-is", () => {
-      const result = expandHookCommand("ide sync-cwd $unknown", {});
-      expect(result).toBe("ide sync-cwd $unknown");
+      const result = expandHookCommand("lx sync-cwd $unknown", {});
+      expect(result).toBe("lx sync-cwd $unknown");
     });
 
     it("should handle empty template", () => {
@@ -1029,15 +1029,15 @@ describe("IDE Command Parser E2E", () => {
     });
 
     it("should handle template with no variables", () => {
-      const result = expandHookCommand("ide get-cwd", { path: "/foo" });
-      expect(result).toBe("ide get-cwd");
+      const result = expandHookCommand("lx get-cwd", { path: "/foo" });
+      expect(result).toBe("lx get-cwd");
     });
 
     it("should expand $exitCode", () => {
-      const result = expandHookCommand("ide notify 'Command failed (exit $exitCode)'", {
+      const result = expandHookCommand("lx notify 'Command failed (exit $exitCode)'", {
         exitCode: "1",
       });
-      expect(result).toBe("ide notify 'Command failed (exit 1)'");
+      expect(result).toBe("lx notify 'Command failed (exit 1)'");
     });
 
     it("should handle variable adjacent to text", () => {
@@ -1204,10 +1204,10 @@ describe("Cross-Store Integration E2E", () => {
 
     // 3. Expand the hook command template
     const command = expandHookCommand(matched[0].run, { path: event.data });
-    expect(command).toBe("ide sync-cwd file:///home/user/new-project");
+    expect(command).toBe("lx sync-cwd file:///home/user/new-project");
 
     // 4. Parse the expanded command
-    const parsed = parseIdeCommand(command)!;
+    const parsed = parseLxCommand(command)!;
     expect(parsed.action).toBe("sync-cwd");
     expect(parsed.args[0]).toBe("file:///home/user/new-project");
   });
@@ -1225,12 +1225,12 @@ describe("Cross-Store Integration E2E", () => {
     const matched = matchHook(hooks, event);
     expect(matched.length).toBe(1);
 
-    // 3. Would expand to: ide sync-branch $branch (branch extracted from git)
+    // 3. Would expand to: lx sync-branch $branch (branch extracted from git)
     const command = expandHookCommand(matched[0].run, { branch: "develop" });
-    expect(command).toBe("ide sync-branch develop");
+    expect(command).toBe("lx sync-branch develop");
 
     // 4. Parse
-    const parsed = parseIdeCommand(command)!;
+    const parsed = parseLxCommand(command)!;
     expect(parsed.action).toBe("sync-branch");
     expect(parsed.args[0]).toBe("develop");
   });
@@ -1247,10 +1247,10 @@ describe("Cross-Store Integration E2E", () => {
 
     // 3. Expand
     const command = expandHookCommand(matched[0].run, { exitCode: event.data });
-    expect(command).toBe("ide notify --level error 'Command failed (exit 127)'");
+    expect(command).toBe("lx notify --level error 'Command failed (exit 127)'");
 
     // 4. Parse
-    const parsed = parseIdeCommand(command)!;
+    const parsed = parseLxCommand(command)!;
     expect(parsed.action).toBe("notify");
     expect(parsed.flags.level).toBe("error");
     expect(parsed.args[0]).toBe("Command failed (exit 127)");

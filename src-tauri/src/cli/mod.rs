@@ -2,10 +2,10 @@ pub mod cli;
 
 use serde::{Deserialize, Serialize};
 
-/// Represents a message sent from the `ide` CLI to the IDE backend via socket.
+/// Represents a message sent from the `lx` CLI to the IDE backend via socket.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "action")]
-pub enum IdeMessage {
+pub enum LxMessage {
     #[serde(rename = "sync-cwd")]
     SyncCwd {
         path: String,
@@ -67,15 +67,15 @@ pub enum IdeMessage {
     },
 }
 
-/// Response from the IDE to the `ide` CLI.
+/// Response from the IDE to the `lx` CLI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct IdeResponse {
+pub struct LxResponse {
     pub success: bool,
     pub data: Option<String>,
     pub error: Option<String>,
 }
 
-impl IdeResponse {
+impl LxResponse {
     pub fn ok(data: Option<String>) -> Self {
         Self {
             success: true,
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn serialize_sync_cwd_message() {
-        let msg = IdeMessage::SyncCwd {
+        let msg = LxMessage::SyncCwd {
             path: "/home/user/project".into(),
             terminal_id: "t1".into(),
             group_id: "g1".into(),
@@ -114,9 +114,9 @@ mod tests {
     #[test]
     fn deserialize_sync_cwd_message() {
         let json = r#"{"action":"sync-cwd","path":"/foo","terminal_id":"t1","group_id":"g1","all":false}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::SyncCwd { path, terminal_id, group_id, all, target_group } => {
+            LxMessage::SyncCwd { path, terminal_id, group_id, all, target_group } => {
                 assert_eq!(path, "/foo");
                 assert_eq!(terminal_id, "t1");
                 assert_eq!(group_id, "g1");
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn serialize_notify_message() {
-        let msg = IdeMessage::Notify {
+        let msg = LxMessage::Notify {
             message: "Build complete".into(),
             terminal_id: "t1".into(),
             level: None,
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn serialize_notify_with_level() {
-        let msg = IdeMessage::Notify {
+        let msg = LxMessage::Notify {
             message: "Build failed".into(),
             terminal_id: "t1".into(),
             level: Some("error".into()),
@@ -153,9 +153,9 @@ mod tests {
     #[test]
     fn deserialize_notify_with_level() {
         let json = r#"{"action":"notify","message":"fail","terminal_id":"t1","level":"error"}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::Notify { message, level, .. } => {
+            LxMessage::Notify { message, level, .. } => {
                 assert_eq!(message, "fail");
                 assert_eq!(level, Some("error".into()));
             }
@@ -166,9 +166,9 @@ mod tests {
     #[test]
     fn deserialize_notify_without_level() {
         let json = r#"{"action":"notify","message":"ok","terminal_id":"t1"}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::Notify { level, .. } => {
+            LxMessage::Notify { level, .. } => {
                 assert_eq!(level, None);
             }
             _ => panic!("Expected Notify"),
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn serialize_send_command_message() {
-        let msg = IdeMessage::SendCommand {
+        let msg = LxMessage::SendCommand {
             command: "cd /foo".into(),
             group: "project-a".into(),
         };
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn response_ok() {
-        let resp = IdeResponse::ok(Some("done".into()));
+        let resp = LxResponse::ok(Some("done".into()));
         assert!(resp.success);
         assert_eq!(resp.data, Some("done".into()));
         assert!(resp.error.is_none());
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn response_err() {
-        let resp = IdeResponse::err("not found".into());
+        let resp = LxResponse::err("not found".into());
         assert!(!resp.success);
         assert!(resp.data.is_none());
         assert_eq!(resp.error, Some("not found".into()));
@@ -204,52 +204,52 @@ mod tests {
     #[test]
     fn round_trip_all_message_types() {
         let messages = vec![
-            IdeMessage::SyncCwd {
+            LxMessage::SyncCwd {
                 path: "/p".into(),
                 terminal_id: "t".into(),
                 group_id: "g".into(),
                 all: true,
                 target_group: Some("other".into()),
             },
-            IdeMessage::SyncBranch {
+            LxMessage::SyncBranch {
                 branch: "main".into(),
                 terminal_id: "t".into(),
                 group_id: "g".into(),
             },
-            IdeMessage::Notify {
+            LxMessage::Notify {
                 message: "hi".into(),
                 terminal_id: "t".into(),
                 level: None,
             },
-            IdeMessage::SetTabTitle {
+            LxMessage::SetTabTitle {
                 title: "Tab".into(),
                 terminal_id: "t".into(),
             },
-            IdeMessage::GetCwd {
+            LxMessage::GetCwd {
                 terminal_id: "t".into(),
             },
-            IdeMessage::GetBranch {
+            LxMessage::GetBranch {
                 terminal_id: "t".into(),
             },
-            IdeMessage::SendCommand {
+            LxMessage::SendCommand {
                 command: "ls".into(),
                 group: "g".into(),
             },
-            IdeMessage::OpenFile {
+            LxMessage::OpenFile {
                 path: "/foo/bar.rs".into(),
                 terminal_id: "t".into(),
             },
-            IdeMessage::SetCommandStatus {
+            LxMessage::SetCommandStatus {
                 terminal_id: "t".into(),
                 command: Some("npm test".into()),
                 exit_code: Some(0),
             },
-            IdeMessage::SetCommandStatus {
+            LxMessage::SetCommandStatus {
                 terminal_id: "t".into(),
                 command: Some("npm build".into()),
                 exit_code: None,
             },
-            IdeMessage::SetCommandStatus {
+            LxMessage::SetCommandStatus {
                 terminal_id: "t".into(),
                 command: None,
                 exit_code: Some(1),
@@ -258,14 +258,14 @@ mod tests {
 
         for msg in messages {
             let json = serde_json::to_string(&msg).unwrap();
-            let parsed: IdeMessage = serde_json::from_str(&json).unwrap();
+            let parsed: LxMessage = serde_json::from_str(&json).unwrap();
             assert_eq!(msg, parsed);
         }
     }
 
     #[test]
     fn serialize_open_file_message() {
-        let msg = IdeMessage::OpenFile {
+        let msg = LxMessage::OpenFile {
             path: "/home/user/main.rs".into(),
             terminal_id: "t1".into(),
         };
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn serialize_set_command_status() {
-        let msg = IdeMessage::SetCommandStatus {
+        let msg = LxMessage::SetCommandStatus {
             terminal_id: "t1".into(),
             command: Some("npm test".into()),
             exit_code: Some(0),
@@ -290,9 +290,9 @@ mod tests {
     #[test]
     fn deserialize_set_command_status_partial() {
         let json = r#"{"action":"set-command-status","terminal_id":"t1","command":"npm build"}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus { command, exit_code, .. } => {
                 assert_eq!(command, Some("npm build".into()));
                 assert_eq!(exit_code, None);
             }
@@ -303,9 +303,9 @@ mod tests {
     #[test]
     fn deserialize_set_command_status_exit_only() {
         let json = r#"{"action":"set-command-status","terminal_id":"t1","exit_code":1}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus { command, exit_code, .. } => {
                 assert_eq!(command, None);
                 assert_eq!(exit_code, Some(1));
             }
@@ -316,9 +316,9 @@ mod tests {
     #[test]
     fn deserialize_open_file_message() {
         let json = r#"{"action":"open-file","path":"/foo.rs","terminal_id":"t1"}"#;
-        let msg: IdeMessage = serde_json::from_str(json).unwrap();
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IdeMessage::OpenFile { path, terminal_id } => {
+            LxMessage::OpenFile { path, terminal_id } => {
                 assert_eq!(path, "/foo.rs");
                 assert_eq!(terminal_id, "t1");
             }

@@ -36,6 +36,7 @@ export function useSessionPersistence() {
           profiles: sProfiles?.map((p) => ({
             name: p.name,
             commandLine: p.commandLine,
+            startupCommand: p.startupCommand ?? "",
             colorScheme: p.colorScheme ?? "",
             startingDirectory: p.startingDirectory ?? "",
             hidden: p.hidden ?? false,

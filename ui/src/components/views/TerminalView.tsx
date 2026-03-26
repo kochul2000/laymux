@@ -24,7 +24,7 @@ import {
 import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
-import { isIdeShortcut } from "@/lib/ide-shortcuts";
+import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -132,7 +132,7 @@ export function TerminalView({
     // Custom key event handler: IDE shortcuts + smart paste interception.
     // Returning false prevents xterm from consuming the event.
     terminal.attachCustomKeyEventHandler((e) => {
-      if (isIdeShortcut(e)) return false;
+      if (isLxShortcut(e)) return false;
 
       // Smart paste: intercept Ctrl+V / Ctrl+Shift+V on keydown
       if (

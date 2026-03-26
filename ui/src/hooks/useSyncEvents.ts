@@ -5,7 +5,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   onSyncCwd,
   onSyncBranch,
-  onIdeNotify,
+  onLxNotify,
   onSetTabTitle,
   onCommandStatus,
 } from "@/lib/tauri-api";
@@ -61,9 +61,9 @@ export function useSyncEvents() {
       }),
     );
 
-    // ide-notify: add notification to the workspace that owns the terminal
+    // lx-notify: add notification to the workspace that owns the terminal
     trackListener(
-      onIdeNotify((data) => {
+      onLxNotify((data) => {
         if (cancelled) return;
         // Find which workspace the terminal belongs to via its syncGroup
         const instance = useTerminalStore.getState().instances.find(

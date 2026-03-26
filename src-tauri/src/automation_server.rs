@@ -322,7 +322,7 @@ async fn api_docs() -> impl IntoResponse {
         "version": "v1",
         "description": "Programmatic control of Laymux IDE. All endpoints are localhost-only (127.0.0.1). No authentication required.",
         "base_url": "http://127.0.0.1:{port}/api/v1",
-        "discovery": "Port is written to %APPDATA%/laymux/automation.json (Windows) or ~/.config/laymux/automation.json (Linux). Also available via IDE_AUTOMATION_PORT env var in spawned terminals.",
+        "discovery": "Port is written to %APPDATA%/laymux/automation.json (Windows) or ~/.config/laymux/automation.json (Linux). Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
