@@ -1,4 +1,6 @@
-/** Curated monospaced fonts — shown in the font picker. */
+import { invoke } from "@tauri-apps/api/core";
+
+/** Curated monospaced fonts — shown at the top of the font picker. */
 export const MONOSPACED_FONTS = [
   "Cascadia Mono",
   "Cascadia Code",
@@ -6,6 +8,8 @@ export const MONOSPACED_FONTS = [
   "Courier New",
   "Fira Code",
   "JetBrains Mono",
+  "JetBrainsMonoBigHangul",
+  "JetBrainsMonoHangul",
   "Source Code Pro",
   "Ubuntu Mono",
   "Hack",
@@ -44,17 +48,49 @@ export function detectInstalledFonts(candidates: string[]): string[] {
     const fallbackFont = "monospace";
     const testSize = "72px";
 
-    // Measure with fallback only
     ctx.font = `${testSize} ${fallbackFont}`;
     const fallbackWidth = ctx.measureText(testString).width;
 
     return candidates.filter((font) => {
       ctx.font = `${testSize} "${font}", ${fallbackFont}`;
       const width = ctx.measureText(testString).width;
-      // If width differs from fallback, the font is installed
       return Math.abs(width - fallbackWidth) > 0.5;
     });
   } catch {
     return candidates;
   }
+}
+
+/**
+ * Gets system monospace font families from the Tauri backend.
+ * The backend checks the font's post table isFixedPitch flag.
+ */
+export async function listSystemMonospaceFonts(): Promise<string[]> {
+  try {
+    return await invoke<string[]>("list_system_monospace_fonts");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns monospace fonts with curated fonts at the top.
+ * Falls back to curated list if system enumeration is unavailable.
+ */
+export async function getSystemMonospaceFonts(): Promise<string[]> {
+  const systemFonts = await listSystemMonospaceFonts();
+
+  if (systemFonts.length === 0) {
+    return detectInstalledFonts(MONOSPACED_FONTS);
+  }
+
+  const systemSet = new Set(systemFonts);
+
+  // Curated fonts that are installed — keep curated order at top
+  const curated = MONOSPACED_FONTS.filter((f) => systemSet.has(f));
+  // Remaining system monospace fonts not in curated list
+  const curatedSet = new Set(MONOSPACED_FONTS);
+  const rest = systemFonts.filter((f) => !curatedSet.has(f));
+
+  return [...curated, ...rest];
 }

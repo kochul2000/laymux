@@ -13,7 +13,7 @@ import {
   type AntialiasingMode,
 } from "@/stores/settings-store";
 import { persistSession } from "@/lib/persist-session";
-import { MONOSPACED_FONTS, detectInstalledFonts } from "@/lib/system-fonts";
+import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 
 // -- Shared styles --
 const inputCls = "w-full rounded px-2 py-1.5 text-[13px]";
@@ -122,15 +122,15 @@ const fontWeightOptions = [
   "medium", "semi-bold", "bold", "extra-bold", "black", "extra-black",
 ];
 
-/** Hook to detect which curated monospaced fonts are installed. */
+/** Hook to detect installed monospace fonts via system enumeration + canvas check. */
 function useMonospacedFonts() {
   const [installed, setInstalled] = useState<string[]>(MONOSPACED_FONTS);
   useEffect(() => {
-    // Run detection after first paint to avoid blocking render
-    const id = requestAnimationFrame(() => {
-      setInstalled(detectInstalledFonts(MONOSPACED_FONTS));
+    let cancelled = false;
+    getSystemMonospaceFonts().then((fonts) => {
+      if (!cancelled) setInstalled(fonts);
     });
-    return () => cancelAnimationFrame(id);
+    return () => { cancelled = true; };
   }, []);
   return installed;
 }
