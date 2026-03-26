@@ -487,4 +487,104 @@ describe("TerminalView", () => {
 
     expect(mockClipboardWriteText).not.toHaveBeenCalled();
   });
+
+  // -- Ctrl+Wheel Zoom --
+
+  it("increases font size on Ctrl+Wheel scroll up", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+    });
+
+    render(
+      <TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom1");
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(useSettingsStore.getState().font.size).toBe(15);
+  });
+
+  it("decreases font size on Ctrl+Wheel scroll down", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+    });
+
+    render(
+      <TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom2");
+    const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(useSettingsStore.getState().font.size).toBe(13);
+  });
+
+  it("does not change font size on wheel without Ctrl", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+    });
+
+    render(
+      <TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom3");
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
+    container.dispatchEvent(event);
+
+    expect(useSettingsStore.getState().font.size).toBe(14);
+  });
+
+  it("clamps font size to minimum 6", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      font: { face: "Cascadia Mono", size: 6, weight: "normal" },
+    });
+
+    render(
+      <TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom4");
+    const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(useSettingsStore.getState().font.size).toBe(6);
+  });
+
+  it("clamps font size to maximum 72", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      font: { face: "Cascadia Mono", size: 72, weight: "normal" },
+    });
+
+    render(
+      <TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom5");
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(useSettingsStore.getState().font.size).toBe(72);
+  });
+
+  it("prevents default browser zoom on Ctrl+Wheel", async () => {
+    render(
+      <TerminalView instanceId="t-zoom6" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-zoom6");
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+    container.dispatchEvent(event);
+
+    expect(preventDefaultSpy).toHaveBeenCalled();
+  });
 });

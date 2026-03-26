@@ -392,6 +392,19 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
+    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const { font, setFont } = useSettingsStore.getState();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      const newSize = Math.max(6, Math.min(72, font.size + delta));
+      if (newSize !== font.size) {
+        setFont({ ...font, size: newSize });
+      }
+    };
+    outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
+
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
@@ -438,6 +451,7 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
+      outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       unlistenOutput?.();
