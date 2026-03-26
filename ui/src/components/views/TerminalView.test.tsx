@@ -217,6 +217,26 @@ describe("TerminalView", () => {
     expect(mockFocus).not.toHaveBeenCalled();
   });
 
+  it("calls terminal.blur() when isFocused transitions from true to false", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-blur1" profile="PowerShell" syncGroup="" isFocused={true} />,
+    );
+
+    // Wait for terminal to open
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockBlur.mockClear();
+
+    // Transition isFocused from true to false (simulates Alt+Arrow away)
+    rerender(
+      <TerminalView instanceId="t-blur1" profile="PowerShell" syncGroup="" isFocused={false} />,
+    );
+
+    expect(mockBlur).toHaveBeenCalled();
+  });
+
   // -- syncGroup change (workspace rename) should NOT recreate terminal --
 
   it("does not destroy and recreate terminal when syncGroup changes", async () => {

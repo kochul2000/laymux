@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -170,11 +170,19 @@ function applyOrder(options: ViewOption[], order: string[]): ViewOption[] {
 }
 
 export function EmptyView({ onSelectView, context: _context = "pane", isFocused }: EmptyViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const profiles = useSettingsStore((s) => s.profiles);
   const visibleProfiles = profiles.filter((p) => !p.hidden);
   const viewOrder = useSettingsStore((s) => s.viewOrder) ?? [];
   const setViewOrder = useSettingsStore((s) => s.setViewOrder);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  // Grab DOM focus when this pane becomes focused (e.g. via Alt+Arrow navigation)
+  useEffect(() => {
+    if (isFocused) {
+      containerRef.current?.focus();
+    }
+  }, [isFocused]);
 
   const rawOptions = buildOptions(visibleProfiles);
   const options = applyOrder(rawOptions, viewOrder);
@@ -237,8 +245,10 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
 
   return (
     <div
+      ref={containerRef}
+      tabIndex={-1}
       data-testid="empty-view"
-      className="flex h-full flex-col items-center justify-center gap-3 p-6"
+      className="flex h-full flex-col items-center justify-center gap-3 p-6 outline-none"
       style={{ color: "var(--text-secondary)" }}
     >
       {/* Header */}

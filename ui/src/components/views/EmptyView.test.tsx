@@ -121,6 +121,18 @@ describe("EmptyView", () => {
     expect(handles.length).toBeGreaterThan(0);
   });
 
+  it("focuses container element when isFocused becomes true", () => {
+    const { container } = render(<EmptyView isFocused={true} />);
+    const focusable = container.querySelector("[data-testid='empty-view']") as HTMLElement;
+    expect(focusable).toBe(document.activeElement);
+  });
+
+  it("does not steal focus when isFocused is false", () => {
+    const { container } = render(<EmptyView isFocused={false} />);
+    const focusable = container.querySelector("[data-testid='empty-view']") as HTMLElement;
+    expect(focusable).not.toBe(document.activeElement);
+  });
+
   it("respects stored viewOrder", () => {
     // Set custom order: browser first
     useSettingsStore.setState({ viewOrder: ["browser", "settings", "ws-selector"] });
