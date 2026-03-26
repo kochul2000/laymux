@@ -111,9 +111,9 @@ export function GridEditToolbar() {
         <button
           data-testid="edit-mode-toggle"
           onClick={toggleEditMode}
-          className={btnBase + " px-3"}
+          className={btnBase + " px-4"}
           style={{
-            ...btnH,
+            height: 18,
             background: editMode ? "var(--accent)" : "transparent",
             color: editMode ? "var(--bg-base)" : "var(--text-secondary)",
             border: "1px solid rgba(255,255,255,0.08)",
