@@ -138,7 +138,14 @@ pub fn launch_cdp_browser(url: &str) -> Result<BrowserInstance, String> {
 
     let (ws_url, cdp_port) = rx
         .recv_timeout(Duration::from_secs(15))
-        .map_err(|_| "Timeout (15s) waiting for browser CDP endpoint")?;
+        .map_err(|_| {
+            // Kill the orphaned browser process so it doesn't linger.
+            // On Windows, dropping a Child does NOT kill the process.
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&user_data_dir);
+            "Timeout (15s) waiting for browser CDP endpoint"
+        })?;
 
     Ok(BrowserInstance {
         process: child,
