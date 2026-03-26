@@ -938,7 +938,7 @@ function ConvenienceSection() {
             <FocusInput
               data-testid="paste-image-dir-input"
               className={inputCls}
-              placeholder="(default: %APPDATA%\laymux\paste-images)"
+              placeholder="(default: config directory/paste-images)"
               value={convenience.pasteImageDir}
               onChange={(e) => setConvenience({ pasteImageDir: e.target.value })}
             />

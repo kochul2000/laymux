@@ -19,7 +19,9 @@ export function IssueReporterView() {
   const captureScreenshot = async () => {
     setState("capturing");
     try {
-      const res = await fetch("http://127.0.0.1:19280/api/v1/screenshot", { method: "POST" });
+      const { invoke } = await import("@tauri-apps/api/core");
+      const port = await invoke<number>("get_automation_port");
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/screenshot`, { method: "POST" });
       const data = await res.json();
       if (data.path) setScreenshotPath(data.path);
       if (data.dataUrl) setScreenshotDataUrl(data.dataUrl);

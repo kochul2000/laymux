@@ -98,6 +98,7 @@ pub fn run() {
             commands::launch_cdp_browser,
             commands::close_cdp_browser,
             commands::get_cdp_browsers,
+            commands::get_automation_port,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

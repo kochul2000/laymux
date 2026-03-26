@@ -1474,6 +1474,16 @@ pub fn get_cdp_browsers(
     Ok(browsers.values().map(|b| b.info.clone()).collect())
 }
 
+/// Return the automation server port.
+#[tauri::command]
+pub fn get_automation_port(state: State<Arc<AppState>>) -> Result<u16, String> {
+    let lock = state
+        .automation_port
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    lock.ok_or_else(|| "Automation port not set".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

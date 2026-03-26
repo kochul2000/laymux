@@ -390,26 +390,8 @@ impl Default for Settings {
 
 /// Get the settings file path.
 pub fn settings_path() -> PathBuf {
-    // Use app-local data directory, fallback to current dir
-    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    let base = crate::config_dir::config_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("settings.json")
-}
-
-fn dirs_config_path() -> Option<PathBuf> {
-    // On Windows: %APPDATA%/laymux
-    // On Linux: ~/.config/laymux
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|p| PathBuf::from(p).join("laymux"))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME")
-            .ok()
-            .map(|p| PathBuf::from(p).join(".config").join("laymux"))
-    }
 }
 
 /// Load settings from disk. Returns default settings if file doesn't exist.

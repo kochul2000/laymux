@@ -166,8 +166,13 @@ fn discovery_file_path() -> std::path::PathBuf {
         .join("automation.json")
 }
 
+/// Preferred port range start: release uses 19280, dev uses 19281.
+fn preferred_port_start() -> u16 {
+    if cfg!(debug_assertions) { 19281 } else { 19280 }
+}
+
 /// Start the automation HTTP server.
-/// Tries ports 19280..19289 then falls back to OS-assigned.
+/// Release tries ports 19280..19289, dev tries 19281..19289, then falls back to OS-assigned.
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
     let server_state = ServerState {
         app_state: app_state.clone(),
@@ -178,7 +183,7 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
 
     // Try preferred ports — bind to 0.0.0.0 so WSL2 can reach Windows host
     let mut listener = None;
-    for port in 19280..=19289 {
+    for port in preferred_port_start()..=19289 {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         match TcpListener::bind(addr).await {
             Ok(l) => {

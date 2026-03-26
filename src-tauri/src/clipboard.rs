@@ -49,7 +49,7 @@ pub fn windows_to_wsl_path(win_path: &str) -> String {
 
 /// Get the default paste image directory.
 pub fn default_paste_image_dir() -> PathBuf {
-    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    let base = crate::config_dir::config_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("paste-images")
 }
 
@@ -129,21 +129,6 @@ pub fn save_rgba_as_png(
 /// Returns the resolved path or "none" if clipboard has only text.
 pub fn smart_paste(image_dir: &str, profile: &str) -> Result<SmartPasteResult, String> {
     smart_paste_platform(image_dir, profile)
-}
-
-fn dirs_config_path() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|p| PathBuf::from(p).join("laymux"))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME")
-            .ok()
-            .map(|p| PathBuf::from(p).join(".config").join("laymux"))
-    }
 }
 
 // -- Platform-specific implementation --
