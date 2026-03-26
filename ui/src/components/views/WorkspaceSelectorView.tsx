@@ -98,8 +98,10 @@ function WorkspaceItem({
             {index < 9 ? index + 1 : ""}
           </span>
           <span
+            data-testid={`workspace-name-${ws.id}`}
             className="truncate text-sm font-medium"
             style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}
+            onDoubleClick={(e) => { e.stopPropagation(); onRename(); }}
           >
             {ws.name}
           </span>
