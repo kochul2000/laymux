@@ -96,10 +96,10 @@ describe("IssueReporterView", () => {
       expect(screen.getByText("Submitted!")).toBeInTheDocument();
     });
 
-    // URL should be displayed as text, not as a link with target="_blank"
-    const links = screen.queryAllByRole("link");
-    const externalLinks = links.filter((l) => l.getAttribute("target") === "_blank");
-    expect(externalLinks).toHaveLength(0);
+    // URL should be displayed as a link but without target="_blank"
+    const link = screen.getByTestId("issue-link");
+    expect(link).toBeInTheDocument();
+    expect(link).not.toHaveAttribute("target", "_blank");
   });
 
   it("disables submit button during submission", async () => {

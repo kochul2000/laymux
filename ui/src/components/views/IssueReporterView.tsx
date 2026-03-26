@@ -200,13 +200,7 @@ export function IssueReporterView() {
         )}
 
         {state === "success" && resultMsg && (
-          <span
-            className="truncate text-[11px]"
-            style={{ color: "var(--green)" }}
-            title={resultMsg}
-          >
-            {resultMsg}
-          </span>
+          <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>✓</span>
         )}
         {state === "error" && (
           <span className="truncate text-[11px]" style={{ color: "var(--red)" }}>
@@ -214,6 +208,20 @@ export function IssueReporterView() {
           </span>
         )}
       </div>
+
+      {/* Issue link */}
+      {state === "success" && resultMsg && (
+        <a
+          data-testid="issue-link"
+          href={resultMsg}
+          onClick={(e) => e.preventDefault()}
+          className="mt-2 truncate text-[11px] underline"
+          style={{ color: "var(--accent)", cursor: "text", userSelect: "all" }}
+          title={resultMsg}
+        >
+          {resultMsg}
+        </a>
+      )}
     </div>
   );
 }
