@@ -112,38 +112,6 @@ describe("NotificationStore", () => {
     expect(updated[2].readAt).not.toBeNull();
   });
 
-  it("markNotificationsNavigated sets navigatedAt and readAt", () => {
-    const { addNotification } = useNotificationStore.getState();
-    addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "a" });
-    addNotification({ terminalId: "t2", workspaceId: "ws-1", message: "b" });
-
-    const notifs = useNotificationStore.getState().notifications;
-    useNotificationStore.getState().markNotificationsNavigated([notifs[0].id]);
-
-    const updated = useNotificationStore.getState().notifications;
-    expect(updated[0].navigatedAt).not.toBeNull();
-    expect(updated[0].readAt).not.toBeNull();
-    expect(updated[1].navigatedAt).toBeNull();
-    expect(updated[1].readAt).toBeNull();
-  });
-
-  it("markNotificationsNavigated preserves existing readAt", () => {
-    const { addNotification } = useNotificationStore.getState();
-    addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "a" });
-
-    // Auto-dismiss sets readAt first
-    useNotificationStore.getState().markWorkspaceAsRead("ws-1");
-    const readAt = useNotificationStore.getState().notifications[0].readAt;
-
-    // Navigate — readAt should stay the same (already set)
-    const id = useNotificationStore.getState().notifications[0].id;
-    useNotificationStore.getState().markNotificationsNavigated([id]);
-
-    const updated = useNotificationStore.getState().notifications[0];
-    expect(updated.navigatedAt).not.toBeNull();
-    expect(updated.readAt).toBe(readAt); // unchanged
-  });
-
   it("markNotificationsAsRead does not affect already-read notifications", () => {
     const { addNotification } = useNotificationStore.getState();
     addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "a" });

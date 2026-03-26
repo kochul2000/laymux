@@ -158,7 +158,7 @@ describe("NotificationPanel", () => {
           level: "info",
           createdAt: now - 3000,
           readAt: now - 1000,
-          navigatedAt: null,
+
         },
         {
           id: "n2",
@@ -168,7 +168,7 @@ describe("NotificationPanel", () => {
           level: "info",
           createdAt: now - 1000,
           readAt: null,
-          navigatedAt: null,
+
         },
         {
           id: "n3",
@@ -178,7 +178,7 @@ describe("NotificationPanel", () => {
           level: "info",
           createdAt: now - 500,
           readAt: now - 100,
-          navigatedAt: null,
+
         },
       ],
     });
@@ -245,7 +245,7 @@ describe("NotificationPanel", () => {
           level: "info",
           createdAt: now - 30000, // 30 seconds ago
           readAt: null,
-          navigatedAt: null,
+
         },
       ],
     });

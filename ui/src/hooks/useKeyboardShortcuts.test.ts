@@ -401,8 +401,8 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "older", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "older", level: "info", createdAt: 100, readAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
         ],
       });
 
@@ -446,7 +446,7 @@ describe("useKeyboardShortcuts", () => {
       expect(useGridStore.getState().focusedPaneIndex).toBe(0);
     });
 
-    it("marks only target pane notifications as navigated", () => {
+    it("marks only target pane notifications as read", () => {
       useWorkspaceStore.setState({
         ...useWorkspaceStore.getState(),
         workspaces: [
@@ -464,8 +464,8 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 alert", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 alert", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 alert", level: "info", createdAt: 100, readAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 alert", level: "info", createdAt: 200, readAt: null },
         ],
       });
 
@@ -473,13 +473,13 @@ describe("useKeyboardShortcuts", () => {
       fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
 
       const notifs = useNotificationStore.getState().notifications;
-      // p1 notification should still be un-navigated
-      expect(notifs.find((n) => n.terminalId === "terminal-p1")!.navigatedAt).toBeNull();
-      // p2 notification (most recent) should be navigated
-      expect(notifs.find((n) => n.terminalId === "terminal-p2")!.navigatedAt).not.toBeNull();
+      // p1 notification should still be unread
+      expect(notifs.find((n) => n.terminalId === "terminal-p1")!.readAt).toBeNull();
+      // p2 notification (most recent) should be marked as read
+      expect(notifs.find((n) => n.terminalId === "terminal-p2")!.readAt).not.toBeNull();
     });
 
-    it("marks consecutive same-terminal notifications as navigated", () => {
+    it("marks consecutive same-terminal notifications as read", () => {
       useWorkspaceStore.setState({
         ...useWorkspaceStore.getState(),
         workspaces: [
@@ -497,9 +497,9 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 old", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 middle", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
-          { id: "n3", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 recent", level: "info", createdAt: 300, readAt: null, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 old", level: "info", createdAt: 100, readAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 middle", level: "info", createdAt: 200, readAt: null },
+          { id: "n3", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 recent", level: "info", createdAt: 300, readAt: null },
         ],
       });
 
@@ -509,12 +509,12 @@ describe("useKeyboardShortcuts", () => {
       const notifs = useNotificationStore.getState().notifications;
       // Sorted desc: n3(p1,300), n2(p2,200), n1(p1,100)
       // Only n3 is consecutive from top (n2 breaks it)
-      expect(notifs[2].navigatedAt).not.toBeNull(); // n3 (p1 recent) — navigated
-      expect(notifs[1].navigatedAt).toBeNull();     // n2 (p2) — still un-navigated
-      expect(notifs[0].navigatedAt).toBeNull();     // n1 (p1 old) — still un-navigated
+      expect(notifs[2].readAt).not.toBeNull(); // n3 (p1 recent) — read
+      expect(notifs[1].readAt).toBeNull();     // n2 (p2) — still unread
+      expect(notifs[0].readAt).toBeNull();     // n1 (p1 old) — still unread
     });
 
-    it("navigates to auto-dismissed (read) notifications that were not navigated", () => {
+    it("does not navigate to already-read (auto-dismissed) notifications", () => {
       useWorkspaceStore.setState({
         ...useWorkspaceStore.getState(),
         workspaces: [
@@ -530,22 +530,20 @@ describe("useKeyboardShortcuts", () => {
         ],
       });
 
-      // Notifications are already read (auto-dismissed) but not yet navigated
+      // All notifications are already read (auto-dismissed)
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 100, readAt: 105, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 200, readAt: 205, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 100, readAt: 105 },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 200, readAt: 205 },
         ],
       });
 
+      useGridStore.setState({ focusedPaneIndex: null });
       renderHook(() => useKeyboardShortcuts());
       fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
 
-      // Should still navigate (readAt doesn't prevent navigation)
-      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
-      const notifs = useNotificationStore.getState().notifications;
-      expect(notifs[1].navigatedAt).not.toBeNull();
-      expect(notifs[0].navigatedAt).toBeNull();
+      // Should NOT navigate — all notifications are read (no badge visible)
+      expect(useGridStore.getState().focusedPaneIndex).toBeNull();
     });
 
     it("does nothing when no unread notifications exist", () => {
@@ -576,8 +574,8 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "oldest", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "oldest", level: "info", createdAt: 100, readAt: null },
+          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
         ],
       });
 
@@ -606,9 +604,9 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 first", level: "info", createdAt: 100, readAt: null, navigatedAt: null },
-          { id: "n2", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 second", level: "info", createdAt: 200, readAt: null, navigatedAt: null },
-          { id: "n3", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 third", level: "info", createdAt: 300, readAt: null, navigatedAt: null },
+          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 first", level: "info", createdAt: 100, readAt: null },
+          { id: "n2", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 second", level: "info", createdAt: 200, readAt: null },
+          { id: "n3", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 third", level: "info", createdAt: 300, readAt: null },
         ],
       });
 
@@ -617,10 +615,10 @@ describe("useKeyboardShortcuts", () => {
 
       const notifs = useNotificationStore.getState().notifications;
       // Sorted asc: n1(p1,100), n2(p1,200), n3(p2,300)
-      // n1, n2 consecutive from p1 — both navigated
-      expect(notifs[0].navigatedAt).not.toBeNull(); // n1
-      expect(notifs[1].navigatedAt).not.toBeNull(); // n2
-      expect(notifs[2].navigatedAt).toBeNull();     // n3 — still un-navigated
+      // n1, n2 consecutive from p1 — both marked as read
+      expect(notifs[0].readAt).not.toBeNull(); // n1
+      expect(notifs[1].readAt).not.toBeNull(); // n2
+      expect(notifs[2].readAt).toBeNull();     // n3 — still unread
     });
   });
 

@@ -9,9 +9,10 @@ export interface NotificationNavTarget {
 /**
  * Find the navigation target for notification-based pane navigation.
  *
- * - "recent": most recent unread notification first (descending by createdAt)
+ * - "recent": most recent unread (readAt === null) notification first (descending by createdAt)
  * - "oldest": oldest unread notification first (ascending by createdAt)
  *
+ * Only notifications visible as badges (readAt === null) are considered.
  * Consecutive notifications from the same terminal (in sorted order) are
  * grouped together so they can all be consumed in one navigation step.
  */
@@ -19,7 +20,7 @@ export function findNotificationNavTarget(
   notifications: Notification[],
   direction: "recent" | "oldest",
 ): NotificationNavTarget | null {
-  const unread = notifications.filter((n) => n.navigatedAt === null);
+  const unread = notifications.filter((n) => n.readAt === null);
   if (unread.length === 0) return null;
 
   const sorted = [...unread].sort((a, b) =>

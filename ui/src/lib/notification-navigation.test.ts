@@ -9,7 +9,6 @@ function makeNotif(
     message: "test",
     level: "info",
     readAt: null,
-    navigatedAt: null,
     ...overrides,
   };
 }
@@ -20,11 +19,27 @@ describe("findNotificationNavTarget", () => {
     expect(findNotificationNavTarget([], "oldest")).toBeNull();
   });
 
-  it("returns null when all notifications are navigated", () => {
+  it("returns null when all notifications are read", () => {
     const notifs: Notification[] = [
-      makeNotif({ id: "n1", terminalId: "terminal-p1", workspaceId: "ws-1", createdAt: 100, navigatedAt: 200 }),
+      makeNotif({ id: "n1", terminalId: "terminal-p1", workspaceId: "ws-1", createdAt: 100, readAt: 200 }),
     ];
     expect(findNotificationNavTarget(notifs, "recent")).toBeNull();
+  });
+
+  it("excludes read notifications from targets", () => {
+    const notifs: Notification[] = [
+      makeNotif({ id: "n1", terminalId: "terminal-p1", workspaceId: "ws-1", createdAt: 100, readAt: 150 }),
+      makeNotif({ id: "n2", terminalId: "terminal-p2", workspaceId: "ws-1", createdAt: 200, readAt: 250 }),
+      makeNotif({ id: "n3", terminalId: "terminal-p3", workspaceId: "ws-2", createdAt: 300 }),
+    ];
+    // Only n3 is unread — n1, n2 are read and should be excluded
+    const result = findNotificationNavTarget(notifs, "recent")!;
+    expect(result.terminalId).toBe("terminal-p3");
+    expect(result.notificationIds).toEqual(["n3"]);
+
+    const resultOldest = findNotificationNavTarget(notifs, "oldest")!;
+    expect(resultOldest.terminalId).toBe("terminal-p3");
+    expect(resultOldest.notificationIds).toEqual(["n3"]);
   });
 
   it("returns the most recent unread notification for 'recent'", () => {
@@ -91,27 +106,16 @@ describe("findNotificationNavTarget", () => {
     expect(result.notificationIds).toEqual(["n3"]);
   });
 
-  it("skips already-navigated notifications when finding consecutive", () => {
+  it("skips already-read notifications when finding consecutive", () => {
     const notifs: Notification[] = [
       makeNotif({ id: "n1", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 100 }),
-      makeNotif({ id: "n2", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 200, navigatedAt: 250 }),
+      makeNotif({ id: "n2", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 200, readAt: 250 }),
       makeNotif({ id: "n3", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 300 }),
     ];
     const result = findNotificationNavTarget(notifs, "recent")!;
-    // Only unnavigated: n3(pA,300), n1(pA,100)
+    // Only unread: n3(pA,300), n1(pA,100)
     // Consecutive from top: n3, n1 (both pA, no break)
     expect(result.notificationIds).toEqual(["n3", "n1"]);
-  });
-
-  it("includes read-but-not-navigated notifications (auto-dismissed)", () => {
-    const notifs: Notification[] = [
-      makeNotif({ id: "n1", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 100, readAt: 150 }),
-      makeNotif({ id: "n2", terminalId: "terminal-pB", workspaceId: "ws-1", createdAt: 200, readAt: 250 }),
-    ];
-    // Both are read (auto-dismissed) but not navigated — should still be found
-    const result = findNotificationNavTarget(notifs, "recent")!;
-    expect(result.terminalId).toBe("terminal-pB");
-    expect(result.notificationIds).toEqual(["n2"]);
   });
 
   it("handles single unread notification", () => {

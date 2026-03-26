@@ -26,7 +26,7 @@ function switchWorkspace(id: string) {
 
 /** Navigate to a pane by notification direction, consuming matched notifications. */
 function navigateByNotification(direction: "recent" | "oldest") {
-  const { notifications, markNotificationsNavigated } =
+  const { notifications, markNotificationsAsRead } =
     useNotificationStore.getState();
   const target = findNotificationNavTarget(notifications, direction);
   if (!target) return;
@@ -43,8 +43,10 @@ function navigateByNotification(direction: "recent" | "oldest") {
     useGridStore.getState().setFocusedPane(paneIndex >= 0 ? paneIndex : 0);
   }
 
-  // Mark only the target notifications as navigated (independent of readAt/auto-dismiss)
-  markNotificationsNavigated(target.notificationIds);
+  // Mark target notifications as read so next navigation advances.
+  // In workspace/paneFocus dismiss modes, auto-dismiss also fires (harmless overlap).
+  // In manual mode, this is the only dismissal path.
+  markNotificationsAsRead(target.notificationIds);
 }
 
 export function useKeyboardShortcuts() {
