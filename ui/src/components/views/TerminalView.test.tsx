@@ -68,6 +68,7 @@ const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "" });
 const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
+const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
@@ -77,7 +78,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
   clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
-  setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
+  setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -586,5 +587,139 @@ describe("TerminalView", () => {
     container.dispatchEvent(event);
 
     expect(preventDefaultSpy).toHaveBeenCalled();
+  });
+
+  // -- cwdReceive sync (issue #24) --
+
+  describe("cwdReceive sync", () => {
+    it("syncs cwdReceive=false to backend AFTER createTerminalSession resolves", async () => {
+      const callOrder: string[] = [];
+      mockCreateTerminalSession.mockImplementation((...args: unknown[]) => {
+        callOrder.push("createTerminalSession");
+        return Promise.resolve({
+          id: args[0],
+          title: "Terminal",
+          config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
+        });
+      });
+      mockSetTerminalCwdReceive.mockImplementation((..._args: unknown[]) => {
+        callOrder.push("setTerminalCwdReceive");
+        return Promise.resolve(undefined);
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-cwd1"
+          profile="PowerShell"
+          syncGroup="default"
+          cwdReceive={false}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-cwd1", "PowerShell", 80, 24, "default",
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd1", false);
+      });
+
+      // Critical: setTerminalCwdReceive must fire AFTER createTerminalSession
+      const createIdx = callOrder.indexOf("createTerminalSession");
+      const receiveIdx = callOrder.lastIndexOf("setTerminalCwdReceive");
+      expect(createIdx).toBeGreaterThanOrEqual(0);
+      expect(receiveIdx).toBeGreaterThan(createIdx);
+    });
+
+    it("syncs cwdReceive=true (default) to backend after session creation", async () => {
+      render(
+        <TerminalView
+          instanceId="t-cwd2"
+          profile="PowerShell"
+          syncGroup="default"
+          cwdReceive={true}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd2", true);
+      });
+    });
+
+    it("updates cwdReceive when prop changes after session exists", async () => {
+      const { rerender } = render(
+        <TerminalView
+          instanceId="t-cwd3"
+          profile="PowerShell"
+          syncGroup="default"
+          cwdReceive={true}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      mockSetTerminalCwdReceive.mockClear();
+
+      rerender(
+        <TerminalView
+          instanceId="t-cwd3"
+          profile="PowerShell"
+          syncGroup="default"
+          cwdReceive={false}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd3", false);
+      });
+    });
+
+    it("does not call setTerminalCwdReceive with correct value before session resolves", async () => {
+      let resolveSession!: (value: unknown) => void;
+      mockCreateTerminalSession.mockImplementation(() => {
+        return new Promise((resolve) => {
+          resolveSession = resolve;
+        });
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-cwd4"
+          profile="PowerShell"
+          syncGroup="default"
+          cwdReceive={false}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      // Before session resolves, clear mock to track only post-creation calls
+      mockSetTerminalCwdReceive.mockClear();
+      await new Promise((r) => setTimeout(r, 0));
+
+      // No meaningful call should have fired since session is still pending
+      expect(mockSetTerminalCwdReceive).not.toHaveBeenCalled();
+
+      // Now resolve the session
+      resolveSession({
+        id: "t-cwd4",
+        title: "Terminal",
+        config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd4", false);
+      });
+    });
   });
 });

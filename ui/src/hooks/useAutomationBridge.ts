@@ -154,6 +154,15 @@ const handlers: HandlerMap = {
       useDockStore.getState().removeDockPane(p.position as DockPosition, p.paneId as string);
       return ok({ removed: true });
     },
+    setDockPaneView: (p) => {
+      const view = p.view as { type: string; [key: string]: unknown };
+      useDockStore.getState().setDockPaneView(
+        p.position as DockPosition,
+        p.paneId as string,
+        { ...view, type: view.type as ViewType },
+      );
+      return ok({ viewSet: true });
+    },
   },
 
   settings: {

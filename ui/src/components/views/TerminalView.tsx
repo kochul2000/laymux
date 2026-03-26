@@ -80,6 +80,8 @@ export function TerminalView({
   syncGroupRef.current = syncGroup;
   const cwdSendRef = useRef(cwdSend);
   cwdSendRef.current = cwdSend;
+  const cwdReceiveRef = useRef(cwdReceive);
+  cwdReceiveRef.current = cwdReceive;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -437,7 +439,9 @@ export function TerminalView({
           terminal.cols,
           terminal.rows,
           syncGroup,
-        ).catch(() => {});
+        ).then(() => {
+          setTerminalCwdReceive(instanceId, cwdReceiveRef.current).catch(() => {});
+        }).catch(() => {});
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }

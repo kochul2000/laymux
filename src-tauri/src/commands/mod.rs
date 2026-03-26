@@ -386,24 +386,25 @@ fn handle_lx_message_dispatch(
                 mark_propagated(&state, &target_terminals)?;
             }
 
-            // Update stored CWD for all targets (including those already at the CWD)
-            for tid in &all_targets {
+            // Update stored CWD for receiving targets only (respect cwd_receive filter)
+            for tid in &receiving_targets {
                 update_terminal_cwd(&state, tid, &normalized_path);
             }
 
-            // Emit sync-cwd event to frontend for UI updates (all targets for CWD display)
+            // Emit sync-cwd event to frontend — only receiving targets, not all
             let _ = app.emit("sync-cwd", serde_json::json!({
                 "path": normalized_path,
                 "terminalId": terminal_id,
                 "groupId": group_id,
-                "targets": all_targets,
+                "targets": receiving_targets,
             }));
 
             Ok(LxResponse::ok(Some(format!(
-                "sync-cwd {} to {} terminals ({} already at cwd)",
+                "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
                 normalized_path,
                 target_terminals.len(),
-                all_targets.len() - target_terminals.len()
+                all_targets.len() - receiving_targets.len(),
+                receiving_targets.len() - target_terminals.len()
             ))))
         }
         LxMessage::SyncBranch {
