@@ -19,6 +19,7 @@ axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1", features = ["v4"] }
 png = "0.17"
+font-kit = "0.14"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

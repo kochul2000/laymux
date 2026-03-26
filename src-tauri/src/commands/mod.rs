@@ -707,6 +707,18 @@ fn write_cd_to_group_terminals(
 }
 
 #[tauri::command]
+pub fn list_system_fonts() -> Result<Vec<String>, String> {
+    use font_kit::source::SystemSource;
+    let source = SystemSource::new();
+    let mut families = source
+        .all_families()
+        .map_err(|e| format!("Failed to enumerate system fonts: {e}"))?;
+    families.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    families.dedup();
+    Ok(families)
+}
+
+#[tauri::command]
 pub fn load_settings() -> Result<crate::settings::Settings, String> {
     Ok(crate::settings::load_settings())
 }

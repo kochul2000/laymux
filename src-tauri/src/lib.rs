@@ -80,6 +80,7 @@ pub fn run() {
             commands::close_terminal_session,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
+            commands::list_system_fonts,
             commands::load_settings,
             commands::save_settings,
             commands::open_settings_file,
