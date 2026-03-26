@@ -46,6 +46,15 @@ export function IssueReporterView() {
     }
   };
 
+  const handleReset = () => {
+    setTitle("");
+    setBody("");
+    setScreenshotPath(null);
+    setScreenshotDataUrl(null);
+    setState("idle");
+    setResultMsg("");
+  };
+
   const fieldStyle: React.CSSProperties = {
     background: "var(--bg-base)",
     color: "var(--text-primary)",
@@ -139,6 +148,7 @@ export function IssueReporterView() {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Issue title"
+        disabled={state === "success"}
         className="mb-3 w-full rounded px-3 py-2 text-xs"
         style={fieldStyle}
       />
@@ -150,6 +160,7 @@ export function IssueReporterView() {
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Describe the issue..."
+        disabled={state === "success"}
         className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 text-xs leading-relaxed"
         style={{ ...fieldStyle, minHeight: 80 }}
       />
@@ -162,22 +173,41 @@ export function IssueReporterView() {
         <button
           data-testid="issue-submit"
           onClick={handleSubmit}
-          disabled={!title.trim() || state === "submitting"}
+          disabled={!title.trim() || state === "submitting" || state === "success"}
           className="cursor-pointer px-5 py-1.5 text-xs font-medium"
           style={{
             background: state === "success" ? "var(--green)" : "var(--accent)",
             color: "var(--bg-base)",
             border: "none",
             borderRadius: 3,
-            opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
+            opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
             transition: "opacity 0.15s",
           }}
         >
           {state === "submitting" ? "Submitting..." : state === "success" ? "Submitted!" : "Submit Issue"}
         </button>
 
+        {state === "success" && (
+          <button
+            data-testid="issue-new-report"
+            onClick={handleReset}
+            className="cursor-pointer rounded px-4 py-1.5 text-xs font-medium"
+            style={{
+              background: "transparent",
+              color: "var(--accent)",
+              border: "1px solid rgba(137,180,250,0.3)",
+              borderRadius: 3,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(137,180,250,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            New Report
+          </button>
+        )}
+
         {state === "success" && resultMsg && (
           <a
+            data-testid="issue-result-link"
             href={resultMsg}
             target="_blank"
             rel="noopener noreferrer"
