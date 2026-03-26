@@ -195,6 +195,10 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
   const [dragOverInfo, setDragOverInfo] = useState<{ index: number; half: "above" | "below" } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const dragOverRef = useRef(dragOverInfo);
+  dragOverRef.current = dragOverInfo;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const handlePointerDown = (e: React.PointerEvent, idx: number) => {
     e.preventDefault();
@@ -218,13 +222,15 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       if (!draggingRef.current) return;
       draggingRef.current = false;
 
-      if (dragOverInfo && dragIdx !== null && dragOverInfo.index !== dragIdx) {
-        const reordered = [...options];
+      const overInfo = dragOverRef.current;
+      const opts = optionsRef.current;
+      if (overInfo && dragIdx !== null && overInfo.index !== dragIdx) {
+        const reordered = [...opts];
         const [moved] = reordered.splice(dragIdx, 1);
-        let targetIdx = dragOverInfo.index;
+        let targetIdx = overInfo.index;
         // Adjust for the removal shifting indices
         if (dragIdx < targetIdx) targetIdx--;
-        if (dragOverInfo.half === "below") targetIdx++;
+        if (overInfo.half === "below") targetIdx++;
         reordered.splice(Math.min(targetIdx, reordered.length), 0, moved);
         setViewOrder(reordered.map((o) => o.key));
       }
@@ -240,7 +246,7 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       document.removeEventListener("pointerup", handlePointerUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragIdx, dragOverInfo, options.length]);
+  }, [dragIdx]);
 
   const handleSelect = useCallback(
     (idx: number) => {

@@ -28,14 +28,15 @@ export function BrowserPreviewView({
   }, [initialUrl]);
 
   // Cleanup CDP browser on unmount
+  const cdpInfoRef = useRef(cdpInfo);
+  cdpInfoRef.current = cdpInfo;
   useEffect(() => {
     return () => {
-      if (cdpInfo) {
-        closeCdpBrowser(cdpInfo.id).catch(() => {});
+      if (cdpInfoRef.current) {
+        closeCdpBrowser(cdpInfoRef.current.id).catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cdpInfo?.id]);
+  }, []);
 
   const navigate = useCallback((raw: string) => {
     let normalized = raw.trim();
