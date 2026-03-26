@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EmptyView } from "./EmptyView";
@@ -111,7 +111,7 @@ describe("EmptyView", () => {
 
   it("shows drag hint text", () => {
     render(<EmptyView />);
-    expect(screen.getByText(/Drag to reorder/)).toBeInTheDocument();
+    expect(screen.getByText(/Drag handle to reorder/)).toBeInTheDocument();
   });
 
   it("shows drag handle on each card", () => {
@@ -133,5 +133,42 @@ describe("EmptyView", () => {
     const wslIdx = labels.findIndex((l) => l?.includes("WSL"));
     // Browser should come before WSL since it's first in custom order
     expect(browserIdx).toBeLessThan(wslIdx);
+  });
+
+  it("reorders items via pointer-based drag", () => {
+    render(<EmptyView />);
+
+    const handle0 = screen.getByTestId("drag-handle-0");
+    const cards = document.querySelectorAll<HTMLElement>("[data-card-index]");
+
+    // jsdom doesn't lay out elements, so mock getBoundingClientRect for each card
+    Array.from(cards).forEach((card, i) => {
+      vi.spyOn(card, "getBoundingClientRect").mockReturnValue({
+        top: i * 40,
+        bottom: (i + 1) * 40,
+        left: 0,
+        right: 240,
+        width: 240,
+        height: 40,
+        x: 0,
+        y: i * 40,
+        toJSON: () => ({}),
+      });
+    });
+
+    // Simulate pointer drag: down on handle 0, move to card 1 area, release
+    fireEvent.pointerDown(handle0, { pointerId: 1 });
+
+    // pointermove on document — clientY in card 1's lower half (below midpoint)
+    fireEvent.pointerMove(document, { clientY: 61 });
+
+    fireEvent.pointerUp(document);
+
+    // viewOrder should now have second item first
+    const order = useSettingsStore.getState().viewOrder;
+    expect(order.length).toBeGreaterThan(0);
+    const profiles = useSettingsStore.getState().profiles.filter((p) => !p.hidden);
+    const firstOriginalKey = `terminal-${profiles[0].name}`;
+    expect(order[0]).not.toBe(firstOriginalKey);
   });
 });
