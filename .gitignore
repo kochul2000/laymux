@@ -30,5 +30,6 @@ WixTools/
 # Reference docs (local only)
 .reference/
 
-# Claude Code local settings (user-specific, not shared)
+# Claude Code
 .claude/settings.local.json
+.claude/worktrees/
