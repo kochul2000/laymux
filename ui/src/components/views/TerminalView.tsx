@@ -26,7 +26,7 @@ import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle } from "@/lib/activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, getClaudeCompletionMessage } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -213,7 +213,8 @@ export function TerminalView({
       const currentActivity = detected ?? instance?.activity;
 
       // Claude task transition (handles garbled encoding from xterm.js)
-      const transition = detectClaudeTaskTransition(previousClaudeTitle ?? instance?.title, title, currentActivity);
+      const prevTitle = previousClaudeTitle ?? instance?.title;
+      const transition = detectClaudeTaskTransition(prevTitle, title, currentActivity);
       previousClaudeTitle = title;
 
       updateInstanceInfo(instanceId, {
@@ -223,14 +224,11 @@ export function TerminalView({
 
       if (transition === "completed") {
         updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
-        const taskDesc = extractClaudeTaskDesc(title);
-        // Skip notification for generic idle titles (e.g., startup "Claude Code")
-        if (!isGenericClaudeTitle(taskDesc)) {
-          const wsId = resolveWorkspaceId(instanceId);
-          useNotificationStore.getState().addNotification({
-            terminalId: instanceId, workspaceId: wsId, message: taskDesc || "Claude task completed", level: "success",
-          });
-        }
+        const message = getClaudeCompletionMessage(prevTitle, title);
+        const wsId = resolveWorkspaceId(instanceId);
+        useNotificationStore.getState().addNotification({
+          terminalId: instanceId, workspaceId: wsId, message, level: "success",
+        });
       } else if (transition === "started") {
         const taskDesc = extractClaudeTaskDesc(title);
         updateInstanceInfo(instanceId, {
@@ -302,7 +300,8 @@ export function TerminalView({
           const rawTitle = titleMatch[1];
           const inst0 = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
           const currentActivity = inst0?.activity;
-          const transition = detectClaudeTaskTransition(previousClaudeTitle, rawTitle, currentActivity);
+          const prevTitle = previousClaudeTitle;
+          const transition = detectClaudeTaskTransition(prevTitle, rawTitle, currentActivity);
           previousClaudeTitle = rawTitle;
 
           if (transition === "completed") {
@@ -310,16 +309,14 @@ export function TerminalView({
               lastExitCode: 0,
               lastCommandAt: Date.now(),
             });
-            const taskDesc = extractClaudeTaskDesc(rawTitle);
-            if (!isGenericClaudeTitle(taskDesc)) {
-              const wsId = resolveWorkspaceId(instanceId);
-              useNotificationStore.getState().addNotification({
-                terminalId: instanceId,
-                workspaceId: wsId,
-                message: taskDesc || "Claude task completed",
-                level: "success",
-              });
-            }
+            const message = getClaudeCompletionMessage(prevTitle, rawTitle);
+            const wsId = resolveWorkspaceId(instanceId);
+            useNotificationStore.getState().addNotification({
+              terminalId: instanceId,
+              workspaceId: wsId,
+              message,
+              level: "success",
+            });
           } else if (transition === "started") {
             const taskDesc = extractClaudeTaskDesc(rawTitle);
             useTerminalStore.getState().updateInstanceInfo(instanceId, {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle } from "./activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle, getClaudeCompletionMessage } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -198,5 +198,62 @@ describe("isGenericClaudeTitle", () => {
   it("returns false for actual task description", () => {
     expect(isGenericClaudeTitle("Build project")).toBe(false);
     expect(isGenericClaudeTitle("Basic arithmetic")).toBe(false);
+  });
+});
+
+describe("getClaudeCompletionMessage", () => {
+  it("extracts task description from previous (spinner) title when new title is generic idle", () => {
+    expect(getClaudeCompletionMessage("✻ Fix the bug", "✳ Claude Code")).toBe("Fix the bug");
+  });
+
+  it("works with various spinner characters", () => {
+    expect(getClaudeCompletionMessage("✶ Build project", "✳ Claude Code")).toBe("Build project");
+    expect(getClaudeCompletionMessage("✽ Running tests", "✳ Claude Code")).toBe("Running tests");
+    expect(getClaudeCompletionMessage("· Thinking about solution", "✳ Claude Code")).toBe("Thinking about solution");
+  });
+
+  it("prefers previous title description over new title description", () => {
+    expect(getClaudeCompletionMessage("✻ Fix the bug", "✳ Review results")).toBe("Fix the bug");
+  });
+
+  it("falls back to new title when previous title is generic", () => {
+    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Some specific task")).toBe("Some specific task");
+  });
+
+  it("falls back to default message when both titles are generic", () => {
+    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Claude Code")).toBe("Claude task completed");
+  });
+
+  it("falls back to default message when both titles extract to empty", () => {
+    expect(getClaudeCompletionMessage("✻", "✳")).toBe("Claude task completed");
+  });
+
+  it("handles undefined previous title", () => {
+    expect(getClaudeCompletionMessage(undefined, "✳ Claude Code")).toBe("Claude task completed");
+  });
+
+  it("handles garbled encoding — still creates non-generic message", () => {
+    // Garbled spinner prefix may not be fully stripped, but result is still non-generic
+    const message = getClaudeCompletionMessage("\udce2\uc7fc Build project", "\udce2\uc454 Claude Code");
+    expect(isGenericClaudeTitle(message)).toBe(false);
+    expect(message).toContain("Build project");
+  });
+
+  it("handles lowercase generic 'claude' in previous title", () => {
+    expect(getClaudeCompletionMessage("✻ claude", "✳ Claude Code")).toBe("Claude task completed");
+  });
+});
+
+describe("Claude completion notification wiring (bug repro)", () => {
+  it("old code skips notification when title transitions to idle", () => {
+    // OLD buggy flow: extracts from newTitle → "Claude Code" → generic → SKIP
+    const oldTaskDesc = extractClaudeTaskDesc("✳ Claude Code");
+    expect(isGenericClaudeTitle(oldTaskDesc)).toBe(true);
+  });
+
+  it("new code extracts task from previous title", () => {
+    const message = getClaudeCompletionMessage("✻ Fix the bug", "✳ Claude Code");
+    expect(message).toBe("Fix the bug");
+    expect(isGenericClaudeTitle(message)).toBe(false);
   });
 });
