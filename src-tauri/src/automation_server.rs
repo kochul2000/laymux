@@ -156,11 +156,16 @@ pub fn remove_discovery_file() {
 }
 
 fn discovery_file_path() -> std::path::PathBuf {
+    let filename = if cfg!(debug_assertions) {
+        "automation.dev.json"
+    } else {
+        "automation.json"
+    };
     crate::settings::settings_path()
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("automation.json")
+        .join(filename)
 }
 
 /// Start the automation HTTP server.
@@ -322,7 +327,7 @@ async fn api_docs() -> impl IntoResponse {
         "version": "v1",
         "description": "Programmatic control of Laymux IDE. All endpoints are localhost-only (127.0.0.1). No authentication required.",
         "base_url": "http://127.0.0.1:{port}/api/v1",
-        "discovery": "Port is written to %APPDATA%/laymux/automation.json (Windows) or ~/.config/laymux/automation.json (Linux). Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
+        "discovery": "Port is written to %APPDATA%/laymux/automation.json (release) or automation.dev.json (dev) on Windows, ~/.config/laymux/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
@@ -1424,7 +1429,7 @@ mod tests {
     #[test]
     fn discovery_file_path_ends_with_automation_json() {
         let path = discovery_file_path();
-        assert!(path.to_string_lossy().ends_with("automation.json"));
+        assert!(path.to_string_lossy().ends_with("automation.dev.json"));
     }
 
     #[test]
