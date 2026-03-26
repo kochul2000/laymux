@@ -18,13 +18,13 @@ vi.mock("@/lib/tauri-api", () => ({
   resizeTerminal: vi.fn().mockResolvedValue(undefined),
   closeTerminalSession: vi.fn().mockResolvedValue(undefined),
   getSyncGroupTerminals: vi.fn().mockResolvedValue([]),
-  handleIdeMessage: vi.fn().mockResolvedValue({}),
+  handleLxMessage: vi.fn().mockResolvedValue({}),
   loadSettings: vi.fn().mockResolvedValue({}),
   saveSettings: vi.fn().mockResolvedValue(undefined),
   onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
   onSyncCwd: vi.fn().mockResolvedValue(() => {}),
   onSyncBranch: vi.fn().mockResolvedValue(() => {}),
-  onIdeNotify: vi.fn().mockResolvedValue(() => {}),
+  onLxNotify: vi.fn().mockResolvedValue(() => {}),
   onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
   getGitBranch: vi.fn().mockResolvedValue(null),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
@@ -491,6 +491,40 @@ describe("WorkspaceSelectorView", () => {
     const card = screen.getByTestId("layout-card-default-layout");
     await user.hover(card);
     expect(screen.getByTestId("layout-menu-default-layout")).toBeInTheDocument();
+  });
+
+  it("double-clicking workspace name triggers rename prompt", async () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+    render(<WorkspaceSelectorView />);
+    const nameEl = screen.getByTestId("workspace-name-ws-default");
+    fireEvent.doubleClick(nameEl);
+    expect(promptSpy).toHaveBeenCalledWith("Rename workspace:", "Default");
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed WS");
+    promptSpy.mockRestore();
+  });
+
+  it("double-clicking workspace name does not rename when prompt is cancelled", () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+    render(<WorkspaceSelectorView />);
+    const nameEl = screen.getByTestId("workspace-name-ws-default");
+    fireEvent.doubleClick(nameEl);
+    expect(promptSpy).toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Default");
+    promptSpy.mockRestore();
+  });
+
+  it("double-clicking workspace name does not trigger workspace select", () => {
+    // Add a second workspace so we can check that double-clicking name on a non-active ws doesn't switch
+    useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
+    const workspaces = useWorkspaceStore.getState().workspaces;
+    const ws2 = workspaces[workspaces.length - 1];
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+    render(<WorkspaceSelectorView />);
+    const nameEl = screen.getByTestId(`workspace-name-${ws2.id}`);
+    fireEvent.doubleClick(nameEl);
+    // Active workspace should still be the first one
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+    promptSpy.mockRestore();
   });
 
   it("renameLayout changes layout name in store", () => {
