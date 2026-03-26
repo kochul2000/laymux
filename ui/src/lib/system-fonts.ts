@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** Curated monospaced fonts — used as fallback when system enumeration fails. */
+/** Curated monospaced fonts — shown at the top of the font picker. */
 export const MONOSPACED_FONTS = [
   "Cascadia Mono",
   "Cascadia Code",
@@ -8,6 +8,8 @@ export const MONOSPACED_FONTS = [
   "Courier New",
   "Fira Code",
   "JetBrains Mono",
+  "JetBrainsMonoBigHangul",
+  "JetBrainsMonoHangul",
   "Source Code Pro",
   "Ubuntu Mono",
   "Hack",
@@ -31,18 +33,6 @@ export const MONOSPACED_FONTS = [
   "JetBrainsMono Nerd Font",
   "Hack Nerd Font",
 ];
-
-/**
- * Checks if a font renders as monospace using canvas text measurement.
- * Compares widths of narrow ('i') and wide ('W') characters —
- * in a monospace font these are equal.
- */
-export function isMonospace(ctx: CanvasRenderingContext2D, fontFamily: string): boolean {
-  ctx.font = `72px "${fontFamily}"`;
-  const narrowWidth = ctx.measureText("iiiii").width;
-  const wideWidth = ctx.measureText("WWWWW").width;
-  return Math.abs(narrowWidth - wideWidth) < 2;
-}
 
 /**
  * Detects which monospaced fonts from the curated list are actually installed.
@@ -72,34 +62,35 @@ export function detectInstalledFonts(candidates: string[]): string[] {
 }
 
 /**
- * Gets all system font families from the Tauri backend.
+ * Gets system monospace font families from the Tauri backend.
+ * The backend checks the font's post table isFixedPitch flag.
  */
-export async function listSystemFonts(): Promise<string[]> {
+export async function listSystemMonospaceFonts(): Promise<string[]> {
   try {
-    return await invoke<string[]>("list_system_fonts");
+    return await invoke<string[]>("list_system_monospace_fonts");
   } catch {
     return [];
   }
 }
 
 /**
- * Returns installed monospace fonts by combining system enumeration with canvas detection.
+ * Returns monospace fonts with curated fonts at the top.
  * Falls back to curated list if system enumeration is unavailable.
  */
 export async function getSystemMonospaceFonts(): Promise<string[]> {
-  const systemFonts = await listSystemFonts();
+  const systemFonts = await listSystemMonospaceFonts();
 
   if (systemFonts.length === 0) {
     return detectInstalledFonts(MONOSPACED_FONTS);
   }
 
-  try {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return detectInstalledFonts(MONOSPACED_FONTS);
+  const systemSet = new Set(systemFonts);
 
-    return systemFonts.filter((font) => isMonospace(ctx, font));
-  } catch {
-    return detectInstalledFonts(MONOSPACED_FONTS);
-  }
+  // Curated fonts that are installed — keep curated order at top
+  const curated = MONOSPACED_FONTS.filter((f) => systemSet.has(f));
+  // Remaining system monospace fonts not in curated list
+  const curatedSet = new Set(MONOSPACED_FONTS);
+  const rest = systemFonts.filter((f) => !curatedSet.has(f));
+
+  return [...curated, ...rest];
 }

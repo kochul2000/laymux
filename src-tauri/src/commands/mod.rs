@@ -706,16 +706,52 @@ fn write_cd_to_group_terminals(
     Ok(())
 }
 
+/// Checks whether a font is monospace by reading the `post` table's `isFixedPitch` field.
+/// Falls back to comparing advance widths of 'i' and 'M' if the table is unavailable.
+fn is_monospace(font: &font_kit::font::Font) -> bool {
+    // Primary: check the 'post' table isFixedPitch field (offset 12, 4 bytes big-endian)
+    if let Some(post_data) = font.load_font_table(u32::from_be_bytes(*b"post")) {
+        let post: &[u8] = post_data.as_ref();
+        if post.len() >= 16 {
+            let is_fixed = u32::from_be_bytes([post[12], post[13], post[14], post[15]]);
+            return is_fixed != 0;
+        }
+    }
+    // Fallback: compare advance widths of narrow vs wide characters
+    let glyphs: Vec<f32> = ['i', 'M']
+        .iter()
+        .filter_map(|&c| {
+            let gid = font.glyph_for_char(c)?;
+            font.advance(gid).ok().map(|v| v.x())
+        })
+        .collect();
+    glyphs.len() == 2 && (glyphs[0] - glyphs[1]).abs() < 1.0
+}
+
 #[tauri::command]
-pub fn list_system_fonts() -> Result<Vec<String>, String> {
+pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
     use font_kit::source::SystemSource;
     let source = SystemSource::new();
-    let mut families = source
+    let families = source
         .all_families()
         .map_err(|e| format!("Failed to enumerate system fonts: {e}"))?;
-    families.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-    families.dedup();
-    Ok(families)
+
+    let mut result: Vec<String> = families
+        .into_iter()
+        .filter(|name| {
+            source
+                .select_family_by_name(name)
+                .ok()
+                .and_then(|fh| fh.fonts().first().cloned())
+                .and_then(|h| h.load().ok())
+                .map(|f| is_monospace(&f))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    result.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    result.dedup();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2247,5 +2283,49 @@ mod tests {
         let encoded = base64_encode(original);
         let decoded = crate::automation_server::base64_decode(&encoded).unwrap();
         assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn is_monospace_detects_consolas() {
+        use font_kit::source::SystemSource;
+        let source = SystemSource::new();
+        // Consolas is always present on Windows
+        if let Ok(family) = source.select_family_by_name("Consolas") {
+            if let Some(handle) = family.fonts().first() {
+                if let Ok(font) = handle.load() {
+                    assert!(is_monospace(&font), "Consolas should be detected as monospace");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn is_monospace_rejects_arial() {
+        use font_kit::source::SystemSource;
+        let source = SystemSource::new();
+        // Arial is always present on Windows and is proportional
+        if let Ok(family) = source.select_family_by_name("Arial") {
+            if let Some(handle) = family.fonts().first() {
+                if let Ok(font) = handle.load() {
+                    assert!(!is_monospace(&font), "Arial should not be detected as monospace");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn list_system_monospace_fonts_returns_known_fonts() {
+        let result = list_system_monospace_fonts().expect("should enumerate fonts");
+        // Should contain at least Consolas (always present on Windows)
+        assert!(
+            result.iter().any(|f| f == "Consolas"),
+            "System monospace fonts should include Consolas, got: {:?}",
+            &result[..result.len().min(10)]
+        );
+        // Should NOT contain proportional fonts
+        assert!(
+            !result.iter().any(|f| f == "Arial"),
+            "System monospace fonts should not include Arial"
+        );
     }
 }
