@@ -622,6 +622,16 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 placeholder="powershell.exe"
               />
             </SettingRow>
+            <SettingRow label="Startup Command" desc="Command to run after shell initialization">
+              <input
+                type="text"
+                value={profile.startupCommand}
+                onChange={(e) => update({ startupCommand: e.target.value })}
+                className={inputCls}
+                style={inputStyle}
+                placeholder="cd ~/project && conda activate myenv"
+              />
+            </SettingRow>
             <SettingRow label="Starting Directory" desc="Directory where the shell starts">
               <input
                 type="text"

@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseIdeCommand,
+  parseLxCommand,
   expandHookCommand,
-} from "./ide-commands";
+} from "./lx-commands";
 
-describe("parseIdeCommand", () => {
+describe("parseLxCommand", () => {
   it("parses sync-cwd command", () => {
-    const cmd = parseIdeCommand("ide sync-cwd /home/user/project");
+    const cmd = parseLxCommand("lx sync-cwd /home/user/project");
     expect(cmd).toEqual({
       action: "sync-cwd",
       args: ["/home/user/project"],
@@ -15,7 +15,7 @@ describe("parseIdeCommand", () => {
   });
 
   it("parses sync-cwd with --all flag", () => {
-    const cmd = parseIdeCommand("ide sync-cwd /foo --all");
+    const cmd = parseLxCommand("lx sync-cwd /foo --all");
     expect(cmd).toEqual({
       action: "sync-cwd",
       args: ["/foo"],
@@ -24,7 +24,7 @@ describe("parseIdeCommand", () => {
   });
 
   it("parses sync-cwd with --group flag", () => {
-    const cmd = parseIdeCommand("ide sync-cwd /foo --group project-a");
+    const cmd = parseLxCommand("lx sync-cwd /foo --group project-a");
     expect(cmd).toEqual({
       action: "sync-cwd",
       args: ["/foo"],
@@ -33,7 +33,7 @@ describe("parseIdeCommand", () => {
   });
 
   it("parses sync-branch command", () => {
-    const cmd = parseIdeCommand("ide sync-branch main");
+    const cmd = parseLxCommand("lx sync-branch main");
     expect(cmd).toEqual({
       action: "sync-branch",
       args: ["main"],
@@ -42,7 +42,7 @@ describe("parseIdeCommand", () => {
   });
 
   it("parses notify command", () => {
-    const cmd = parseIdeCommand('ide notify "Build complete"');
+    const cmd = parseLxCommand('lx notify "Build complete"');
     expect(cmd).toEqual({
       action: "notify",
       args: ["Build complete"],
@@ -51,7 +51,7 @@ describe("parseIdeCommand", () => {
   });
 
   it("parses set-tab-title command", () => {
-    const cmd = parseIdeCommand('ide set-tab-title "My Terminal"');
+    const cmd = parseLxCommand('lx set-tab-title "My Terminal"');
     expect(cmd).toEqual({
       action: "set-tab-title",
       args: ["My Terminal"],
@@ -59,30 +59,30 @@ describe("parseIdeCommand", () => {
     });
   });
 
-  it("returns null for non-ide commands", () => {
-    expect(parseIdeCommand("ls -la")).toBeNull();
-    expect(parseIdeCommand("")).toBeNull();
+  it("returns null for non-lx commands", () => {
+    expect(parseLxCommand("ls -la")).toBeNull();
+    expect(parseLxCommand("")).toBeNull();
   });
 });
 
 describe("expandHookCommand", () => {
   it("expands $path variable from OSC 7 data", () => {
-    const result = expandHookCommand("ide sync-cwd $path", {
+    const result = expandHookCommand("lx sync-cwd $path", {
       path: "/home/user",
     });
-    expect(result).toBe("ide sync-cwd /home/user");
+    expect(result).toBe("lx sync-cwd /home/user");
   });
 
   it("expands $exitCode variable", () => {
     const result = expandHookCommand(
-      "ide notify 'Command failed (exit $exitCode)'",
+      "lx notify 'Command failed (exit $exitCode)'",
       { exitCode: "1" },
     );
-    expect(result).toBe("ide notify 'Command failed (exit 1)'");
+    expect(result).toBe("lx notify 'Command failed (exit 1)'");
   });
 
   it("leaves unknown variables as-is", () => {
-    const result = expandHookCommand("ide sync-cwd $unknown", {});
-    expect(result).toBe("ide sync-cwd $unknown");
+    const result = expandHookCommand("lx sync-cwd $unknown", {});
+    expect(result).toBe("lx sync-cwd $unknown");
   });
 });

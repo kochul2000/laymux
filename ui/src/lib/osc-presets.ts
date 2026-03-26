@@ -18,14 +18,14 @@ const presets: Record<OscPresetName, OscHook[]> = {
   "sync-cwd": [
     {
       osc: 7,
-      run: "ide sync-cwd $path",
+      run: "lx sync-cwd $path",
     },
   ],
   "set-wsl-distro": [
     {
       osc: 9,
       when: "message.startsWith('9;')",
-      run: "ide set-wsl-distro $path",
+      run: "lx set-wsl-distro $path",
     },
   ],
   "sync-branch": [
@@ -33,7 +33,7 @@ const presets: Record<OscPresetName, OscHook[]> = {
       osc: 133,
       param: "E",
       when: "command.startsWith('git switch') || command.startsWith('git checkout')",
-      run: "ide sync-branch $branch",
+      run: "lx sync-branch $branch",
     },
   ],
   "notify-on-fail": [
@@ -41,7 +41,7 @@ const presets: Record<OscPresetName, OscHook[]> = {
       osc: 133,
       param: "D",
       when: "exitCode !== '0'",
-      run: "ide notify --level error 'Command failed (exit $exitCode)'",
+      run: "lx notify --level error 'Command failed (exit $exitCode)'",
     },
   ],
   "notify-on-complete": [
@@ -49,58 +49,58 @@ const presets: Record<OscPresetName, OscHook[]> = {
       osc: 133,
       param: "D",
       when: "exitCode === '0'",
-      run: "ide notify --level success 'Command completed'",
+      run: "lx notify --level success 'Command completed'",
     },
   ],
   "set-title-cwd": [
     {
       osc: 7,
-      run: "ide set-tab-title $path",
+      run: "lx set-tab-title $path",
     },
     {
       osc: 9,
       when: "message.startsWith('9;')",
-      run: "ide set-tab-title $path",
+      run: "lx set-tab-title $path",
     },
   ],
   "notify-osc9": [
     {
       osc: 9,
       when: "!message.startsWith('9;')",
-      run: "ide notify $message",
+      run: "lx notify $message",
     },
   ],
   "notify-osc99": [
     {
       osc: 99,
-      run: "ide notify $message",
+      run: "lx notify $message",
     },
   ],
   "notify-osc777": [
     {
       osc: 777,
-      run: "ide notify $message",
+      run: "lx notify $message",
     },
   ],
   "track-command": [
     {
       osc: 133,
       param: "E",
-      run: "ide set-command-status --command \"$command\"",
+      run: "lx set-command-status --command \"$command\"",
     },
   ],
   "track-command-result": [
     {
       osc: 133,
       param: "D",
-      run: "ide set-command-status --exit-code $exitCode",
+      run: "lx set-command-status --exit-code $exitCode",
     },
   ],
   "track-command-start": [
     {
       osc: 133,
       param: "C",
-      run: "ide set-command-status --command __preexec__",
+      run: "lx set-command-status --command __preexec__",
     },
   ],
 };

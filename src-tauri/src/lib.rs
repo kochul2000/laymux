@@ -2,7 +2,7 @@ pub mod automation_server;
 pub mod clipboard;
 pub mod commands;
 pub mod git_watcher;
-pub mod ide_cli;
+pub mod cli;
 pub mod ipc_server;
 pub mod output_buffer;
 pub mod port_detect;
@@ -28,12 +28,12 @@ pub fn run() {
             match ipc_server::start_ipc_server(session_id, Arc::new(move |msg| {
                 let message_json = match serde_json::to_string(&msg) {
                     Ok(json) => json,
-                    Err(e) => return ide_cli::IdeResponse::err(format!("Serialize error: {e}")),
+                    Err(e) => return cli::LxResponse::err(format!("Serialize error: {e}")),
                 };
                 // Route through the same handler as the Tauri command
-                match commands::handle_ide_message_inner(&message_json, &state_for_ipc, &app_handle_for_ipc) {
+                match commands::handle_lx_message_inner(&message_json, &state_for_ipc, &app_handle_for_ipc) {
                     Ok(resp) => resp,
-                    Err(e) => ide_cli::IdeResponse::err(e),
+                    Err(e) => cli::LxResponse::err(e),
                 }
             })) {
                 Ok(socket_path) => {
@@ -79,7 +79,7 @@ pub fn run() {
             commands::write_to_terminal,
             commands::close_terminal_session,
             commands::get_sync_group_terminals,
-            commands::handle_ide_message,
+            commands::handle_lx_message,
             commands::load_settings,
             commands::save_settings,
             commands::open_settings_file,

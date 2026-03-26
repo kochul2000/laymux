@@ -1,17 +1,17 @@
-export interface IdeCommand {
+export interface LxCommand {
   action: string;
   args: string[];
   flags: Record<string, string | boolean>;
 }
 
 /**
- * Parse an `ide` CLI command string into structured form.
+ * Parse an `lx` CLI command string into structured form.
  */
-export function parseIdeCommand(input: string): IdeCommand | null {
+export function parseLxCommand(input: string): LxCommand | null {
   const trimmed = input.trim();
-  if (!trimmed.startsWith("ide ")) return null;
+  if (!trimmed.startsWith("lx ")) return null;
 
-  const rest = trimmed.slice(4).trim();
+  const rest = trimmed.slice(3).trim();
   if (!rest) return null;
 
   const tokens = tokenize(rest);

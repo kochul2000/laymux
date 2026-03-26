@@ -54,16 +54,16 @@ export async function getSyncGroupTerminals(
   return invoke("get_sync_group_terminals", { groupName });
 }
 
-export interface IdeResponse {
+export interface LxResponse {
   success: boolean;
   data: string | null;
   error: string | null;
 }
 
-export async function handleIdeMessage(
+export async function handleLxMessage(
   messageJson: string,
-): Promise<IdeResponse> {
-  return invoke("handle_ide_message", { messageJson });
+): Promise<LxResponse> {
+  return invoke("handle_lx_message", { messageJson });
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -126,6 +126,7 @@ export interface PaddingSettings {
 export interface Profile {
   name: string;
   commandLine: string;
+  startupCommand?: string;
   colorScheme: string;
   startingDirectory: string;
   hidden: boolean;
@@ -263,11 +264,11 @@ export function onSyncBranch(
   });
 }
 
-/** Listen for IDE notification events. */
-export function onIdeNotify(
+/** Listen for Lx notification events. */
+export function onLxNotify(
   callback: (data: { message: string; terminalId: string; level?: string }) => void,
 ): Promise<UnlistenFn> {
-  return listen("ide-notify", (event) => {
+  return listen("lx-notify", (event) => {
     callback(event.payload as { message: string; terminalId: string; level?: string });
   });
 }

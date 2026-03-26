@@ -73,6 +73,7 @@ export interface ProfileDefaults {
 export interface Profile {
   name: string;
   commandLine: string;
+  startupCommand: string;
   colorScheme: string;
   startingDirectory: string;
   hidden: boolean;
@@ -198,6 +199,7 @@ function makeProfile(
   return {
     name,
     commandLine,
+    startupCommand: "",
     ...defaultProfileDefaults,
     startingDirectory: "",
     hidden: false,
@@ -215,6 +217,7 @@ export function makeProfileFromDefaults(
   return {
     name,
     commandLine,
+    startupCommand: "",
     ...defaults,
     startingDirectory: "",
     hidden: false,

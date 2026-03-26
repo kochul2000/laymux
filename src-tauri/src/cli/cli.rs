@@ -1,16 +1,16 @@
 use std::env;
 use std::io::{BufRead, Write};
 
-use super::{IdeMessage, IdeResponse};
+use super::{LxMessage, LxResponse};
 
-/// Parse command-line args into an IdeMessage.
-pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
+/// Parse command-line args into an LxMessage.
+pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
     if args.is_empty() {
-        return Err("No command provided. Usage: ide <command> [args...]".into());
+        return Err("No command provided. Usage: lx <command> [args...]".into());
     }
 
-    let terminal_id = env::var("IDE_TERMINAL_ID").unwrap_or_default();
-    let group_id = env::var("IDE_GROUP_ID").unwrap_or_default();
+    let terminal_id = env::var("LX_TERMINAL_ID").unwrap_or_default();
+    let group_id = env::var("LX_GROUP_ID").unwrap_or_default();
 
     match args[0].as_str() {
         "sync-cwd" => {
@@ -26,7 +26,7 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
                 .and_then(|i| args.get(i + 1))
                 .cloned();
 
-            Ok(IdeMessage::SyncCwd {
+            Ok(LxMessage::SyncCwd {
                 path,
                 terminal_id,
                 group_id,
@@ -36,7 +36,7 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
         }
         "sync-branch" => {
             let branch = args.get(1).cloned().unwrap_or_default();
-            Ok(IdeMessage::SyncBranch {
+            Ok(LxMessage::SyncBranch {
                 branch,
                 terminal_id,
                 group_id,
@@ -62,7 +62,7 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
                 .map(|(_, s)| s.as_str())
                 .collect();
             let message = message_parts.join(" ");
-            Ok(IdeMessage::Notify {
+            Ok(LxMessage::Notify {
                 message,
                 terminal_id,
                 level,
@@ -70,13 +70,13 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
         }
         "set-tab-title" => {
             let title = args[1..].join(" ");
-            Ok(IdeMessage::SetTabTitle {
+            Ok(LxMessage::SetTabTitle {
                 title,
                 terminal_id,
             })
         }
-        "get-cwd" => Ok(IdeMessage::GetCwd { terminal_id }),
-        "get-branch" => Ok(IdeMessage::GetBranch { terminal_id }),
+        "get-cwd" => Ok(LxMessage::GetCwd { terminal_id }),
+        "get-branch" => Ok(LxMessage::GetBranch { terminal_id }),
         "get-terminal-id" => {
             // This is a local command, no IPC needed
             println!("{terminal_id}");
@@ -91,11 +91,11 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
                 .cloned()
                 .unwrap_or(group_id);
 
-            Ok(IdeMessage::SendCommand { command, group })
+            Ok(LxMessage::SendCommand { command, group })
         }
         "open-file" => {
             let path = args.get(1).cloned().unwrap_or_default();
-            Ok(IdeMessage::OpenFile {
+            Ok(LxMessage::OpenFile {
                 path,
                 terminal_id,
             })
@@ -111,7 +111,7 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
                 .and_then(|i| args.get(i + 1))
                 .and_then(|v| v.parse::<i32>().ok());
 
-            Ok(IdeMessage::SetCommandStatus {
+            Ok(LxMessage::SetCommandStatus {
                 terminal_id,
                 command,
                 exit_code,
@@ -123,10 +123,10 @@ pub fn parse_args(args: &[String]) -> Result<IdeMessage, String> {
 
 /// Send a message to the IDE via the IPC socket and return the response.
 pub fn send_message<R: BufRead, W: Write>(
-    message: &IdeMessage,
+    message: &LxMessage,
     reader: &mut R,
     writer: &mut W,
-) -> Result<IdeResponse, String> {
+) -> Result<LxResponse, String> {
     let json = serde_json::to_string(message).map_err(|e| format!("Serialize error: {e}"))?;
     writeln!(writer, "{json}").map_err(|e| format!("Write error: {e}"))?;
     writer.flush().map_err(|e| format!("Flush error: {e}"))?;
@@ -150,7 +150,7 @@ mod tests {
         let args = vec!["sync-cwd".into(), "/home/user".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SyncCwd { path, all, .. } => {
+            LxMessage::SyncCwd { path, all, .. } => {
                 assert_eq!(path, "/home/user");
                 assert!(!all);
             }
@@ -163,7 +163,7 @@ mod tests {
         let args = vec!["sync-cwd".into(), "/tmp".into(), "--all".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SyncCwd { all, .. } => assert!(all),
+            LxMessage::SyncCwd { all, .. } => assert!(all),
             _ => panic!("Expected SyncCwd"),
         }
     }
@@ -178,7 +178,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SyncCwd { target_group, .. } => {
+            LxMessage::SyncCwd { target_group, .. } => {
                 assert_eq!(target_group, Some("mygroup".into()));
             }
             _ => panic!("Expected SyncCwd"),
@@ -190,7 +190,7 @@ mod tests {
         let args = vec!["sync-branch".into(), "main".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SyncBranch { branch, .. } => assert_eq!(branch, "main"),
+            LxMessage::SyncBranch { branch, .. } => assert_eq!(branch, "main"),
             _ => panic!("Expected SyncBranch"),
         }
     }
@@ -200,7 +200,7 @@ mod tests {
         let args = vec!["notify".into(), "Build".into(), "done".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::Notify { message, .. } => assert_eq!(message, "Build done"),
+            LxMessage::Notify { message, .. } => assert_eq!(message, "Build done"),
             _ => panic!("Expected Notify"),
         }
     }
@@ -216,7 +216,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::Notify { message, level, .. } => {
+            LxMessage::Notify { message, level, .. } => {
                 assert_eq!(message, "Build failed");
                 assert_eq!(level, Some("error".into()));
             }
@@ -229,7 +229,7 @@ mod tests {
         let args = vec!["notify".into(), "Build".into(), "done".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::Notify { message, level, .. } => {
+            LxMessage::Notify { message, level, .. } => {
                 assert_eq!(message, "Build done");
                 assert_eq!(level, None);
             }
@@ -248,7 +248,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::Notify { message, level, .. } => {
+            LxMessage::Notify { message, level, .. } => {
                 assert_eq!(message, "Build failed");
                 assert_eq!(level, Some("error".into()));
             }
@@ -261,7 +261,7 @@ mod tests {
         let args = vec!["set-tab-title".into(), "My".into(), "Terminal".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SetTabTitle { title, .. } => assert_eq!(title, "My Terminal"),
+            LxMessage::SetTabTitle { title, .. } => assert_eq!(title, "My Terminal"),
             _ => panic!("Expected SetTabTitle"),
         }
     }
@@ -270,14 +270,14 @@ mod tests {
     fn parse_get_cwd() {
         let args = vec!["get-cwd".into()];
         let msg = parse_args(&args).unwrap();
-        assert!(matches!(msg, IdeMessage::GetCwd { .. }));
+        assert!(matches!(msg, LxMessage::GetCwd { .. }));
     }
 
     #[test]
     fn parse_get_branch() {
         let args = vec!["get-branch".into()];
         let msg = parse_args(&args).unwrap();
-        assert!(matches!(msg, IdeMessage::GetBranch { .. }));
+        assert!(matches!(msg, LxMessage::GetBranch { .. }));
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SendCommand { command, group } => {
+            LxMessage::SendCommand { command, group } => {
                 assert_eq!(command, "ls -la");
                 assert_eq!(group, "dev");
             }
@@ -303,7 +303,7 @@ mod tests {
         let args = vec!["open-file".into(), "/home/user/main.rs".into()];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::OpenFile { path, .. } => assert_eq!(path, "/home/user/main.rs"),
+            LxMessage::OpenFile { path, .. } => assert_eq!(path, "/home/user/main.rs"),
             _ => panic!("Expected OpenFile"),
         }
     }
@@ -317,7 +317,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus { command, exit_code, .. } => {
                 assert_eq!(command, Some("npm test".into()));
                 assert_eq!(exit_code, None);
             }
@@ -334,7 +334,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus { command, exit_code, .. } => {
                 assert_eq!(command, None);
                 assert_eq!(exit_code, Some(0));
             }
@@ -353,7 +353,7 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            IdeMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus { command, exit_code, .. } => {
                 assert_eq!(command, Some("npm build".into()));
                 assert_eq!(exit_code, Some(1));
             }
@@ -377,13 +377,13 @@ mod tests {
     fn send_message_round_trip() {
         use std::io::Cursor;
 
-        let message = IdeMessage::Notify {
+        let message = LxMessage::Notify {
             message: "test".into(),
             terminal_id: "t1".into(),
             level: None,
         };
 
-        let response = IdeResponse::ok(Some("ok".into()));
+        let response = LxResponse::ok(Some("ok".into()));
         let response_json = serde_json::to_string(&response).unwrap();
 
         let mut reader = BufReader::new(Cursor::new(format!("{response_json}\n")));
@@ -395,7 +395,7 @@ mod tests {
 
         // Verify what was written
         let written = String::from_utf8(writer).unwrap();
-        let parsed: IdeMessage = serde_json::from_str(written.trim()).unwrap();
-        assert!(matches!(parsed, IdeMessage::Notify { .. }));
+        let parsed: LxMessage = serde_json::from_str(written.trim()).unwrap();
+        assert!(matches!(parsed, LxMessage::Notify { .. }));
     }
 }

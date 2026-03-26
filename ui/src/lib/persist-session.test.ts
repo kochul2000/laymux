@@ -8,11 +8,11 @@ vi.mock("@/lib/tauri-api", () => ({
   resizeTerminal: vi.fn().mockResolvedValue(undefined),
   closeTerminalSession: vi.fn().mockResolvedValue(undefined),
   getSyncGroupTerminals: vi.fn().mockResolvedValue([]),
-  handleIdeMessage: vi.fn().mockResolvedValue({}),
+  handleLxMessage: vi.fn().mockResolvedValue({}),
   onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
   onSyncCwd: vi.fn().mockResolvedValue(() => {}),
   onSyncBranch: vi.fn().mockResolvedValue(() => {}),
-  onIdeNotify: vi.fn().mockResolvedValue(() => {}),
+  onLxNotify: vi.fn().mockResolvedValue(() => {}),
   onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
   getListeningPorts: vi.fn().mockResolvedValue([]),
   getGitBranch: vi.fn().mockResolvedValue(null),
@@ -74,6 +74,15 @@ describe("persistSession", () => {
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.font.face).toBe("Fira Code");
     expect(savedArg.font.size).toBe(18);
+  });
+
+  it("preserves startupCommand in profiles", async () => {
+    useSettingsStore.getState().updateProfile(0, { startupCommand: "/home/user/init.sh" });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].startupCommand).toBe("/home/user/init.sh");
   });
 
   it("preserves dock panes with view config through save", async () => {

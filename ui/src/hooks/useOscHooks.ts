@@ -1,6 +1,6 @@
 import { parseOsc, matchHook, type OscHook } from "@/lib/osc-parser";
-import { parseIdeCommand, expandHookCommand } from "@/lib/ide-commands";
-import { handleIdeMessage } from "@/lib/tauri-api";
+import { parseLxCommand, expandHookCommand } from "@/lib/lx-commands";
+import { handleLxMessage } from "@/lib/tauri-api";
 
 /**
  * Regex to find all OSC sequences in terminal output.
@@ -65,23 +65,23 @@ export function processOscInOutput(
       }
 
       const expanded = expandHookCommand(hook.run, vars);
-      const parsed = parseIdeCommand(expanded);
+      const parsed = parseLxCommand(expanded);
       if (!parsed) continue;
 
-      // Convert parsed command to IdeMessage JSON and send via IPC
-      const message = buildIdeMessage(parsed, terminalId, groupId);
+      // Convert parsed command to LxMessage JSON and send via IPC
+      const message = buildLxMessage(parsed, terminalId, groupId);
       if (message) {
         if (options?.skipSyncCwd && message.action === "sync-cwd") continue;
-        handleIdeMessage(JSON.stringify(message)).catch(() => {});
+        handleLxMessage(JSON.stringify(message)).catch(() => {});
       }
     }
   }
 }
 
 /**
- * Build an IdeMessage-compatible object from a parsed IDE command.
+ * Build an LxMessage-compatible object from a parsed IDE command.
  */
-function buildIdeMessage(
+function buildLxMessage(
   cmd: { action: string; args: string[]; flags: Record<string, string | boolean> },
   terminalId: string,
   groupId: string,

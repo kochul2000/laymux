@@ -75,19 +75,19 @@ describe("matchHook", () => {
   const hooks: OscHook[] = [
     {
       osc: 7,
-      run: "ide sync-cwd $path",
+      run: "lx sync-cwd $path",
     },
     {
       osc: 133,
       param: "D",
       when: "exitCode !== '0'",
-      run: "ide notify 'Command failed (exit $exitCode)'",
+      run: "lx notify 'Command failed (exit $exitCode)'",
     },
     {
       osc: 133,
       param: "E",
       when: "command.startsWith('git switch') || command.startsWith('git checkout')",
-      run: "ide sync-branch $branch",
+      run: "lx sync-branch $branch",
     },
   ];
 
@@ -95,14 +95,14 @@ describe("matchHook", () => {
     const event: OscEvent = { code: 7, data: "file:///home/user" };
     const matched = matchHook(hooks, event);
     expect(matched).toHaveLength(1);
-    expect(matched[0].run).toBe("ide sync-cwd $path");
+    expect(matched[0].run).toBe("lx sync-cwd $path");
   });
 
   it("matches OSC 133 D hook with condition", () => {
     const event: OscEvent = { code: 133, param: "D", data: "1" };
     const matched = matchHook(hooks, event);
     expect(matched).toHaveLength(1);
-    expect(matched[0].run).toContain("ide notify");
+    expect(matched[0].run).toContain("lx notify");
   });
 
   it("does not match OSC 133 D when exitCode is 0", () => {

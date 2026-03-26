@@ -74,6 +74,7 @@ describe("settings-store", () => {
     useSettingsStore.getState().addProfile({
       name: "Git Bash",
       commandLine: "C:\\Program Files\\Git\\bin\\bash.exe",
+      startupCommand: "",
       colorScheme: "",
       startingDirectory: "",
       hidden: false,
@@ -107,7 +108,7 @@ describe("settings-store", () => {
       font: { face: "JetBrains Mono", size: 13, weight: "normal" },
       defaultProfile: "WSL",
       profiles: [{
-        name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false,
+        name: "WSL", commandLine: "wsl.exe", startupCommand: "", colorScheme: "", startingDirectory: "", hidden: false,
         cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
         scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
         closeOnExit: "automatic", antialiasingMode: "grayscale",

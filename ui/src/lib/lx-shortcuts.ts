@@ -11,7 +11,7 @@ const CTRL_SHIFT_KEYS = new Set(["U", "B", "I", "u", "b", "i"]);
 const CTRL_ALT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "N", "W", "R", "D", "n", "w", "r", "d"]);
 const ALT_ARROWS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 
-export function isIdeShortcut(e: KeyboardEvent): boolean {
+export function isLxShortcut(e: KeyboardEvent): boolean {
   // Alt+Arrow: pane navigation
   if (e.altKey && !e.ctrlKey && !e.shiftKey && ALT_ARROWS.has(e.key)) {
     return true;

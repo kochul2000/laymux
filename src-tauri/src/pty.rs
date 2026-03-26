@@ -59,10 +59,19 @@ where
 
     // Collect all env vars (config + IDE vars) for shell script injection
     let mut all_env: Vec<(String, String)> = session.config.env.clone();
-    all_env.push(("IDE_TERMINAL_ID".into(), session.id.clone()));
-    all_env.push(("IDE_GROUP_ID".into(), session.config.sync_group.clone()));
+    all_env.push(("LX_TERMINAL_ID".into(), session.id.clone()));
+    all_env.push(("LX_GROUP_ID".into(), session.config.sync_group.clone()));
 
-    let (cmd_path, args) = TerminalSession::profile_to_command_with_env(&session.config.profile, &all_env);
+    let (cmd_path, args) = if session.config.command_line.is_empty() {
+        // Fallback: legacy profile name-based resolution
+        TerminalSession::profile_to_command_with_env(&session.config.profile, &all_env)
+    } else {
+        TerminalSession::command_line_to_command_with_startup(
+            &session.config.command_line,
+            &all_env,
+            &session.config.startup_command,
+        )
+    };
     let mut cmd = CommandBuilder::new(&cmd_path);
     for arg in &args {
         cmd.arg(arg);
@@ -125,6 +134,8 @@ mod tests {
             "test-pty".into(),
             TerminalConfig {
                 profile: profile.into(),
+                command_line: String::new(),
+                startup_command: String::new(),
                 cols: 80,
                 rows: 24,
                 sync_group: "test-group".into(),
@@ -195,8 +206,8 @@ mod tests {
             let _ = tx.send(data);
         }).unwrap();
 
-        // Check that IDE_TERMINAL_ID is set
-        let _ = handle.write(b"echo $env:IDE_TERMINAL_ID\r\n");
+        // Check that LX_TERMINAL_ID is set
+        let _ = handle.write(b"echo $env:LX_TERMINAL_ID\r\n");
 
         let mut output = String::new();
         for _ in 0..20 {
@@ -209,7 +220,7 @@ mod tests {
         }
         assert!(
             output.contains("test-pty"),
-            "IDE_TERMINAL_ID should be set. Got: {output}"
+            "LX_TERMINAL_ID should be set. Got: {output}"
         );
 
         let _ = handle.write(b"exit\r\n");

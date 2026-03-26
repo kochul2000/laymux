@@ -8,7 +8,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 // Mock tauri-api event listeners
 const mockOnSyncCwd = vi.fn();
 const mockOnSyncBranch = vi.fn();
-const mockOnIdeNotify = vi.fn();
+const mockOnLxNotify = vi.fn();
 const mockOnSetTabTitle = vi.fn();
 const mockOnCommandStatus = vi.fn();
 
@@ -17,7 +17,7 @@ const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
   onSyncBranch: (...args: unknown[]) => mockOnSyncBranch(...args),
-  onIdeNotify: (...args: unknown[]) => mockOnIdeNotify(...args),
+  onLxNotify: (...args: unknown[]) => mockOnLxNotify(...args),
   onSetTabTitle: (...args: unknown[]) => mockOnSetTabTitle(...args),
   onCommandStatus: (...args: unknown[]) => mockOnCommandStatus(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
@@ -37,7 +37,7 @@ describe("useSyncEvents", () => {
     const unlisten = vi.fn();
     mockOnSyncCwd.mockResolvedValue(unlisten);
     mockOnSyncBranch.mockResolvedValue(unlisten);
-    mockOnIdeNotify.mockResolvedValue(unlisten);
+    mockOnLxNotify.mockResolvedValue(unlisten);
     mockOnSetTabTitle.mockResolvedValue(unlisten);
     mockOnCommandStatus.mockResolvedValue(unlisten);
   });
@@ -52,9 +52,9 @@ describe("useSyncEvents", () => {
     expect(mockOnSyncBranch).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("registers ide-notify listener on mount", () => {
+  it("registers lx-notify listener on mount", () => {
     renderHook(() => useSyncEvents());
-    expect(mockOnIdeNotify).toHaveBeenCalledWith(expect.any(Function));
+    expect(mockOnLxNotify).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it("registers set-tab-title listener on mount", () => {
@@ -111,10 +111,10 @@ describe("useSyncEvents", () => {
     expect(instance?.branch).toBe("feature/login");
   });
 
-  it("adds notification on ide-notify event with terminalId", () => {
+  it("adds notification on lx-notify event with terminalId", () => {
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Build complete", terminalId: "t1" });
 
     const notifs = useNotificationStore.getState().notifications;
@@ -123,10 +123,10 @@ describe("useSyncEvents", () => {
     expect(notifs[0].terminalId).toBe("t1");
   });
 
-  it("adds notification with level on ide-notify event", () => {
+  it("adds notification with level on lx-notify event", () => {
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Build failed", terminalId: "t1", level: "error" });
 
     const notifs = useNotificationStore.getState().notifications;
@@ -138,7 +138,7 @@ describe("useSyncEvents", () => {
   it("defaults notification level to info when not provided", () => {
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Hello", terminalId: "t1" });
 
     const notifs = useNotificationStore.getState().notifications;
@@ -170,7 +170,7 @@ describe("useSyncEvents", () => {
 
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Build done", terminalId: "t1" });
 
     expect(mockSendDesktopNotification).toHaveBeenCalledWith("Laymux", "Build done");
@@ -194,7 +194,7 @@ describe("useSyncEvents", () => {
 
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Build done", terminalId: "t1" });
 
     expect(mockSendDesktopNotification).toHaveBeenCalledWith("Laymux", "Build done");
@@ -248,7 +248,7 @@ describe("useSyncEvents", () => {
     // Active workspace is the default one, and notification goes to it
     renderHook(() => useSyncEvents());
 
-    const callback = mockOnIdeNotify.mock.calls[0][0];
+    const callback = mockOnLxNotify.mock.calls[0][0];
     callback({ message: "Build done", terminalId: "t1" });
 
     expect(mockSendDesktopNotification).not.toHaveBeenCalled();

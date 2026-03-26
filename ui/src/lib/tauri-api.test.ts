@@ -18,7 +18,7 @@ import {
   resizeTerminal,
   closeTerminalSession,
   getSyncGroupTerminals,
-  handleIdeMessage,
+  handleLxMessage,
   loadSettings,
   saveSettings,
   onTerminalOutput,
@@ -110,13 +110,13 @@ describe("tauri-api", () => {
     });
   });
 
-  describe("handleIdeMessage", () => {
-    it("sends ide message and gets response", async () => {
+  describe("handleLxMessage", () => {
+    it("sends lx message and gets response", async () => {
       const resp = { success: true, data: "ok", error: null };
       mockInvoke.mockResolvedValue(resp);
 
-      const result = await handleIdeMessage('{"action":"notify","message":"hi","terminal_id":"t1"}');
-      expect(mockInvoke).toHaveBeenCalledWith("handle_ide_message", {
+      const result = await handleLxMessage('{"action":"notify","message":"hi","terminal_id":"t1"}');
+      expect(mockInvoke).toHaveBeenCalledWith("handle_lx_message", {
         messageJson: '{"action":"notify","message":"hi","terminal_id":"t1"}',
       });
       expect(result.success).toBe(true);
