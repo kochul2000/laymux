@@ -448,6 +448,8 @@ fn terminal_session_full_lifecycle() {
     for (id, profile, group) in &configs {
         let config = TerminalConfig {
             profile: profile.to_string(),
+            command_line: String::new(),
+            startup_command: String::new(),
             cols: 80,
             rows: 24,
             sync_group: group.to_string(),
@@ -556,6 +558,8 @@ fn terminal_session_update_cwd_and_branch() {
 fn terminal_session_with_custom_env_vars() {
     let config = TerminalConfig {
         profile: "WSL".into(),
+        command_line: String::new(),
+        startup_command: String::new(),
         cols: 120,
         rows: 40,
         sync_group: "dev".into(),
