@@ -708,17 +708,21 @@ fn write_cd_to_group_terminals(
 }
 
 /// Checks whether a font is monospace by reading the `post` table's `isFixedPitch` field.
-/// Falls back to comparing advance widths of 'i' and 'M' if the table is unavailable.
+/// Falls back to comparing advance widths of 'i' and 'M'.
+/// CJK-aware monospace fonts (e.g. JetBrainsMonoBigHangul) may set isFixedPitch=0
+/// because they use half-width/full-width proportions, so we always verify with advance widths.
 fn is_monospace(font: &font_kit::font::Font) -> bool {
-    // Primary: check the 'post' table isFixedPitch field (offset 12, 4 bytes big-endian)
+    // Quick accept: if the post table says it's fixed-pitch, trust it
     if let Some(post_data) = font.load_font_table(u32::from_be_bytes(*b"post")) {
         let post: &[u8] = post_data.as_ref();
         if post.len() >= 16 {
             let is_fixed = u32::from_be_bytes([post[12], post[13], post[14], post[15]]);
-            return is_fixed != 0;
+            if is_fixed != 0 {
+                return true;
+            }
         }
     }
-    // Fallback: compare advance widths of narrow vs wide characters
+    // Fallback / CJK-aware check: compare advance widths of narrow vs wide Latin characters
     let glyphs: Vec<f32> = ['i', 'M']
         .iter()
         .filter_map(|&c| {
@@ -2315,6 +2319,24 @@ mod tests {
     }
 
     #[test]
+    fn is_monospace_detects_cjk_monospace_font() {
+        use font_kit::source::SystemSource;
+        let source = SystemSource::new();
+        // JetBrainsMonoBigHangul has isFixedPitch=0 in post table (CJK double-width)
+        // but Latin chars 'i' and 'M' share the same advance width — it IS monospace
+        if let Ok(family) = source.select_family_by_name("JetBrainsMonoBigHangul") {
+            if let Some(handle) = family.fonts().first() {
+                if let Ok(font) = handle.load() {
+                    assert!(
+                        is_monospace(&font),
+                        "JetBrainsMonoBigHangul should be detected as monospace"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn list_system_monospace_fonts_returns_known_fonts() {
         let result = list_system_monospace_fonts().expect("should enumerate fonts");
         // Should contain at least Consolas (always present on Windows)
@@ -2327,6 +2349,11 @@ mod tests {
         assert!(
             !result.iter().any(|f| f == "Arial"),
             "System monospace fonts should not include Arial"
+        );
+        // Should contain CJK-aware monospace fonts
+        assert!(
+            result.iter().any(|f| f == "JetBrainsMonoBigHangul"),
+            "System monospace fonts should include JetBrainsMonoBigHangul"
         );
     }
 }
