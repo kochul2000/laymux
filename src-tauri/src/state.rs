@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::browser_manager::{self, BrowserInstances};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty::PtyHandle;
 use crate::terminal::{SyncGroup, TerminalSession};
@@ -18,6 +19,8 @@ pub struct AppState {
     /// Terminals that recently received a propagated command (e.g., cd from sync-cwd).
     /// Used to suppress OSC echo loops. Entries expire after PROPAGATION_TIMEOUT.
     pub propagated_terminals: Mutex<HashMap<String, Instant>>,
+    /// Active CDP browser instances launched for BrowserPreviewView.
+    pub browser_instances: BrowserInstances,
 }
 
 impl AppState {
@@ -31,6 +34,7 @@ impl AppState {
             automation_channels: Mutex::new(HashMap::new()),
             automation_port: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
+            browser_instances: browser_manager::new_browser_instances(),
         }
     }
 }

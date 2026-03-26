@@ -1,4 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  launchCdpBrowser,
+  closeCdpBrowser,
+  type CdpInfo,
+} from "@/lib/tauri-api";
 
 interface BrowserPreviewViewProps {
   url?: string;
@@ -11,6 +16,9 @@ export function BrowserPreviewView({
   const [inputUrl, setInputUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cdpInfo, setCdpInfo] = useState<CdpInfo | null>(null);
+  const [cdpLoading, setCdpLoading] = useState(false);
+  const [cdpError, setCdpError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Sync state when the url prop changes externally
@@ -18,6 +26,16 @@ export function BrowserPreviewView({
     setCurrentUrl(initialUrl);
     setInputUrl(initialUrl);
   }, [initialUrl]);
+
+  // Cleanup CDP browser on unmount
+  useEffect(() => {
+    return () => {
+      if (cdpInfo) {
+        closeCdpBrowser(cdpInfo.id).catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cdpInfo?.id]);
 
   const navigate = useCallback((raw: string) => {
     let normalized = raw.trim();
@@ -48,6 +66,31 @@ export function BrowserPreviewView({
       iframeRef.current.src = currentUrl;
     }
   }, [currentUrl]);
+
+  const handleLaunchCdp = useCallback(async () => {
+    const targetUrl = currentUrl === "about:blank" ? "about:blank" : currentUrl;
+    setCdpLoading(true);
+    setCdpError(null);
+    try {
+      const info = await launchCdpBrowser(targetUrl);
+      setCdpInfo(info);
+    } catch (e) {
+      setCdpError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCdpLoading(false);
+    }
+  }, [currentUrl]);
+
+  const handleCloseCdp = useCallback(async () => {
+    if (!cdpInfo) return;
+    try {
+      await closeCdpBrowser(cdpInfo.id);
+    } catch {
+      // ignore close errors
+    }
+    setCdpInfo(null);
+    setCdpError(null);
+  }, [cdpInfo]);
 
   const btnClass =
     "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-sm";
@@ -109,7 +152,67 @@ export function BrowserPreviewView({
             outline: "none",
           }}
         />
+        {/* CDP toggle button */}
+        {cdpInfo ? (
+          <button
+            data-testid="cdp-close-btn"
+            onClick={handleCloseCdp}
+            className="flex h-7 cursor-pointer items-center gap-1 rounded px-2 text-xs"
+            style={{
+              background: "var(--accent)",
+              color: "var(--bg-base)",
+              border: "none",
+            }}
+            title="Close CDP browser"
+          >
+            CDP :{cdpInfo.cdpPort}
+          </button>
+        ) : (
+          <button
+            data-testid="cdp-launch-btn"
+            onClick={handleLaunchCdp}
+            disabled={cdpLoading}
+            className="flex h-7 cursor-pointer items-center gap-1 rounded px-2 text-xs"
+            style={{
+              border: "1px solid var(--border)",
+              background: "transparent",
+              color: "var(--text-secondary)",
+              opacity: cdpLoading ? 0.5 : 1,
+            }}
+            title="Launch browser with CDP for Playwright"
+          >
+            {cdpLoading ? "..." : "CDP"}
+          </button>
+        )}
       </div>
+
+      {/* CDP info bar */}
+      {(cdpInfo || cdpError) && (
+        <div
+          data-testid="cdp-info-bar"
+          className="flex shrink-0 items-center gap-2 px-2 py-1 text-xs"
+          style={{
+            borderBottom: "1px solid var(--border)",
+            background: cdpError ? "rgba(255,0,0,0.05)" : "rgba(0,255,0,0.05)",
+            color: cdpError ? "var(--red, #f44)" : "var(--text-secondary)",
+          }}
+        >
+          {cdpError ? (
+            <span data-testid="cdp-error">{cdpError}</span>
+          ) : cdpInfo ? (
+            <>
+              <span style={{ color: "var(--green, #4f4)" }}>●</span>
+              <code data-testid="cdp-ws-url" className="select-all">
+                {cdpInfo.cdpWsUrl}
+              </code>
+              <span style={{ opacity: 0.5 }}>|</span>
+              <code data-testid="cdp-http-url" className="select-all">
+                http://localhost:{cdpInfo.cdpPort}
+              </code>
+            </>
+          ) : null}
+        </div>
+      )}
 
       {/* Content area */}
       <div className="relative min-h-0 flex-1">

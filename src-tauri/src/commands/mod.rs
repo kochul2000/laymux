@@ -1425,6 +1425,55 @@ fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
     Err("Clipboard write not implemented on this platform".into())
 }
 
+// ---- CDP Browser commands ----
+
+/// Launch a Chromium-based browser with CDP (Chrome DevTools Protocol) enabled.
+/// Returns CDP connection info that external tools like Playwright can use.
+#[tauri::command]
+pub fn launch_cdp_browser(
+    url: String,
+    state: State<Arc<AppState>>,
+) -> Result<crate::browser_manager::CdpInfo, String> {
+    let instance = crate::browser_manager::launch_cdp_browser(&url)?;
+    let info = instance.info.clone();
+    let mut browsers = state
+        .browser_instances
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    browsers.insert(info.id.clone(), instance);
+    Ok(info)
+}
+
+/// Close a CDP browser instance by ID.
+#[tauri::command]
+pub fn close_cdp_browser(
+    id: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let mut browsers = state
+        .browser_instances
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    if let Some(mut instance) = browsers.remove(&id) {
+        crate::browser_manager::close_browser_instance(&mut instance);
+        Ok(())
+    } else {
+        Err(format!("Browser instance '{id}' not found"))
+    }
+}
+
+/// List all active CDP browser instances.
+#[tauri::command]
+pub fn get_cdp_browsers(
+    state: State<Arc<AppState>>,
+) -> Result<Vec<crate::browser_manager::CdpInfo>, String> {
+    let browsers = state
+        .browser_instances
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(browsers.values().map(|b| b.info.clone()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

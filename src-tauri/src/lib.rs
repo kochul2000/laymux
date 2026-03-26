@@ -1,6 +1,8 @@
 pub mod automation_server;
+pub mod browser_manager;
 pub mod clipboard;
 pub mod commands;
+pub mod config_dir;
 pub mod git_watcher;
 pub mod cli;
 pub mod ipc_server;
@@ -93,6 +95,9 @@ pub fn run() {
             commands::clipboard_write_text,
             commands::set_terminal_cwd_receive,
             commands::update_terminal_sync_group,
+            commands::launch_cdp_browser,
+            commands::close_cdp_browser,
+            commands::get_cdp_browsers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

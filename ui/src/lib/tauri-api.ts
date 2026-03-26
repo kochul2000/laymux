@@ -334,6 +334,31 @@ export async function sendOsNotification(
   return invoke("send_os_notification", { title, body });
 }
 
+// -- CDP Browser API --
+
+export interface CdpInfo {
+  id: string;
+  cdpPort: number;
+  cdpWsUrl: string;
+  targetUrl: string;
+  pid: number;
+}
+
+/** Launch a browser with CDP (Chrome DevTools Protocol) enabled. */
+export async function launchCdpBrowser(url: string): Promise<CdpInfo> {
+  return invoke("launch_cdp_browser", { url });
+}
+
+/** Close a CDP browser instance by ID. */
+export async function closeCdpBrowser(id: string): Promise<void> {
+  return invoke("close_cdp_browser", { id });
+}
+
+/** List all active CDP browser instances. */
+export async function getCdpBrowsers(): Promise<CdpInfo[]> {
+  return invoke("get_cdp_browsers");
+}
+
 // -- Automation API --
 
 export interface AutomationRequest {

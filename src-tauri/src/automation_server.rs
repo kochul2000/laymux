@@ -129,6 +129,11 @@ pub struct FocusTerminalBody {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+pub struct BrowserLaunchBody {
+    pub url: String,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -156,16 +161,9 @@ pub fn remove_discovery_file() {
 }
 
 fn discovery_file_path() -> std::path::PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "automation.dev.json"
-    } else {
-        "automation.json"
-    };
-    crate::settings::settings_path()
-        .parent()
-        .map(|p| p.to_path_buf())
+    crate::config_dir::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(filename)
+        .join("automation.json")
 }
 
 /// Start the automation HTTP server.
@@ -270,6 +268,9 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT",    "/api/v1/settings/profile-defaults"),
     ("PUT",    "/api/v1/settings/profiles/{index}"),
     ("POST",   "/api/v1/ui/notifications"),
+    ("POST",   "/api/v1/browser/launch"),
+    ("GET",    "/api/v1/browser/cdp"),
+    ("DELETE", "/api/v1/browser/{id}"),
 ];
 
 pub fn build_router(state: ServerState) -> Router {
@@ -315,6 +316,9 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/settings/profile-defaults", put(settings_set_profile_defaults))
         .route("/api/v1/settings/profiles/{index}", put(settings_update_profile))
         .route("/api/v1/ui/notifications", post(ui_toggle_notification_panel))
+        .route("/api/v1/browser/launch", post(browser_launch))
+        .route("/api/v1/browser/cdp", get(browser_get_cdp))
+        .route("/api/v1/browser/{id}", delete(browser_close))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -327,7 +331,7 @@ async fn api_docs() -> impl IntoResponse {
         "version": "v1",
         "description": "Programmatic control of Laymux IDE. All endpoints are localhost-only (127.0.0.1). No authentication required.",
         "base_url": "http://127.0.0.1:{port}/api/v1",
-        "discovery": "Port is written to %APPDATA%/laymux/automation.json (release) or automation.dev.json (dev) on Windows, ~/.config/laymux/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
+        "discovery": "Port is written to automation.json in the profile config directory: %APPDATA%/laymux/ (release) or %APPDATA%/laymux-dev/ (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
@@ -492,6 +496,21 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/ui/notifications",
                 "description": "Toggle the notification panel overlay open/closed."
+            },
+            {
+                "method": "POST", "path": "/api/v1/browser/launch",
+                "description": "Launch a Chromium-based browser (Edge/Chrome) with CDP (Chrome DevTools Protocol) enabled. Returns CDP connection info for Playwright/Puppeteer. Usage: playwright.chromium.connect_over_cdp(`http://localhost:${cdpPort}`)",
+                "body": { "url": "string — URL to open in the browser" },
+                "response": "{ id, cdpPort, cdpWsUrl, targetUrl, pid }"
+            },
+            {
+                "method": "GET", "path": "/api/v1/browser/cdp",
+                "description": "List all active CDP browser instances with their connection info.",
+                "response": "{ browsers: [{ id, cdpPort, cdpWsUrl, targetUrl, pid }] }"
+            },
+            {
+                "method": "DELETE", "path": "/api/v1/browser/{id}",
+                "description": "Close a CDP browser instance by ID. Kills the browser process and cleans up."
             }
         ],
         "tips": [
@@ -1329,6 +1348,66 @@ fn err_json(msg: &str) -> serde_json::Value {
     serde_json::json!({ "success": false, "error": msg })
 }
 
+// ---- CDP Browser handlers (backend-only, no frontend bridge) ----
+
+async fn browser_launch(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<BrowserLaunchBody>,
+) -> impl IntoResponse {
+    // Run in a blocking thread since browser launch does I/O + waits for stderr
+    let app_state = state.app_state.clone();
+    match tokio::task::spawn_blocking(move || {
+        let instance = crate::browser_manager::launch_cdp_browser(&body.url)?;
+        let info = instance.info.clone();
+        let mut browsers = app_state
+            .browser_instances
+            .lock()
+            .map_err(|e| format!("Lock error: {e}"))?;
+        browsers.insert(info.id.clone(), instance);
+        Ok::<_, String>(info)
+    })
+    .await
+    {
+        Ok(Ok(info)) => (StatusCode::OK, Json(serde_json::to_value(info).unwrap())),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&e))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&format!("Task join error: {e}"))),
+        ),
+    }
+}
+
+async fn browser_get_cdp(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    let browsers = match state.app_state.browser_instances.lock() {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json("Lock error"))),
+    };
+    let infos: Vec<_> = browsers.values().map(|b| b.info.clone()).collect();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "browsers": infos })),
+    )
+}
+
+async fn browser_close(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let mut browsers = match state.app_state.browser_instances.lock() {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json("Lock error"))),
+    };
+    if let Some(mut instance) = browsers.remove(&id) {
+        crate::browser_manager::close_browser_instance(&mut instance);
+        (StatusCode::OK, Json(ok_json("Browser closed")))
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(err_json(&format!("Browser '{id}' not found"))),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1429,7 +1508,10 @@ mod tests {
     #[test]
     fn discovery_file_path_ends_with_automation_json() {
         let path = discovery_file_path();
-        assert!(path.to_string_lossy().ends_with("automation.dev.json"));
+        assert!(path.to_string_lossy().ends_with("automation.json"));
+        // In test (dev) mode, parent dir should be laymux-dev
+        let parent = path.parent().unwrap().file_name().unwrap().to_string_lossy();
+        assert_eq!(parent, "laymux-dev");
     }
 
     #[test]
