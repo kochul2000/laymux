@@ -28,7 +28,7 @@ export function IssueReporterView() {
   };
 
   const handleSubmit = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || state === "submitting" || state === "success") return;
     setState("submitting");
     setResultMsg("");
     try {
@@ -44,6 +44,13 @@ export function IssueReporterView() {
       setState("error");
       setResultMsg(String(e));
     }
+  };
+
+  const handleNewReport = () => {
+    setTitle("");
+    setBody("");
+    setResultMsg("");
+    setState("idle");
   };
 
   const fieldStyle: React.CSSProperties = {
@@ -162,30 +169,38 @@ export function IssueReporterView() {
         <button
           data-testid="issue-submit"
           onClick={handleSubmit}
-          disabled={!title.trim() || state === "submitting"}
+          disabled={!title.trim() || state === "submitting" || state === "success"}
           className="cursor-pointer px-5 py-1.5 text-xs font-medium"
           style={{
             background: state === "success" ? "var(--green)" : "var(--accent)",
             color: "var(--bg-base)",
             border: "none",
             borderRadius: 3,
-            opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
+            opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
             transition: "opacity 0.15s",
           }}
         >
           {state === "submitting" ? "Submitting..." : state === "success" ? "Submitted!" : "Submit Issue"}
         </button>
 
-        {state === "success" && resultMsg && (
-          <a
-            href={resultMsg}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="truncate text-[11px] underline"
-            style={{ color: "var(--accent)" }}
+        {state === "success" && (
+          <button
+            data-testid="issue-new-report"
+            onClick={handleNewReport}
+            className="cursor-pointer px-4 py-1.5 text-xs font-medium"
+            style={{
+              background: "transparent",
+              color: "var(--accent)",
+              border: "1px solid rgba(137,180,250,0.2)",
+              borderRadius: 3,
+            }}
           >
-            {resultMsg}
-          </a>
+            New Report
+          </button>
+        )}
+
+        {state === "success" && resultMsg && (
+          <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>✓</span>
         )}
         {state === "error" && (
           <span className="truncate text-[11px]" style={{ color: "var(--red)" }}>
@@ -193,6 +208,20 @@ export function IssueReporterView() {
           </span>
         )}
       </div>
+
+      {/* Issue link */}
+      {state === "success" && resultMsg && (
+        <a
+          data-testid="issue-link"
+          href={resultMsg}
+          onClick={(e) => e.preventDefault()}
+          className="mt-2 truncate text-[11px] underline"
+          style={{ color: "var(--accent)", cursor: "text", userSelect: "all" }}
+          title={resultMsg}
+        >
+          {resultMsg}
+        </a>
+      )}
     </div>
   );
 }
