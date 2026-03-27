@@ -12,6 +12,11 @@ use crate::terminal::{TerminalActivity, TerminalConfig, TerminalSession, Termina
 /// How long a propagation flag remains valid before expiring.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Number of bytes to scan from the end of a terminal output buffer when detecting
+/// activity state or Claude Code presence. 16KB covers terminal title sequences
+/// even when OSC 133 markers have scrolled out.
+const ACTIVITY_SCAN_BYTES: usize = 16384;
+
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Laymux.", name)
@@ -371,14 +376,15 @@ fn handle_lx_message_dispatch(
             let receiving_targets = filter_targets_cwd_receive(&state, &all_targets);
 
             // Skip targets that have a command running (e.g., interactive apps like Claude Code)
-            let idle_targets = filter_targets_not_busy(&state, &receiving_targets);
+            let settings = crate::settings::load_settings();
+            let (idle_targets, claude_ids) = filter_targets_not_busy(&state, &receiving_targets, &settings.claude.sync_cwd);
 
             // Skip targets that are already at the same CWD
             let target_terminals = filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
 
             // Write cd command to target terminals (with propagation flag + path conversion)
             if !target_terminals.is_empty() {
-                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path)?;
+                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path, &claude_ids)?;
             }
 
             // Mark targets so their OSC echo won't re-propagate
@@ -660,27 +666,19 @@ fn write_to_group_terminals(
 /// Converts the path for each target's profile (e.g., WSL→PowerShell: /mnt/c/... → C:\...).
 /// Uses WSL distro name for UNC path conversion when needed (e.g., /home/... → \\wsl.localhost\distro\...).
 ///
-/// Claude Code terminals in command mode get `! cd /path\n` instead of the normal
+/// Claude Code terminals in command mode get `! cd "/path"\n` instead of the normal
 /// propagated cd command, because Claude Code accepts `! <command>` for inline shell execution.
+/// The `claude_ids` set is produced by `filter_targets_not_busy` so we avoid re-scanning
+/// the output buffers.
 fn write_cd_to_group_terminals(
     state: &AppState,
     target_ids: &[String],
     source_id: &str,
     path: &str,
+    claude_ids: &std::collections::HashSet<String>,
 ) -> Result<(), String> {
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = find_wsl_distro(state, source_id);
-
-    // Collect Claude terminal IDs before locking ptys/terminals (needs output_buffers lock)
-    let claude_ids: std::collections::HashSet<String> = if let Ok(buffers) = state.output_buffers.lock() {
-        target_ids
-            .iter()
-            .filter(|id| is_claude_terminal_from_buffer(buffers.get(id.as_str())))
-            .cloned()
-            .collect()
-    } else {
-        std::collections::HashSet::new()
-    };
 
     let ptys = state
         .pty_handles
@@ -710,8 +708,8 @@ fn write_cd_to_group_terminals(
             };
 
             if claude_ids.contains(id) {
-                // Claude Code terminal: use `! cd /path\n` format
-                let cmd = format!("! cd {converted}\n");
+                // Claude Code terminal: use `! cd "/path"\n` format (quoted for spaces/special chars)
+                let cmd = format!("! cd \"{converted}\"\n");
                 let _ = handle.write(cmd.as_bytes());
             } else {
                 // Normal terminal: propagated cd command
@@ -1052,9 +1050,16 @@ fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<Strin
 ///
 /// Claude Code terminals are partitioned out and handled separately based on
 /// the `claude.syncCwd` setting (skip or command mode).
-fn filter_targets_not_busy(state: &AppState, targets: &[String]) -> Vec<String> {
-    let settings = crate::settings::load_settings();
-    let claude_mode = &settings.claude.sync_cwd;
+///
+/// Returns `(idle_targets, claude_ids)` — the caller passes `claude_ids` to
+/// `write_cd_to_group_terminals` so it can format the command differently
+/// without re-scanning the output buffers.
+fn filter_targets_not_busy(
+    state: &AppState,
+    targets: &[String],
+    claude_mode: &crate::settings::ClaudeSyncCwdMode,
+) -> (Vec<String>, std::collections::HashSet<String>) {
+    let mut claude_ids = std::collections::HashSet::new();
 
     if let Ok(buffers) = state.output_buffers.lock() {
         let mut result = Vec::new();
@@ -1070,6 +1075,7 @@ fn filter_targets_not_busy(state: &AppState, targets: &[String]) -> Vec<String> 
                     crate::settings::ClaudeSyncCwdMode::Command => {
                         // Only include if Claude is idle (✳ prefix in title)
                         if is_claude_idle_from_buffer(buf) {
+                            claude_ids.insert(id.clone());
                             result.push(id.clone());
                         }
                     }
@@ -1078,9 +1084,9 @@ fn filter_targets_not_busy(state: &AppState, targets: &[String]) -> Vec<String> 
                 result.push(id.clone());
             }
         }
-        result
+        (result, claude_ids)
     } else {
-        targets.to_vec()
+        (targets.to_vec(), claude_ids)
     }
 }
 
@@ -1091,7 +1097,7 @@ fn is_claude_terminal_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(16384);
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return false;
     }
@@ -1110,7 +1116,7 @@ fn is_claude_idle_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(16384);
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return false;
     }
@@ -1130,7 +1136,7 @@ fn is_terminal_at_prompt_from_buffer(
     let Some(buf) = buffer else {
         return true; // Unknown terminal → assume at prompt
     };
-    let recent = buf.recent_bytes(8192); // Check last 8KB
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return true; // No output yet → assume at prompt
     }
@@ -1180,7 +1186,7 @@ pub fn detect_terminal_activity(
     let Some(buf) = buffer else {
         return TerminalActivity::Shell;
     };
-    let recent = buf.recent_bytes(16384);
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return TerminalActivity::Shell;
     }
@@ -1907,17 +1913,18 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into(), "t3".into()];
-        let filtered = filter_targets_not_busy(&state, &targets);
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert!(filtered.contains(&"t1".to_string()), "t1 at prompt");
         assert!(!filtered.contains(&"t2".to_string()), "t2 is busy, should be excluded");
         assert!(filtered.contains(&"t3".to_string()), "t3 no output, assume at prompt");
+        assert!(claude_ids.is_empty(), "no Claude terminals in this test");
     }
 
     #[test]
     fn filter_targets_not_busy_includes_unknown_terminals() {
         let state = AppState::new();
         let targets = vec!["unknown".into()];
-        let filtered = filter_targets_not_busy(&state, &targets);
+        let (filtered, _) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert_eq!(filtered, vec!["unknown"]);
     }
 
@@ -1979,7 +1986,7 @@ mod tests {
         let all_targets = resolve_target_terminals(&state, "t1", "g1", false, None).unwrap();
         assert_eq!(all_targets, vec!["t2", "t3"]);
 
-        let idle_targets = filter_targets_not_busy(&state, &all_targets);
+        let (idle_targets, _) = filter_targets_not_busy(&state, &all_targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert_eq!(idle_targets, vec!["t2"]);
     }
 
@@ -2168,9 +2175,10 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into()];
-        let filtered = filter_targets_not_busy(&state, &targets);
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         // In skip mode (default), Claude terminal t2 should be excluded
         assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
+        assert!(claude_ids.is_empty(), "skip mode should not collect claude_ids");
         assert!(!filtered.contains(&"t2".to_string()), "Claude terminal should be skipped");
     }
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ClaudeSyncCwdMode, ClaudeSettings } from "../lib/tauri-api";
 
 export interface FontSettings {
   face: string;
@@ -51,11 +52,6 @@ export interface ConvenienceSettings {
   copyOnSelect: boolean;
 }
 
-export type ClaudeSyncCwdMode = "skip" | "command";
-
-export interface ClaudeSettings {
-  syncCwd: ClaudeSyncCwdMode;
-}
 
 export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
