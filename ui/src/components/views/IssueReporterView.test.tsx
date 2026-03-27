@@ -15,6 +15,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+// Mock @tauri-apps/plugin-shell
+const mockShellOpen = vi.fn();
+vi.mock("@tauri-apps/plugin-shell", () => ({
+  open: (...args: unknown[]) => mockShellOpen(...args),
+}));
+
 describe("IssueReporterView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,7 +89,7 @@ describe("IssueReporterView", () => {
     expect(screen.queryByTestId("issue-new-report")).not.toBeInTheDocument();
   });
 
-  it("does not open external window for issue URL", async () => {
+  it("opens issue URL in system browser when clicked", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
@@ -96,10 +102,13 @@ describe("IssueReporterView", () => {
       expect(screen.getByText("Submitted!")).toBeInTheDocument();
     });
 
-    // URL should be displayed as a link but without target="_blank"
     const link = screen.getByTestId("issue-link");
     expect(link).toBeInTheDocument();
-    expect(link).not.toHaveAttribute("target", "_blank");
+
+    mockShellOpen.mockClear();
+    await user.click(link);
+
+    expect(mockShellOpen).toHaveBeenCalledWith("https://github.com/repo/issues/1");
   });
 
   it("disables submit button during submission", async () => {

@@ -214,9 +214,13 @@ export function IssueReporterView() {
         <a
           data-testid="issue-link"
           href={resultMsg}
-          onClick={(e) => e.preventDefault()}
+          onClick={async (e) => {
+            e.preventDefault();
+            const { open } = await import("@tauri-apps/plugin-shell");
+            open(resultMsg);
+          }}
           className="mt-2 truncate text-[11px] underline"
-          style={{ color: "var(--accent)", cursor: "text", userSelect: "all" }}
+          style={{ color: "var(--accent)", cursor: "pointer", userSelect: "all" }}
           title={resultMsg}
         >
           {resultMsg}
