@@ -476,10 +476,14 @@ export function TerminalView({
     setTerminalCwdReceive(instanceId, cwdReceive).catch(() => {});
   }, [instanceId, cwdReceive]);
 
-  // Focus terminal when pane focus state changes (only if terminal is opened)
+  // Focus/blur terminal when pane focus state changes (only if terminal is opened)
   useEffect(() => {
-    if (isFocused && openedRef.current) {
-      terminalRef.current?.focus();
+    if (openedRef.current) {
+      if (isFocused) {
+        terminalRef.current?.focus();
+      } else {
+        terminalRef.current?.blur();
+      }
     }
   }, [isFocused]);
 

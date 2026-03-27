@@ -202,6 +202,24 @@ describe("TerminalView", () => {
     });
   });
 
+  it("calls terminal.blur() when isFocused becomes false", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-blur" profile="PowerShell" syncGroup="" isFocused={true} />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockBlur.mockClear();
+
+    rerender(
+      <TerminalView instanceId="t-blur" profile="PowerShell" syncGroup="" isFocused={false} />,
+    );
+
+    expect(mockBlur).toHaveBeenCalled();
+  });
+
   it("does not call terminal.focus() when isFocused is false", async () => {
     render(
       <TerminalView instanceId="t10" profile="PowerShell" syncGroup="" isFocused={false} />,
