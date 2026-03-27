@@ -995,6 +995,42 @@ function ConvenienceSection() {
   );
 }
 
+// -- Section: Claude Code --
+
+function ClaudeSection() {
+  const claude = useSettingsStore((s) => s.claude);
+  const setClaude = useSettingsStore((s) => s.setClaude);
+
+  return (
+    <div>
+      <SectionTitle>Claude Code</SectionTitle>
+
+      <div style={cardStyle} className="p-4">
+        {/* Sync CWD mode */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Sync CWD</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              Claude Code 실행 중인 터미널에 cd 전파 방식
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="claude-sync-cwd-select"
+              className={inputCls}
+              value={claude.syncCwd}
+              onChange={(e) => setClaude({ syncCwd: e.target.value as "skip" | "command" })}
+            >
+              <option value="skip">Skip (전파하지 않음)</option>
+              <option value="command">Command (유휴 시 ! cd 전송)</option>
+            </FocusSelect>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // -- Section: Keybindings --
 
 interface KeybindingDef {
@@ -1408,6 +1444,16 @@ export function SettingsView() {
         >
           Convenience
         </button>
+        <button
+          data-testid="nav-claude"
+          className="w-full px-4 py-2 text-left text-[13px]"
+          style={navBtnStyle("claude")}
+          onClick={() => setActiveNav("claude")}
+          onMouseEnter={() => setNavHover("claude")}
+          onMouseLeave={() => setNavHover(null)}
+        >
+          Claude Code
+        </button>
 
         {/* Profiles group */}
         <div className="mt-3 flex items-center justify-between px-3 pb-1">
@@ -1478,6 +1524,7 @@ export function SettingsView() {
           {activeNav === "colorSchemes" && <ColorSchemesSection />}
           {activeNav === "keybindings" && <KeybindingsSection />}
           {activeNav === "convenience" && <ConvenienceSection />}
+          {activeNav === "claude" && <ClaudeSection />}
         </div>
 
         {/* Sticky save bar — always visible at bottom */}

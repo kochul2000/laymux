@@ -88,6 +88,7 @@ export async function persistSession(): Promise<void> {
       })),
     })),
     convenience: { ...settingsState.convenience },
+    claude: { ...settingsState.claude },
     docks: dockState.docks.map((d) => ({
       position: d.position,
       activeView: d.activeView,
