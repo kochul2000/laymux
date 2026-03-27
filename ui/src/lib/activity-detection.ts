@@ -87,6 +87,25 @@ export function isGenericClaudeTitle(taskDesc: string): boolean {
 }
 
 /**
+ * Extract a meaningful notification message for Claude task completion.
+ *
+ * Tries the previous title first (contains the actual task description from the spinner),
+ * falls back to the new title, then to a default message.
+ */
+export function getClaudeCompletionMessage(
+  previousTitle: string | undefined,
+  newTitle: string,
+): string {
+  if (previousTitle) {
+    const prevDesc = extractClaudeTaskDesc(previousTitle);
+    if (!isGenericClaudeTitle(prevDesc)) return prevDesc;
+  }
+  const newDesc = extractClaudeTaskDesc(newTitle);
+  if (!isGenericClaudeTitle(newDesc)) return newDesc;
+  return "Claude task completed";
+}
+
+/**
  * Detect Claude Code task state transitions from title changes.
  *
  * Claude Code uses spinner characters (✶✻✽✢*·) while working and ✳ when idle.
