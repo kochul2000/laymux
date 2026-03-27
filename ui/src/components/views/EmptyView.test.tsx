@@ -92,8 +92,8 @@ describe("EmptyView", () => {
   });
 
   it("grabs DOM focus when isFocused becomes true", () => {
-    const { container } = render(<EmptyView isFocused={true} />);
-    const wrapper = container.querySelector("[data-testid='empty-view']")!;
+    render(<EmptyView isFocused={true} />);
+    const wrapper = screen.getByTestId("empty-view");
     expect(document.activeElement).toBe(wrapper);
   });
 
