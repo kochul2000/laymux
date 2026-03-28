@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -56,32 +56,77 @@ describe("SettingsView", () => {
     expect(select.value).toBe("normal");
   });
 
-  it("updates font face in store", async () => {
+  it("does NOT update font face in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
     await user.selectOptions(select, "Fira Code");
 
+    // Store should still have original value (draft only in local state)
+    expect(useSettingsStore.getState().font.face).toBe("Cascadia Mono");
+    // But the UI select should show the new value
+    expect(select.value).toBe("Fira Code");
+  });
+
+  it("updates font face in store only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
+    await user.selectOptions(select, "Fira Code");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
     expect(useSettingsStore.getState().font.face).toBe("Fira Code");
   });
 
-  it("updates font size in store", () => {
+  it("does NOT update font size in store until Save is clicked", () => {
     render(<SettingsView />);
 
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "16");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    fireEvent.change(input, { target: { value: "16" } });
+
+    // Store should still have original value
+    expect(useSettingsStore.getState().font.size).toBe(14);
+    // But the UI input should show the new value
+    expect(input.value).toBe("16");
+  });
+
+  it("updates font size in store only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const input = screen.getByTestId("font-size-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "16" } });
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
 
     expect(useSettingsStore.getState().font.size).toBe(16);
   });
 
-  it("updates font weight in store", async () => {
+  it("does NOT update font weight in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     const select = screen.getByTestId("font-weight-select");
     await user.selectOptions(select, "bold");
+
+    // Store should still have original value
+    expect(useSettingsStore.getState().font.weight).toBe("normal");
+  });
+
+  it("updates font weight in store only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("font-weight-select");
+    await user.selectOptions(select, "bold");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
 
     expect(useSettingsStore.getState().font.weight).toBe("bold");
   });
@@ -258,6 +303,7 @@ describe("SettingsView", () => {
   // -- Save --
 
   it("has a save button that triggers persistSession", async () => {
+    vi.mocked(persistSession).mockClear();
     const user = userEvent.setup();
     render(<SettingsView />);
 

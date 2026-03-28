@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -136,7 +136,7 @@ function useMonospacedFonts() {
 }
 
 function StartupSection() {
-  const font = useSettingsStore((s) => s.font);
+  const storeFont = useSettingsStore((s) => s.font);
   const setFont = useSettingsStore((s) => s.setFont);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
@@ -144,6 +144,20 @@ function StartupSection() {
   const appThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
   const setAppTheme = useSettingsStore((s) => s.setAppTheme);
   const monoFonts = useMonospacedFonts();
+
+  // Draft font state — only committed to store on Save
+  const [draftFont, setDraftFont] = useState({ ...storeFont });
+  const draftFontRef = useRef(draftFont);
+  draftFontRef.current = draftFont;
+
+  // Register flush callback so Save commits draft to store
+  const { registerFlush, unregisterFlush } = useSettingsDraft();
+  useEffect(() => {
+    registerFlush("startup-font", () => {
+      setFont(draftFontRef.current);
+    });
+    return () => unregisterFlush("startup-font");
+  }, [registerFlush, unregisterFlush, setFont]);
 
   return (
     <div>
@@ -213,12 +227,12 @@ function StartupSection() {
           <SettingRow label="Font Face" desc="Monospaced font for terminals">
             <FocusSelect
               data-testid="font-face-input"
-              value={font.face}
-              onChange={(e) => setFont({ ...font, face: e.target.value })}
+              value={draftFont.face}
+              onChange={(e) => setDraftFont({ ...draftFont, face: e.target.value })}
               className={inputCls}
             >
-              {!monoFonts.includes(font.face) && (
-                <option value={font.face}>{font.face}</option>
+              {!monoFonts.includes(draftFont.face) && (
+                <option value={draftFont.face}>{draftFont.face}</option>
               )}
               {monoFonts.map((f) => (
                 <option key={f} value={f}>{f}</option>
@@ -229,8 +243,8 @@ function StartupSection() {
             <FocusInput
               data-testid="font-size-input"
               type="number"
-              value={font.size}
-              onChange={(e) => setFont({ ...font, size: parseInt(e.target.value) || 14 })}
+              value={draftFont.size}
+              onChange={(e) => setDraftFont({ ...draftFont, size: parseInt(e.target.value) || 14 })}
               className="w-24 rounded px-2 py-1.5 text-xs"
               min={6}
               max={72}
@@ -239,8 +253,8 @@ function StartupSection() {
           <SettingRow label="Font Weight">
             <select
               data-testid="font-weight-select"
-              value={font.weight}
-              onChange={(e) => setFont({ ...font, weight: e.target.value })}
+              value={draftFont.weight}
+              onChange={(e) => setDraftFont({ ...draftFont, weight: e.target.value })}
               className={inputCls}
               style={inputStyle}
             >
@@ -1314,6 +1328,24 @@ function KeybindingsSection() {
   );
 }
 
+// -- Draft flush context --
+// Sections register flush callbacks that SettingsView invokes on Save.
+
+type FlushFn = () => void;
+interface SettingsDraftCtx {
+  registerFlush: (id: string, fn: FlushFn) => void;
+  unregisterFlush: (id: string) => void;
+}
+const SettingsDraftContext = createContext<SettingsDraftCtx>({
+  registerFlush: () => {},
+  unregisterFlush: () => {},
+});
+
+/** Hook for sections to register a flush callback that runs on Save. */
+function useSettingsDraft() {
+  return useContext(SettingsDraftContext);
+}
+
 // -- Main SettingsView --
 
 export function SettingsView() {
@@ -1353,7 +1385,19 @@ export function SettingsView() {
   const [navHover, setNavHover] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Draft flush registry — sections register callbacks invoked on Save
+  const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const registerFlush = useCallback((id: string, fn: FlushFn) => {
+    flushMapRef.current.set(id, fn);
+  }, []);
+  const unregisterFlush = useCallback((id: string) => {
+    flushMapRef.current.delete(id);
+  }, []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush }).current;
+
   const handleSave = () => {
+    // Flush all draft states to store first
+    for (const fn of flushMapRef.current.values()) fn();
     clearTimeout(saveTimerRef.current);
     persistSession()
       .then(() => {
@@ -1379,6 +1423,7 @@ export function SettingsView() {
   };
 
   return (
+    <SettingsDraftContext.Provider value={draftCtx}>
     <div data-testid="settings-view" className="flex h-full" style={{ color: "var(--text-primary)" }}>
       {/* Sidebar Navigation */}
       <nav
@@ -1550,5 +1595,6 @@ export function SettingsView() {
         </div>
       </div>
     </div>
+    </SettingsDraftContext.Provider>
   );
 }
