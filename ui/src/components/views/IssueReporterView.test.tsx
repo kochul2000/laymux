@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { IssueReporterView } from "./IssueReporterView";
@@ -180,8 +180,10 @@ describe("IssueReporterView", () => {
     // Should only invoke once despite two clicks
     expect(mockInvoke).toHaveBeenCalledTimes(1);
 
-    // Resolve to clean up
-    resolveSubmit!("https://github.com/repo/issues/1");
+    // Resolve to clean up pending promise
+    await act(async () => {
+      resolveSubmit!("https://github.com/repo/issues/1");
+    });
   });
 
   it("awaits shell open and handles errors gracefully", async () => {
