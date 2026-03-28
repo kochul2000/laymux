@@ -16,6 +16,7 @@ import {
   clipboardWriteText,
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
+  openExternal,
 } from "@/lib/tauri-api";
 import {
   colorSchemeToXtermTheme,
@@ -124,7 +125,9 @@ export function TerminalView({
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      openExternal(uri).catch(() => {});
+    });
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);

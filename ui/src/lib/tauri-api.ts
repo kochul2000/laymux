@@ -225,6 +225,17 @@ export async function updateTerminalSyncGroup(terminalId: string, newGroup: stri
   return invoke("update_terminal_sync_group", { terminalId, newGroup });
 }
 
+/** Open a URL in the user's default browser via Tauri shell plugin. */
+export async function openExternal(url: string): Promise<void> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  } catch (e) {
+    console.warn("shell.open failed, falling back to window.open:", e);
+    window.open(url, "_blank");
+  }
+}
+
 /** Listen for terminal output events from the backend. */
 export function onTerminalOutput(
   terminalId: string,
