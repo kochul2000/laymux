@@ -577,6 +577,31 @@ describe("TerminalView", () => {
     expect(useSettingsStore.getState().font.size).toBe(6);
   });
 
+  // -- Scrollbar style --
+
+  it("applies scrollbar-overlay class by default", () => {
+    render(
+      <TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />,
+    );
+    const container = screen.getByTestId("terminal-view-t-sb1");
+    expect(container.classList.contains("scrollbar-overlay")).toBe(true);
+    expect(container.classList.contains("scrollbar-separate")).toBe(false);
+  });
+
+  it("applies scrollbar-separate class when setting is separate", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+    });
+
+    render(
+      <TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />,
+    );
+    const container = screen.getByTestId("terminal-view-t-sb2");
+    expect(container.classList.contains("scrollbar-separate")).toBe(true);
+    expect(container.classList.contains("scrollbar-overlay")).toBe(false);
+  });
+
   it("clamps font size to maximum 72", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),

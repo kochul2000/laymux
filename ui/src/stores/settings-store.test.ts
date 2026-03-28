@@ -280,4 +280,46 @@ describe("settings-store", () => {
     const { claude } = useSettingsStore.getState();
     expect(claude.syncCwd).toBe("skip");
   });
+
+  // -- Scrollbar style settings --
+
+  it("has default scrollbarStyle as overlay", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("setConvenience updates scrollbarStyle", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+  });
+
+  it("setConvenience updates scrollbarStyle back to overlay", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "overlay" });
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("loadFromSettings loads scrollbarStyle", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "separate" as const },
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("separate");
+  });
+
+  it("loadFromSettings fills missing scrollbarStyle with default overlay", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("setConvenience does not affect other convenience fields when setting scrollbarStyle", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.smartPaste).toBe(true);
+    expect(convenience.copyOnSelect).toBe(true);
+    expect(convenience.scrollbarStyle).toBe("separate");
+  });
 });

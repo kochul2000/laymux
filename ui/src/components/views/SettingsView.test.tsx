@@ -363,6 +363,26 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
   });
 
+  // -- Scrollbar style --
+
+  it("shows scrollbar style select in convenience section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
+  });
+
+  it("scrollbar style select updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
+    await user.selectOptions(select, "separate");
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+  });
+
   // -- Claude Code section --
 
   it("shows Claude Code nav button", () => {
