@@ -1,7 +1,7 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
-    ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding, Layout, LayoutPane,
-    Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
+    ClaudeSettings, ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding,
+    Layout, LayoutPane, Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -70,11 +70,7 @@ fn settings_round_trip_with_full_config() {
                 command: "closeTab".into(),
             },
         ],
-        font: FontSettings {
-            face: "JetBrains Mono".into(),
-            size: 16,
-            weight: "normal".into(),
-        },
+        font: None,
         default_profile: "Ubuntu".into(),
         layouts: vec![
             Layout {
@@ -145,6 +141,7 @@ fn settings_round_trip_with_full_config() {
             },
         ],
         convenience: ConvenienceSettings::default(),
+        claude: ClaudeSettings::default(),
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -167,8 +164,8 @@ fn settings_deserialize_empty_json_object() {
     assert!(settings.color_schemes.is_empty());
     assert!(settings.keybindings.is_empty());
     assert!(settings.docks.is_empty());
-    assert_eq!(settings.font.face, "Consolas");
-    assert_eq!(settings.font.size, 14);
+    // Root font is None after deserialization of empty JSON
+    assert!(settings.font.is_none());
 }
 
 #[test]
@@ -416,16 +413,20 @@ fn settings_overwrite_existing_file() {
     let json = serde_json::to_string_pretty(&settings).unwrap();
     fs::write(&path, &json).unwrap();
 
-    // Modify and overwrite
-    settings.font.size = 20;
-    settings.font.face = "Fira Code".into();
+    // Modify and overwrite — set font at profile level
+    settings.profiles[0].font = Some(FontSettings {
+        face: "Fira Code".into(),
+        size: 20,
+        weight: "normal".into(),
+    });
     settings.default_profile = "WSL".into();
     let json2 = serde_json::to_string_pretty(&settings).unwrap();
     fs::write(&path, &json2).unwrap();
 
     let loaded: Settings = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(loaded.font.size, 20);
-    assert_eq!(loaded.font.face, "Fira Code");
+    let ps_font = loaded.profiles[0].font.as_ref().unwrap();
+    assert_eq!(ps_font.size, 20);
+    assert_eq!(ps_font.face, "Fira Code");
     assert_eq!(loaded.default_profile, "WSL");
 }
 
@@ -448,6 +449,8 @@ fn terminal_session_full_lifecycle() {
     for (id, profile, group) in &configs {
         let config = TerminalConfig {
             profile: profile.to_string(),
+            command_line: String::new(),
+            startup_command: String::new(),
             cols: 80,
             rows: 24,
             sync_group: group.to_string(),
@@ -556,6 +559,8 @@ fn terminal_session_update_cwd_and_branch() {
 fn terminal_session_with_custom_env_vars() {
     let config = TerminalConfig {
         profile: "WSL".into(),
+        command_line: String::new(),
+        startup_command: String::new(),
         cols: 120,
         rows: 40,
         sync_group: "dev".into(),
@@ -1416,8 +1421,10 @@ fn windows_terminal_settings_compatibility() {
     assert_eq!(settings.color_schemes.len(), 1);
     assert_eq!(settings.color_schemes[0].name, "Campbell");
     assert_eq!(settings.color_schemes[0].bright_white, "#F2F2F2");
-    assert_eq!(settings.font.face, "Cascadia Mono");
-    assert_eq!(settings.font.size, 12);
+    // Root-level font is parsed as legacy backward compat
+    let font = settings.font.as_ref().unwrap();
+    assert_eq!(font.face, "Cascadia Mono");
+    assert_eq!(font.size, 12);
     assert_eq!(settings.keybindings.len(), 2);
     assert_eq!(settings.default_profile, "Windows PowerShell");
 }
@@ -1522,16 +1529,17 @@ fn concurrent_session_create_and_close() {
 
 #[test]
 fn settings_font_size_zero() {
-    let json = r#"{"font": {"face": "Mono", "size": 0}}"#;
+    // Font at profile level now
+    let json = r#"{"profiles": [{"name": "T", "commandLine": "x", "font": {"face": "Mono", "size": 0}}]}"#;
     let settings: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.font.size, 0);
+    assert_eq!(settings.profiles[0].font.as_ref().unwrap().size, 0);
 }
 
 #[test]
 fn settings_font_size_max() {
-    let json = r#"{"font": {"face": "Mono", "size": 65535}}"#;
+    let json = r#"{"profiles": [{"name": "T", "commandLine": "x", "font": {"face": "Mono", "size": 65535}}]}"#;
     let settings: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.font.size, 65535);
+    assert_eq!(settings.profiles[0].font.as_ref().unwrap().size, 65535);
 }
 
 #[test]
@@ -1583,8 +1591,9 @@ fn settings_json_with_extra_fields_ignored() {
     let result: Result<Settings, _> = serde_json::from_str(json);
     // If it succeeds, verify known fields are correct
     if let Ok(settings) = result {
-        assert_eq!(settings.font.face, "Mono");
-        assert_eq!(settings.font.size, 14);
+        let font = settings.font.as_ref().unwrap();
+        assert_eq!(font.face, "Mono");
+        assert_eq!(font.size, 14);
     }
     // Either way, it shouldn't panic
 }

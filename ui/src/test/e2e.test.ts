@@ -579,7 +579,6 @@ function makeTestColorScheme(overrides: { name: string; foreground?: string; bac
 describe("Settings Store E2E", () => {
   beforeEach(() => {
     useSettingsStore.setState({
-      font: { face: "Consolas", size: 14, weight: "normal" },
       defaultProfile: "PowerShell",
       profiles: [
         makeTestProfile({ name: "PowerShell", commandLine: "powershell.exe -NoLogo" }),
@@ -592,7 +591,7 @@ describe("Settings Store E2E", () => {
 
   it("should load bulk settings via loadFromSettings", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
       defaultProfile: "WSL",
       colorSchemes: [
         makeTestColorScheme({ name: "Dark", foreground: "#fff", background: "#000" }),
@@ -600,8 +599,8 @@ describe("Settings Store E2E", () => {
     });
 
     const state = useSettingsStore.getState();
-    expect(state.font.face).toBe("Fira Code");
-    expect(state.font.size).toBe(16);
+    expect(state.profileDefaults.font.face).toBe("Fira Code");
+    expect(state.profileDefaults.font.size).toBe(16);
     expect(state.defaultProfile).toBe("WSL");
     // 10 builtins + 1 loaded = 11 (builtins are always merged)
     expect(state.colorSchemes.length).toBe(11);
@@ -641,17 +640,17 @@ describe("Settings Store E2E", () => {
     expect(useSettingsStore.getState().colorSchemes.length).toBe(1);
   });
 
-  it("should handle font size edge values", () => {
-    useSettingsStore.getState().setFont({ face: "Mono", size: 0, weight: "normal" });
-    expect(useSettingsStore.getState().font.size).toBe(0);
+  it("should handle font size edge values via profileDefaults", () => {
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "Mono", size: 0, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(0);
 
-    useSettingsStore.getState().setFont({ face: "Mono", size: 999, weight: "normal" });
-    expect(useSettingsStore.getState().font.size).toBe(999);
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "Mono", size: 999, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(999);
   });
 
-  it("should handle empty font face", () => {
-    useSettingsStore.getState().setFont({ face: "", size: 14, weight: "normal" });
-    expect(useSettingsStore.getState().font.face).toBe("");
+  it("should handle empty font face via profileDefaults", () => {
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "", size: 14, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("");
   });
 });
 

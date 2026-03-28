@@ -38,10 +38,12 @@ describe("persistSession", () => {
 
     expect(saveSettings).toHaveBeenCalledTimes(1);
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(savedArg).toHaveProperty("font");
     expect(savedArg).toHaveProperty("layouts");
     expect(savedArg).toHaveProperty("workspaces");
     expect(savedArg).toHaveProperty("docks");
+    expect(savedArg).toHaveProperty("profiles");
+    // font is now at profile level or profileDefaults, not root
+    expect(savedArg).toHaveProperty("profileDefaults");
   });
 
   it("includes dock state in saved settings", async () => {
@@ -66,14 +68,31 @@ describe("persistSession", () => {
     expect(savedArg.layouts).toHaveLength(1);
   });
 
-  it("includes settings store data", async () => {
-    useSettingsStore.getState().setFont({ face: "Fira Code", size: 18, weight: "normal" });
+  it("includes profileDefaults font in saved settings", async () => {
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "Fira Code", size: 18, weight: "normal" } });
 
     await persistSession();
 
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(savedArg.font.face).toBe("Fira Code");
-    expect(savedArg.font.size).toBe(18);
+    expect(savedArg.profileDefaults.font.face).toBe("Fira Code");
+    expect(savedArg.profileDefaults.font.size).toBe(18);
+  });
+
+  it("includes per-profile font override in saved settings", async () => {
+    useSettingsStore.getState().updateProfile(0, { font: { face: "JetBrains Mono", size: 16, weight: "bold" } });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].font.face).toBe("JetBrains Mono");
+    expect(savedArg.profiles[0].font.size).toBe(16);
+  });
+
+  it("does not include font in profile when no override set", async () => {
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].font).toBeUndefined();
   });
 
   it("preserves startupCommand in profiles", async () => {
