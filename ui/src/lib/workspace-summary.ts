@@ -18,6 +18,7 @@ export interface TerminalSummaryInfo {
   lastCommandAt: number | undefined;
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
+  hasUnreadNotification: boolean;
 }
 
 export interface WorkspaceSummary {
@@ -130,6 +131,9 @@ export function computeWorkspaceSummary(
       lastCommandAt: t.lastCommandAt,
       activity: t.activity,
       outputActive: t.outputActive ?? false,
+      hasUnreadNotification: notifications.some(
+        (n) => n.terminalId === t.id && n.readAt === null,
+      ),
     })),
   };
 }

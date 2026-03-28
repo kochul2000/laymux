@@ -136,4 +136,43 @@ describe("NotificationStore", () => {
     const notifs = useNotificationStore.getState().notifications;
     expect(notifs.map((n) => n.level)).toEqual(["info", "error", "warning", "success"]);
   });
+
+  it("hasUnreadForTerminal returns true when terminal has unread notifications", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-1",
+      message: "alert",
+    });
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p1")).toBe(true);
+  });
+
+  it("hasUnreadForTerminal returns false when terminal has no notifications", () => {
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p1")).toBe(false);
+  });
+
+  it("hasUnreadForTerminal returns false after notifications are read", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-1",
+      message: "alert",
+    });
+    useNotificationStore.getState().markWorkspaceAsRead("ws-1");
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p1")).toBe(false);
+  });
+
+  it("hasUnreadForTerminal is scoped to specific terminal", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-1",
+      message: "alert for p1",
+    });
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p2",
+      workspaceId: "ws-1",
+      message: "alert for p2",
+    });
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p1")).toBe(true);
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p2")).toBe(true);
+    expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p3")).toBe(false);
+  });
 });

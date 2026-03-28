@@ -222,6 +222,30 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
     expect(summary.terminalCount).toBe(2);
     expect(summary.terminalSummaries).toHaveLength(2);
   });
+
+  it("includes hasUnreadNotification in terminal summaries", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+      makeTerminal({ id: "t2", workspaceId: "ws-1", profile: "PS", label: "PS" }),
+    ];
+    const notifications: Notification[] = [
+      makeNotification({ id: "n1", workspaceId: "ws-1", terminalId: "t1", readAt: null }),
+      makeNotification({ id: "n2", workspaceId: "ws-1", terminalId: "t2", readAt: Date.now() }), // already read
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), notifications);
+    const t1Summary = summary.terminalSummaries.find((ts) => ts.id === "t1");
+    const t2Summary = summary.terminalSummaries.find((ts) => ts.id === "t2");
+    expect(t1Summary?.hasUnreadNotification).toBe(true);
+    expect(t2Summary?.hasUnreadNotification).toBe(false);
+  });
+
+  it("hasUnreadNotification is false when no notifications exist", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), []);
+    expect(summary.terminalSummaries[0].hasUnreadNotification).toBe(false);
+  });
 });
 
 describe("abbreviatePath", () => {
