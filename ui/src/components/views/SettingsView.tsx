@@ -528,9 +528,16 @@ const fallbackDefaults: ProfileDefaults = {
 
 function DefaultsSection() {
   const rawDefaults = useSettingsStore((s) => s.profileDefaults);
-  const profileDefaults = rawDefaults ?? fallbackDefaults;
+  const storeDefaults = rawDefaults ?? fallbackDefaults;
   const setProfileDefaults = useSettingsStore((s) => s.setProfileDefaults);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
+  const [draftDefaults, setDraftDefaults] = useDraft(
+    "profileDefaults",
+    storeDefaults,
+    (v) => setProfileDefaults(v as Partial<ProfileDefaults>),
+  );
+  const updateDefaults = (partial: Partial<ProfileDefaults>) =>
+    setDraftDefaults(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -540,14 +547,14 @@ function DefaultsSection() {
       </p>
 
       <AppearanceFields
-        data={profileDefaults}
-        onChange={(d) => setProfileDefaults(d as Partial<ProfileDefaults>)}
+        data={draftDefaults}
+        onChange={updateDefaults}
         colorSchemes={colorSchemes}
       />
 
       <AdvancedFields
-        data={profileDefaults}
-        onChange={(d) => setProfileDefaults(d as Partial<ProfileDefaults>)}
+        data={draftDefaults}
+        onChange={updateDefaults}
       />
     </div>
   );
@@ -1332,12 +1339,16 @@ interface SettingsDraftCtx {
   unregisterFlush: (id: string) => void;
   registerReset: (id: string, fn: FlushFn) => void;
   unregisterReset: (id: string) => void;
+  markDirty: () => void;
+  markClean: () => void;
 }
 const SettingsDraftContext = createContext<SettingsDraftCtx>({
   registerFlush: () => {},
   unregisterFlush: () => {},
   registerReset: () => {},
   unregisterReset: () => {},
+  markDirty: () => {},
+  markClean: () => {},
 });
 
 /** Hook for sections to register flush/reset callbacks. */
@@ -1353,7 +1364,12 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
   const storeRef = useRef(storeValue);
   storeRef.current = storeValue;
 
-  const { registerFlush, unregisterFlush, registerReset, unregisterReset } = useSettingsDraft();
+  const { registerFlush, unregisterFlush, registerReset, unregisterReset, markDirty } = useSettingsDraft();
+
+  const wrappedSetDraft: React.Dispatch<React.SetStateAction<T>> = useCallback((action) => {
+    setDraft(action);
+    markDirty();
+  }, [markDirty]);
 
   useEffect(() => {
     registerFlush(id, () => storeSetter(draftRef.current));
@@ -1361,7 +1377,7 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
     return () => { unregisterFlush(id); unregisterReset(id); };
   }, [id, registerFlush, unregisterFlush, registerReset, unregisterReset, storeSetter]);
 
-  return [draft, setDraft];
+  return [draft, wrappedSetDraft];
 }
 
 // -- Main SettingsView --
@@ -1406,6 +1422,7 @@ export function SettingsView() {
   // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
   const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
   const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const [dirty, setDirty] = useState(false);
   const registerFlush = useCallback((id: string, fn: FlushFn) => {
     flushMapRef.current.set(id, fn);
   }, []);
@@ -1418,11 +1435,14 @@ export function SettingsView() {
   const unregisterReset = useCallback((id: string) => {
     resetMapRef.current.delete(id);
   }, []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush, registerReset, unregisterReset }).current;
+  const markDirty = useCallback(() => setDirty(true), []);
+  const markClean = useCallback(() => setDirty(false), []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush, registerReset, unregisterReset, markDirty, markClean }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
+    setDirty(false);
     clearTimeout(saveTimerRef.current);
     persistSession()
       .then(() => {
@@ -1437,6 +1457,7 @@ export function SettingsView() {
 
   const handleDiscard = () => {
     for (const fn of resetMapRef.current.values()) fn();
+    setDirty(false);
   };
 
   const navBtnStyle = (id: string): React.CSSProperties => {
@@ -1609,14 +1630,16 @@ export function SettingsView() {
           <button
             data-testid="discard-settings-btn"
             onClick={handleDiscard}
+            disabled={!dirty}
             className="px-5 py-2 text-[13px] font-medium"
             style={{
               background: "transparent",
               color: "var(--text-secondary)",
               border: "1px solid var(--border)",
-              cursor: "pointer",
+              cursor: dirty ? "pointer" : "default",
               transition: "all 0.15s",
               borderRadius: 4,
+              opacity: dirty ? 1 : 0.4,
             }}
           >
             Discard changes
@@ -1624,14 +1647,16 @@ export function SettingsView() {
           <button
             data-testid="save-settings-btn"
             onClick={handleSave}
+            disabled={!dirty}
             className="px-8 py-2 text-[13px] font-medium"
             style={{
               background: saveLabel === "Saved!" ? "var(--green)" : saveLabel === "Error!" ? "var(--red)" : "var(--accent)",
               color: "var(--bg-base)",
               border: "none",
-              cursor: "pointer",
+              cursor: dirty ? "pointer" : "default",
               transition: "all 0.15s",
               borderRadius: 4,
+              opacity: dirty ? 1 : 0.4,
             }}
           >
             {saveLabel}

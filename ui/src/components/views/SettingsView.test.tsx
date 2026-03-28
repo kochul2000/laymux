@@ -359,6 +359,10 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
+    // Make a change to enable the Save button (dirty state)
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
@@ -376,6 +380,32 @@ describe("SettingsView", () => {
     // Content area has Appearance heading (h4) and Advanced heading (h4)
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Scrollback Lines")).toBeInTheDocument();
+  });
+
+  it("does NOT update profileDefaults cursor shape until Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const select = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+    await user.selectOptions(select, "filledBox");
+
+    expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("bar");
+    expect(select.value).toBe("filledBox");
+  });
+
+  it("updates profileDefaults cursor shape after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const select = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+    await user.selectOptions(select, "filledBox");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
+    expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("filledBox");
   });
 
   it("shows settings.json shortcut in sidebar", () => {
@@ -611,5 +641,59 @@ describe("SettingsView", () => {
     const toggleAfter = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
     expect(toggleAfter.checked).toBe(true);
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
+  });
+
+  // -- Dirty state (Save/Discard button enabled/disabled) --
+
+  it("save and discard buttons are disabled when no changes", () => {
+    render(<SettingsView />);
+
+    const saveBtn = screen.getByTestId("save-settings-btn") as HTMLButtonElement;
+    const discardBtn = screen.getByTestId("discard-settings-btn") as HTMLButtonElement;
+
+    expect(saveBtn.disabled).toBe(true);
+    expect(discardBtn.disabled).toBe(true);
+  });
+
+  it("save and discard buttons become enabled after a change", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
+    const saveBtn = screen.getByTestId("save-settings-btn") as HTMLButtonElement;
+    const discardBtn = screen.getByTestId("discard-settings-btn") as HTMLButtonElement;
+
+    expect(saveBtn.disabled).toBe(false);
+    expect(discardBtn.disabled).toBe(false);
+  });
+
+  it("buttons become disabled again after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
+    const saveBtn = screen.getByTestId("save-settings-btn") as HTMLButtonElement;
+    await user.click(saveBtn);
+
+    expect(saveBtn.disabled).toBe(true);
+    expect((screen.getByTestId("discard-settings-btn") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("buttons become disabled again after Discard", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
+    const discardBtn = screen.getByTestId("discard-settings-btn") as HTMLButtonElement;
+    await user.click(discardBtn);
+
+    expect(discardBtn.disabled).toBe(true);
+    expect((screen.getByTestId("save-settings-btn") as HTMLButtonElement).disabled).toBe(true);
   });
 });
