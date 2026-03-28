@@ -1,6 +1,6 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
-    ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding, Layout, LayoutPane,
+    ClaudeSettings, ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding, Layout, LayoutPane,
     Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
@@ -145,6 +145,7 @@ fn settings_round_trip_with_full_config() {
             },
         ],
         convenience: ConvenienceSettings::default(),
+        claude: ClaudeSettings::default(),
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -452,6 +453,7 @@ fn terminal_session_full_lifecycle() {
             rows: 24,
             sync_group: group.to_string(),
             env: vec![],
+            ..TerminalConfig::default()
         };
         let session = TerminalSession::new(id.to_string(), config);
 
@@ -566,6 +568,7 @@ fn terminal_session_with_custom_env_vars() {
             ("EMPTY_VAR".into(), "".into()),
             ("SPECIAL_CHARS".into(), "hello world!@#$%".into()),
         ],
+        ..TerminalConfig::default()
     };
 
     let session = TerminalSession::new("env-test".into(), config);
