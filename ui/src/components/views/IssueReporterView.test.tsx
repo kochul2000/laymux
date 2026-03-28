@@ -139,4 +139,68 @@ describe("IssueReporterView", () => {
       expect(screen.getByTestId("issue-submit")).not.toBeDisabled();
     });
   });
+
+  it("shows 'New Report' button after error for clearing form", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockRejectedValueOnce(new Error("Network error"));
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.type(screen.getByTestId("issue-body"), "Some body");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
+    });
+
+    // Clicking New Report should clear form
+    await user.click(screen.getByTestId("issue-new-report"));
+    expect(screen.getByTestId("issue-title")).toHaveValue("");
+    expect(screen.getByTestId("issue-body")).toHaveValue("");
+    expect(screen.getByText("Submit Issue")).toBeInTheDocument();
+  });
+
+  it("prevents double submission with rapid clicks", async () => {
+    const user = userEvent.setup();
+    let resolveSubmit: (value: string) => void;
+    mockInvoke.mockImplementation(
+      () => new Promise<string>((resolve) => { resolveSubmit = resolve; }),
+    );
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+
+    // Rapid double-click
+    const btn = screen.getByTestId("issue-submit");
+    await user.click(btn);
+    await user.click(btn);
+
+    // Should only invoke once despite two clicks
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+
+    // Resolve to clean up
+    resolveSubmit!("https://github.com/repo/issues/1");
+  });
+
+  it("awaits shell open and handles errors gracefully", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockShellOpen.mockRejectedValueOnce(new Error("shell open failed"));
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-link")).toBeInTheDocument();
+    });
+
+    // Click the link — should not throw even if shell open fails
+    await user.click(screen.getByTestId("issue-link"));
+
+    expect(mockShellOpen).toHaveBeenCalledWith("https://github.com/repo/issues/1");
+  });
 });

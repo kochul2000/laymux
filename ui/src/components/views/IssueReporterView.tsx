@@ -11,6 +11,7 @@ export function IssueReporterView() {
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     captureScreenshot();
@@ -28,7 +29,8 @@ export function IssueReporterView() {
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || state === "submitting" || state === "success") return;
+    if (!title.trim() || submittingRef.current || state === "success") return;
+    submittingRef.current = true;
     setState("submitting");
     setResultMsg("");
     try {
@@ -43,6 +45,8 @@ export function IssueReporterView() {
     } catch (e) {
       setState("error");
       setResultMsg(String(e));
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -183,7 +187,7 @@ export function IssueReporterView() {
           {state === "submitting" ? "Submitting..." : state === "success" ? "Submitted!" : "Submit Issue"}
         </button>
 
-        {state === "success" && (
+        {(state === "success" || state === "error") && (
           <button
             data-testid="issue-new-report"
             onClick={handleNewReport}
@@ -216,11 +220,15 @@ export function IssueReporterView() {
           href={resultMsg}
           onClick={async (e) => {
             e.preventDefault();
-            const { open } = await import("@tauri-apps/plugin-shell");
-            open(resultMsg);
+            try {
+              const { open } = await import("@tauri-apps/plugin-shell");
+              await open(resultMsg);
+            } catch {
+              window.open(resultMsg, "_blank");
+            }
           }}
           className="mt-2 truncate text-[11px] underline"
-          style={{ color: "var(--accent)", cursor: "pointer", userSelect: "all" }}
+          style={{ color: "var(--accent)", cursor: "pointer" }}
           title={resultMsg}
         >
           {resultMsg}
