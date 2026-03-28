@@ -198,9 +198,20 @@ describe("IssueReporterView", () => {
       expect(screen.getByTestId("issue-link")).toBeInTheDocument();
     });
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const windowOpenSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
     // Click the link — should not throw even if shell open fails
     await user.click(screen.getByTestId("issue-link"));
 
     expect(mockShellOpen).toHaveBeenCalledWith("https://github.com/repo/issues/1");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("shell.open failed"),
+      expect.any(Error),
+    );
+    expect(windowOpenSpy).toHaveBeenCalledWith("https://github.com/repo/issues/1", "_blank");
+
+    warnSpy.mockRestore();
+    windowOpenSpy.mockRestore();
   });
 });

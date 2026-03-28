@@ -223,7 +223,8 @@ export function IssueReporterView() {
             try {
               const { open } = await import("@tauri-apps/plugin-shell");
               await open(resultMsg);
-            } catch {
+            } catch (e) {
+              console.warn("shell.open failed, falling back to window.open:", e);
               window.open(resultMsg, "_blank");
             }
           }}
