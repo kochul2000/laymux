@@ -138,26 +138,17 @@ function useMonospacedFonts() {
 function StartupSection() {
   const storeFont = useSettingsStore((s) => s.font);
   const setFont = useSettingsStore((s) => s.setFont);
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const storeDefaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
   const profiles = useSettingsStore((s) => s.profiles);
-  const appThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
+  const storeAppThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
   const setAppTheme = useSettingsStore((s) => s.setAppTheme);
   const monoFonts = useMonospacedFonts();
 
-  // Draft font state — only committed to store on Save
-  const [draftFont, setDraftFont] = useState({ ...storeFont });
-  const draftFontRef = useRef(draftFont);
-  draftFontRef.current = draftFont;
-
-  // Register flush callback so Save commits draft to store
-  const { registerFlush, unregisterFlush } = useSettingsDraft();
-  useEffect(() => {
-    registerFlush("startup-font", () => {
-      setFont(draftFontRef.current);
-    });
-    return () => unregisterFlush("startup-font");
-  }, [registerFlush, unregisterFlush, setFont]);
+  // Draft state — only committed to store on Save
+  const [draftFont, setDraftFont] = useDraft("startup-font", storeFont, setFont);
+  const [draftAppTheme, setDraftAppTheme] = useDraft("startup-appTheme", storeAppThemeId, setAppTheme);
+  const [draftDefaultProfile, setDraftDefaultProfile] = useDraft("startup-defaultProfile", storeDefaultProfile, setDefaultProfile);
 
   return (
     <div>
@@ -177,8 +168,8 @@ function StartupSection() {
             </div>
             <FocusSelect
               data-testid="app-theme-select"
-              value={appThemeId}
-              onChange={(e) => setAppTheme(e.target.value)}
+              value={draftAppTheme}
+              onChange={(e) => setDraftAppTheme(e.target.value)}
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
               {builtinAppThemes.map((t) => (
@@ -203,8 +194,8 @@ function StartupSection() {
             </div>
             <FocusSelect
               data-testid="default-profile-select"
-              value={defaultProfile}
-              onChange={(e) => setDefaultProfile(e.target.value)}
+              value={draftDefaultProfile}
+              onChange={(e) => setDraftDefaultProfile(e.target.value)}
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
               {profiles
@@ -886,8 +877,10 @@ function ColorSchemesSection() {
 // -- Section: Convenience --
 
 function ConvenienceSection() {
-  const convenience = useSettingsStore((s) => s.convenience);
+  const storeConvenience = useSettingsStore((s) => s.convenience);
   const setConvenience = useSettingsStore((s) => s.setConvenience);
+  const [convenience, setDraftConvenience] = useDraft("convenience", storeConvenience, (v) => setConvenience(v));
+  const updateConvenience = (partial: Partial<typeof convenience>) => setDraftConvenience(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -908,7 +901,7 @@ function ConvenienceSection() {
                 data-testid="smart-paste-toggle"
                 type="checkbox"
                 checked={convenience.smartPaste}
-                onChange={(e) => setConvenience({ smartPaste: e.target.checked })}
+                onChange={(e) => updateConvenience({ smartPaste: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.smartPaste ? "Enabled" : "Disabled"}
@@ -931,7 +924,7 @@ function ConvenienceSection() {
                 data-testid="copy-on-select-toggle"
                 type="checkbox"
                 checked={convenience.copyOnSelect}
-                onChange={(e) => setConvenience({ copyOnSelect: e.target.checked })}
+                onChange={(e) => updateConvenience({ copyOnSelect: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.copyOnSelect ? "Enabled" : "Disabled"}
@@ -954,7 +947,7 @@ function ConvenienceSection() {
               className={inputCls}
               placeholder="(default: %APPDATA%\laymux\paste-images)"
               value={convenience.pasteImageDir}
-              onChange={(e) => setConvenience({ pasteImageDir: e.target.value })}
+              onChange={(e) => updateConvenience({ pasteImageDir: e.target.value })}
             />
           </div>
         </div>
@@ -977,7 +970,7 @@ function ConvenienceSection() {
               className={inputCls}
               style={{ width: 70 }}
               value={convenience.hoverIdleSeconds}
-              onChange={(e) => setConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => updateConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>초</span>
           </div>
@@ -996,7 +989,7 @@ function ConvenienceSection() {
               data-testid="notification-dismiss-select"
               className={inputCls}
               value={convenience.notificationDismiss}
-              onChange={(e) => setConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
+              onChange={(e) => updateConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
             >
               <option value="workspace">워크스페이스 선택 시 자동 해제</option>
               <option value="paneFocus">Pane 포커스 시 자동 해제</option>
@@ -1012,8 +1005,10 @@ function ConvenienceSection() {
 // -- Section: Claude Code --
 
 function ClaudeSection() {
-  const claude = useSettingsStore((s) => s.claude);
+  const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
+  const [claude, setDraftClaude] = useDraft("claude", storeClaude, (v) => setClaude(v));
+  const updateClaude = (partial: Partial<typeof claude>) => setDraftClaude(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -1033,7 +1028,7 @@ function ClaudeSection() {
               data-testid="claude-sync-cwd-select"
               className={inputCls}
               value={claude.syncCwd}
-              onChange={(e) => setClaude({ syncCwd: e.target.value as "skip" | "command" })}
+              onChange={(e) => updateClaude({ syncCwd: e.target.value as "skip" | "command" })}
             >
               <option value="skip">Skip (전파하지 않음)</option>
               <option value="command">Command (유휴 시 ! cd 전송)</option>
@@ -1329,21 +1324,44 @@ function KeybindingsSection() {
 }
 
 // -- Draft flush context --
-// Sections register flush callbacks that SettingsView invokes on Save.
+// Sections register flush/reset callbacks that SettingsView invokes on Save/Discard.
 
 type FlushFn = () => void;
 interface SettingsDraftCtx {
   registerFlush: (id: string, fn: FlushFn) => void;
   unregisterFlush: (id: string) => void;
+  registerReset: (id: string, fn: FlushFn) => void;
+  unregisterReset: (id: string) => void;
 }
 const SettingsDraftContext = createContext<SettingsDraftCtx>({
   registerFlush: () => {},
   unregisterFlush: () => {},
+  registerReset: () => {},
+  unregisterReset: () => {},
 });
 
-/** Hook for sections to register a flush callback that runs on Save. */
+/** Hook for sections to register flush/reset callbacks. */
 function useSettingsDraft() {
   return useContext(SettingsDraftContext);
+}
+
+/** Hook: local draft state that flushes on Save and resets on Discard. */
+function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [draft, setDraft] = useState<T>(storeValue);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const storeRef = useRef(storeValue);
+  storeRef.current = storeValue;
+
+  const { registerFlush, unregisterFlush, registerReset, unregisterReset } = useSettingsDraft();
+
+  useEffect(() => {
+    registerFlush(id, () => storeSetter(draftRef.current));
+    registerReset(id, () => setDraft(storeRef.current));
+    return () => { unregisterFlush(id); unregisterReset(id); };
+  }, [id, registerFlush, unregisterFlush, registerReset, unregisterReset, storeSetter]);
+
+  return [draft, setDraft];
 }
 
 // -- Main SettingsView --
@@ -1385,15 +1403,22 @@ export function SettingsView() {
   const [navHover, setNavHover] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Draft flush registry — sections register callbacks invoked on Save
+  // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
   const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
   const registerFlush = useCallback((id: string, fn: FlushFn) => {
     flushMapRef.current.set(id, fn);
   }, []);
   const unregisterFlush = useCallback((id: string) => {
     flushMapRef.current.delete(id);
   }, []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush }).current;
+  const registerReset = useCallback((id: string, fn: FlushFn) => {
+    resetMapRef.current.set(id, fn);
+  }, []);
+  const unregisterReset = useCallback((id: string) => {
+    resetMapRef.current.delete(id);
+  }, []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush, registerReset, unregisterReset }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
@@ -1408,6 +1433,10 @@ export function SettingsView() {
         setSaveLabel("Error!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 2000);
       });
+  };
+
+  const handleDiscard = () => {
+    for (const fn of resetMapRef.current.values()) fn();
   };
 
   const navBtnStyle = (id: string): React.CSSProperties => {
@@ -1574,13 +1603,28 @@ export function SettingsView() {
 
         {/* Sticky save bar — always visible at bottom */}
         <div
-          className="sticky bottom-0 flex items-center justify-end px-4 py-3"
+          className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
           style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
         >
           <button
+            data-testid="discard-settings-btn"
+            onClick={handleDiscard}
+            className="px-5 py-2 text-[13px] font-medium"
+            style={{
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+              cursor: "pointer",
+              transition: "all 0.15s",
+              borderRadius: 4,
+            }}
+          >
+            Discard changes
+          </button>
+          <button
             data-testid="save-settings-btn"
             onClick={handleSave}
-            className="mx-1 px-8 py-2 text-[13px] font-medium"
+            className="px-8 py-2 text-[13px] font-medium"
             style={{
               background: saveLabel === "Saved!" ? "var(--green)" : saveLabel === "Error!" ? "var(--red)" : "var(--accent)",
               color: "var(--bg-base)",

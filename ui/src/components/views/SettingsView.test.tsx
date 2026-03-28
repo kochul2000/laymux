@@ -131,6 +131,58 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().font.weight).toBe("bold");
   });
 
+  // -- App Theme draft --
+
+  it("does NOT update appTheme in store until Save is clicked", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
+    expect(useSettingsStore.getState().appThemeId).toBe("catppuccin-mocha");
+    expect(select.value).toBe("dracula");
+  });
+
+  it("updates appTheme in store only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
+    expect(useSettingsStore.getState().appThemeId).toBe("dracula");
+  });
+
+  // -- Default Profile draft --
+
+  it("does NOT update defaultProfile in store until Save is clicked", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("default-profile-select") as HTMLSelectElement;
+    await user.selectOptions(select, "WSL");
+
+    expect(useSettingsStore.getState().defaultProfile).toBe("PowerShell");
+    expect(select.value).toBe("WSL");
+  });
+
+  it("updates defaultProfile in store only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("default-profile-select") as HTMLSelectElement;
+    await user.selectOptions(select, "WSL");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
+    expect(useSettingsStore.getState().defaultProfile).toBe("WSL");
+  });
+
   it("shows default profile dropdown", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("default-profile-select")).toBeInTheDocument();
@@ -369,24 +421,54 @@ describe("SettingsView", () => {
     expect(toggle.checked).toBe(true);
   });
 
-  it("toggling smart paste updates store", async () => {
+  it("does NOT update smart paste in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-convenience"));
     const toggle = screen.getByTestId("smart-paste-toggle");
     await user.click(toggle);
+
+    // Store unchanged
+    expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
+  });
+
+  it("toggling smart paste updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("smart-paste-toggle");
+    await user.click(toggle);
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
   });
 
-  it("toggling copy on select updates store", async () => {
+  it("does NOT update copy on select in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-convenience"));
     const toggle = screen.getByTestId("copy-on-select-toggle");
-    // Default is true, clicking should set to false
     await user.click(toggle);
+
+    expect(useSettingsStore.getState().convenience.copyOnSelect).toBe(true);
+  });
+
+  it("toggling copy on select updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("copy-on-select-toggle");
+    await user.click(toggle);
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
     expect(useSettingsStore.getState().convenience.copyOnSelect).toBe(false);
   });
 
@@ -398,7 +480,7 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("paste-image-dir-input")).toBeInTheDocument();
   });
 
-  it("paste image dir input updates store", async () => {
+  it("does NOT update paste image dir in store until Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
@@ -406,6 +488,22 @@ describe("SettingsView", () => {
     const input = screen.getByTestId("paste-image-dir-input") as HTMLInputElement;
     await user.clear(input);
     await user.type(input, "C:\\my\\dir");
+
+    expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("");
+  });
+
+  it("paste image dir input updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const input = screen.getByTestId("paste-image-dir-input") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "C:\\my\\dir");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
     expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
   });
 
@@ -434,13 +532,84 @@ describe("SettingsView", () => {
     expect(select.value).toBe("skip");
   });
 
-  it("changing claude sync cwd updates store", async () => {
+  it("does NOT update claude sync cwd in store until Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-claude"));
     const select = screen.getByTestId("claude-sync-cwd-select");
     await user.selectOptions(select, "command");
+
+    expect(useSettingsStore.getState().claude.syncCwd).toBe("skip");
+  });
+
+  it("changing claude sync cwd updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const select = screen.getByTestId("claude-sync-cwd-select");
+    await user.selectOptions(select, "command");
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+  });
+
+  // -- Discard --
+
+  it("has a discard button", () => {
+    render(<SettingsView />);
+    expect(screen.getByTestId("discard-settings-btn")).toBeInTheDocument();
+  });
+
+  it("discard reverts font draft to store value", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
+    await user.selectOptions(select, "Fira Code");
+    expect(select.value).toBe("Fira Code");
+
+    const discardBtn = screen.getByTestId("discard-settings-btn");
+    await user.click(discardBtn);
+
+    expect(select.value).toBe("Cascadia Mono");
+    expect(useSettingsStore.getState().font.face).toBe("Cascadia Mono");
+  });
+
+  it("discard reverts appTheme draft to store value", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+    await user.selectOptions(select, "dracula");
+    expect(select.value).toBe("dracula");
+
+    const discardBtn = screen.getByTestId("discard-settings-btn");
+    await user.click(discardBtn);
+
+    expect(select.value).toBe("catppuccin-mocha");
+    expect(useSettingsStore.getState().appThemeId).toBe("catppuccin-mocha");
+  });
+
+  it("discard reverts convenience draft to store value", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+    await user.click(toggle);
+    expect(toggle.checked).toBe(false);
+
+    const discardBtn = screen.getByTestId("discard-settings-btn");
+    await user.click(discardBtn);
+
+    // Need to navigate back to convenience since discard may re-render
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggleAfter = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+    expect(toggleAfter.checked).toBe(true);
+    expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
   });
 });
