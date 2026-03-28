@@ -245,12 +245,39 @@ describe("settings-store", () => {
     expect(convenience.pasteImageDir).toBe("");
   });
 
-  it("loadFromSettings migrates claude key to convenience", () => {
+  // -- Claude settings --
+
+  it("has default claude settings", () => {
+    const { claude } = useSettingsStore.getState();
+    expect(claude.syncCwd).toBe("skip");
+  });
+
+  it("setClaude updates sync cwd mode", () => {
+    useSettingsStore.getState().setClaude({ syncCwd: "command" });
+    expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+  });
+
+  it("loadFromSettings loads claude settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      claude: { smartPaste: false, pasteImageDir: "/old/path" },
-    } as any);
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(false);
-    expect(convenience.pasteImageDir).toBe("/old/path");
+      claude: { syncCwd: "command" },
+    });
+    const { claude } = useSettingsStore.getState();
+    expect(claude.syncCwd).toBe("command");
+  });
+
+  it("loadFromSettings fills missing claude fields with defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      claude: {} as any,
+    });
+    const { claude } = useSettingsStore.getState();
+    expect(claude.syncCwd).toBe("skip");
+  });
+
+  it("loadFromSettings without claude preserves defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    const { claude } = useSettingsStore.getState();
+    expect(claude.syncCwd).toBe("skip");
   });
 });

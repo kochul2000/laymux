@@ -362,4 +362,39 @@ describe("SettingsView", () => {
     await user.type(input, "C:\\my\\dir");
     expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
   });
+
+  // -- Claude Code section --
+
+  it("shows Claude Code nav button", () => {
+    render(<SettingsView />);
+    expect(screen.getByTestId("nav-claude")).toBeInTheDocument();
+  });
+
+  it("renders Claude Code section with sync cwd dropdown", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("claude-sync-cwd-select")).toBeInTheDocument();
+  });
+
+  it("claude sync cwd defaults to skip", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const select = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+    expect(select.value).toBe("skip");
+  });
+
+  it("changing claude sync cwd updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const select = screen.getByTestId("claude-sync-cwd-select");
+    await user.selectOptions(select, "command");
+    expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+  });
 });

@@ -12,6 +12,11 @@ use crate::terminal::{TerminalActivity, TerminalConfig, TerminalSession, Termina
 /// How long a propagation flag remains valid before expiring.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Number of bytes to scan from the end of a terminal output buffer when detecting
+/// activity state or Claude Code presence. 16KB covers terminal title sequences
+/// even when OSC 133 markers have scrolled out.
+const ACTIVITY_SCAN_BYTES: usize = 16384;
+
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Laymux.", name)
@@ -371,14 +376,15 @@ fn handle_lx_message_dispatch(
             let receiving_targets = filter_targets_cwd_receive(&state, &all_targets);
 
             // Skip targets that have a command running (e.g., interactive apps like Claude Code)
-            let idle_targets = filter_targets_not_busy(&state, &receiving_targets);
+            let settings = crate::settings::load_settings();
+            let (idle_targets, claude_ids) = filter_targets_not_busy(&state, &receiving_targets, &settings.claude.sync_cwd);
 
             // Skip targets that are already at the same CWD
             let target_terminals = filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
 
             // Write cd command to target terminals (with propagation flag + path conversion)
             if !target_terminals.is_empty() {
-                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path)?;
+                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path, &claude_ids)?;
             }
 
             // Mark targets so their OSC echo won't re-propagate
@@ -659,11 +665,17 @@ fn write_to_group_terminals(
 /// Write a cd command to target terminals with cross-profile path conversion.
 /// Converts the path for each target's profile (e.g., WSL→PowerShell: /mnt/c/... → C:\...).
 /// Uses WSL distro name for UNC path conversion when needed (e.g., /home/... → \\wsl.localhost\distro\...).
+///
+/// Claude Code terminals in command mode get `! cd "/path"\n` instead of the normal
+/// propagated cd command, because Claude Code accepts `! <command>` for inline shell execution.
+/// The `claude_ids` set is produced by `filter_targets_not_busy` so we avoid re-scanning
+/// the output buffers.
 fn write_cd_to_group_terminals(
     state: &AppState,
     target_ids: &[String],
     source_id: &str,
     path: &str,
+    claude_ids: &std::collections::HashSet<String>,
 ) -> Result<(), String> {
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = find_wsl_distro(state, source_id);
@@ -695,16 +707,31 @@ fn write_cd_to_group_terminals(
                 None => continue,
             };
 
-            let cd_cmd = build_cd_command(&converted, profile);
-            let propagated_cmd = match profile {
-                "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cd_cmd}"),
-                _ => format!("LX_PROPAGATED=1 {cd_cmd}"),
-            };
-            let _ = handle.write(propagated_cmd.as_bytes());
+            let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(id));
+            let _ = handle.write(cmd.as_bytes());
         }
     }
 
     Ok(())
+}
+
+/// Build the command string to write to a terminal for sync-cwd.
+///
+/// Claude Code terminals get `! cd '/path'\n` (single-quoted, escaped).
+/// Normal terminals get `LX_PROPAGATED=1 cd '/path'\n` (or PowerShell equivalent).
+fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -> String {
+    if is_claude {
+        // Single-quote the path so $, ", backticks, etc. are treated literally.
+        // Escape embedded single quotes with the '\'' trick.
+        let escaped = converted_path.replace('\'', "'\\''");
+        format!("! cd '{escaped}'\n")
+    } else {
+        let cd_cmd = build_cd_command(converted_path, profile);
+        match profile {
+            "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cd_cmd}"),
+            _ => format!("LX_PROPAGATED=1 {cd_cmd}"),
+        }
+    }
 }
 
 /// Checks whether a font is monospace by reading the `post` table's `isFixedPitch` field.
@@ -1028,15 +1055,84 @@ fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<Strin
 
 /// This is more reliable than the async `command_running` flag because it
 /// reads from the actual terminal output (ground truth), avoiding race conditions.
-fn filter_targets_not_busy(state: &AppState, targets: &[String]) -> Vec<String> {
+///
+/// Claude Code terminals are partitioned out and handled separately based on
+/// the `claude.syncCwd` setting (skip or command mode).
+///
+/// Returns `(idle_targets, claude_ids)` — the caller passes `claude_ids` to
+/// `write_cd_to_group_terminals` so it can format the command differently
+/// without re-scanning the output buffers.
+fn filter_targets_not_busy(
+    state: &AppState,
+    targets: &[String],
+    claude_mode: &crate::settings::ClaudeSyncCwdMode,
+) -> (Vec<String>, std::collections::HashSet<String>) {
+    let mut claude_ids = std::collections::HashSet::new();
+
     if let Ok(buffers) = state.output_buffers.lock() {
-        targets
-            .iter()
-            .filter(|id| is_terminal_at_prompt_from_buffer(buffers.get(id.as_str())))
-            .cloned()
-            .collect()
+        let mut result = Vec::new();
+        for id in targets {
+            let buf = buffers.get(id.as_str());
+            if is_claude_terminal_from_buffer(buf) {
+                // Handle Claude Code terminal based on settings
+                match claude_mode {
+                    crate::settings::ClaudeSyncCwdMode::Skip => {
+                        // Don't propagate cd to Claude terminals
+                        continue;
+                    }
+                    crate::settings::ClaudeSyncCwdMode::Command => {
+                        // Only include if Claude is idle (✳ prefix in title)
+                        if is_claude_idle_from_buffer(buf) {
+                            claude_ids.insert(id.clone());
+                            result.push(id.clone());
+                        }
+                    }
+                }
+            } else if is_terminal_at_prompt_from_buffer(buf) {
+                result.push(id.clone());
+            }
+        }
+        (result, claude_ids)
     } else {
-        targets.to_vec()
+        (targets.to_vec(), claude_ids)
+    }
+}
+
+/// Check if a terminal is running Claude Code by examining its output buffer title.
+fn is_claude_terminal_from_buffer(
+    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
+) -> bool {
+    let Some(buf) = buffer else {
+        return false;
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return false;
+    }
+    if let Some(title) = extract_last_terminal_title(&recent) {
+        title.contains("Claude Code")
+    } else {
+        false
+    }
+}
+
+/// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
+/// Claude Code sets the terminal title with ✳ when idle and spinner chars when working.
+fn is_claude_idle_from_buffer(
+    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
+) -> bool {
+    let Some(buf) = buffer else {
+        return false;
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return false;
+    }
+    if let Some(title) = extract_last_terminal_title(&recent) {
+        // ✳ is U+2733, encoded as \xe2\x9c\xb3 in UTF-8
+        title.starts_with('\u{2733}')
+    } else {
+        false
     }
 }
 
@@ -1048,7 +1144,7 @@ fn is_terminal_at_prompt_from_buffer(
     let Some(buf) = buffer else {
         return true; // Unknown terminal → assume at prompt
     };
-    let recent = buf.recent_bytes(8192); // Check last 8KB
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return true; // No output yet → assume at prompt
     }
@@ -1087,25 +1183,31 @@ fn find_last_osc_133(data: &[u8], param: &[u8]) -> Option<usize> {
 
 /// Detect the activity state of a terminal from its output buffer.
 /// Returns Shell (at prompt), Running (command executing), or InteractiveApp (TUI app).
+///
+/// IMPORTANT: Check interactive app title BEFORE OSC 133 markers.
+/// When long-running apps like Claude Code run, the preexec marker (OSC 133;C) can scroll
+/// out of the 8KB buffer, causing `is_terminal_at_prompt_from_buffer` to wrongly return true.
+/// Checking the terminal title first prevents this misdetection.
 pub fn detect_terminal_activity(
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
 ) -> TerminalActivity {
     let Some(buf) = buffer else {
         return TerminalActivity::Shell;
     };
-    let recent = buf.recent_bytes(16384);
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
         return TerminalActivity::Shell;
+    }
+
+    // Check terminal title FIRST — interactive apps set their title even when
+    // OSC 133 markers have scrolled out of the buffer.
+    if let Some(name) = detect_interactive_app(&recent) {
+        return TerminalActivity::InteractiveApp { name };
     }
 
     let at_prompt = is_terminal_at_prompt_from_buffer(Some(buf));
     if at_prompt {
         return TerminalActivity::Shell;
-    }
-
-    // Command is running — check terminal title for known interactive apps
-    if let Some(name) = detect_interactive_app(&recent) {
-        return TerminalActivity::InteractiveApp { name };
     }
 
     TerminalActivity::Running
@@ -1819,17 +1921,18 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into(), "t3".into()];
-        let filtered = filter_targets_not_busy(&state, &targets);
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert!(filtered.contains(&"t1".to_string()), "t1 at prompt");
         assert!(!filtered.contains(&"t2".to_string()), "t2 is busy, should be excluded");
         assert!(filtered.contains(&"t3".to_string()), "t3 no output, assume at prompt");
+        assert!(claude_ids.is_empty(), "no Claude terminals in this test");
     }
 
     #[test]
     fn filter_targets_not_busy_includes_unknown_terminals() {
         let state = AppState::new();
         let targets = vec!["unknown".into()];
-        let filtered = filter_targets_not_busy(&state, &targets);
+        let (filtered, _) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert_eq!(filtered, vec!["unknown"]);
     }
 
@@ -1891,7 +1994,7 @@ mod tests {
         let all_targets = resolve_target_terminals(&state, "t1", "g1", false, None).unwrap();
         assert_eq!(all_targets, vec!["t2", "t3"]);
 
-        let idle_targets = filter_targets_not_busy(&state, &all_targets);
+        let (idle_targets, _) = filter_targets_not_busy(&state, &all_targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert_eq!(idle_targets, vec!["t2"]);
     }
 
@@ -1998,6 +2101,170 @@ mod tests {
         let state_info = detect_terminal_state(Some(&buf));
         assert!(!state_info.output_active, "10s old output should not be active");
         assert!(state_info.last_output_ms_ago >= 9000);
+    }
+
+    // --- Claude Code detection tests ---
+
+    #[test]
+    fn is_claude_terminal_detects_claude_from_title() {
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+        assert!(is_claude_terminal_from_buffer(Some(&buf)));
+    }
+
+    #[test]
+    fn is_claude_terminal_false_for_normal_terminal() {
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;bash\x07");
+        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+    }
+
+    #[test]
+    fn is_claude_terminal_false_for_no_buffer() {
+        assert!(!is_claude_terminal_from_buffer(None));
+    }
+
+    #[test]
+    fn is_claude_terminal_false_for_empty_buffer() {
+        let buf = crate::output_buffer::TerminalOutputBuffer::default();
+        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+    }
+
+    #[test]
+    fn is_claude_idle_detects_idle_prefix() {
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // ✳ (U+2733) prefix = idle
+        buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+        assert!(is_claude_idle_from_buffer(Some(&buf)));
+    }
+
+    #[test]
+    fn is_claude_idle_false_when_working() {
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // ✶ (U+2736) prefix = working/spinner
+        buf.push(b"\x1b]0;\xe2\x9c\xb6 Claude Code\x07");
+        assert!(!is_claude_idle_from_buffer(Some(&buf)));
+    }
+
+    #[test]
+    fn is_claude_idle_false_for_no_buffer() {
+        assert!(!is_claude_idle_from_buffer(None));
+    }
+
+    #[test]
+    fn detect_activity_claude_when_osc133_markers_scrolled_out() {
+        // Bug fix test: when Claude runs long, OSC 133;C scrolls out of buffer.
+        // Without title, there are no OSC 133 markers → would wrongly return Shell.
+        // With fix: title check happens first → correctly returns InteractiveApp.
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // Only a title set, no OSC 133 markers at all (simulating they scrolled out)
+        buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output here");
+        assert_eq!(
+            detect_terminal_activity(Some(&buf)),
+            TerminalActivity::InteractiveApp { name: "Claude Code".to_string() }
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_claude_in_skip_mode() {
+        // Default settings: claude.syncCwd = "skip"
+        // Claude terminals should be excluded even if they appear idle
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal at prompt
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: Claude Code terminal (idle)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]133;D;0\x07\x1b]133;C\x07\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        // In skip mode (default), Claude terminal t2 should be excluded
+        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
+        assert!(claude_ids.is_empty(), "skip mode should not collect claude_ids");
+        assert!(!filtered.contains(&"t2".to_string()), "Claude terminal should be skipped");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_command_mode_includes_idle_claude() {
+        // Command mode: idle Claude terminal should be included with claude_ids
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal at prompt
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: Claude Code terminal (idle — ✳ prefix)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]133;D;0\x07\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
+        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
+        assert!(filtered.contains(&"t2".to_string()), "idle Claude should be included in command mode");
+        assert!(claude_ids.contains("t2"), "idle Claude should be in claude_ids");
+        assert!(!claude_ids.contains("t1"), "normal terminal should not be in claude_ids");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_command_mode_excludes_working_claude() {
+        // Command mode: working Claude terminal (✶ spinner) should be excluded
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: Claude Code terminal (working — ✶ prefix)
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]0;\xe2\x9c\xb6 Claude Code\x07");
+            buffers.insert("t1".into(), buf1);
+        }
+
+        let targets = vec!["t1".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
+        assert!(filtered.is_empty(), "working Claude should be excluded even in command mode");
+        assert!(claude_ids.is_empty(), "working Claude should not be in claude_ids");
+    }
+
+    // --- build_sync_cd_command tests ---
+
+    #[test]
+    fn build_sync_cd_command_claude_uses_bang_cd_single_quoted() {
+        let cmd = build_sync_cd_command("/home/user/project", "WSL", true);
+        assert_eq!(cmd, "! cd '/home/user/project'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_claude_escapes_single_quotes_in_path() {
+        let cmd = build_sync_cd_command("/home/user/it's a dir", "WSL", true);
+        assert_eq!(cmd, "! cd '/home/user/it'\\''s a dir'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_claude_safe_with_dollar_and_backtick() {
+        let cmd = build_sync_cd_command("/home/$USER/`test`", "WSL", true);
+        // Single quotes prevent shell expansion of $ and backticks
+        assert_eq!(cmd, "! cd '/home/$USER/`test`'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_normal_wsl_uses_propagated_cd() {
+        let cmd = build_sync_cd_command("/home/user/project", "WSL", false);
+        assert!(cmd.starts_with("LX_PROPAGATED=1 "), "WSL should use LX_PROPAGATED=1 prefix");
+        assert!(cmd.contains("cd "), "should contain cd command");
+    }
+
+    #[test]
+    fn build_sync_cd_command_normal_powershell_uses_env_propagated() {
+        let cmd = build_sync_cd_command("C:\\Users\\test", "PowerShell", false);
+        assert!(cmd.starts_with("$env:LX_PROPAGATED='1';"), "PowerShell should use $env: prefix");
+        assert!(cmd.contains("cd "), "should contain cd command");
     }
 
     // --- Cross-profile path conversion tests ---

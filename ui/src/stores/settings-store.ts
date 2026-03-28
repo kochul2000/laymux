@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ClaudeSyncCwdMode, ClaudeSettings } from "../lib/tauri-api";
 
 export interface FontSettings {
   face: string;
@@ -50,6 +51,7 @@ export interface ConvenienceSettings {
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
 }
+
 
 export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
@@ -157,12 +159,14 @@ interface SettingsState {
   viewOrder: string[];
   appThemeId: string;
   convenience: ConvenienceSettings;
+  claude: ClaudeSettings;
 
   setFont: (font: FontSettings) => void;
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppTheme: (themeId: string) => void;
   setConvenience: (data: Partial<ConvenienceSettings>) => void;
+  setClaude: (data: Partial<ClaudeSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   addProfile: (profile: Profile) => void;
   removeProfile: (index: number) => void;
@@ -173,7 +177,7 @@ interface SettingsState {
   addKeybinding: (keybinding: Keybinding) => void;
   removeKeybinding: (index: number) => void;
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "font" | "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience"> & { claude?: ConvenienceSettings }>) => void;
+  loadFromSettings: (data: Partial<Pick<SettingsState, "font" | "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">>) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
@@ -368,6 +372,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
   convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
+  claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setFont: (font) => set({ font }),
 
@@ -376,6 +381,11 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   setConvenience: (data) =>
     set((state) => ({
       convenience: { ...state.convenience, ...data },
+    })),
+
+  setClaude: (data) =>
+    set((state) => ({
+      claude: { ...state.claude, ...data },
     })),
 
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
@@ -456,10 +466,13 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       const kept = builtinColorSchemes.filter((b) => !userNames.has(b.name));
       return [...kept, ...loadedSchemes];
     })() : undefined;
-    // Ensure convenience settings have all fields (backwards compat, also accepts "claude" alias)
-    const convSource = data.convenience ?? (data as { claude?: ConvenienceSettings }).claude;
-    const convenience = convSource
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(convSource as Partial<ConvenienceSettings>) }
+    // Ensure convenience settings have all fields (backwards compat)
+    const convenience = data.convenience
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      : undefined;
+    // Ensure claude settings have all fields (backwards compat)
+    const claude = data.claude
+      ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
 
     set((state) => ({
@@ -470,6 +483,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
+      ...(claude ? { claude } : {}),
     }));
   },
 }));

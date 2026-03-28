@@ -230,6 +230,38 @@ pub struct Workspace {
     pub panes: Vec<WorkspacePane>,
 }
 
+/// Claude Code sync-cwd propagation mode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClaudeSyncCwdMode {
+    /// Don't propagate cd when Claude Code is detected (default).
+    Skip,
+    /// When Claude Code is idle, send `! cd /path` format.
+    Command,
+}
+
+impl Default for ClaudeSyncCwdMode {
+    fn default() -> Self {
+        Self::Skip
+    }
+}
+
+/// Claude Code integration settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettings {
+    #[serde(default)]
+    pub sync_cwd: ClaudeSyncCwdMode,
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self {
+            sync_cwd: ClaudeSyncCwdMode::default(),
+        }
+    }
+}
+
 /// Convenience feature settings (smart paste, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -320,8 +352,10 @@ pub struct Settings {
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
     pub docks: Vec<DockSetting>,
-    #[serde(default, alias = "claude")]
+    #[serde(default)]
     pub convenience: ConvenienceSettings,
+    #[serde(default)]
+    pub claude: ClaudeSettings,
 }
 
 fn default_profile() -> String {
@@ -384,6 +418,7 @@ impl Default for Settings {
                 },
             ],
             convenience: ConvenienceSettings::default(),
+            claude: ClaudeSettings::default(),
         }
     }
 }
@@ -664,12 +699,41 @@ mod tests {
     }
 
     #[test]
-    fn convenience_settings_claude_alias() {
-        // Old settings with "claude" key should still work via serde alias
-        let json = r#"{"claude": {"smartPaste": false, "pasteImageDir": "/tmp/img"}}"#;
+    fn claude_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.claude.sync_cwd, ClaudeSyncCwdMode::Skip);
+    }
+
+    #[test]
+    fn claude_settings_deserialize_skip() {
+        let json = r#"{"claude": {"syncCwd": "skip"}}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert!(!settings.convenience.smart_paste);
-        assert_eq!(settings.convenience.paste_image_dir, "/tmp/img");
+        assert_eq!(settings.claude.sync_cwd, ClaudeSyncCwdMode::Skip);
+    }
+
+    #[test]
+    fn claude_settings_deserialize_command() {
+        let json = r#"{"claude": {"syncCwd": "command"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.claude.sync_cwd, ClaudeSyncCwdMode::Command);
+    }
+
+    #[test]
+    fn claude_settings_missing_defaults_to_skip() {
+        let json = r#"{"font": {"face": "Fira Code", "size": 16}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.claude.sync_cwd, ClaudeSyncCwdMode::Skip);
+    }
+
+    #[test]
+    fn claude_settings_round_trip() {
+        let settings = Settings {
+            claude: ClaudeSettings { sync_cwd: ClaudeSyncCwdMode::Command },
+            ..Settings::default()
+        };
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.claude.sync_cwd, ClaudeSyncCwdMode::Command);
     }
 
     #[test]

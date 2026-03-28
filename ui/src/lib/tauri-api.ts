@@ -79,6 +79,12 @@ export interface ConvenienceSettings {
   pasteImageDir: string;
 }
 
+export type ClaudeSyncCwdMode = "skip" | "command";
+
+export interface ClaudeSettings {
+  syncCwd: ClaudeSyncCwdMode;
+}
+
 export interface Settings {
   colorSchemes: ColorScheme[];
   profiles: Profile[];
@@ -89,6 +95,7 @@ export interface Settings {
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
   convenience: ConvenienceSettings;
+  claude: ClaudeSettings;
 }
 
 export interface ColorScheme {
