@@ -707,23 +707,31 @@ fn write_cd_to_group_terminals(
                 None => continue,
             };
 
-            if claude_ids.contains(id) {
-                // Claude Code terminal: use `! cd "/path"\n` format (quoted for spaces/special chars)
-                let cmd = format!("! cd \"{converted}\"\n");
-                let _ = handle.write(cmd.as_bytes());
-            } else {
-                // Normal terminal: propagated cd command
-                let cd_cmd = build_cd_command(&converted, profile);
-                let propagated_cmd = match profile {
-                    "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cd_cmd}"),
-                    _ => format!("LX_PROPAGATED=1 {cd_cmd}"),
-                };
-                let _ = handle.write(propagated_cmd.as_bytes());
-            }
+            let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(id));
+            let _ = handle.write(cmd.as_bytes());
         }
     }
 
     Ok(())
+}
+
+/// Build the command string to write to a terminal for sync-cwd.
+///
+/// Claude Code terminals get `! cd '/path'\n` (single-quoted, escaped).
+/// Normal terminals get `LX_PROPAGATED=1 cd '/path'\n` (or PowerShell equivalent).
+fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -> String {
+    if is_claude {
+        // Single-quote the path so $, ", backticks, etc. are treated literally.
+        // Escape embedded single quotes with the '\'' trick.
+        let escaped = converted_path.replace('\'', "'\\''");
+        format!("! cd '{escaped}'\n")
+    } else {
+        let cd_cmd = build_cd_command(converted_path, profile);
+        match profile {
+            "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cd_cmd}"),
+            _ => format!("LX_PROPAGATED=1 {cd_cmd}"),
+        }
+    }
 }
 
 /// Checks whether a font is monospace by reading the `post` table's `isFixedPitch` field.
@@ -2180,6 +2188,83 @@ mod tests {
         assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
         assert!(claude_ids.is_empty(), "skip mode should not collect claude_ids");
         assert!(!filtered.contains(&"t2".to_string()), "Claude terminal should be skipped");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_command_mode_includes_idle_claude() {
+        // Command mode: idle Claude terminal should be included with claude_ids
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal at prompt
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: Claude Code terminal (idle — ✳ prefix)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]133;D;0\x07\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
+        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
+        assert!(filtered.contains(&"t2".to_string()), "idle Claude should be included in command mode");
+        assert!(claude_ids.contains("t2"), "idle Claude should be in claude_ids");
+        assert!(!claude_ids.contains("t1"), "normal terminal should not be in claude_ids");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_command_mode_excludes_working_claude() {
+        // Command mode: working Claude terminal (✶ spinner) should be excluded
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: Claude Code terminal (working — ✶ prefix)
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]0;\xe2\x9c\xb6 Claude Code\x07");
+            buffers.insert("t1".into(), buf1);
+        }
+
+        let targets = vec!["t1".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
+        assert!(filtered.is_empty(), "working Claude should be excluded even in command mode");
+        assert!(claude_ids.is_empty(), "working Claude should not be in claude_ids");
+    }
+
+    // --- build_sync_cd_command tests ---
+
+    #[test]
+    fn build_sync_cd_command_claude_uses_bang_cd_single_quoted() {
+        let cmd = build_sync_cd_command("/home/user/project", "WSL", true);
+        assert_eq!(cmd, "! cd '/home/user/project'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_claude_escapes_single_quotes_in_path() {
+        let cmd = build_sync_cd_command("/home/user/it's a dir", "WSL", true);
+        assert_eq!(cmd, "! cd '/home/user/it'\\''s a dir'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_claude_safe_with_dollar_and_backtick() {
+        let cmd = build_sync_cd_command("/home/$USER/`test`", "WSL", true);
+        // Single quotes prevent shell expansion of $ and backticks
+        assert_eq!(cmd, "! cd '/home/$USER/`test`'\n");
+    }
+
+    #[test]
+    fn build_sync_cd_command_normal_wsl_uses_propagated_cd() {
+        let cmd = build_sync_cd_command("/home/user/project", "WSL", false);
+        assert!(cmd.starts_with("LX_PROPAGATED=1 "), "WSL should use LX_PROPAGATED=1 prefix");
+        assert!(cmd.contains("cd "), "should contain cd command");
+    }
+
+    #[test]
+    fn build_sync_cd_command_normal_powershell_uses_env_propagated() {
+        let cmd = build_sync_cd_command("C:\\Users\\test", "PowerShell", false);
+        assert!(cmd.starts_with("$env:LX_PROPAGATED='1';"), "PowerShell should use $env: prefix");
+        assert!(cmd.contains("cd "), "should contain cd command");
     }
 
     // --- Cross-profile path conversion tests ---
