@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary, abbreviatePath, formatCommand, formatRelativeTime, formatActivity } from "@/lib/workspace-summary";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
@@ -40,6 +41,7 @@ function WorkspaceItem({
   summary,
   panes,
   canClose,
+  pathEllipsis,
   onSelect,
   onClose,
   onDuplicate,
@@ -51,6 +53,7 @@ function WorkspaceItem({
   summary: ReturnType<typeof computeWorkspaceSummary>;
   panes: WorkspacePane[];
   canClose: boolean;
+  pathEllipsis: "start" | "end";
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
@@ -222,8 +225,8 @@ function WorkspaceItem({
                       {ts.cwd && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
-                          <span className="truncate" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", opacity: isActive ? 0.7 : 0.5 }}>
-                            {abbreviatePath(ts.cwd)}
+                          <span className="truncate" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", opacity: isActive ? 0.7 : 0.5, ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}) }}>
+                            {abbreviatePath(ts.cwd, pathEllipsis)}
                           </span>
                         </>
                       )}
@@ -301,8 +304,8 @@ function WorkspaceItem({
             <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
           )}
           {summary.cwd && (
-            <span className="truncate" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
-              {abbreviatePath(summary.cwd)}
+            <span className="truncate" style={{ color: "var(--text-secondary)", opacity: 0.5, ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}) }}>
+              {abbreviatePath(summary.cwd, pathEllipsis)}
             </span>
           )}
         </div>
@@ -496,6 +499,7 @@ export function WorkspaceSelectorView() {
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
   const terminalInstances = useTerminalStore((s) => s.instances);
+  const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const terminalPorts = new Map<string, number[]>();
 
   const handleSelectWorkspace = (wsId: string) => {
@@ -558,6 +562,7 @@ export function WorkspaceSelectorView() {
               summary={summary}
               panes={ws.panes}
               canClose={workspaces.length > 1}
+              pathEllipsis={pathEllipsis}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {

@@ -134,7 +134,12 @@ export function computeWorkspaceSummary(
   };
 }
 
-export function abbreviatePath(cwd: string): string {
+/**
+ * Abbreviate a file path for display.
+ * @param cwd - The raw path string
+ * @param ellipsis - "start" (default) truncates the beginning (shows end), "end" truncates the end (shows beginning)
+ */
+export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start"): string {
   let path = cwd;
 
   // Strip file:// URI prefix (from OSC 7)
@@ -172,6 +177,11 @@ export function abbreviatePath(cwd: string): string {
   if (path.length > 30) {
     const sep = path.includes("/") ? "/" : "\\";
     const parts = path.split(sep);
+    if (ellipsis === "end") {
+      // Keep beginning, truncate end
+      return parts.slice(0, 3).join("/") + "/...";
+    }
+    // Default: keep end, truncate beginning
     return ".../" + parts.slice(-2).join("/");
   }
 

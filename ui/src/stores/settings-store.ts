@@ -41,6 +41,9 @@ export interface ColorScheme {
 
 export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 
+/** Path ellipsis direction: "start" truncates the beginning, "end" truncates the end. */
+export type PathEllipsisMode = "start" | "end";
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
@@ -50,6 +53,8 @@ export interface ConvenienceSettings {
   notificationDismiss: NotificationDismissMode;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
+  /** Path ellipsis direction in WorkspaceSelectorView. "start" (default) shows the end of the path, "end" shows the beginning. */
+  pathEllipsis: PathEllipsisMode;
 }
 
 
@@ -371,7 +376,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setFont: (font) => set({ font }),
@@ -468,7 +473,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude

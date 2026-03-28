@@ -990,6 +990,27 @@ function ConvenienceSection() {
             </FocusSelect>
           </div>
         </div>
+
+        {/* Path ellipsis mode */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Path Ellipsis</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              경로가 길 때 생략 방향 (워크스페이스 목록)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="path-ellipsis-select"
+              className={inputCls}
+              value={convenience.pathEllipsis}
+              onChange={(e) => setConvenience({ pathEllipsis: e.target.value as "start" | "end" })}
+            >
+              <option value="start">앞부분 생략 (.../dir/file)</option>
+              <option value="end">뒷부분 생략 (/home/user/...)</option>
+            </FocusSelect>
+          </div>
+        </div>
       </div>
     </div>
   );
