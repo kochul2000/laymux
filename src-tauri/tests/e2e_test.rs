@@ -1,7 +1,7 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
-    ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding, Layout, LayoutPane,
-    Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
+    ClaudeSettings, ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding,
+    Layout, LayoutPane, Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -145,6 +145,7 @@ fn settings_round_trip_with_full_config() {
             },
         ],
         convenience: ConvenienceSettings::default(),
+        claude: ClaudeSettings::default(),
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -167,7 +168,7 @@ fn settings_deserialize_empty_json_object() {
     assert!(settings.color_schemes.is_empty());
     assert!(settings.keybindings.is_empty());
     assert!(settings.docks.is_empty());
-    assert_eq!(settings.font.face, "Consolas");
+    assert_eq!(settings.font.face, "Cascadia Mono");
     assert_eq!(settings.font.size, 14);
 }
 
@@ -448,6 +449,8 @@ fn terminal_session_full_lifecycle() {
     for (id, profile, group) in &configs {
         let config = TerminalConfig {
             profile: profile.to_string(),
+            command_line: String::new(),
+            startup_command: String::new(),
             cols: 80,
             rows: 24,
             sync_group: group.to_string(),
@@ -556,6 +559,8 @@ fn terminal_session_update_cwd_and_branch() {
 fn terminal_session_with_custom_env_vars() {
     let config = TerminalConfig {
         profile: "WSL".into(),
+        command_line: String::new(),
+        startup_command: String::new(),
         cols: 120,
         rows: 40,
         sync_group: "dev".into(),
@@ -587,14 +592,14 @@ fn terminal_profile_to_command_case_insensitive_variants() {
     assert_eq!(TerminalSession::profile_to_command("wsl").0, "wsl.exe");
     assert_eq!(TerminalSession::profile_to_command("PowerShell").0, "powershell.exe");
     assert_eq!(TerminalSession::profile_to_command("powershell").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("CMD").0, "cmd.exe");
-    assert_eq!(TerminalSession::profile_to_command("cmd").0, "cmd.exe");
-
-    // Unknown profiles default to powershell
-    assert_eq!(TerminalSession::profile_to_command("Unknown").0, "powershell.exe");
+    // Unknown/other profiles pass through as-is (command_line = profile name)
+    assert_eq!(TerminalSession::profile_to_command("CMD").0, "CMD");
+    assert_eq!(TerminalSession::profile_to_command("cmd").0, "cmd");
+    assert_eq!(TerminalSession::profile_to_command("Unknown").0, "Unknown");
+    // Empty string falls back to "powershell.exe" via command_line_to_command default
     assert_eq!(TerminalSession::profile_to_command("").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("bash").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("zsh").0, "powershell.exe");
+    assert_eq!(TerminalSession::profile_to_command("bash").0, "bash");
+    assert_eq!(TerminalSession::profile_to_command("zsh").0, "zsh");
 }
 
 #[test]

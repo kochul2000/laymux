@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 pub mod automation_server;
 pub mod clipboard;
 pub mod commands;

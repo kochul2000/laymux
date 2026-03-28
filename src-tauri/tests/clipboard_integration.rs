@@ -5,9 +5,11 @@
 mod windows_tests {
     use clipboard_win::{formats, get_clipboard, set_clipboard};
     use laymux_lib::clipboard::smart_paste;
+    use serial_test::serial;
     use std::path::Path;
 
     #[test]
+    #[serial]
     fn clipboard_read_text() {
         // 1. Put text on clipboard
         set_clipboard(formats::Unicode, "hello from test").unwrap();
@@ -19,6 +21,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[serial]
     fn smart_paste_with_text() {
         // 1. Put text on clipboard
         set_clipboard(formats::Unicode, "test paste text").unwrap();
@@ -33,6 +36,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[serial]
     fn smart_paste_with_text_wsl_profile() {
         set_clipboard(formats::Unicode, "wsl test").unwrap();
 
@@ -48,6 +52,7 @@ mod windows_tests {
     /// Diagnostic: print what's currently on the clipboard.
     /// Run after copying from Paint: cargo test --test clipboard_integration diagnostic -- --nocapture --test-threads=1
     #[test]
+    #[serial]
     fn diagnostic_clipboard_state() {
         eprintln!("\n=== Clipboard Diagnostic ===");
 
@@ -93,6 +98,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[serial]
     fn smart_paste_with_bitmap() {
         // Construct a minimal 2x2 32-bit BGRA bitmap
         let mut dib = vec![0u8; 40 + 16];
@@ -146,6 +152,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[serial]
     fn smart_paste_with_bitmap_wsl_path() {
         let mut dib = vec![0u8; 40 + 8];
         dib[0..4].copy_from_slice(&40u32.to_le_bytes());
