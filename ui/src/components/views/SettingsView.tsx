@@ -27,7 +27,7 @@ const inputStyle: React.CSSProperties = {
 };
 const inputFocusStyle: React.CSSProperties = {
   ...inputStyle,
-  borderColor: "var(--accent)",
+  border: "1px solid var(--accent)",
 };
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
