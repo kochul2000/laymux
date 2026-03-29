@@ -252,6 +252,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT",    "/api/v1/docks/{position}/size"),
     ("PUT",    "/api/v1/docks/{position}/views"),
     ("POST",   "/api/v1/docks/{position}/split"),
+    ("POST",   "/api/v1/docks/layout-mode/toggle"),
     ("DELETE","/api/v1/docks/{position}/panes/{paneId}"),
     ("GET",    "/api/v1/terminals"),
     ("POST",   "/api/v1/terminals/{id}/write"),
@@ -296,6 +297,7 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/docks/{position}/toggle", post(docks_toggle_visible))
         .route("/api/v1/docks/{position}/size", put(docks_set_size))
         .route("/api/v1/docks/{position}/views", put(docks_set_views))
+        .route("/api/v1/docks/layout-mode/toggle", post(docks_toggle_layout_mode))
         .route("/api/v1/docks/{position}/split", post(docks_split_pane))
         .route("/api/v1/docks/{position}/panes/{paneId}", delete(docks_remove_pane))
         .route("/api/v1/terminals", get(terminals_list))
@@ -415,6 +417,10 @@ async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/docks/{position}/active-view",
                 "description": "Set the active view of a dock. position: top|bottom|left|right.",
                 "body": { "view": "\"WorkspaceSelectorView\" | \"SettingsView\"" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/docks/layout-mode/toggle",
+                "description": "Toggle dock layout mode between horizontal and vertical."
             },
             {
                 "method": "POST", "path": "/api/v1/docks/{position}/toggle",
@@ -926,6 +932,23 @@ async fn docks_set_active_view(
         "docks",
         "setActiveView",
         serde_json::json!({ "position": position, "view": body.view }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+async fn docks_toggle_layout_mode(
+    AxumState(state): AxumState<ServerState>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "docks",
+        "toggleLayoutMode",
+        serde_json::json!({}),
     )
     .await
     {
