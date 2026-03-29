@@ -18,11 +18,14 @@ fn expand_env_in_path(path: &str) -> String {
     }
 
     // Expand %VAR% style environment variables
-    while let Some(start) = result.find('%') {
+    let mut search_from = 0;
+    while let Some(rel_start) = result[search_from..].find('%') {
+        let start = search_from + rel_start;
         if let Some(end) = result[start + 1..].find('%') {
             let var_name = &result[start + 1..start + 1 + end];
             if let Ok(val) = std::env::var(var_name) {
                 result = format!("{}{}{}", &result[..start], val, &result[start + 2 + end..]);
+                search_from = start + val.len();
             } else {
                 // Variable not found — skip past it to avoid infinite loop
                 break;

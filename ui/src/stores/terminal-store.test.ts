@@ -130,4 +130,70 @@ describe("TerminalStore", () => {
     expect(instances[0].profile).toBe("PowerShell");
     expect(instances[0].syncGroup).toBe("g2");
   });
+
+  describe("clearCommandState", () => {
+    it("clears lastCommand, lastExitCode, and lastCommandAt for given terminal", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "WSL",
+        syncGroup: "g",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        lastCommand: "Claude task",
+        lastExitCode: 0,
+        lastCommandAt: 12345,
+      });
+
+      // Pre-condition: command state is set
+      let inst = useTerminalStore.getState().instances[0];
+      expect(inst.lastCommand).toBe("Claude task");
+      expect(inst.lastExitCode).toBe(0);
+      expect(inst.lastCommandAt).toBe(12345);
+
+      useTerminalStore.getState().clearCommandState("t1");
+
+      inst = useTerminalStore.getState().instances[0];
+      expect(inst.lastCommand).toBeUndefined();
+      expect(inst.lastExitCode).toBeUndefined();
+      expect(inst.lastCommandAt).toBeUndefined();
+    });
+
+    it("does not affect other terminal instances", () => {
+      const { registerInstance } = useTerminalStore.getState();
+      registerInstance({ id: "t1", profile: "WSL", syncGroup: "g", workspaceId: "ws-1" });
+      registerInstance({ id: "t2", profile: "PS", syncGroup: "g", workspaceId: "ws-1" });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        lastCommand: "cmd1",
+        lastExitCode: 0,
+        lastCommandAt: 100,
+      });
+      useTerminalStore.getState().updateInstanceInfo("t2", {
+        lastCommand: "cmd2",
+        lastExitCode: 1,
+        lastCommandAt: 200,
+      });
+
+      useTerminalStore.getState().clearCommandState("t1");
+
+      const t1 = useTerminalStore.getState().instances.find((i) => i.id === "t1")!;
+      const t2 = useTerminalStore.getState().instances.find((i) => i.id === "t2")!;
+      expect(t1.lastCommand).toBeUndefined();
+      expect(t2.lastCommand).toBe("cmd2");
+      expect(t2.lastExitCode).toBe(1);
+    });
+
+    it("is a no-op for non-existent terminal id", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "WSL",
+        syncGroup: "g",
+        workspaceId: "ws-1",
+      });
+
+      // Should not throw
+      useTerminalStore.getState().clearCommandState("non-existent");
+      expect(useTerminalStore.getState().instances).toHaveLength(1);
+    });
+  });
 });

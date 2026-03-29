@@ -800,6 +800,16 @@ pub fn save_settings(settings: crate::settings::Settings) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn load_memo(key: String) -> Result<String, String> {
+    Ok(crate::settings::load_memo(&key))
+}
+
+#[tauri::command]
+pub fn save_memo(key: String, content: String) -> Result<(), String> {
+    crate::settings::save_memo(&key, &content)
+}
+
+#[tauri::command]
 pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
