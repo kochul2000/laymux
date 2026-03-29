@@ -511,8 +511,17 @@ pub fn memo_path() -> PathBuf {
 /// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
 pub fn load_memo(key: &str) -> String {
     let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let path = memo_path();
-    let map = match fs::read_to_string(&path) {
+    load_memo_from(&memo_path(), key)
+}
+
+/// Save memo content for a specific key.
+pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    save_memo_to(&memo_path(), key, content)
+}
+
+fn load_memo_from(path: &PathBuf, key: &str) -> String {
+    let map = match fs::read_to_string(path) {
         Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
             .unwrap_or_default(),
         Err(_) => std::collections::HashMap::new(),
@@ -520,14 +529,11 @@ pub fn load_memo(key: &str) -> String {
     map.get(key).cloned().unwrap_or_default()
 }
 
-/// Save memo content for a specific key.
-pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
-    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let path = memo_path();
+fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
-    let mut map = match fs::read_to_string(&path) {
+    let mut map = match fs::read_to_string(path) {
         Ok(data) => serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
             .unwrap_or_default(),
         Err(_) => std::collections::HashMap::new(),
@@ -538,7 +544,7 @@ pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
         map.insert(key.to_string(), content.to_string());
     }
     let json = serde_json::to_string_pretty(&map).map_err(|e| format!("Serialize error: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
+    fs::write(path, json).map_err(|e| format!("Write error: {e}"))
 }
 
 /// Save settings to disk.
@@ -893,35 +899,28 @@ mod tests {
     }
 
     #[test]
-    fn memo_round_trip_via_file() {
+    fn memo_round_trip_via_functions() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("memo.json");
 
-        // Save two entries
-        let mut map = std::collections::HashMap::new();
-        map.insert("pane-1".to_string(), "Hello".to_string());
-        map.insert("pane-2".to_string(), "World".to_string());
-        let json = serde_json::to_string_pretty(&map).unwrap();
-        fs::write(&path, &json).unwrap();
+        save_memo_to(&path, "pane-1", "Hello").unwrap();
+        save_memo_to(&path, "pane-2", "World").unwrap();
 
-        // Load and verify
-        let loaded: std::collections::HashMap<String, String> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(loaded.get("pane-1").unwrap(), "Hello");
-        assert_eq!(loaded.get("pane-2").unwrap(), "World");
+        assert_eq!(load_memo_from(&path, "pane-1"), "Hello");
+        assert_eq!(load_memo_from(&path, "pane-2"), "World");
     }
 
     #[test]
     fn memo_missing_key_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("memo.json");
-        let map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let json = serde_json::to_string(&map).unwrap();
-        fs::write(&path, &json).unwrap();
 
-        let loaded: std::collections::HashMap<String, String> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(loaded.get("nonexistent").cloned().unwrap_or_default(), "");
+        // No file at all
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
+
+        // File exists but key doesn't
+        save_memo_to(&path, "other", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
     }
 
     #[test]
@@ -929,20 +928,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("memo.json");
 
-        let mut map = std::collections::HashMap::new();
-        map.insert("pane-1".to_string(), "data".to_string());
-        let json = serde_json::to_string(&map).unwrap();
-        fs::write(&path, &json).unwrap();
+        save_memo_to(&path, "pane-1", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "data");
 
-        // Remove by writing empty
-        let mut loaded: std::collections::HashMap<String, String> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        loaded.remove("pane-1");
-        let json = serde_json::to_string(&loaded).unwrap();
-        fs::write(&path, &json).unwrap();
+        // Save empty string removes the key
+        save_memo_to(&path, "pane-1", "").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "");
 
-        let final_map: std::collections::HashMap<String, String> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(!final_map.contains_key("pane-1"));
+        // Verify it's actually removed from the file
+        let content = fs::read_to_string(&path).unwrap();
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(&content).unwrap();
+        assert!(!map.contains_key("pane-1"));
     }
 }
