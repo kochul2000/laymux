@@ -60,6 +60,8 @@ export interface ConvenienceSettings {
   pathEllipsis: PathEllipsisMode;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
   scrollbarStyle: ScrollbarStyle;
+  /** Allow Alt+Arrow to navigate into/out of dock areas. */
+  dockArrowNav: boolean;
 }
 
 
@@ -389,7 +391,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockArrowNav: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -507,7 +509,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockArrowNav: true, ...(data.convenience as Partial<ConvenienceSettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude

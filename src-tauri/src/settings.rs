@@ -350,6 +350,9 @@ pub struct ConvenienceSettings {
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
+    /// Allow Alt+Arrow to navigate into/out of dock areas.
+    #[serde(default = "default_true")]
+    pub dock_arrow_nav: bool,
 }
 
 impl Default for ConvenienceSettings {
@@ -360,6 +363,7 @@ impl Default for ConvenienceSettings {
             copy_on_select: true,
             path_ellipsis: PathEllipsisMode::default(),
             scrollbar_style: "overlay".to_string(),
+            dock_arrow_nav: true,
         }
     }
 }

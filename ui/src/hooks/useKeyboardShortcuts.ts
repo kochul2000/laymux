@@ -4,8 +4,10 @@ import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
+import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -62,11 +64,38 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Alt+Arrow: pane navigation
+      // Alt+Arrow: pane navigation (workspace + dock)
       if (e.altKey && !e.ctrlKey && !e.shiftKey) {
         const direction = ARROW_TO_DIRECTION[e.key];
         if (direction) {
           e.preventDefault();
+          const dockStore = useDockStore.getState();
+          const { focusedDock } = dockStore;
+          const dockArrowNav = useSettingsStore.getState().convenience.dockArrowNav;
+
+          // If currently focused on a dock, try to exit it
+          if (focusedDock !== null) {
+            const exitDir = getDockExitDirection(focusedDock);
+            if (direction === exitDir) {
+              // Exit dock → go back to workspace
+              dockStore.setFocusedDock(null);
+              const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
+              if (focusedPaneIndex === null) setFocusedPane(0);
+              return;
+            }
+            // Other directions while in dock: try to navigate to another dock
+            if (dockArrowNav) {
+              const targetDock = getDockForDirection(direction);
+              const targetState = dockStore.getDock(targetDock);
+              if (targetState?.visible && targetDock !== focusedDock) {
+                dockStore.setFocusedDock(targetDock);
+                return;
+              }
+            }
+            return;
+          }
+
+          // Currently in workspace: try pane navigation first
           const ws = useWorkspaceStore.getState().getActiveWorkspace();
           if (!ws) return;
           const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
@@ -74,7 +103,15 @@ export function useKeyboardShortcuts() {
           const next = findPaneInDirection(ws.panes, current, direction);
           if (next !== null) {
             setFocusedPane(next);
-            useDockStore.getState().setFocusedDock(null);
+            dockStore.setFocusedDock(null);
+          } else if (dockArrowNav) {
+            // No pane in that direction → try to enter a dock
+            const targetDock = getDockForDirection(direction);
+            const targetState = dockStore.getDock(targetDock);
+            if (targetState?.visible) {
+              dockStore.setFocusedDock(targetDock);
+              useGridStore.getState().setFocusedPane(null);
+            }
           }
           return;
         }
