@@ -240,6 +240,11 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         propagated.remove(&id);
     }
 
+    // Clean up Claude terminal tracking
+    if let Ok(mut known) = state.known_claude_terminals.lock() {
+        known.remove(&id);
+    }
+
     Ok(())
 }
 
@@ -1088,7 +1093,7 @@ fn filter_targets_not_busy(
         let mut result = Vec::new();
         for id in targets {
             let buf = buffers.get(id.as_str());
-            if is_claude_terminal_from_buffer(buf) {
+            if is_claude_terminal_from_buffer(state, id, buf) {
                 // Handle Claude Code terminal based on settings
                 match claude_mode {
                     crate::settings::ClaudeSyncCwdMode::Skip => {
@@ -1113,10 +1118,56 @@ fn filter_targets_not_busy(
     }
 }
 
-/// Check if a terminal is running Claude Code by examining its output buffer title.
+/// Check if ANY terminal title (OSC 0 or OSC 2) in the buffer data contains the given substring.
+/// Scans all title sequences, not just the last one.
+fn any_terminal_title_contains(data: &[u8], substring: &str) -> bool {
+    let needle_0: &[u8] = &[0x1b, b']', b'0', b';'];
+    let needle_2: &[u8] = &[0x1b, b']', b'2', b';'];
+
+    for needle in [needle_0, needle_2] {
+        let mut start = 0;
+        while start + needle.len() <= data.len() {
+            if let Some(found) = data[start..].windows(needle.len()).position(|w| w == needle) {
+                let abs_pos = start + found;
+                let title_start = abs_pos + needle.len();
+                if title_start < data.len() {
+                    let remaining = &data[title_start..];
+                    if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
+                        let title = String::from_utf8_lossy(&remaining[..end]);
+                        if title.contains(substring) {
+                            return true;
+                        }
+                    }
+                }
+                start = abs_pos + 1;
+            } else {
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a terminal is running Claude Code.
+/// Uses two-pronged detection:
+/// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
+/// 2. Full buffer title scan — checks ALL OSC 0/2 titles, not just the last one
+///
+/// When detected via buffer scan, the terminal ID is added to `known_claude_terminals`
+/// so future calls don't depend on the title still being in the buffer.
 fn is_claude_terminal_from_buffer(
+    state: &AppState,
+    terminal_id: &str,
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
 ) -> bool {
+    // Prong 1: Check persistent tracking
+    if let Ok(known) = state.known_claude_terminals.lock() {
+        if known.contains(terminal_id) {
+            return true;
+        }
+    }
+
+    // Prong 2: Scan ALL titles in buffer for "Claude Code"
     let Some(buf) = buffer else {
         return false;
     };
@@ -1124,11 +1175,16 @@ fn is_claude_terminal_from_buffer(
     if recent.is_empty() {
         return false;
     }
-    if let Some(title) = extract_last_terminal_title(&recent) {
-        title.contains("Claude Code")
-    } else {
-        false
+
+    if any_terminal_title_contains(&recent, "Claude Code") {
+        // Mark persistently for future calls
+        if let Ok(mut known) = state.known_claude_terminals.lock() {
+            known.insert(terminal_id.to_string());
+        }
+        return true;
     }
+
+    false
 }
 
 /// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
@@ -2121,27 +2177,31 @@ mod tests {
 
     #[test]
     fn is_claude_terminal_detects_claude_from_title() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_claude_terminal_false_for_normal_terminal() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;bash\x07");
-        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_claude_terminal_false_for_no_buffer() {
-        assert!(!is_claude_terminal_from_buffer(None));
+        let state = AppState::new();
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", None));
     }
 
     #[test]
     fn is_claude_terminal_false_for_empty_buffer() {
+        let state = AppState::new();
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
-        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
@@ -2665,6 +2725,133 @@ mod tests {
         assert!(filtered.contains(&"t1".to_string()), "t1 with cwd_receive=true should pass");
         assert!(!filtered.contains(&"t2".to_string()), "t2 with cwd_receive=false should be excluded");
         assert!(filtered.contains(&"t3".to_string()), "t3 with cwd_receive=true should pass");
+    }
+
+    // --- any_terminal_title_contains tests ---
+
+    #[test]
+    fn any_title_contains_finds_claude_in_earlier_title() {
+        // Claude Code set title first, then changed to task description
+        let data = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_finds_claude_in_last_title() {
+        let data = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_false_when_no_claude() {
+        let data = b"\x1b]0;bash\x07output\x1b]0;vim\x07";
+        assert!(!any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_checks_osc2_titles() {
+        // OSC 2 (window title) should also be scanned
+        let data = b"\x1b]2;\xe2\x9c\xb3 Claude Code\x07\x1b]0;task desc\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_empty_data() {
+        assert!(!any_terminal_title_contains(b"", "Claude Code"));
+    }
+
+    // --- is_claude_terminal_from_buffer with persistent tracking ---
+
+    #[test]
+    fn is_claude_terminal_detected_when_last_title_is_task() {
+        // Core bug scenario: Claude initially sets "✳ Claude Code", then changes to task title
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07");
+        assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            "Claude should be detected even when last title is a task description");
+    }
+
+    #[test]
+    fn is_claude_terminal_persistent_after_titles_scroll_out() {
+        let state = AppState::new();
+        // First call: detect from buffer and mark persistently
+        {
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+        }
+        // Second call: buffer no longer has "Claude Code", but persistent set remembers
+        {
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xbb reading file.rs\x07");
+            assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+                "Should be detected via persistent tracking even without Claude Code in buffer");
+        }
+    }
+
+    #[test]
+    fn known_claude_terminal_cleaned_up_on_close() {
+        let state = AppState::new();
+        // Simulate detection
+        state.known_claude_terminals.lock().unwrap().insert("t1".to_string());
+        assert!(state.known_claude_terminals.lock().unwrap().contains("t1"));
+        // Simulate close_terminal_session cleanup
+        state.known_claude_terminals.lock().unwrap().remove("t1");
+        assert!(!state.known_claude_terminals.lock().unwrap().contains("t1"));
+
+        // After cleanup, buffer without "Claude Code" should not be detected
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;bash\x07");
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            "After close, reused terminal ID should not be falsely detected");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_claude_with_task_title_in_skip_mode() {
+        // Core integration test: Claude terminal with task-only title should still be skipped
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal at prompt
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: Claude Code but last title is a task description (the bug scenario!)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07lots of output here\x1b]0;\xe2\x9c\xb6 Exploring code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
+        assert!(!filtered.contains(&"t2".to_string()), "Claude with task title should still be skipped in skip mode");
+        assert!(claude_ids.is_empty(), "skip mode should not collect claude_ids");
+    }
+
+    #[test]
+    fn filter_targets_not_busy_persistent_claude_skipped_in_skip_mode() {
+        // Claude detected previously, now buffer has no Claude title at all
+        let state = AppState::new();
+        // Pre-mark as Claude (simulating previous detection)
+        state.known_claude_terminals.lock().unwrap().insert("t2".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: known Claude but buffer only has task title (no "Claude Code" anywhere)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]0;\xe2\x9c\xb6 Exploring code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, _) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered.contains(&"t1".to_string()));
+        assert!(!filtered.contains(&"t2".to_string()), "Persistently known Claude terminal should be skipped");
     }
 
 }
