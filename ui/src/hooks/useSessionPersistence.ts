@@ -48,6 +48,7 @@ export function useSessionPersistence() {
             antialiasingMode: (p.antialiasingMode ?? "grayscale") as import("@/stores/settings-store").AntialiasingMode,
             suppressApplicationTitle: p.suppressApplicationTitle ?? false,
             snapOnInput: p.snapOnInput ?? true,
+            ...(p.font ? { font: { face: p.font.face, size: p.font.size, weight: p.font.weight ?? "normal" } } : {}),
           })) ?? [],
           colorSchemes: sColorSchemes?.map((cs) => {
             const base = makeDefaultColorScheme();
@@ -57,6 +58,8 @@ export function useSessionPersistence() {
             keys: kb.keys,
             command: kb.command,
           })) ?? [],
+          ...(rawSettings.convenience ? { convenience: rawSettings.convenience as Partial<import("@/stores/settings-store").ConvenienceSettings> } : {}),
+          ...(rawSettings.claude ? { claude: rawSettings.claude as Partial<import("@/lib/tauri-api").ClaudeSettings> } : {}),
         });
 
         // Apply layouts and workspaces to workspace store

@@ -118,6 +118,114 @@ describe("persistSession", () => {
     expect(pane.view.content).toBeUndefined();
   });
 
+  // -- Save → Load round-trip tests --
+
+  describe("round-trip: save → loadFromSettings preserves state", () => {
+    it("profile fields including font survive round-trip", async () => {
+      useSettingsStore.getState().updateProfile(0, {
+        font: { face: "JetBrains Mono", size: 18, weight: "bold" },
+        startupCommand: "echo hi",
+        colorScheme: "One Half Dark",
+        startingDirectory: "~/projects",
+        hidden: true,
+        cursorShape: "filledBox",
+        padding: { top: 4, right: 4, bottom: 4, left: 4 },
+        scrollbackLines: 5000,
+        opacity: 80,
+        tabTitle: "Dev",
+        bellStyle: "none",
+        closeOnExit: "always",
+        antialiasingMode: "cleartype",
+        suppressApplicationTitle: true,
+        snapOnInput: false,
+      });
+
+      await persistSession();
+
+      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+      // Reset store and reload from saved payload
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+      useSettingsStore.getState().loadFromSettings(saved);
+
+      const profile = useSettingsStore.getState().profiles[0];
+      expect(profile.font).toBeDefined();
+      expect(profile.font!.face).toBe("JetBrains Mono");
+      expect(profile.font!.size).toBe(18);
+      expect(profile.font!.weight).toBe("bold");
+      expect(profile.startupCommand).toBe("echo hi");
+      expect(profile.colorScheme).toBe("One Half Dark");
+      expect(profile.startingDirectory).toBe("~/projects");
+      expect(profile.hidden).toBe(true);
+      expect(profile.cursorShape).toBe("filledBox");
+      expect(profile.padding).toEqual({ top: 4, right: 4, bottom: 4, left: 4 });
+      expect(profile.scrollbackLines).toBe(5000);
+      expect(profile.opacity).toBe(80);
+      expect(profile.tabTitle).toBe("Dev");
+      expect(profile.bellStyle).toBe("none");
+      expect(profile.closeOnExit).toBe("always");
+      expect(profile.antialiasingMode).toBe("cleartype");
+      expect(profile.suppressApplicationTitle).toBe(true);
+      expect(profile.snapOnInput).toBe(false);
+    });
+
+    it("profileDefaults font survives round-trip", async () => {
+      useSettingsStore.getState().setProfileDefaults({
+        font: { face: "Fira Code", size: 20, weight: "semi-bold" },
+      });
+
+      await persistSession();
+
+      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+      useSettingsStore.getState().loadFromSettings(saved);
+
+      const { font } = useSettingsStore.getState().profileDefaults;
+      expect(font.face).toBe("Fira Code");
+      expect(font.size).toBe(20);
+      expect(font.weight).toBe("semi-bold");
+    });
+
+    it("convenience settings survive round-trip", async () => {
+      useSettingsStore.getState().setConvenience({
+        smartPaste: false,
+        pasteImageDir: "/tmp/img",
+        hoverIdleSeconds: 5,
+        notificationDismiss: "manual",
+        copyOnSelect: false,
+        pathEllipsis: "end",
+        scrollbarStyle: "separate",
+      });
+
+      await persistSession();
+
+      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+      useSettingsStore.getState().loadFromSettings(saved);
+
+      const { convenience } = useSettingsStore.getState();
+      expect(convenience.smartPaste).toBe(false);
+      expect(convenience.pasteImageDir).toBe("/tmp/img");
+      expect(convenience.hoverIdleSeconds).toBe(5);
+      expect(convenience.notificationDismiss).toBe("manual");
+      expect(convenience.copyOnSelect).toBe(false);
+      expect(convenience.pathEllipsis).toBe("end");
+      expect(convenience.scrollbarStyle).toBe("separate");
+    });
+
+    it("claude settings survive round-trip", async () => {
+      useSettingsStore.getState().setClaude({ syncCwd: "command" });
+
+      await persistSession();
+
+      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+      useSettingsStore.getState().loadFromSettings(saved);
+
+      expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+    });
+  });
+
   it("preserves dock panes with view config through save", async () => {
     // Set up a dock pane with a profile (TerminalView with WSL)
     useDockStore.getState().setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
