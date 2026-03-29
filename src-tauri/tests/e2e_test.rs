@@ -1,7 +1,7 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
     ClaudeSettings, ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding,
-    Layout, LayoutPane, Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
+    Layout, LayoutPane, Profile, ProfileDefaults, Settings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -72,6 +72,9 @@ fn settings_round_trip_with_full_config() {
         ],
         font: None,
         default_profile: "Ubuntu".into(),
+        profile_defaults: ProfileDefaults::default(),
+        view_order: vec![],
+        app_theme_id: "catppuccin-mocha".into(),
         layouts: vec![
             Layout {
                 id: "triple-split".into(),

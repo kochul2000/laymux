@@ -58,8 +58,8 @@ export function useSessionPersistence() {
             keys: kb.keys,
             command: kb.command,
           })) ?? [],
-          ...(rawSettings.convenience ? { convenience: rawSettings.convenience as Partial<import("@/stores/settings-store").ConvenienceSettings> } : {}),
-          ...(rawSettings.claude ? { claude: rawSettings.claude as Partial<import("@/lib/tauri-api").ClaudeSettings> } : {}),
+          ...(rawSettings.convenience ? { convenience: rawSettings.convenience as import("@/stores/settings-store").ConvenienceSettings } : {}),
+          ...(rawSettings.claude ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings } : {}),
         });
 
         // Apply layouts and workspaces to workspace store
