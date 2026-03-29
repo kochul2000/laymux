@@ -74,6 +74,14 @@ export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
 
+export async function loadMemo(key: string): Promise<string> {
+  return invoke("load_memo", { key });
+}
+
+export async function saveMemo(key: string, content: string): Promise<void> {
+  return invoke("save_memo", { key, content });
+}
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;

@@ -18,6 +18,8 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
   loadSettings: vi.fn().mockResolvedValue({}),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  loadMemo: vi.fn().mockResolvedValue(""),
+  saveMemo: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/persist-session", () => ({
@@ -124,26 +126,29 @@ describe("ViewRenderer", () => {
     expect(terminalViewProps.at(-1)?.profile).toBe("PowerShell");
   });
 
-  it("renders NotepadView with data-testid", () => {
+  it("renders MemoView with data-testid", () => {
     render(
       <ViewRenderer
-        viewType="NotepadView"
-        viewConfig={{ type: "NotepadView", content: "hello" }}
+        viewType="MemoView"
+        viewConfig={{ type: "MemoView" }}
+        paneId="pane-99"
       />,
     );
-    expect(screen.getByTestId("view-notepad")).toBeInTheDocument();
-    expect(screen.getByTestId("notepad-textarea")).toBeInTheDocument();
-    expect((screen.getByTestId("notepad-textarea") as HTMLTextAreaElement).value).toBe("hello");
+    expect(screen.getByTestId("view-memo")).toBeInTheDocument();
+    expect(screen.getByTestId("memo-textarea")).toBeInTheDocument();
   });
 
-  it("renders NotepadView with empty content by default", () => {
+  it("MemoView does not use onSelectView", () => {
+    const onSelectView = vi.fn();
     render(
       <ViewRenderer
-        viewType="NotepadView"
-        viewConfig={{ type: "NotepadView" }}
+        viewType="MemoView"
+        viewConfig={{ type: "MemoView" }}
+        paneId="pane-99"
+        onSelectView={onSelectView}
       />,
     );
-    expect((screen.getByTestId("notepad-textarea") as HTMLTextAreaElement).value).toBe("");
+    expect(onSelectView).not.toHaveBeenCalled();
   });
 
   it("uses paneId for stable terminal instanceId", () => {

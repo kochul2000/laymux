@@ -430,7 +430,7 @@ pub fn settings_path() -> PathBuf {
     base.join("settings.json")
 }
 
-fn dirs_config_path() -> Option<PathBuf> {
+pub(crate) fn dirs_config_path() -> Option<PathBuf> {
     // On Windows: %APPDATA%/laymux
     // On Linux: ~/.config/laymux
     #[cfg(target_os = "windows")]
@@ -497,6 +497,43 @@ fn migrate_settings(settings: &mut Settings) {
             }
         }
     }
+}
+
+/// Get the memo file path (sibling of settings.json).
+pub fn memo_path() -> PathBuf {
+    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    base.join("memo.json")
+}
+
+/// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
+pub fn load_memo(key: &str) -> String {
+    let path = memo_path();
+    let map = match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    map.get(key).cloned().unwrap_or_default()
+}
+
+/// Save memo content for a specific key.
+pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
+    let path = memo_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let mut map = match fs::read_to_string(&path) {
+        Ok(data) => serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    if content.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), content.to_string());
+    }
+    let json = serde_json::to_string_pretty(&map).map_err(|e| format!("Serialize error: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
 }
 
 /// Save settings to disk.
@@ -838,5 +875,69 @@ mod tests {
         let before = settings.clone();
         migrate_settings(&mut settings);
         assert_eq!(settings, before);
+    }
+
+    // --- Memo file tests ---
+
+    #[test]
+    fn memo_path_is_sibling_of_settings_path() {
+        let mp = memo_path();
+        let sp = settings_path();
+        assert_eq!(mp.parent(), sp.parent());
+        assert_eq!(mp.file_name().unwrap(), "memo.json");
+    }
+
+    #[test]
+    fn memo_round_trip_via_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        // Save two entries
+        let mut map = std::collections::HashMap::new();
+        map.insert("pane-1".to_string(), "Hello".to_string());
+        map.insert("pane-2".to_string(), "World".to_string());
+        let json = serde_json::to_string_pretty(&map).unwrap();
+        fs::write(&path, &json).unwrap();
+
+        // Load and verify
+        let loaded: std::collections::HashMap<String, String> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(loaded.get("pane-1").unwrap(), "Hello");
+        assert_eq!(loaded.get("pane-2").unwrap(), "World");
+    }
+
+    #[test]
+    fn memo_missing_key_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        let map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let json = serde_json::to_string(&map).unwrap();
+        fs::write(&path, &json).unwrap();
+
+        let loaded: std::collections::HashMap<String, String> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(loaded.get("nonexistent").cloned().unwrap_or_default(), "");
+    }
+
+    #[test]
+    fn memo_empty_content_removes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        let mut map = std::collections::HashMap::new();
+        map.insert("pane-1".to_string(), "data".to_string());
+        let json = serde_json::to_string(&map).unwrap();
+        fs::write(&path, &json).unwrap();
+
+        // Remove by writing empty
+        let mut loaded: std::collections::HashMap<String, String> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        loaded.remove("pane-1");
+        let json = serde_json::to_string(&loaded).unwrap();
+        fs::write(&path, &json).unwrap();
+
+        let final_map: std::collections::HashMap<String, String> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(!final_map.contains_key("pane-1"));
     }
 }

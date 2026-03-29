@@ -127,11 +127,11 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
-    key: "notepad",
-    label: "Notepad",
+    key: "memo",
+    label: "Memo",
     category: "tool",
-    config: { type: "NotepadView" },
-    testId: "empty-view-notepad",
+    config: { type: "MemoView" },
+    testId: "empty-view-memo",
   });
 
   options.push({

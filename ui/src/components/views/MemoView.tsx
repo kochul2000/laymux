@@ -1,26 +1,29 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { loadMemo, saveMemo } from "@/lib/tauri-api";
 
 const DEBOUNCE_MS = 300;
 
-interface NotepadViewProps {
-  content?: string;
-  onContentChange?: (content: string) => void;
+interface MemoViewProps {
+  memoKey: string;
   isFocused?: boolean;
 }
 
-export function NotepadView({ content = "", onContentChange, isFocused }: NotepadViewProps) {
-  const [text, setText] = useState(content);
+export function MemoView({ memoKey, isFocused }: MemoViewProps) {
+  const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestTextRef = useRef(text);
   const flushedRef = useRef(true);
 
-  // Sync from external content prop changes
+  // Load content from memo.json on mount
   useEffect(() => {
-    setText(content);
-    latestTextRef.current = content;
-    flushedRef.current = true;
-  }, [content]);
+    loadMemo(memoKey)
+      .then((content) => {
+        setText(content);
+        latestTextRef.current = content;
+      })
+      .catch(() => {});
+  }, [memoKey]);
 
   // Focus when isFocused becomes true
   useEffect(() => {
@@ -31,10 +34,10 @@ export function NotepadView({ content = "", onContentChange, isFocused }: Notepa
 
   const flush = useCallback(() => {
     if (!flushedRef.current) {
-      onContentChange?.(latestTextRef.current);
+      saveMemo(memoKey, latestTextRef.current).catch(() => {});
       flushedRef.current = true;
     }
-  }, [onContentChange]);
+  }, [memoKey]);
 
   // Flush pending content on unmount
   useEffect(() => {
@@ -52,16 +55,16 @@ export function NotepadView({ content = "", onContentChange, isFocused }: Notepa
 
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      onContentChange?.(val);
+      saveMemo(memoKey, val).catch(() => {});
       flushedRef.current = true;
     }, DEBOUNCE_MS);
   };
 
   return (
-    <div data-testid="notepad-view" className="flex h-full w-full flex-col">
+    <div data-testid="memo-view" className="flex h-full w-full flex-col">
       <textarea
         ref={textareaRef}
-        data-testid="notepad-textarea"
+        data-testid="memo-textarea"
         value={text}
         onChange={handleChange}
         className="h-full w-full flex-1 resize-none border-none p-3 outline-none"

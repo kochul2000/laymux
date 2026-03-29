@@ -127,18 +127,18 @@ describe("EmptyView", () => {
     expect(handles.length).toBeGreaterThan(0);
   });
 
-  it("shows notepad option button", () => {
+  it("shows memo option button", () => {
     render(<EmptyView />);
-    expect(screen.getByTestId("empty-view-notepad")).toBeInTheDocument();
+    expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
   });
 
-  it("calls onSelectView with NotepadView when notepad clicked", async () => {
+  it("calls onSelectView with MemoView when memo clicked", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(<EmptyView onSelectView={onSelect} />);
 
-    await user.click(screen.getByTestId("empty-view-notepad"));
-    expect(onSelect).toHaveBeenCalledWith({ type: "NotepadView" });
+    await user.click(screen.getByTestId("empty-view-memo"));
+    expect(onSelect).toHaveBeenCalledWith({ type: "MemoView" });
   });
 
   it("respects stored viewOrder", () => {

@@ -6,7 +6,7 @@ import { TerminalView } from "./TerminalView";
 import { BrowserPreviewView } from "./BrowserPreviewView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
-import { NotepadView } from "./NotepadView";
+import { MemoView } from "./MemoView";
 
 interface ViewRendererProps {
   viewType: ViewType | null;
@@ -58,18 +58,14 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
           <IssueReporterView />
         </div>
       );
-    case "NotepadView":
+    case "MemoView": {
+      const memoKey = paneId ? `memo-${paneId}` : `memo-fallback-${Math.random().toString(36).slice(2)}`;
       return (
-        <div data-testid="view-notepad" className="h-full">
-          <NotepadView
-            content={(viewConfig?.content as string) ?? ""}
-            onContentChange={(content) => {
-              onSelectView?.({ ...viewConfig!, content });
-            }}
-            isFocused={isFocused}
-          />
+        <div data-testid="view-memo" className="h-full">
+          <MemoView memoKey={memoKey} isFocused={isFocused} />
         </div>
       );
+    }
     case "BrowserPreviewView":
       return (
         <div data-testid="view-browser-preview" className="h-full">

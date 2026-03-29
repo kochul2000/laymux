@@ -84,6 +84,8 @@ pub fn run() {
             commands::list_system_monospace_fonts,
             commands::load_settings,
             commands::save_settings,
+            commands::load_memo,
+            commands::save_memo,
             commands::open_settings_file,
             commands::submit_github_issue,
             commands::get_listening_ports,
