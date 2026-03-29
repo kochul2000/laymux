@@ -41,6 +41,9 @@ export interface ColorScheme {
 
 export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 
+/** Terminal scrollbar rendering mode. */
+export type ScrollbarStyle = "overlay" | "separate";
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
@@ -50,6 +53,8 @@ export interface ConvenienceSettings {
   notificationDismiss: NotificationDismissMode;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
+  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
+  scrollbarStyle: ScrollbarStyle;
 }
 
 
@@ -379,7 +384,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "overlay" as const },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -497,7 +502,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "overlay" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude

@@ -115,6 +115,11 @@ export function TerminalView({
         }
       : defaultTheme;
 
+    // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
+    // does not reserve space for the scrollbar — it renders on top of content.
+    const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
+    const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
+
     const resolvedFont = settingsState.resolveFont(profile);
     const terminal = new Terminal({
       cursorBlink: true,
@@ -123,6 +128,7 @@ export function TerminalView({
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
+      overviewRuler: { width: overviewRulerWidth },
     });
 
     const fitAddon = new FitAddon();
@@ -545,10 +551,17 @@ export function TerminalView({
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
+  // Scrollbar style: overlay (default) renders on top of terminal content,
+  // separate reserves space for the scrollbar.
+  const scrollbarStyle = useSettingsStore(
+    (s) => s.convenience.scrollbarStyle ?? "overlay",
+  );
+  const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
+
   return (
     <div
       data-testid={`terminal-view-${instanceId}`}
-      className="h-full w-full"
+      className={`h-full w-full ${scrollbarClass}`}
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
