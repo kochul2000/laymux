@@ -247,12 +247,12 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/api/v1/panes/{index}"),
     ("PUT",    "/api/v1/panes/{index}/view"),
     ("GET",    "/api/v1/docks"),
+    ("POST",   "/api/v1/docks/layout-mode/toggle"),
     ("PUT",    "/api/v1/docks/{position}/active-view"),
     ("POST",   "/api/v1/docks/{position}/toggle"),
     ("PUT",    "/api/v1/docks/{position}/size"),
     ("PUT",    "/api/v1/docks/{position}/views"),
     ("POST",   "/api/v1/docks/{position}/split"),
-    ("POST",   "/api/v1/docks/layout-mode/toggle"),
     ("DELETE","/api/v1/docks/{position}/panes/{paneId}"),
     ("GET",    "/api/v1/terminals"),
     ("POST",   "/api/v1/terminals/{id}/write"),
@@ -293,11 +293,11 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
         .route("/api/v1/docks", get(docks_list))
+        .route("/api/v1/docks/layout-mode/toggle", post(docks_toggle_layout_mode))
         .route("/api/v1/docks/{position}/active-view", put(docks_set_active_view))
         .route("/api/v1/docks/{position}/toggle", post(docks_toggle_visible))
         .route("/api/v1/docks/{position}/size", put(docks_set_size))
         .route("/api/v1/docks/{position}/views", put(docks_set_views))
-        .route("/api/v1/docks/layout-mode/toggle", post(docks_toggle_layout_mode))
         .route("/api/v1/docks/{position}/split", post(docks_split_pane))
         .route("/api/v1/docks/{position}/panes/{paneId}", delete(docks_remove_pane))
         .route("/api/v1/terminals", get(terminals_list))
