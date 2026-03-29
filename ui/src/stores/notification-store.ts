@@ -27,6 +27,7 @@ interface NotificationStoreState {
   markNotificationsAsRead: (ids: string[]) => void;
   getUnreadCount: (workspaceId: string) => number;
   getLatestNotification: (workspaceId: string) => Notification | undefined;
+  hasUnreadForTerminal: (terminalId: string) => boolean;
 }
 
 export const useNotificationStore = create<NotificationStoreState>()(
@@ -80,6 +81,12 @@ export const useNotificationStore = create<NotificationStoreState>()(
         (n) => n.workspaceId === workspaceId,
       );
       return notifs.length > 0 ? notifs[notifs.length - 1] : undefined;
+    },
+
+    hasUnreadForTerminal: (terminalId) => {
+      return get().notifications.some(
+        (n) => n.terminalId === terminalId && n.readAt === null,
+      );
     },
   }),
 );

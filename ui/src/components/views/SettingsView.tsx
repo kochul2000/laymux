@@ -5,6 +5,7 @@ import {
   makeDefaultColorScheme,
   makeProfileFromDefaults,
   builtinAppThemes,
+  type FontSettings,
   type Profile,
   type ProfileDefaults,
   type CursorShape,
@@ -136,14 +137,11 @@ function useMonospacedFonts() {
 }
 
 function StartupSection() {
-  const font = useSettingsStore((s) => s.font);
-  const setFont = useSettingsStore((s) => s.setFont);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
   const profiles = useSettingsStore((s) => s.profiles);
   const appThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
   const setAppTheme = useSettingsStore((s) => s.setAppTheme);
-  const monoFonts = useMonospacedFonts();
 
   return (
     <div>
@@ -204,54 +202,85 @@ function StartupSection() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div className="mt-4" style={cardStyle}>
-        <div className="px-4 py-2">
-          <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            Font
-          </h4>
-          <SettingRow label="Font Face" desc="Monospaced font for terminals">
-            <FocusSelect
-              data-testid="font-face-input"
-              value={font.face}
-              onChange={(e) => setFont({ ...font, face: e.target.value })}
-              className={inputCls}
-            >
-              {!monoFonts.includes(font.face) && (
-                <option value={font.face}>{font.face}</option>
-              )}
-              {monoFonts.map((f) => (
-                <option key={f} value={f}>{f}</option>
-              ))}
-            </FocusSelect>
-          </SettingRow>
-          <SettingRow label="Font Size" desc="Size in points (6-72)">
-            <FocusInput
-              data-testid="font-size-input"
-              type="number"
-              value={font.size}
-              onChange={(e) => setFont({ ...font, size: parseInt(e.target.value) || 14 })}
-              className="w-24 rounded px-2 py-1.5 text-xs"
-              min={6}
-              max={72}
-            />
-          </SettingRow>
-          <SettingRow label="Font Weight">
-            <select
-              data-testid="font-weight-select"
-              value={font.weight}
-              onChange={(e) => setFont({ ...font, weight: e.target.value })}
-              className={inputCls}
-              style={inputStyle}
-            >
-              {fontWeightOptions.map((w) => (
-                <option key={w} value={w}>
-                  {w.charAt(0).toUpperCase() + w.slice(1)}
-                </option>
-              ))}
-            </select>
-          </SettingRow>
+// -- Shared: Font fields (used by both Defaults and Profile) --
+
+function FontFields({
+  font,
+  onChange,
+  defaults,
+  showReset,
+  monoFonts,
+}: {
+  font: FontSettings;
+  onChange: (font: FontSettings) => void;
+  defaults?: FontSettings;
+  showReset?: boolean;
+  monoFonts: string[];
+}) {
+  const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
+  const resetBtn = showReset && defaults && !isDefault ? (
+    <button
+      onClick={() => onChange({ ...defaults })}
+      className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
+      style={{ color: "var(--accent)", background: "rgba(137,180,250,0.1)", border: "none", cursor: "pointer" }}
+      title="Reset to default"
+    >
+      Reset
+    </button>
+  ) : null;
+
+  return (
+    <div style={cardStyle} className="mb-3">
+      <div className="px-4 py-2">
+        <div className="flex items-center gap-2 mb-2">
+          <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Font</h4>
+          {resetBtn}
         </div>
+        <SettingRow label="Font Face" desc="Monospaced font for terminals">
+          <FocusSelect
+            data-testid="font-face-input"
+            value={font.face}
+            onChange={(e) => onChange({ ...font, face: e.target.value })}
+            className={inputCls}
+          >
+            {!monoFonts.includes(font.face) && (
+              <option value={font.face}>{font.face}</option>
+            )}
+            {monoFonts.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+        <SettingRow label="Font Size" desc="Size in points (6-72)">
+          <FocusInput
+            data-testid="font-size-input"
+            type="number"
+            value={font.size}
+            onChange={(e) => onChange({ ...font, size: parseInt(e.target.value) || 14 })}
+            className="w-24 rounded px-2 py-1.5 text-xs"
+            min={6}
+            max={72}
+          />
+        </SettingRow>
+        <SettingRow label="Font Weight">
+          <select
+            data-testid="font-weight-select"
+            value={font.weight}
+            onChange={(e) => onChange({ ...font, weight: e.target.value })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            {fontWeightOptions.map((w) => (
+              <option key={w} value={w}>
+                {w.charAt(0).toUpperCase() + w.slice(1)}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
       </div>
     </div>
   );
@@ -519,6 +548,7 @@ const fallbackDefaults: ProfileDefaults = {
   antialiasingMode: "grayscale",
   suppressApplicationTitle: false,
   snapOnInput: true,
+  font: { face: "Cascadia Mono", size: 14, weight: "normal" },
 };
 
 function DefaultsSection() {
@@ -526,6 +556,7 @@ function DefaultsSection() {
   const profileDefaults = rawDefaults ?? fallbackDefaults;
   const setProfileDefaults = useSettingsStore((s) => s.setProfileDefaults);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
+  const monoFonts = useMonospacedFonts();
 
   return (
     <div>
@@ -533,6 +564,12 @@ function DefaultsSection() {
       <p className="mb-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
         These settings apply to all new profiles. Individual profiles can override them.
       </p>
+
+      <FontFields
+        font={profileDefaults.font}
+        onChange={(font) => setProfileDefaults({ font })}
+        monoFonts={monoFonts}
+      />
 
       <AppearanceFields
         data={profileDefaults}
@@ -568,6 +605,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
   const rawProfileDefaults = useSettingsStore((s) => s.profileDefaults);
   const profileDefaults = rawProfileDefaults ?? fallbackDefaults;
   const [activeTab, setActiveTab] = useState<ProfileTab>("general");
+  const monoFonts = useMonospacedFonts();
 
   if (!profile) return null;
 
@@ -668,12 +706,19 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
         </div>
       )}
 
-      {/* Additional Settings Tab (Appearance + Advanced — inherited from defaults) */}
+      {/* Additional Settings Tab (Font + Appearance + Advanced — inherited from defaults) */}
       {activeTab === "additional" && (
         <>
           <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
             Override defaults for this profile. Click "Reset" to restore inherited value.
           </p>
+          <FontFields
+            font={profile.font ?? profileDefaults.font}
+            onChange={(font) => update({ font })}
+            defaults={profileDefaults.font}
+            showReset
+            monoFonts={monoFonts}
+          />
           <AppearanceFields
             data={profile}
             onChange={update}
@@ -987,6 +1032,27 @@ function ConvenienceSection() {
               <option value="workspace">워크스페이스 선택 시 자동 해제</option>
               <option value="paneFocus">Pane 포커스 시 자동 해제</option>
               <option value="manual">알림 클릭으로만 해제</option>
+            </FocusSelect>
+          </div>
+        </div>
+
+        {/* Scrollbar style */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Scrollbar Style</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다.
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="scrollbar-style-select"
+              className={inputCls}
+              value={convenience.scrollbarStyle}
+              onChange={(e) => setConvenience({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
+            >
+              <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
+              <option value="separate">Separate (별도 공간 차지)</option>
             </FocusSelect>
           </div>
         </div>

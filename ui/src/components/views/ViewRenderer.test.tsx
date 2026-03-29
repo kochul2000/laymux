@@ -18,6 +18,8 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
   loadSettings: vi.fn().mockResolvedValue({}),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  loadMemo: vi.fn().mockResolvedValue(""),
+  saveMemo: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/persist-session", () => ({
@@ -122,6 +124,31 @@ describe("ViewRenderer", () => {
       />,
     );
     expect(terminalViewProps.at(-1)?.profile).toBe("PowerShell");
+  });
+
+  it("renders MemoView with data-testid", () => {
+    render(
+      <ViewRenderer
+        viewType="MemoView"
+        viewConfig={{ type: "MemoView" }}
+        paneId="pane-99"
+      />,
+    );
+    expect(screen.getByTestId("view-memo")).toBeInTheDocument();
+    expect(screen.getByTestId("memo-textarea")).toBeInTheDocument();
+  });
+
+  it("MemoView does not use onSelectView", () => {
+    const onSelectView = vi.fn();
+    render(
+      <ViewRenderer
+        viewType="MemoView"
+        viewConfig={{ type: "MemoView" }}
+        paneId="pane-99"
+        onSelectView={onSelectView}
+      />,
+    );
+    expect(onSelectView).not.toHaveBeenCalled();
   });
 
   it("uses paneId for stable terminal instanceId", () => {

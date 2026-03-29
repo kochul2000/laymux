@@ -32,58 +32,68 @@ describe("SettingsView", () => {
 
   // -- Startup section (renamed from General) --
 
-  it("displays Startup section with font settings", () => {
+  it("displays Startup section", () => {
     render(<SettingsView />);
     expect(screen.getAllByText("Startup").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Font")).toBeInTheDocument();
   });
 
-  it("shows current font face", () => {
+  it("shows font settings in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    expect(screen.getByText("Font")).toBeInTheDocument();
     const input = screen.getByTestId("font-face-input") as HTMLInputElement;
     expect(input.value).toBe("Cascadia Mono");
   });
 
-  it("shows current font size", () => {
+  it("shows font size in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
     expect(input.value).toBe("14");
   });
 
-  it("shows font weight selector", () => {
+  it("shows font weight selector in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
     const select = screen.getByTestId("font-weight-select") as HTMLSelectElement;
     expect(select.value).toBe("normal");
   });
 
-  it("updates font face in store", async () => {
+  it("updates font face in profileDefaults via Defaults page", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
     await user.selectOptions(select, "Fira Code");
 
-    expect(useSettingsStore.getState().font.face).toBe("Fira Code");
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("Fira Code");
   });
 
-  it("updates font size in store", () => {
+  it("updates font size in profileDefaults via Defaults page", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "16");
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(useSettingsStore.getState().font.size).toBe(16);
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(16);
   });
 
-  it("updates font weight in store", async () => {
+  it("updates font weight in profileDefaults via Defaults page", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-weight-select");
     await user.selectOptions(select, "bold");
 
-    expect(useSettingsStore.getState().font.weight).toBe("bold");
+    expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("bold");
   });
 
   it("shows default profile dropdown", () => {
@@ -143,7 +153,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("Hidden")).toBeInTheDocument();
   });
 
-  it("profile Additional Settings tab shows Appearance and Advanced fields", async () => {
+  it("profile Additional Settings tab shows Font, Appearance and Advanced fields", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
     await navigateToProfile(user, "PowerShell");
@@ -151,6 +161,9 @@ describe("SettingsView", () => {
     const tabBar = screen.getByTestId("profile-tabs");
     await user.click(within(tabBar).getByText("Additional Settings"));
 
+    // Font fields
+    expect(screen.getByText("Font")).toBeInTheDocument();
+    expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
@@ -361,6 +374,26 @@ describe("SettingsView", () => {
     await user.clear(input);
     await user.type(input, "C:\\my\\dir");
     expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
+  });
+
+  // -- Scrollbar style --
+
+  it("shows scrollbar style select in convenience section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
+  });
+
+  it("scrollbar style select updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
+    await user.selectOptions(select, "separate");
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
   });
 
   // -- Claude Code section --
