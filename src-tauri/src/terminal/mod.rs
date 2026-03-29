@@ -36,6 +36,10 @@ pub struct TerminalConfig {
     /// Appended to the shell init script for WSL/PowerShell profiles.
     #[serde(default)]
     pub startup_command: String,
+    /// Starting directory for the terminal process.
+    /// When non-empty, sets the working directory before spawning the shell.
+    #[serde(default)]
+    pub starting_directory: String,
     pub cols: u16,
     pub rows: u16,
     pub sync_group: String,
@@ -48,6 +52,7 @@ impl Default for TerminalConfig {
             profile: "PowerShell".into(),
             command_line: "powershell.exe -NoLogo".into(),
             startup_command: String::new(),
+            starting_directory: String::new(),
             cols: 80,
             rows: 24,
             sync_group: String::new(),
@@ -330,6 +335,7 @@ mod tests {
             profile: "WSL".into(),
             command_line: "wsl.exe".into(),
             startup_command: String::new(),
+            starting_directory: String::new(),
             cols: 120,
             rows: 40,
             sync_group: "project-a".into(),
@@ -351,6 +357,16 @@ mod tests {
         assert_eq!(config.cols, 80);
         assert_eq!(config.rows, 24);
         assert!(config.sync_group.is_empty());
+        assert!(config.starting_directory.is_empty());
+    }
+
+    #[test]
+    fn config_with_starting_directory() {
+        let config = TerminalConfig {
+            starting_directory: "C:\\Users\\test\\project".into(),
+            ..TerminalConfig::default()
+        };
+        assert_eq!(config.starting_directory, "C:\\Users\\test\\project");
     }
 
     #[test]

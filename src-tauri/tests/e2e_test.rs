@@ -455,6 +455,7 @@ fn terminal_session_full_lifecycle() {
             rows: 24,
             sync_group: group.to_string(),
             env: vec![],
+            ..TerminalConfig::default()
         };
         let session = TerminalSession::new(id.to_string(), config);
 
@@ -571,6 +572,7 @@ fn terminal_session_with_custom_env_vars() {
             ("EMPTY_VAR".into(), "".into()),
             ("SPECIAL_CHARS".into(), "hello world!@#$%".into()),
         ],
+        ..TerminalConfig::default()
     };
 
     let session = TerminalSession::new("env-test".into(), config);

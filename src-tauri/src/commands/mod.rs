@@ -45,16 +45,18 @@ pub fn create_terminal_session(
         }
     }
 
-    // Look up the profile's command_line and startup_command from settings
+    // Look up the profile's command_line, startup_command, and starting_directory from settings
     let settings = crate::settings::load_settings();
     let matched_profile = settings.profiles.iter().find(|p| p.name == profile);
     let command_line = matched_profile.map(|p| p.command_line.clone()).unwrap_or_default();
     let startup_command = matched_profile.map(|p| p.startup_command.clone()).unwrap_or_default();
+    let starting_directory = matched_profile.map(|p| p.starting_directory.clone()).unwrap_or_default();
 
     let config = TerminalConfig {
         profile,
         command_line,
         startup_command,
+        starting_directory,
         cols,
         rows,
         sync_group: sync_group.clone(),
@@ -106,6 +108,7 @@ pub fn create_terminal_session(
         profile: session.config.profile.clone(),
         command_line: session.config.command_line.clone(),
         startup_command: session.config.startup_command.clone(),
+        starting_directory: session.config.starting_directory.clone(),
         cols: session.config.cols,
         rows: session.config.rows,
         sync_group: session.config.sync_group.clone(),
