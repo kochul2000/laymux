@@ -318,15 +318,48 @@ describe("abbreviatePath", () => {
     expect(abbreviatePath("file://localhost/C:/Users/kochul/Documents")).toBe("~/Documents");
   });
 
-  it("truncates long paths", () => {
+  it("truncates long paths (default ellipsis=start)", () => {
     const longPath = "/var/lib/really/deeply/nested/directory/structure";
     const result = abbreviatePath(longPath);
     expect(result.startsWith(".../")).toBe(true);
     expect(result.length).toBeLessThan(longPath.length);
   });
 
-  it("returns short paths as-is", () => {
+  it("truncates long paths with ellipsis=end (keeps beginning)", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "end");
+    expect(result.endsWith("/...")).toBe(true);
+    expect(result.length).toBeLessThan(longPath.length);
+  });
+
+  it("ellipsis=start shows last 2 segments", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "start");
+    expect(result).toBe(".../directory/structure");
+  });
+
+  it("ellipsis=end shows first 2 segments", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "end");
+    expect(result).toBe("/var/lib/...");
+  });
+
+  it("returns short paths as-is regardless of ellipsis mode", () => {
     expect(abbreviatePath("/tmp/foo")).toBe("/tmp/foo");
+    expect(abbreviatePath("/tmp/foo", "start")).toBe("/tmp/foo");
+    expect(abbreviatePath("/tmp/foo", "end")).toBe("/tmp/foo");
+  });
+
+  it("uses backslash separator for Windows long paths (ellipsis=start)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "start");
+    expect(result).toBe("...\\dir\\sub");
+  });
+
+  it("uses backslash separator for Windows long paths (ellipsis=end)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "end");
+    expect(result).toBe("D:\\Projects\\work\\...");
   });
 });
 

@@ -41,6 +41,9 @@ export interface ColorScheme {
 
 export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 
+/** Path ellipsis direction: "start" truncates the beginning, "end" truncates the end. */
+export type PathEllipsisMode = "start" | "end";
+
 /** Terminal scrollbar rendering mode. */
 export type ScrollbarStyle = "overlay" | "separate";
 
@@ -53,6 +56,8 @@ export interface ConvenienceSettings {
   notificationDismiss: NotificationDismissMode;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
+  /** Path ellipsis direction in WorkspaceSelectorView. "start" (default) shows the end of the path, "end" shows the beginning. */
+  pathEllipsis: PathEllipsisMode;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
   scrollbarStyle: ScrollbarStyle;
 }
@@ -384,7 +389,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "overlay" as const },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -502,7 +507,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "overlay" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude

@@ -269,6 +269,20 @@ impl Default for ClaudeSettings {
     }
 }
 
+/// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum PathEllipsisMode {
+    Start,
+    End,
+}
+
+impl Default for PathEllipsisMode {
+    fn default() -> Self {
+        Self::Start
+    }
+}
+
 fn default_scrollbar_style() -> String {
     "overlay".to_string()
 }
@@ -284,6 +298,9 @@ pub struct ConvenienceSettings {
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
+    /// Path ellipsis direction in workspace selector. "start" (default) shows the end of the path.
+    #[serde(default)]
+    pub path_ellipsis: PathEllipsisMode,
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
@@ -295,6 +312,7 @@ impl Default for ConvenienceSettings {
             smart_paste: true,
             paste_image_dir: String::new(),
             copy_on_select: true,
+            path_ellipsis: PathEllipsisMode::default(),
             scrollbar_style: "overlay".to_string(),
         }
     }
@@ -731,6 +749,7 @@ mod tests {
         assert!(settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "");
         assert!(settings.convenience.copy_on_select);
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::Start);
     }
 
     #[test]
@@ -739,6 +758,20 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(!settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "C:\\temp\\images");
+    }
+
+    #[test]
+    fn path_ellipsis_deserialize() {
+        let json = r#"{"convenience": {"pathEllipsis": "end"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::End);
+    }
+
+    #[test]
+    fn path_ellipsis_defaults_start_when_missing() {
+        let json = r#"{"convenience": {"smartPaste": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::Start);
     }
 
     #[test]

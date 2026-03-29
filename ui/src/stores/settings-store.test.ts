@@ -321,6 +321,26 @@ describe("settings-store", () => {
     expect(convenience.pasteImageDir).toBe("");
   });
 
+  // -- Path ellipsis settings --
+
+  it("has default pathEllipsis set to start", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.pathEllipsis).toBe("start");
+  });
+
+  it("setConvenience updates pathEllipsis", () => {
+    useSettingsStore.getState().setConvenience({ pathEllipsis: "end" });
+    expect(useSettingsStore.getState().convenience.pathEllipsis).toBe("end");
+  });
+
+  it("loadFromSettings fills missing pathEllipsis with default", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.pathEllipsis).toBe("start");
+  });
+
   // -- Claude settings --
 
   it("has default claude settings", () => {
