@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -507,6 +510,7 @@ pub fn memo_path() -> PathBuf {
 
 /// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
 pub fn load_memo(key: &str) -> String {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = memo_path();
     let map = match fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
@@ -518,6 +522,7 @@ pub fn load_memo(key: &str) -> String {
 
 /// Save memo content for a specific key.
 pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = memo_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;

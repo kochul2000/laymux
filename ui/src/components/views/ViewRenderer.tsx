@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
@@ -21,6 +22,7 @@ interface ViewRendererProps {
 
 export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const fallbackIdRef = useRef(`fallback-${Math.random().toString(36).slice(2)}`);
   switch (viewType) {
     case "WorkspaceSelectorView":
       return (
@@ -37,7 +39,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
     case "TerminalView": {
       const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
       const effectiveSyncGroup = configSyncGroup || workspaceName || "";
-      const instanceId = paneId ? `terminal-${paneId}` : `terminal-fallback-${Math.random().toString(36).slice(2)}`;
+      const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackIdRef.current}`;
       return (
         <div data-testid="view-terminal" className="h-full">
           <TerminalView
@@ -59,7 +61,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
         </div>
       );
     case "MemoView": {
-      const memoKey = paneId ? `memo-${paneId}` : `memo-fallback-${Math.random().toString(36).slice(2)}`;
+      const memoKey = paneId ? `memo-${paneId}` : `memo-${fallbackIdRef.current}`;
       return (
         <div data-testid="view-memo" className="h-full">
           <MemoView memoKey={memoKey} isFocused={isFocused} />
