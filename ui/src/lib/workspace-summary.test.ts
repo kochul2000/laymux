@@ -292,6 +292,18 @@ describe("abbreviatePath", () => {
     expect(abbreviatePath("/tmp/foo", "start")).toBe("/tmp/foo");
     expect(abbreviatePath("/tmp/foo", "end")).toBe("/tmp/foo");
   });
+
+  it("uses backslash separator for Windows long paths (ellipsis=start)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "start");
+    expect(result).toBe("...\\dir\\sub");
+  });
+
+  it("uses backslash separator for Windows long paths (ellipsis=end)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "end");
+    expect(result).toBe("D:\\Projects\\work\\...");
+  });
 });
 
 describe("formatPorts", () => {

@@ -179,10 +179,10 @@ export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start")
     const parts = path.split(sep);
     if (ellipsis === "end") {
       // Keep beginning, truncate end
-      return parts.slice(0, 3).join("/") + "/...";
+      return parts.slice(0, 3).join(sep) + sep + "...";
     }
     // Default: keep end, truncate beginning
-    return ".../" + parts.slice(-2).join("/");
+    return "..." + sep + parts.slice(-2).join(sep);
   }
 
   return path;
