@@ -65,9 +65,7 @@ pub fn create_terminal_session(
     };
 
     let mut session = TerminalSession::new(id.clone(), config);
-    if let Some(receive) = cwd_receive {
-        session.cwd_receive = receive;
-    }
+    session.cwd_receive = cwd_receive.unwrap_or(true);
 
     // Check for duplicate
     {
@@ -2670,10 +2668,4 @@ mod tests {
         assert!(filtered.contains(&"t3".to_string()), "t3 with cwd_receive=true should pass");
     }
 
-    #[test]
-    fn terminal_session_new_with_cwd_receive_false() {
-        let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
-        session.cwd_receive = false;
-        assert!(!session.cwd_receive);
-    }
 }

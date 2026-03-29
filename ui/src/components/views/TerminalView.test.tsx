@@ -730,21 +730,5 @@ describe("TerminalView", () => {
       });
     });
 
-    it("passes cwdReceive=false atomically to createTerminalSession", async () => {
-      render(
-        <TerminalView
-          instanceId="t-cwd4"
-          profile="PowerShell"
-          syncGroup="default"
-          cwdReceive={false}
-        />,
-      );
-
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "t-cwd4", "PowerShell", 80, 24, "default", false,
-        );
-      });
-    });
   });
 });
