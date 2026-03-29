@@ -32,26 +32,32 @@ describe("SettingsView", () => {
 
   // -- Startup section (renamed from General) --
 
-  it("displays Startup section with font settings", () => {
+  it("displays Startup section", () => {
     render(<SettingsView />);
     expect(screen.getAllByText("Startup").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Font")).toBeInTheDocument();
   });
 
-  it("shows current font face", () => {
+  it("shows font settings in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    expect(screen.getByText("Font")).toBeInTheDocument();
     const input = screen.getByTestId("font-face-input") as HTMLInputElement;
     expect(input.value).toBe("Cascadia Mono");
   });
 
-  it("shows current font size", () => {
+  it("shows font size in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
     expect(input.value).toBe("14");
   });
 
-  it("shows font weight selector", () => {
+  it("shows font weight selector in Profile Defaults", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
     const select = screen.getByTestId("font-weight-select") as HTMLSelectElement;
     expect(select.value).toBe("normal");
   });
@@ -59,12 +65,13 @@ describe("SettingsView", () => {
   it("does NOT update font face in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
     await user.selectOptions(select, "Fira Code");
 
     // Store should still have original value (draft only in local state)
-    expect(useSettingsStore.getState().font.face).toBe("Cascadia Mono");
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("Cascadia Mono");
     // But the UI select should show the new value
     expect(select.value).toBe("Fira Code");
   });
@@ -72,6 +79,7 @@ describe("SettingsView", () => {
   it("updates font face in store only after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
     await user.selectOptions(select, "Fira Code");
@@ -79,17 +87,19 @@ describe("SettingsView", () => {
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().font.face).toBe("Fira Code");
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("Fira Code");
   });
 
-  it("does NOT update font size in store until Save is clicked", () => {
+  it("does NOT update font size in store until Save is clicked", async () => {
+    const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "16" } });
 
     // Store should still have original value
-    expect(useSettingsStore.getState().font.size).toBe(14);
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(14);
     // But the UI input should show the new value
     expect(input.value).toBe("16");
   });
@@ -97,6 +107,7 @@ describe("SettingsView", () => {
   it("updates font size in store only after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const input = screen.getByTestId("font-size-input") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "16" } });
@@ -104,23 +115,25 @@ describe("SettingsView", () => {
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().font.size).toBe(16);
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(16);
   });
 
   it("does NOT update font weight in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-weight-select");
     await user.selectOptions(select, "bold");
 
     // Store should still have original value
-    expect(useSettingsStore.getState().font.weight).toBe("normal");
+    expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("normal");
   });
 
   it("updates font weight in store only after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-weight-select");
     await user.selectOptions(select, "bold");
@@ -128,7 +141,7 @@ describe("SettingsView", () => {
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().font.weight).toBe("bold");
+    expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("bold");
   });
 
   // -- App Theme draft --
@@ -240,7 +253,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("Hidden")).toBeInTheDocument();
   });
 
-  it("profile Additional Settings tab shows Appearance and Advanced fields", async () => {
+  it("profile Additional Settings tab shows Font, Appearance and Advanced fields", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
     await navigateToProfile(user, "PowerShell");
@@ -248,6 +261,9 @@ describe("SettingsView", () => {
     const tabBar = screen.getByTestId("profile-tabs");
     await user.click(within(tabBar).getByText("Additional Settings"));
 
+    // Font fields
+    expect(screen.getByText("Font")).toBeInTheDocument();
+    expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
@@ -537,6 +553,26 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
   });
 
+  // -- Scrollbar style --
+
+  it("shows scrollbar style select in convenience section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
+  });
+
+  it("scrollbar style select updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
+    await user.selectOptions(select, "separate");
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+  });
+
   // -- Claude Code section --
 
   it("shows Claude Code nav button", () => {
@@ -597,6 +633,7 @@ describe("SettingsView", () => {
   it("discard reverts font draft to store value", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
 
     const select = screen.getByTestId("font-face-input") as HTMLSelectElement;
     await user.selectOptions(select, "Fira Code");
@@ -606,7 +643,7 @@ describe("SettingsView", () => {
     await user.click(discardBtn);
 
     expect(select.value).toBe("Cascadia Mono");
-    expect(useSettingsStore.getState().font.face).toBe("Cascadia Mono");
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("Cascadia Mono");
   });
 
   it("discard reverts appTheme draft to store value", async () => {
@@ -832,23 +869,24 @@ describe("SettingsView", () => {
   // 이후 Save를 누르면 언마운트된 섹션의 변경사항이 유실된다.
 
   describe("섹션 네비게이션 시 draft 유실 버그", () => {
-    it("StartupSection에서 변경 → 다른 섹션 이동 → Save 시 변경 유실", async () => {
+    it("DefaultsSection에서 변경 → 다른 섹션 이동 → Save 시 변경 유실", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      // StartupSection에서 font face 변경
+      // DefaultsSection에서 font face 변경
+      await user.click(screen.getByTestId("nav-profile-defaults"));
       const fontSelect = screen.getByTestId("font-face-input") as HTMLSelectElement;
       await user.selectOptions(fontSelect, "Fira Code");
       expect(fontSelect.value).toBe("Fira Code");
 
-      // Convenience로 이동 → StartupSection 언마운트
+      // Convenience로 이동 → DefaultsSection 언마운트
       await user.click(screen.getByTestId("nav-convenience"));
 
-      // Save → StartupSection의 flush 콜백이 cleanup으로 삭제됨
+      // Save → DefaultsSection의 flush 콜백이 cleanup으로 삭제됨
       await user.click(screen.getByTestId("save-settings-btn"));
 
       // BUG: font face 변경이 유실됨
-      expect(useSettingsStore.getState().font.face).toBe("Fira Code");
+      expect(useSettingsStore.getState().profileDefaults.font.face).toBe("Fira Code");
     });
 
     it("ConvenienceSection에서 변경 → 다른 섹션 이동 → Save 시 변경 유실", async () => {
@@ -875,7 +913,8 @@ describe("SettingsView", () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      // 1. StartupSection: font 변경
+      // 1. DefaultsSection: font 변경
+      await user.click(screen.getByTestId("nav-profile-defaults"));
       const fontSelect = screen.getByTestId("font-face-input") as HTMLSelectElement;
       await user.selectOptions(fontSelect, "Fira Code");
 
@@ -893,8 +932,8 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("save-settings-btn"));
 
       const state = useSettingsStore.getState();
-      // BUG: StartupSection 변경 유실
-      expect(state.font.face).toBe("Fira Code");
+      // BUG: DefaultsSection 변경 유실
+      expect(state.profileDefaults.font.face).toBe("Fira Code");
       // BUG: ConvenienceSection 변경 유실
       expect(state.convenience.smartPaste).toBe(false);
       // ClaudeSection은 마운트 상태이므로 정상 반영

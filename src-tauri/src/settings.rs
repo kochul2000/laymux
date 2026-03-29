@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -108,6 +111,9 @@ pub struct Profile {
     pub suppress_application_title: bool,
     #[serde(default = "default_true")]
     pub snap_on_input: bool,
+    /// Per-profile font override. When None, inherits from profileDefaults / global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<FontSettings>,
 }
 
 impl Default for Profile {
@@ -129,6 +135,7 @@ impl Default for Profile {
             antialiasing_mode: default_antialiasing_mode(),
             suppress_application_title: false,
             snap_on_input: true,
+            font: None,
         }
     }
 }
@@ -262,6 +269,24 @@ impl Default for ClaudeSettings {
     }
 }
 
+/// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum PathEllipsisMode {
+    Start,
+    End,
+}
+
+impl Default for PathEllipsisMode {
+    fn default() -> Self {
+        Self::Start
+    }
+}
+
+fn default_scrollbar_style() -> String {
+    "overlay".to_string()
+}
+
 /// Convenience feature settings (smart paste, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -273,6 +298,12 @@ pub struct ConvenienceSettings {
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
+    /// Path ellipsis direction in workspace selector. "start" (default) shows the end of the path.
+    #[serde(default)]
+    pub path_ellipsis: PathEllipsisMode,
+    /// Terminal scrollbar style: "overlay" (default) or "separate".
+    #[serde(default = "default_scrollbar_style")]
+    pub scrollbar_style: String,
 }
 
 impl Default for ConvenienceSettings {
@@ -281,6 +312,8 @@ impl Default for ConvenienceSettings {
             smart_paste: true,
             paste_image_dir: String::new(),
             copy_on_select: true,
+            path_ellipsis: PathEllipsisMode::default(),
+            scrollbar_style: "overlay".to_string(),
         }
     }
 }
@@ -342,8 +375,8 @@ pub struct Settings {
     pub profiles: Vec<Profile>,
     #[serde(default)]
     pub keybindings: Vec<Keybinding>,
-    #[serde(default)]
-    pub font: FontSettings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<FontSettings>,
     #[serde(default = "default_profile")]
     pub default_profile: String,
     #[serde(default)]
@@ -379,7 +412,7 @@ impl Default for Settings {
                 },
             ],
             keybindings: Vec::new(),
-            font: FontSettings::default(),
+            font: None,
             default_profile: default_profile(),
             layouts: vec![Layout {
                 id: "default-layout".into(),
@@ -430,7 +463,7 @@ pub fn settings_path() -> PathBuf {
     base.join("settings.json")
 }
 
-fn dirs_config_path() -> Option<PathBuf> {
+pub(crate) fn dirs_config_path() -> Option<PathBuf> {
     // On Windows: %APPDATA%/laymux
     // On Linux: ~/.config/laymux
     #[cfg(target_os = "windows")]
@@ -499,6 +532,51 @@ fn migrate_settings(settings: &mut Settings) {
     }
 }
 
+/// Get the memo file path (sibling of settings.json).
+pub fn memo_path() -> PathBuf {
+    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    base.join("memo.json")
+}
+
+/// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
+pub fn load_memo(key: &str) -> String {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    load_memo_from(&memo_path(), key)
+}
+
+/// Save memo content for a specific key.
+pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    save_memo_to(&memo_path(), key, content)
+}
+
+fn load_memo_from(path: &PathBuf, key: &str) -> String {
+    let map = match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    map.get(key).cloned().unwrap_or_default()
+}
+
+fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let mut map = match fs::read_to_string(path) {
+        Ok(data) => serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    if content.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), content.to_string());
+    }
+    let json = serde_json::to_string_pretty(&map).map_err(|e| format!("Serialize error: {e}"))?;
+    fs::write(path, json).map_err(|e| format!("Write error: {e}"))
+}
+
 /// Save settings to disk.
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
     let path = settings_path();
@@ -531,9 +609,13 @@ mod tests {
 
     #[test]
     fn default_font_settings() {
+        // Root-level font is now None; per-profile font is also None by default
         let settings = Settings::default();
-        assert_eq!(settings.font.face, "Cascadia Mono");
-        assert_eq!(settings.font.size, 14);
+        assert!(settings.font.is_none());
+        // FontSettings default values are still correct
+        let font = FontSettings::default();
+        assert_eq!(font.face, "Cascadia Mono");
+        assert_eq!(font.size, 14);
     }
 
     #[test]
@@ -546,10 +628,12 @@ mod tests {
 
     #[test]
     fn deserialize_partial_settings() {
+        // Root-level font is parsed as legacy (backward compat)
         let json = r#"{"font": {"face": "Fira Code", "size": 16}}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.font.face, "Fira Code");
-        assert_eq!(settings.font.size, 16);
+        let font = settings.font.as_ref().unwrap();
+        assert_eq!(font.face, "Fira Code");
+        assert_eq!(font.size, 16);
         // Defaults fill in
         assert_eq!(settings.default_profile, "PowerShell");
     }
@@ -665,6 +749,7 @@ mod tests {
         assert!(settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "");
         assert!(settings.convenience.copy_on_select);
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::Start);
     }
 
     #[test]
@@ -673,6 +758,20 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(!settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "C:\\temp\\images");
+    }
+
+    #[test]
+    fn path_ellipsis_deserialize() {
+        let json = r#"{"convenience": {"pathEllipsis": "end"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::End);
+    }
+
+    #[test]
+    fn path_ellipsis_defaults_start_when_missing() {
+        let json = r#"{"convenience": {"smartPaste": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.path_ellipsis, PathEllipsisMode::Start);
     }
 
     #[test]
@@ -696,6 +795,42 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "");
+    }
+
+    #[test]
+    fn scrollbar_style_default_is_overlay() {
+        let settings = Settings::default();
+        assert_eq!(settings.convenience.scrollbar_style, "overlay");
+    }
+
+    #[test]
+    fn scrollbar_style_deserialize_separate() {
+        let json = r#"{"convenience": {"scrollbarStyle": "separate"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_style, "separate");
+    }
+
+    #[test]
+    fn scrollbar_style_deserialize_overlay() {
+        let json = r#"{"convenience": {"scrollbarStyle": "overlay"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_style, "overlay");
+    }
+
+    #[test]
+    fn scrollbar_style_defaults_to_overlay_when_missing() {
+        let json = r#"{"convenience": {"smartPaste": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_style, "overlay");
+    }
+
+    #[test]
+    fn scrollbar_style_serialize_roundtrip() {
+        let mut settings = Settings::default();
+        settings.convenience.scrollbar_style = "separate".to_string();
+        let json = serde_json::to_string(&settings).unwrap();
+        let deserialized: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.convenience.scrollbar_style, "separate");
     }
 
     #[test]
@@ -833,10 +968,91 @@ mod tests {
     }
 
     #[test]
-    fn migrate_no_op_for_clean_settings() {
-        let mut settings = Settings::default();
-        let before = settings.clone();
-        migrate_settings(&mut settings);
-        assert_eq!(settings, before);
+    fn profile_font_override() {
+        let json = r#"{"name": "Custom", "commandLine": "zsh", "font": {"face": "Fira Code", "size": 18, "weight": "bold"}}"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        let font = profile.font.unwrap();
+        assert_eq!(font.face, "Fira Code");
+        assert_eq!(font.size, 18);
+        assert_eq!(font.weight, "bold");
+    }
+
+    #[test]
+    fn profile_font_none_by_default() {
+        let profile = Profile::default();
+        assert!(profile.font.is_none());
+    }
+
+    #[test]
+    fn profile_font_not_serialized_when_none() {
+        let profile = Profile::default();
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("\"font\""));
+    }
+
+    #[test]
+    fn profile_font_serialized_when_some() {
+        let mut profile = Profile::default();
+        profile.font = Some(FontSettings { face: "Mono".into(), size: 12, weight: "normal".into() });
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(json.contains("\"font\""));
+        let parsed: Profile = serde_json::from_str(&json).unwrap();
+        let font = parsed.font.unwrap();
+        assert_eq!(font.face, "Mono");
+        assert_eq!(font.size, 12);
+    }
+
+    // --- Memo file tests ---
+
+    #[test]
+    fn memo_path_is_sibling_of_settings_path() {
+        let mp = memo_path();
+        let sp = settings_path();
+        assert_eq!(mp.parent(), sp.parent());
+        assert_eq!(mp.file_name().unwrap(), "memo.json");
+    }
+
+    #[test]
+    fn memo_round_trip_via_functions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        save_memo_to(&path, "pane-1", "Hello").unwrap();
+        save_memo_to(&path, "pane-2", "World").unwrap();
+
+        assert_eq!(load_memo_from(&path, "pane-1"), "Hello");
+        assert_eq!(load_memo_from(&path, "pane-2"), "World");
+    }
+
+    #[test]
+    fn memo_missing_key_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        // No file at all
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
+
+        // File exists but key doesn't
+        save_memo_to(&path, "other", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
+    }
+
+    #[test]
+    fn memo_empty_content_removes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        save_memo_to(&path, "pane-1", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "data");
+
+        // Save empty string removes the key
+        save_memo_to(&path, "pane-1", "").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "");
+
+        // Verify it's actually removed from the file
+        let content = fs::read_to_string(&path).unwrap();
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(&content).unwrap();
+        assert!(!map.contains_key("pane-1"));
     }
 }

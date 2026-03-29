@@ -14,7 +14,6 @@ export async function persistSession(): Promise<void> {
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
-    font: settingsState.font,
     defaultProfile: settingsState.defaultProfile,
     // WARNING: Profile 필드를 추가할 때 여기에도 반드시 포함할 것.
     // 누락하면 settings.json 저장 시 해당 필드가 사라짐.
@@ -36,6 +35,7 @@ export async function persistSession(): Promise<void> {
       antialiasingMode: p.antialiasingMode,
       suppressApplicationTitle: p.suppressApplicationTitle,
       snapOnInput: p.snapOnInput,
+      ...(p.font ? { font: p.font } : {}),
     })),
     colorSchemes: settingsState.colorSchemes.map((cs) => ({
       name: cs.name,
