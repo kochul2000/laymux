@@ -15,6 +15,7 @@ import {
 } from "@/stores/settings-store";
 import { persistSession } from "@/lib/persist-session";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
+import { useDraft } from "@/hooks/useDraft";
 
 // -- Shared styles --
 const inputCls = "w-full rounded px-2 py-1.5 text-[13px]";
@@ -917,12 +918,25 @@ function ColorSchemesSection() {
 // -- Section: Convenience --
 
 function ConvenienceSection() {
-  const convenience = useSettingsStore((s) => s.convenience);
+  const storeConvenience = useSettingsStore((s) => s.convenience);
   const setConvenience = useSettingsStore((s) => s.setConvenience);
+  const { draft: convenience, setDraft: setDraftConvenience, dirty } = useDraft(storeConvenience);
+
+  /** Update both draft and store (live preview while editing). */
+  const update = (data: Partial<typeof convenience>) => {
+    setDraftConvenience((prev) => ({ ...prev, ...data }));
+    setConvenience(data);
+  };
 
   return (
     <div>
       <SectionTitle>Convenience</SectionTitle>
+
+      {dirty && (
+        <div data-testid="convenience-dirty-banner" className="mb-2 rounded px-3 py-1 text-xs" style={{ background: "var(--yellow)", color: "var(--bg-base)", opacity: 0.85 }}>
+          Unsaved changes
+        </div>
+      )}
 
       <div style={cardStyle} className="p-4">
         {/* Smart Paste toggle */}
@@ -939,7 +953,7 @@ function ConvenienceSection() {
                 data-testid="smart-paste-toggle"
                 type="checkbox"
                 checked={convenience.smartPaste}
-                onChange={(e) => setConvenience({ smartPaste: e.target.checked })}
+                onChange={(e) => update({ smartPaste: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.smartPaste ? "Enabled" : "Disabled"}
@@ -962,7 +976,7 @@ function ConvenienceSection() {
                 data-testid="copy-on-select-toggle"
                 type="checkbox"
                 checked={convenience.copyOnSelect}
-                onChange={(e) => setConvenience({ copyOnSelect: e.target.checked })}
+                onChange={(e) => update({ copyOnSelect: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.copyOnSelect ? "Enabled" : "Disabled"}
@@ -985,7 +999,7 @@ function ConvenienceSection() {
               className={inputCls}
               placeholder="(default: %APPDATA%\laymux\paste-images)"
               value={convenience.pasteImageDir}
-              onChange={(e) => setConvenience({ pasteImageDir: e.target.value })}
+              onChange={(e) => update({ pasteImageDir: e.target.value })}
             />
           </div>
         </div>
@@ -1008,7 +1022,7 @@ function ConvenienceSection() {
               className={inputCls}
               style={{ width: 70 }}
               value={convenience.hoverIdleSeconds}
-              onChange={(e) => setConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => update({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>초</span>
           </div>
@@ -1027,7 +1041,7 @@ function ConvenienceSection() {
               data-testid="notification-dismiss-select"
               className={inputCls}
               value={convenience.notificationDismiss}
-              onChange={(e) => setConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
+              onChange={(e) => update({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
             >
               <option value="workspace">워크스페이스 선택 시 자동 해제</option>
               <option value="paneFocus">Pane 포커스 시 자동 해제</option>
@@ -1049,7 +1063,7 @@ function ConvenienceSection() {
               data-testid="path-ellipsis-select"
               className={inputCls}
               value={convenience.pathEllipsis}
-              onChange={(e) => setConvenience({ pathEllipsis: e.target.value as "start" | "end" })}
+              onChange={(e) => update({ pathEllipsis: e.target.value as "start" | "end" })}
             >
               <option value="start">앞부분 생략 (.../dir/file)</option>
               <option value="end">뒷부분 생략 (/home/user/...)</option>
@@ -1070,7 +1084,7 @@ function ConvenienceSection() {
               data-testid="scrollbar-style-select"
               className={inputCls}
               value={convenience.scrollbarStyle}
-              onChange={(e) => setConvenience({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
+              onChange={(e) => update({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
             >
               <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
               <option value="separate">Separate (별도 공간 차지)</option>
@@ -1085,8 +1099,15 @@ function ConvenienceSection() {
 // -- Section: Claude Code --
 
 function ClaudeSection() {
-  const claude = useSettingsStore((s) => s.claude);
+  const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
+  const { draft: claude, setDraft: setDraftClaude } = useDraft(storeClaude);
+
+  /** Update both draft and store. */
+  const update = (data: Partial<typeof claude>) => {
+    setDraftClaude((prev) => ({ ...prev, ...data }));
+    setClaude(data);
+  };
 
   return (
     <div>
@@ -1106,7 +1127,7 @@ function ClaudeSection() {
               data-testid="claude-sync-cwd-select"
               className={inputCls}
               value={claude.syncCwd}
-              onChange={(e) => setClaude({ syncCwd: e.target.value as "skip" | "command" })}
+              onChange={(e) => update({ syncCwd: e.target.value as "skip" | "command" })}
             >
               <option value="skip">Skip (전파하지 않음)</option>
               <option value="command">Command (유휴 시 ! cd 전송)</option>

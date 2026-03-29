@@ -418,4 +418,29 @@ describe("settings-store", () => {
     expect(convenience.copyOnSelect).toBe(true);
     expect(convenience.scrollbarStyle).toBe("separate");
   });
+
+  // -- _externalRevision (Issue #51) --
+
+  it("has initial _externalRevision of 0", () => {
+    expect(useSettingsStore.getState()._externalRevision).toBe(0);
+  });
+
+  it("increments _externalRevision on each loadFromSettings call", () => {
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "WSL" });
+    expect(useSettingsStore.getState()._externalRevision).toBe(1);
+
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "PowerShell" });
+    expect(useSettingsStore.getState()._externalRevision).toBe(2);
+  });
+
+  it("does not increment _externalRevision on regular mutations", () => {
+    useSettingsStore.getState().setDefaultProfile("WSL");
+    expect(useSettingsStore.getState()._externalRevision).toBe(0);
+
+    useSettingsStore.getState().setConvenience({ smartPaste: false });
+    expect(useSettingsStore.getState()._externalRevision).toBe(0);
+
+    useSettingsStore.getState().setClaude({ syncCwd: "command" });
+    expect(useSettingsStore.getState()._externalRevision).toBe(0);
+  });
 });

@@ -173,6 +173,9 @@ interface SettingsState {
   appThemeId: string;
   convenience: ConvenienceSettings;
   claude: ClaudeSettings;
+  /** Monotonically increasing counter bumped on every `loadFromSettings` call.
+   *  Used by `useDraft` in the Settings UI to detect external changes (e.g. file watcher hot-reload). */
+  _externalRevision: number;
 
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
@@ -391,6 +394,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   appThemeId: "catppuccin-mocha",
   convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
+  _externalRevision: 0,
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -524,6 +528,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
       ...(claude ? { claude } : {}),
+      _externalRevision: state._externalRevision + 1,
     }));
   },
 }));

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -429,5 +429,66 @@ describe("SettingsView", () => {
     const select = screen.getByTestId("claude-sync-cwd-select");
     await user.selectOptions(select, "command");
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+  });
+
+  // -- Draft external sync (Issue #51) --
+
+  it("resets convenience draft when settings are loaded externally", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    // Navigate to Convenience section
+    await user.click(screen.getByTestId("nav-convenience"));
+
+    // Toggle smart paste off (default is true)
+    const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    expect(toggle.checked).toBe(false);
+    expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+
+    // Simulate external settings.json change via loadFromSettings
+    // This resets smartPaste back to true (as if file watcher reloaded)
+    act(() => {
+      useSettingsStore.getState().loadFromSettings({
+        convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace", copyOnSelect: true, pathEllipsis: "start", scrollbarStyle: "overlay" },
+      });
+    });
+
+    // The draft should be reset to the new store value
+    const toggleAfter = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+    expect(toggleAfter.checked).toBe(true);
+  });
+
+  it("resets claude draft when settings are loaded externally", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    // Navigate to Claude section and change to "command"
+    await user.click(screen.getByTestId("nav-claude"));
+    const select = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+    await user.selectOptions(select, "command");
+    expect(select.value).toBe("command");
+
+    // Simulate external change reverting to "skip"
+    act(() => {
+      useSettingsStore.getState().loadFromSettings({
+        claude: { syncCwd: "skip" },
+      });
+    });
+
+    // Draft should be reset to "skip"
+    const selectAfter = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+    expect(selectAfter.value).toBe("skip");
+  });
+
+  it("increments _externalRevision on loadFromSettings", () => {
+    expect(useSettingsStore.getState()._externalRevision).toBe(0);
+
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "WSL" });
+    expect(useSettingsStore.getState()._externalRevision).toBe(1);
+
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "PowerShell" });
+    expect(useSettingsStore.getState()._externalRevision).toBe(2);
   });
 });
