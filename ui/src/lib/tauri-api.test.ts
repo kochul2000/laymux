@@ -125,7 +125,7 @@ describe("tauri-api", () => {
 
   describe("loadSettings", () => {
     it("invokes load_settings", async () => {
-      const settings = { font: { face: "Consolas", size: 14 } };
+      const settings = { defaultProfile: "PowerShell", profiles: [] };
       mockInvoke.mockResolvedValue(settings);
       const result = await loadSettings();
       expect(mockInvoke).toHaveBeenCalledWith("load_settings");
@@ -136,7 +136,7 @@ describe("tauri-api", () => {
   describe("saveSettings", () => {
     it("invokes save_settings with settings", async () => {
       mockInvoke.mockResolvedValue(undefined);
-      const settings = { font: { face: "Fira Code", size: 16 } } as any;
+      const settings = { defaultProfile: "PowerShell", profiles: [] } as any;
       await saveSettings(settings);
       expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
         settings,

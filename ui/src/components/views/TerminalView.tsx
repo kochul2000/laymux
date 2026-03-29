@@ -16,6 +16,7 @@ import {
   clipboardWriteText,
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
+  openExternal,
 } from "@/lib/tauri-api";
 import {
   colorSchemeToXtermTheme,
@@ -114,17 +115,26 @@ export function TerminalView({
         }
       : defaultTheme;
 
+    // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
+    // does not reserve space for the scrollbar — it renders on top of content.
+    const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
+    const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
+
+    const resolvedFont = settingsState.resolveFont(profile);
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: settingsState.font.size,
-      fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+      fontSize: resolvedFont.size,
+      fontFamily: `'${resolvedFont.face}', 'Cascadia Mono', 'Consolas', monospace`,
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
+      overviewRuler: { width: overviewRulerWidth },
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      openExternal(uri).catch(() => {});
+    });
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
@@ -395,11 +405,16 @@ export function TerminalView({
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      const { font, setFont } = useSettingsStore.getState();
+      const state = useSettingsStore.getState();
+      const currentFont = state.resolveFont(profile);
       const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, font.size + delta));
-      if (newSize !== font.size) {
-        setFont({ ...font, size: newSize });
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        // Update the profile's font override
+        const idx = state.profiles.findIndex((p) => p.name === profile);
+        if (idx >= 0) {
+          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
+        }
       }
     };
     outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
@@ -493,7 +508,7 @@ export function TerminalView({
     return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
-  const font = useSettingsStore((s) => s.font ?? { face: "Cascadia Mono", size: 14, weight: "normal" });
+  const font = useSettingsStore((s) => s.resolveFont(profile));
 
   useEffect(() => {
     const term = terminalRef.current;
@@ -536,10 +551,17 @@ export function TerminalView({
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
+  // Scrollbar style: overlay (default) renders on top of terminal content,
+  // separate reserves space for the scrollbar.
+  const scrollbarStyle = useSettingsStore(
+    (s) => s.convenience.scrollbarStyle ?? "overlay",
+  );
+  const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
+
   return (
     <div
       data-testid={`terminal-view-${instanceId}`}
-      className="h-full w-full"
+      className={`h-full w-full ${scrollbarClass}`}
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
