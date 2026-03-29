@@ -1139,6 +1139,55 @@ function ClaudeSection() {
   );
 }
 
+// -- Section: Memo --
+
+function MemoSection() {
+  const storeMemo = useSettingsStore((s) => s.memo);
+  const setMemo = useSettingsStore((s) => s.setMemo);
+  const [memo, setDraftMemo] = useDraft("memo", storeMemo, (v) => setMemo(v));
+  const updateMemo = (partial: Partial<typeof memo>) => setDraftMemo(prev => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>Memo</SectionTitle>
+
+      <div style={cardStyle} className="p-4">
+        {/* Padding */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Padding</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              메모 영역의 안쪽 여백 (px)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+                const key = `padding${dir}` as keyof typeof memo;
+                return (
+                  <label key={dir} className="flex items-center gap-1.5">
+                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>{dir}</span>
+                    <input
+                      data-testid={`memo-padding-${dir.toLowerCase()}`}
+                      type="number"
+                      min={0}
+                      max={64}
+                      className={inputCls}
+                      style={{ width: 60 }}
+                      value={memo[key]}
+                      onChange={(e) => updateMemo({ [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)) })}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // -- Section: Keybindings --
 
 interface KeybindingDef {
@@ -1660,6 +1709,16 @@ export function SettingsView() {
         >
           Claude Code
         </button>
+        <button
+          data-testid="nav-memo"
+          className="w-full px-4 py-2 text-left text-[13px]"
+          style={navBtnStyle("memo")}
+          onClick={() => setActiveNav("memo")}
+          onMouseEnter={() => setNavHover("memo")}
+          onMouseLeave={() => setNavHover(null)}
+        >
+          Memo
+        </button>
 
         {/* Profiles group */}
         <div className="mt-3 flex items-center justify-between px-3 pb-1">
@@ -1731,6 +1790,7 @@ export function SettingsView() {
           {activeNav === "keybindings" && <KeybindingsSection />}
           {activeNav === "convenience" && <ConvenienceSection />}
           {activeNav === "claude" && <ClaudeSection />}
+          {activeNav === "memo" && <MemoSection />}
         </div>
 
         {/* Sticky save bar — always visible at bottom */}
