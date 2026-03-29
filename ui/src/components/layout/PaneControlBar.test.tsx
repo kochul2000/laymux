@@ -195,6 +195,29 @@ describe("PaneControlBar", () => {
     expect(onDelete).toHaveBeenCalled();
   });
 
+  it("view selector includes Memo option", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const select = screen.getByTestId("pane-control-view-select") as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toContain("MemoView");
+  });
+
+  it("selecting Memo calls onChangeView with MemoView type", async () => {
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const select = screen.getByTestId("pane-control-view-select");
+    await user.selectOptions(select, "MemoView");
+    expect(defaultActions.onChangeView).toHaveBeenCalledWith({ type: "MemoView" });
+  });
+
   it("renders children content in all modes", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>

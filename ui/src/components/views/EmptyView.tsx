@@ -127,6 +127,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "memo",
+    label: "Memo",
+    category: "tool",
+    config: { type: "MemoView" },
+    testId: "empty-view-memo",
+  });
+
+  options.push({
     key: "issue-reporter",
     label: "Report Issue",
     category: "tool",

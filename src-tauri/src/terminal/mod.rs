@@ -131,7 +131,11 @@ impl TerminalSession {
     ) -> (String, Vec<String>) {
         let parts: Vec<&str> = command_line.split_whitespace().collect();
         let executable = parts.first().copied().unwrap_or("powershell.exe");
-        let extra_args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+        let extra_args: Vec<String> = if parts.len() > 1 {
+            parts[1..].iter().map(|s| s.to_string()).collect()
+        } else {
+            Vec::new()
+        };
 
         match detect_shell_type(executable) {
             ShellType::Wsl => {

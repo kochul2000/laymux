@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -434,7 +437,7 @@ pub fn settings_path() -> PathBuf {
     base.join("settings.json")
 }
 
-fn dirs_config_path() -> Option<PathBuf> {
+pub(crate) fn dirs_config_path() -> Option<PathBuf> {
     // On Windows: %APPDATA%/laymux
     // On Linux: ~/.config/laymux
     #[cfg(target_os = "windows")]
@@ -501,6 +504,51 @@ fn migrate_settings(settings: &mut Settings) {
             }
         }
     }
+}
+
+/// Get the memo file path (sibling of settings.json).
+pub fn memo_path() -> PathBuf {
+    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    base.join("memo.json")
+}
+
+/// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
+pub fn load_memo(key: &str) -> String {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    load_memo_from(&memo_path(), key)
+}
+
+/// Save memo content for a specific key.
+pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    save_memo_to(&memo_path(), key, content)
+}
+
+fn load_memo_from(path: &PathBuf, key: &str) -> String {
+    let map = match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    map.get(key).cloned().unwrap_or_default()
+}
+
+fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
+    }
+    let mut map = match fs::read_to_string(path) {
+        Ok(data) => serde_json::from_str::<std::collections::HashMap<String, String>>(&data)
+            .unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    };
+    if content.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), content.to_string());
+    }
+    let json = serde_json::to_string_pretty(&map).map_err(|e| format!("Serialize error: {e}"))?;
+    fs::write(path, json).map_err(|e| format!("Write error: {e}"))
 }
 
 /// Save settings to disk.
@@ -877,4 +925,57 @@ mod tests {
         assert_eq!(font.size, 12);
     }
 
+    // --- Memo file tests ---
+
+    #[test]
+    fn memo_path_is_sibling_of_settings_path() {
+        let mp = memo_path();
+        let sp = settings_path();
+        assert_eq!(mp.parent(), sp.parent());
+        assert_eq!(mp.file_name().unwrap(), "memo.json");
+    }
+
+    #[test]
+    fn memo_round_trip_via_functions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        save_memo_to(&path, "pane-1", "Hello").unwrap();
+        save_memo_to(&path, "pane-2", "World").unwrap();
+
+        assert_eq!(load_memo_from(&path, "pane-1"), "Hello");
+        assert_eq!(load_memo_from(&path, "pane-2"), "World");
+    }
+
+    #[test]
+    fn memo_missing_key_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        // No file at all
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
+
+        // File exists but key doesn't
+        save_memo_to(&path, "other", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "nonexistent"), "");
+    }
+
+    #[test]
+    fn memo_empty_content_removes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+
+        save_memo_to(&path, "pane-1", "data").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "data");
+
+        // Save empty string removes the key
+        save_memo_to(&path, "pane-1", "").unwrap();
+        assert_eq!(load_memo_from(&path, "pane-1"), "");
+
+        // Verify it's actually removed from the file
+        let content = fs::read_to_string(&path).unwrap();
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(&content).unwrap();
+        assert!(!map.contains_key("pane-1"));
+    }
 }

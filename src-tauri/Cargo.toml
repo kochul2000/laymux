@@ -26,6 +26,7 @@ clipboard-win = "5"
 
 [dev-dependencies]
 tempfile = "3"
+serial_test = "3"
 
 [lib]
 name = "laymux_lib"

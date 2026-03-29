@@ -592,14 +592,14 @@ fn terminal_profile_to_command_case_insensitive_variants() {
     assert_eq!(TerminalSession::profile_to_command("wsl").0, "wsl.exe");
     assert_eq!(TerminalSession::profile_to_command("PowerShell").0, "powershell.exe");
     assert_eq!(TerminalSession::profile_to_command("powershell").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("CMD").0, "cmd.exe");
-    assert_eq!(TerminalSession::profile_to_command("cmd").0, "cmd.exe");
-
-    // Unknown profiles default to powershell
-    assert_eq!(TerminalSession::profile_to_command("Unknown").0, "powershell.exe");
+    // Unknown/other profiles pass through as-is (command_line = profile name)
+    assert_eq!(TerminalSession::profile_to_command("CMD").0, "CMD");
+    assert_eq!(TerminalSession::profile_to_command("cmd").0, "cmd");
+    assert_eq!(TerminalSession::profile_to_command("Unknown").0, "Unknown");
+    // Empty string falls back to "powershell.exe" via command_line_to_command default
     assert_eq!(TerminalSession::profile_to_command("").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("bash").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("zsh").0, "powershell.exe");
+    assert_eq!(TerminalSession::profile_to_command("bash").0, "bash");
+    assert_eq!(TerminalSession::profile_to_command("zsh").0, "zsh");
 }
 
 #[test]
