@@ -137,6 +137,7 @@ function ViewSelect({
         <option key={p.name} value={`TerminalView:${p.name}`}>{p.name}</option>
       ))}
       <option value="BrowserPreviewView">Browser</option>
+      <option value="NotepadView">Notepad</option>
       <option value="IssueReporterView">Issue Reporter</option>
     </select>
   );

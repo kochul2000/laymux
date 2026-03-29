@@ -6,6 +6,7 @@ import { TerminalView } from "./TerminalView";
 import { BrowserPreviewView } from "./BrowserPreviewView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
+import { NotepadView } from "./NotepadView";
 
 interface ViewRendererProps {
   viewType: ViewType | null;
@@ -55,6 +56,18 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
       return (
         <div data-testid="view-issue-reporter" className="h-full">
           <IssueReporterView />
+        </div>
+      );
+    case "NotepadView":
+      return (
+        <div data-testid="view-notepad" className="h-full">
+          <NotepadView
+            content={(viewConfig?.content as string) ?? ""}
+            onContentChange={(content) => {
+              onSelectView?.({ ...viewConfig!, content });
+            }}
+            isFocused={isFocused}
+          />
         </div>
       );
     case "BrowserPreviewView":

@@ -127,6 +127,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "notepad",
+    label: "Notepad",
+    category: "tool",
+    config: { type: "NotepadView" },
+    testId: "empty-view-notepad",
+  });
+
+  options.push({
     key: "issue-reporter",
     label: "Report Issue",
     category: "tool",

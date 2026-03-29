@@ -124,6 +124,28 @@ describe("ViewRenderer", () => {
     expect(terminalViewProps.at(-1)?.profile).toBe("PowerShell");
   });
 
+  it("renders NotepadView with data-testid", () => {
+    render(
+      <ViewRenderer
+        viewType="NotepadView"
+        viewConfig={{ type: "NotepadView", content: "hello" }}
+      />,
+    );
+    expect(screen.getByTestId("view-notepad")).toBeInTheDocument();
+    expect(screen.getByTestId("notepad-textarea")).toBeInTheDocument();
+    expect((screen.getByTestId("notepad-textarea") as HTMLTextAreaElement).value).toBe("hello");
+  });
+
+  it("renders NotepadView with empty content by default", () => {
+    render(
+      <ViewRenderer
+        viewType="NotepadView"
+        viewConfig={{ type: "NotepadView" }}
+      />,
+    );
+    expect((screen.getByTestId("notepad-textarea") as HTMLTextAreaElement).value).toBe("");
+  });
+
   it("uses paneId for stable terminal instanceId", () => {
     const { rerender } = render(
       <ViewRenderer

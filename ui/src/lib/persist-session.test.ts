@@ -85,6 +85,21 @@ describe("persistSession", () => {
     expect(savedArg.profiles[0].startupCommand).toBe("/home/user/init.sh");
   });
 
+  it("preserves NotepadView content in workspace panes", async () => {
+    // Set up a workspace pane with NotepadView content
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "NotepadView",
+      content: "my notepad text",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const pane = savedArg.workspaces[0].panes[0];
+    expect(pane.view.type).toBe("NotepadView");
+    expect(pane.view.content).toBe("my notepad text");
+  });
+
   it("preserves dock panes with view config through save", async () => {
     // Set up a dock pane with a profile (TerminalView with WSL)
     useDockStore.getState().setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
