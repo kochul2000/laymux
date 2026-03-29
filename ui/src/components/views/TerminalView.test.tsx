@@ -517,11 +517,7 @@ describe("TerminalView", () => {
   // -- Ctrl+Wheel Zoom --
 
   it("increases font size on Ctrl+Wheel scroll up", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
+    // Font is now resolved from profile -> profileDefaults
     render(
       <TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />,
     );
@@ -530,15 +526,11 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(15);
+    // Ctrl+Wheel sets font override on the profile
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(15);
   });
 
   it("decreases font size on Ctrl+Wheel scroll down", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
     render(
       <TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />,
     );
@@ -547,15 +539,10 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(13);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(13);
   });
 
   it("does not change font size on wheel without Ctrl", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
     render(
       <TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />,
     );
@@ -564,14 +551,13 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(14);
+    // No font override should be set
+    expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
   });
 
   it("clamps font size to minimum 6", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 6, weight: "normal" },
-    });
+    // Set profile font override to minimum
+    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
 
     render(
       <TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />,
@@ -581,14 +567,11 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(6);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(6);
   });
 
   it("clamps font size to maximum 72", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 72, weight: "normal" },
-    });
+    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
 
     render(
       <TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />,
@@ -598,7 +581,7 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(72);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(72);
   });
 
   it("prevents default browser zoom on Ctrl+Wheel", async () => {

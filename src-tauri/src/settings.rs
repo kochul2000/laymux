@@ -111,6 +111,9 @@ pub struct Profile {
     pub suppress_application_title: bool,
     #[serde(default = "default_true")]
     pub snap_on_input: bool,
+    /// Per-profile font override. When None, inherits from profileDefaults / global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<FontSettings>,
 }
 
 impl Default for Profile {
@@ -132,6 +135,7 @@ impl Default for Profile {
             antialiasing_mode: default_antialiasing_mode(),
             suppress_application_title: false,
             snap_on_input: true,
+            font: None,
         }
     }
 }
@@ -345,8 +349,8 @@ pub struct Settings {
     pub profiles: Vec<Profile>,
     #[serde(default)]
     pub keybindings: Vec<Keybinding>,
-    #[serde(default)]
-    pub font: FontSettings,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<FontSettings>,
     #[serde(default = "default_profile")]
     pub default_profile: String,
     #[serde(default)]
@@ -382,7 +386,7 @@ impl Default for Settings {
                 },
             ],
             keybindings: Vec::new(),
-            font: FontSettings::default(),
+            font: None,
             default_profile: default_profile(),
             layouts: vec![Layout {
                 id: "default-layout".into(),
@@ -579,9 +583,13 @@ mod tests {
 
     #[test]
     fn default_font_settings() {
+        // Root-level font is now None; per-profile font is also None by default
         let settings = Settings::default();
-        assert_eq!(settings.font.face, "Cascadia Mono");
-        assert_eq!(settings.font.size, 14);
+        assert!(settings.font.is_none());
+        // FontSettings default values are still correct
+        let font = FontSettings::default();
+        assert_eq!(font.face, "Cascadia Mono");
+        assert_eq!(font.size, 14);
     }
 
     #[test]
@@ -594,10 +602,12 @@ mod tests {
 
     #[test]
     fn deserialize_partial_settings() {
+        // Root-level font is parsed as legacy (backward compat)
         let json = r#"{"font": {"face": "Fira Code", "size": 16}}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.font.face, "Fira Code");
-        assert_eq!(settings.font.size, 16);
+        let font = settings.font.as_ref().unwrap();
+        assert_eq!(font.face, "Fira Code");
+        assert_eq!(font.size, 16);
         // Defaults fill in
         assert_eq!(settings.default_profile, "PowerShell");
     }
@@ -881,11 +891,38 @@ mod tests {
     }
 
     #[test]
-    fn migrate_no_op_for_clean_settings() {
-        let mut settings = Settings::default();
-        let before = settings.clone();
-        migrate_settings(&mut settings);
-        assert_eq!(settings, before);
+    fn profile_font_override() {
+        let json = r#"{"name": "Custom", "commandLine": "zsh", "font": {"face": "Fira Code", "size": 18, "weight": "bold"}}"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        let font = profile.font.unwrap();
+        assert_eq!(font.face, "Fira Code");
+        assert_eq!(font.size, 18);
+        assert_eq!(font.weight, "bold");
+    }
+
+    #[test]
+    fn profile_font_none_by_default() {
+        let profile = Profile::default();
+        assert!(profile.font.is_none());
+    }
+
+    #[test]
+    fn profile_font_not_serialized_when_none() {
+        let profile = Profile::default();
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("\"font\""));
+    }
+
+    #[test]
+    fn profile_font_serialized_when_some() {
+        let mut profile = Profile::default();
+        profile.font = Some(FontSettings { face: "Mono".into(), size: 12, weight: "normal".into() });
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(json.contains("\"font\""));
+        let parsed: Profile = serde_json::from_str(&json).unwrap();
+        let font = parsed.font.unwrap();
+        assert_eq!(font.face, "Mono");
+        assert_eq!(font.size, 12);
     }
 
     // --- Memo file tests ---

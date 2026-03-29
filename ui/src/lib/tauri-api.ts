@@ -97,7 +97,7 @@ export interface Settings {
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];
-  font: FontSettings;
+  font?: FontSettings;
   defaultProfile: string;
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
@@ -155,6 +155,7 @@ export interface Profile {
   antialiasingMode?: string;
   suppressApplicationTitle?: boolean;
   snapOnInput?: boolean;
+  font?: FontSettings;
 }
 
 export interface Keybinding {

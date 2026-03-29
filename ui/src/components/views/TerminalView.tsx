@@ -115,10 +115,11 @@ export function TerminalView({
         }
       : defaultTheme;
 
+    const resolvedFont = settingsState.resolveFont(profile);
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: settingsState.font.size,
-      fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+      fontSize: resolvedFont.size,
+      fontFamily: `'${resolvedFont.face}', 'Cascadia Mono', 'Consolas', monospace`,
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
@@ -398,11 +399,16 @@ export function TerminalView({
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      const { font, setFont } = useSettingsStore.getState();
+      const state = useSettingsStore.getState();
+      const currentFont = state.resolveFont(profile);
       const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, font.size + delta));
-      if (newSize !== font.size) {
-        setFont({ ...font, size: newSize });
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        // Update the profile's font override
+        const idx = state.profiles.findIndex((p) => p.name === profile);
+        if (idx >= 0) {
+          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
+        }
       }
     };
     outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
@@ -496,7 +502,7 @@ export function TerminalView({
     return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
-  const font = useSettingsStore((s) => s.font ?? { face: "Cascadia Mono", size: 14, weight: "normal" });
+  const font = useSettingsStore((s) => s.resolveFont(profile));
 
   useEffect(() => {
     const term = terminalRef.current;

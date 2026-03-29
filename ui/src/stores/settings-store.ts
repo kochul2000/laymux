@@ -70,6 +70,7 @@ export interface ProfileDefaults {
   antialiasingMode: AntialiasingMode;
   suppressApplicationTitle: boolean;
   snapOnInput: boolean;
+  font: FontSettings;
 }
 
 export interface Profile {
@@ -89,6 +90,8 @@ export interface Profile {
   antialiasingMode: AntialiasingMode;
   suppressApplicationTitle: boolean;
   snapOnInput: boolean;
+  /** Per-profile font override. When undefined, inherits from profileDefaults. */
+  font?: FontSettings;
 }
 
 export interface Keybinding {
@@ -100,6 +103,7 @@ export interface Keybinding {
 export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
   "colorScheme", "cursorShape", "padding", "scrollbackLines", "opacity",
   "bellStyle", "closeOnExit", "antialiasingMode", "suppressApplicationTitle", "snapOnInput",
+  "font",
 ];
 
 /** App UI theme — separate from terminal color schemes. */
@@ -150,7 +154,6 @@ export const builtinAppThemes: AppTheme[] = [
 ];
 
 interface SettingsState {
-  font: FontSettings;
   defaultProfile: string;
   profileDefaults: ProfileDefaults;
   profiles: Profile[];
@@ -161,7 +164,6 @@ interface SettingsState {
   convenience: ConvenienceSettings;
   claude: ClaudeSettings;
 
-  setFont: (font: FontSettings) => void;
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppTheme: (themeId: string) => void;
@@ -177,10 +179,14 @@ interface SettingsState {
   addKeybinding: (keybinding: Keybinding) => void;
   removeKeybinding: (index: number) => void;
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "font" | "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">>) => void;
+  /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
+  resolveFont: (profileName: string) => FontSettings;
+  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">> & { font?: FontSettings }) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
+
+export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
 
 const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
@@ -193,6 +199,7 @@ const defaultProfileDefaults: ProfileDefaults = {
   antialiasingMode: "grayscale",
   suppressApplicationTitle: false,
   snapOnInput: true,
+  font: { ...DEFAULT_FONT },
 };
 
 function makeProfile(
@@ -200,11 +207,12 @@ function makeProfile(
   commandLine: string,
   overrides?: Partial<Profile>,
 ): Profile {
+  const { font: _font, ...rest } = defaultProfileDefaults;
   return {
     name,
     commandLine,
     startupCommand: "",
-    ...defaultProfileDefaults,
+    ...rest,
     startingDirectory: "",
     hidden: false,
     tabTitle: "",
@@ -218,11 +226,12 @@ export function makeProfileFromDefaults(
   commandLine: string,
   defaults: ProfileDefaults,
 ): Profile {
+  const { font: _font, ...rest } = defaults;
   return {
     name,
     commandLine,
     startupCommand: "",
-    ...defaults,
+    ...rest,
     startingDirectory: "",
     hidden: false,
     tabTitle: "",
@@ -359,8 +368,7 @@ export const builtinColorSchemes: ColorScheme[] = [
   },
 ];
 
-export const useSettingsStore = create<SettingsState>()((set, _get) => ({
-  font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+export const useSettingsStore = create<SettingsState>()((set, get) => ({
   defaultProfile: "PowerShell",
   profileDefaults: { ...defaultProfileDefaults },
   profiles: [
@@ -373,8 +381,6 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
   appThemeId: "catppuccin-mocha",
   convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
-
-  setFont: (font) => set({ font }),
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -442,19 +448,42 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       ),
     })),
 
+  resolveFont: (profileName) => {
+    const state = get();
+    const profile = state.profiles.find((p) => p.name === profileName);
+    if (profile?.font) return profile.font;
+    if (state.profileDefaults?.font) return state.profileDefaults.font;
+    return DEFAULT_FONT;
+  },
+
   loadFromSettings: (data) => {
+    // Legacy migration: root-level font → profileDefaults.font
+    const legacyFont = data.font;
+
     // Ensure profiles have all required fields (backwards compat)
     const profiles = data.profiles?.map((p) => ({
       ...makeProfile(p.name, p.commandLine),
       ...p,
       padding: p.padding ?? { ...defaultPadding },
+      // Ensure profile font weight defaults to "normal" if present but missing weight
+      ...(p.font ? { font: { ...p.font, weight: p.font.weight ?? "normal" } } : {}),
     }));
-    // Ensure font has weight (backwards compat — explicit undefined in spread would override)
-    const font = data.font ? { ...data.font, weight: data.font.weight ?? "normal" } : undefined;
     // Ensure profileDefaults has all fields (backwards compat)
+    // If root-level font exists but profileDefaults.font doesn't, migrate it
+    const resolvedProfileDefaultsFont = data.profileDefaults?.font
+      ? { ...DEFAULT_FONT, ...data.profileDefaults.font, weight: data.profileDefaults.font.weight ?? "normal" }
+      : legacyFont
+        ? { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" }
+        : defaultProfileDefaults.font;
     const profileDefaults = data.profileDefaults
-      ? { ...defaultProfileDefaults, ...data.profileDefaults }
-      : undefined;
+      ? {
+          ...defaultProfileDefaults,
+          ...data.profileDefaults,
+          font: resolvedProfileDefaultsFont,
+        }
+      : legacyFont
+        ? { ...defaultProfileDefaults, font: { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" } }
+        : undefined;
     // Merge loaded color schemes with builtins (builtins first, user schemes appended)
     const loadedSchemes = data.colorSchemes?.map((cs) => ({
       ...makeDefaultColorScheme(),
@@ -475,11 +504,12 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
 
+    // Strip legacy font field before spreading into state
+    const { font: _legacyFont, ...rest } = data;
     set((state) => ({
       ...state,
-      ...data,
+      ...rest,
       ...(profiles ? { profiles } : {}),
-      ...(font ? { font } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
