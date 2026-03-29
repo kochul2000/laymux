@@ -364,6 +364,35 @@ impl Default for ConvenienceSettings {
     }
 }
 
+fn default_memo_padding() -> u32 {
+    12
+}
+
+/// MemoView settings (padding, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoSettings {
+    #[serde(default = "default_memo_padding")]
+    pub padding_top: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_right: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_bottom: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_left: u32,
+}
+
+impl Default for MemoSettings {
+    fn default() -> Self {
+        Self {
+            padding_top: 12,
+            padding_right: 12,
+            padding_bottom: 12,
+            padding_left: 12,
+        }
+    }
+}
+
 /// Dock pane definition (persisted view config with position).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -441,6 +470,8 @@ pub struct Settings {
     pub convenience: ConvenienceSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
+    #[serde(default)]
+    pub memo: MemoSettings,
 }
 
 fn default_app_theme_id() -> String {
@@ -511,6 +542,7 @@ impl Default for Settings {
             ],
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
+            memo: MemoSettings::default(),
         }
     }
 }

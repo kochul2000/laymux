@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { loadMemo, saveMemo } from "@/lib/tauri-api";
+import { useSettingsStore } from "@/stores/settings-store";
 
 const DEBOUNCE_MS = 300;
 
@@ -60,6 +61,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     }, DEBOUNCE_MS);
   };
 
+  const memo = useSettingsStore((s) => s.memo);
+
   return (
     <div data-testid="memo-view" className="flex h-full w-full flex-col">
       <textarea
@@ -67,13 +70,14 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
         data-testid="memo-textarea"
         value={text}
         onChange={handleChange}
-        className="h-full w-full flex-1 resize-none border-none p-3 outline-none"
+        className="h-full w-full flex-1 resize-none border-none outline-none"
         style={{
           background: "var(--bg-base)",
           color: "var(--text-primary)",
           fontFamily: "inherit",
           fontSize: "13px",
           lineHeight: "1.6",
+          padding: `${memo.paddingTop}px ${memo.paddingRight}px ${memo.paddingBottom}px ${memo.paddingLeft}px`,
         }}
         spellCheck={false}
       />
