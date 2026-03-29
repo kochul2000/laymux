@@ -635,7 +635,7 @@ describe("WorkspaceSelectorView", () => {
     expect(badge.style.border).toContain("var(--accent)");
   });
 
-  it("does not show pane notification badge when no command status exists but notification does", () => {
+  it("shows standalone notification dot when no command status but notification exists", () => {
     // When there's no command icon, the notification badge should still appear
     useWorkspaceStore.setState({
       workspaces: [{
