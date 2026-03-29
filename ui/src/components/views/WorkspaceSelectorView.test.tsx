@@ -585,4 +585,111 @@ describe("WorkspaceSelectorView", () => {
     useWorkspaceStore.getState().setDefaultLayout(newId);
     expect(useWorkspaceStore.getState().layouts[0].id).toBe(newId);
   });
+
+  // -- Pane-level notification badge --
+
+  it("shows notification border on pane command icon when pane has unread notifications", () => {
+    useWorkspaceStore.setState({
+      workspaces: [{
+        id: "ws-default", name: "Default", layoutId: "default-layout",
+        panes: [
+          { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+          { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
+        ],
+      }],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default", label: "PS",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test",
+      lastExitCode: 0,
+      lastCommandAt: Date.now(),
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", {
+      lastCommand: "cargo build",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+    });
+    // Add notification only for terminal-p1
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "Build complete",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    // terminal-p1 should have notification badge border
+    const badge1 = screen.getByTestId("pane-cmd-badge-terminal-p1");
+    expect(badge1).toBeInTheDocument();
+    expect(badge1.style.border).toContain("var(--accent)");
+
+    // terminal-p2 should NOT have notification badge border
+    const badge2 = screen.getByTestId("pane-cmd-badge-terminal-p2");
+    expect(badge2.style.border).not.toContain("var(--accent)");
+  });
+
+  it("shows notification border on hourglass icon for running command with notification", () => {
+    useWorkspaceStore.setState({
+      workspaces: [{
+        id: "ws-default", name: "Default", layoutId: "default-layout",
+        panes: [
+          { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+        ],
+      }],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test",
+      lastCommandAt: Date.now(),
+    });
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "alert",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("⏳");
+    expect(badge.style.border).toContain("var(--accent)");
+  });
+
+  it("shows standalone notification dot when no command status but notification exists", () => {
+    // When there's no command icon, the notification badge should still appear
+    useWorkspaceStore.setState({
+      workspaces: [{
+        id: "ws-default", name: "Default", layoutId: "default-layout",
+        panes: [
+          { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+        ],
+      }],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+    });
+    // No command but notification exists
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "alert",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    // There's no command icon, so we show a standalone notification dot
+    const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
+    expect(badge).toBeInTheDocument();
+  });
 });
