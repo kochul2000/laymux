@@ -1336,19 +1336,16 @@ function KeybindingsSection() {
 type FlushFn = () => void;
 interface SettingsDraftCtx {
   registerFlush: (id: string, fn: FlushFn) => void;
-  unregisterFlush: (id: string) => void;
   registerReset: (id: string, fn: FlushFn) => void;
-  unregisterReset: (id: string) => void;
   markDirty: () => void;
-  markClean: () => void;
+  draftValues: React.MutableRefObject<Map<string, unknown>>;
 }
+const defaultDraftValues = { current: new Map<string, unknown>() };
 const SettingsDraftContext = createContext<SettingsDraftCtx>({
   registerFlush: () => {},
-  unregisterFlush: () => {},
   registerReset: () => {},
-  unregisterReset: () => {},
   markDirty: () => {},
-  markClean: () => {},
+  draftValues: defaultDraftValues,
 });
 
 /** Hook for sections to register flush/reset callbacks. */
@@ -1356,26 +1353,52 @@ function useSettingsDraft() {
   return useContext(SettingsDraftContext);
 }
 
-/** Hook: local draft state that flushes on Save and resets on Discard. */
+/** Hook: local draft state that flushes on Save and resets on Discard.
+ *  Draft values are persisted in a shared Map so they survive section unmount/remount. */
 function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const [draft, setDraft] = useState<T>(storeValue);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
+  const { registerFlush, registerReset, markDirty, draftValues } = useSettingsDraft();
+
+  const setterRef = useRef(storeSetter);
+  setterRef.current = storeSetter;
   const storeRef = useRef(storeValue);
   storeRef.current = storeValue;
 
-  const { registerFlush, unregisterFlush, registerReset, unregisterReset, markDirty } = useSettingsDraft();
+  // Restore preserved draft on remount, otherwise use store value
+  const [draft, setDraft] = useState<T>(
+    () => draftValues.current.has(id) ? draftValues.current.get(id) as T : storeValue,
+  );
+
+  // Keep shared map in sync with local draft
+  useEffect(() => {
+    draftValues.current.set(id, draft);
+  }, [id, draft, draftValues]);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Register flush/reset once — intentionally no cleanup so callbacks survive unmount
+  useEffect(() => {
+    registerFlush(id, () => {
+      const val = draftValues.current.get(id);
+      if (val !== undefined) setterRef.current(val as T);
+    });
+    registerReset(id, () => {
+      draftValues.current.delete(id);
+      if (mountedRef.current) setDraft(storeRef.current);
+    });
+  }, [id, registerFlush, registerReset, draftValues]);
 
   const wrappedSetDraft: React.Dispatch<React.SetStateAction<T>> = useCallback((action) => {
-    setDraft(action);
+    setDraft((prev) => {
+      const next = typeof action === "function" ? (action as (p: T) => T)(prev) : action;
+      draftValues.current.set(id, next);
+      return next;
+    });
     markDirty();
-  }, [markDirty]);
-
-  useEffect(() => {
-    registerFlush(id, () => storeSetter(draftRef.current));
-    registerReset(id, () => setDraft(storeRef.current));
-    return () => { unregisterFlush(id); unregisterReset(id); };
-  }, [id, registerFlush, unregisterFlush, registerReset, unregisterReset, storeSetter]);
+  }, [id, markDirty, draftValues]);
 
   return [draft, wrappedSetDraft];
 }
@@ -1422,26 +1445,21 @@ export function SettingsView() {
   // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
   const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
   const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const draftValuesRef = useRef<Map<string, unknown>>(new Map());
   const [dirty, setDirty] = useState(false);
   const registerFlush = useCallback((id: string, fn: FlushFn) => {
     flushMapRef.current.set(id, fn);
   }, []);
-  const unregisterFlush = useCallback((id: string) => {
-    flushMapRef.current.delete(id);
-  }, []);
   const registerReset = useCallback((id: string, fn: FlushFn) => {
     resetMapRef.current.set(id, fn);
   }, []);
-  const unregisterReset = useCallback((id: string) => {
-    resetMapRef.current.delete(id);
-  }, []);
   const markDirty = useCallback(() => setDirty(true), []);
-  const markClean = useCallback(() => setDirty(false), []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, unregisterFlush, registerReset, unregisterReset, markDirty, markClean }).current;
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, draftValues: draftValuesRef }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
+    draftValuesRef.current.clear();
     setDirty(false);
     clearTimeout(saveTimerRef.current);
     persistSession()
@@ -1457,6 +1475,7 @@ export function SettingsView() {
 
   const handleDiscard = () => {
     for (const fn of resetMapRef.current.values()) fn();
+    draftValuesRef.current.clear();
     setDirty(false);
   };
 

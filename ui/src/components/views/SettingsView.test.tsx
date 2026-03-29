@@ -1,4 +1,4 @@
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -695,5 +695,210 @@ describe("SettingsView", () => {
 
     expect(discardBtn.disabled).toBe(true);
     expect((screen.getByTestId("save-settings-btn") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // -- storeSetter 참조 불안정 유발 테스트 --
+  // DefaultsSection, ConvenienceSection, ClaudeSection은 useDraft에
+  // 인라인 화살표 함수를 storeSetter로 전달한다. 매 렌더마다 새 참조가
+  // 생성되어 useEffect가 불필요하게 재실행된다.
+  // 아래 테스트는 "외부 store 변경 → 재렌더 → Save/Discard" 시나리오에서
+  // flush/reset 콜백이 여전히 올바르게 동작하는지 검증한다.
+
+  describe("storeSetter 참조 불안정 유발 — DefaultsSection", () => {
+    it("draft 변경 → 외부 store 변경으로 재렌더 → Save 시 flush 정상 동작", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-profile-defaults"));
+      const select = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+      await user.selectOptions(select, "filledBox");
+      expect(select.value).toBe("filledBox");
+
+      // colorSchemes 변경으로 DefaultsSection 재렌더 유발
+      // → 인라인 storeSetter 새 참조 생성 → useEffect 재실행
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          colorSchemes: [...state.colorSchemes],
+        });
+      });
+
+      // draft가 재렌더 후에도 보존되어야 함
+      expect(select.value).toBe("filledBox");
+      // store는 아직 미변경
+      expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("bar");
+
+      // Save → flush 콜백이 올바른 draft 값을 사용해야 함
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("filledBox");
+    });
+
+    it("draft 변경 → 외부 store 변경으로 재렌더 → Discard 시 reset 정상 동작", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-profile-defaults"));
+      const select = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+      await user.selectOptions(select, "filledBox");
+
+      // 재렌더 유발
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          colorSchemes: [...state.colorSchemes],
+        });
+      });
+
+      // Discard → reset 콜백이 원래 store 값으로 복원해야 함
+      await user.click(screen.getByTestId("discard-settings-btn"));
+      await user.click(screen.getByTestId("nav-profile-defaults"));
+      const selectAfter = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+      expect(selectAfter.value).toBe("bar");
+    });
+
+    it("다중 재렌더 후에도 flush 정상 동작", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-profile-defaults"));
+      const select = screen.getByTestId("cursor-shape-select") as HTMLSelectElement;
+      await user.selectOptions(select, "filledBox");
+
+      // 5회 연속 재렌더 유발 — 매번 새 storeSetter → useEffect 재실행
+      for (let i = 0; i < 5; i++) {
+        act(() => {
+          const state = useSettingsStore.getState();
+          useSettingsStore.setState({
+            colorSchemes: [...state.colorSchemes],
+          });
+        });
+      }
+
+      expect(select.value).toBe("filledBox");
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("filledBox");
+    });
+  });
+
+  describe("storeSetter 참조 불안정 유발 — ConvenienceSection", () => {
+    it("draft 변경 → 외부 store 변경으로 재렌더 → Save 시 flush 정상 동작", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+      expect(toggle.checked).toBe(false);
+
+      // ConvenienceSection이 구독하는 store 상태 변경으로 재렌더 유발
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          convenience: { ...state.convenience },
+        });
+      });
+
+      // 재렌더 후 draft 보존 + Save 정상 동작
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+    });
+  });
+
+  describe("storeSetter 참조 불안정 유발 — ClaudeSection", () => {
+    it("draft 변경 → 외부 store 변경으로 재렌더 → Save 시 flush 정상 동작", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-claude"));
+      const select = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+      await user.selectOptions(select, "command");
+
+      // ClaudeSection이 구독하는 store 상태 변경으로 재렌더 유발
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          claude: { ...state.claude },
+        });
+      });
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+    });
+  });
+
+  // -- 섹션 언마운트 시 flush 콜백 유실 버그 유발 테스트 --
+  // activeNav 조건부 렌더링에 의해 섹션 이동 시 이전 섹션이 언마운트되면
+  // useDraft의 useEffect cleanup이 flush/reset 콜백을 Map에서 삭제한다.
+  // 이후 Save를 누르면 언마운트된 섹션의 변경사항이 유실된다.
+
+  describe("섹션 네비게이션 시 draft 유실 버그", () => {
+    it("StartupSection에서 변경 → 다른 섹션 이동 → Save 시 변경 유실", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // StartupSection에서 font face 변경
+      const fontSelect = screen.getByTestId("font-face-input") as HTMLSelectElement;
+      await user.selectOptions(fontSelect, "Fira Code");
+      expect(fontSelect.value).toBe("Fira Code");
+
+      // Convenience로 이동 → StartupSection 언마운트
+      await user.click(screen.getByTestId("nav-convenience"));
+
+      // Save → StartupSection의 flush 콜백이 cleanup으로 삭제됨
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      // BUG: font face 변경이 유실됨
+      expect(useSettingsStore.getState().font.face).toBe("Fira Code");
+    });
+
+    it("ConvenienceSection에서 변경 → 다른 섹션 이동 → Save 시 변경 유실", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // ConvenienceSection으로 이동 후 smart paste 토글
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+      expect(toggle.checked).toBe(false);
+
+      // Claude 섹션으로 이동 → ConvenienceSection 언마운트
+      await user.click(screen.getByTestId("nav-claude"));
+
+      // Save
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      // BUG: smart paste 변경이 유실됨
+      expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+    });
+
+    it("여러 섹션에서 순차 변경 → Save 시 마지막 섹션만 반영됨", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // 1. StartupSection: font 변경
+      const fontSelect = screen.getByTestId("font-face-input") as HTMLSelectElement;
+      await user.selectOptions(fontSelect, "Fira Code");
+
+      // 2. ConvenienceSection: smart paste 변경
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+
+      // 3. ClaudeSection: sync cwd 변경
+      await user.click(screen.getByTestId("nav-claude"));
+      const claudeSelect = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+      await user.selectOptions(claudeSelect, "command");
+
+      // Save → 마지막에 마운트된 ClaudeSection만 flush 가능
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      const state = useSettingsStore.getState();
+      // BUG: StartupSection 변경 유실
+      expect(state.font.face).toBe("Fira Code");
+      // BUG: ConvenienceSection 변경 유실
+      expect(state.convenience.smartPaste).toBe(false);
+      // ClaudeSection은 마운트 상태이므로 정상 반영
+      expect(state.claude.syncCwd).toBe("command");
+    });
   });
 });
