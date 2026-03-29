@@ -118,11 +118,16 @@ export function AppLayout() {
   const left = docks.find((d) => d.position === "left");
   const right = docks.find((d) => d.position === "right");
 
+  const dockPersistState = useSettingsStore((s) => s.convenience.dockPersistState);
+
   const renderDock = (dock: typeof top, borderSide: string) => {
-    if (!dock?.visible) return null;
+    if (!dock) return null;
+    // When not visible: unmount if persistState is off, CSS-hide if on
+    if (!dock.visible && !dockPersistState) return null;
     const pos = dock.position;
     const isLR = pos === "left" || pos === "right";
     const isFocused = focusedDock === pos;
+    const hidden = !dock.visible && dockPersistState;
     return (
       <div
         className={`relative shrink-0 ${isLR ? "" : "w-full"}`}
@@ -130,6 +135,7 @@ export function AppLayout() {
           [isLR ? "width" : "height"]: dock.size,
           [`border${borderSide}`]: `1px solid var(--border)`,
           background: "var(--bg-surface)",
+          ...(hidden ? { display: "none" } : {}),
         }}
         onMouseDown={() => {
           setFocusedDock(pos);

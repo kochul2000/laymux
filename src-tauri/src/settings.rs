@@ -350,6 +350,9 @@ pub struct ConvenienceSettings {
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
+    /// Keep dock state in background when hidden.
+    #[serde(default = "default_true")]
+    pub dock_persist_state: bool,
 }
 
 impl Default for ConvenienceSettings {
@@ -360,6 +363,7 @@ impl Default for ConvenienceSettings {
             copy_on_select: true,
             path_ellipsis: PathEllipsisMode::default(),
             scrollbar_style: "overlay".to_string(),
+            dock_persist_state: true,
         }
     }
 }
