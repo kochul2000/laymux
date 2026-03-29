@@ -1,5 +1,6 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
+import { parseClaudeMode, isRalphActive, type ClaudeMode } from "@/lib/activity-detection";
 
 export interface LastCommandInfo {
   command: string;
@@ -13,6 +14,7 @@ export interface TerminalSummaryInfo {
   profile: string;
   cwd: string | null;
   branch: string | null;
+  title: string | undefined;
   lastCommand: string | undefined;
   lastExitCode: number | undefined;
   lastCommandAt: number | undefined;
@@ -124,6 +126,7 @@ export function computeWorkspaceSummary(
       profile: t.profile,
       cwd: t.cwd ?? null,
       branch: t.branch ?? null,
+      title: t.title,
       lastCommand: t.lastCommand,
       lastExitCode: t.lastExitCode,
       lastCommandAt: t.lastCommandAt,
@@ -199,10 +202,19 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
   return `${shown}  +${ports.length - maxDisplay}`;
 }
 
+const CLAUDE_MODE_LABELS: Record<ClaudeMode, { suffix: string; icon: string }> = {
+  idle: { suffix: "", icon: "✳" },
+  working: { suffix: "", icon: "⟳" },
+  plan: { suffix: " Plan", icon: "📋" },
+  danger: { suffix: " Danger", icon: "⚠" },
+};
+
 /** Get a display label for terminal activity state. */
-export function formatActivity(activity: TerminalActivityInfo | undefined): {
+export function formatActivity(activity: TerminalActivityInfo | undefined, title?: string): {
   label: string;
   color: string;
+  claudeMode?: ClaudeMode;
+  ralph?: boolean;
 } {
   if (!activity) return { label: "shell", color: "var(--text-secondary)" };
   switch (activity.type) {
@@ -210,11 +222,17 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
       return { label: "shell", color: "var(--text-secondary)" };
     case "running":
       return { label: "running", color: "var(--yellow)" };
-    case "interactiveApp":
+    case "interactiveApp": {
       if (activity.name === "Claude") {
-        return { label: activity.name, color: "#D97757" };
+        const mode = parseClaudeMode(title, activity);
+        const ralph = isRalphActive(title);
+        const modeInfo = mode ? CLAUDE_MODE_LABELS[mode] : { suffix: "", icon: "" };
+        const label = `${modeInfo.icon} Claude${modeInfo.suffix}${ralph ? " ®" : ""}`.trim();
+        const color = mode === "danger" ? "var(--red)" : mode === "plan" ? "var(--yellow)" : "#D97757";
+        return { label, color, claudeMode: mode, ralph };
       }
       return { label: activity.name ?? "app", color: "var(--accent)" };
+    }
   }
 }
 

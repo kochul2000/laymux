@@ -54,6 +54,44 @@ export function detectActivityFromCommand(command: string): TerminalActivityInfo
   return undefined;
 }
 
+export type ClaudeMode = "idle" | "working" | "plan" | "danger";
+
+/**
+ * Parse Claude Code mode from terminal title.
+ *
+ * Claude Code embeds status in its terminal title:
+ * - ✳ prefix = idle (accept edits)
+ * - spinner prefix = working
+ * - Title may contain mode keywords: "Plan mode", "Danger", etc.
+ *
+ * Returns undefined if not a Claude terminal.
+ */
+export function parseClaudeMode(
+  title: string | undefined,
+  activity: TerminalActivityInfo | undefined,
+): ClaudeMode | undefined {
+  if (activity?.type !== "interactiveApp" || activity.name !== "Claude") return undefined;
+  if (!title) return "idle";
+
+  // Check for plan mode indicator (case-insensitive)
+  if (/\bplan\b/i.test(title)) return "plan";
+  // Check for danger mode indicator
+  if (/\bdanger\b/i.test(title)) return "danger";
+
+  // Idle vs working based on prefix character
+  if (isClaudeIdle(title)) return "idle";
+  return "working";
+}
+
+/**
+ * Check if the title indicates Ralph (autonomous loop) is active.
+ * Ralph typically sets a distinctive title pattern.
+ */
+export function isRalphActive(title: string | undefined): boolean {
+  if (!title) return false;
+  return /\bralph\b/i.test(title);
+}
+
 export type ClaudeTaskTransition = "started" | "completed";
 
 /** Claude Code idle prefix: ✳ (U+2733) */

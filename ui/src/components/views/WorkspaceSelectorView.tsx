@@ -188,7 +188,7 @@ function WorkspaceItem({
                 const tCmdColor = ts.lastCommand
                   ? ts.lastExitCode === undefined ? "var(--yellow)" : ts.lastExitCode === 0 ? "var(--green)" : "var(--red)"
                   : undefined;
-                const actInfo = formatActivity(ts.activity);
+                const actInfo = formatActivity(ts.activity, ts.title);
                 return (
                   <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
                     {showMinimap && (
