@@ -1097,6 +1097,29 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Dock Persist State toggle */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Dock Persist State</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="dock-persist-state-toggle"
+                type="checkbox"
+                checked={convenience.dockPersistState}
+                onChange={(e) => updateConvenience({ dockPersistState: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.dockPersistState ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Dock Arrow Nav toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">

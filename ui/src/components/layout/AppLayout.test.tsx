@@ -11,6 +11,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -18,6 +19,7 @@ describe("AppLayout", () => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   it("renders left dock and workspace area by default", () => {
@@ -40,7 +42,20 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("dock-right")).toBeInTheDocument();
   });
 
-  it("hides dock when toggled invisible", () => {
+  it("keeps dock in DOM when toggled invisible with dockPersistState on", () => {
+    useSettingsStore.setState({
+      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: true },
+    });
+    useDockStore.getState().toggleDockVisible("left");
+    render(<AppLayout />);
+    // Dock content remains in DOM (inside 0px grid cell with overflow:hidden)
+    expect(screen.getByTestId("dock-left")).toBeInTheDocument();
+  });
+
+  it("removes dock from DOM when toggled invisible with dockPersistState off", () => {
+    useSettingsStore.setState({
+      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: false },
+    });
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
     expect(screen.queryByTestId("dock-left")).not.toBeInTheDocument();
