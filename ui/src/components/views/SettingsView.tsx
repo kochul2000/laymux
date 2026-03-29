@@ -1147,6 +1147,59 @@ function ConvenienceSection() {
   );
 }
 
+// -- Section: Workspaces --
+
+function WorkspacesSection() {
+  const storeWsDisplay = useSettingsStore((s) => s.workspaceDisplay);
+  const setWsDisplay = useSettingsStore((s) => s.setWorkspaceDisplay);
+  const [wsDisplay, setDraftWsDisplay] = useDraft("workspaceDisplay", storeWsDisplay, (v) => setWsDisplay(v));
+  const updateWsDisplay = (partial: Partial<typeof wsDisplay>) => setDraftWsDisplay(prev => ({ ...prev, ...partial }));
+
+  const displayItems: { key: keyof typeof wsDisplay; label: string; desc: string }[] = [
+    { key: "minimap", label: "Minimap", desc: "Pane 위치를 나타내는 미니맵" },
+    { key: "environment", label: "Environment", desc: "실행 환경 (PS, WSL 등)" },
+    { key: "activity", label: "Activity", desc: "실행 프로그램 (shell, Claude 등)" },
+    { key: "path", label: "Path", desc: "Git 브랜치 및 현재 경로" },
+    { key: "result", label: "Result", desc: "명령 실행 결과 및 알림" },
+  ];
+
+  return (
+    <div>
+      <SectionTitle>Workspaces</SectionTitle>
+
+      {/* Display */}
+      <div style={cardStyle} className="p-4">
+        <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+          Display
+        </h3>
+        {displayItems.map((item, i) => (
+          <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
+            <div className="w-36 shrink-0 pt-1">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>{item.label}</span>
+              <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+                {item.desc}
+              </p>
+            </div>
+            <div className="min-w-0 flex-1">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  data-testid={`ws-display-${item.key}-toggle`}
+                  type="checkbox"
+                  checked={wsDisplay[item.key]}
+                  onChange={(e) => updateWsDisplay({ [item.key]: e.target.checked })}
+                />
+                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                  {wsDisplay[item.key] ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // -- Section: Claude Code --
 
 function ClaudeSection() {
@@ -1746,6 +1799,16 @@ export function SettingsView() {
           Convenience
         </button>
         <button
+          data-testid="nav-workspaceDisplay"
+          className="w-full px-4 py-2 text-left text-[13px]"
+          style={navBtnStyle("workspaceDisplay")}
+          onClick={() => setActiveNav("workspaceDisplay")}
+          onMouseEnter={() => setNavHover("workspaceDisplay")}
+          onMouseLeave={() => setNavHover(null)}
+        >
+          Workspaces
+        </button>
+        <button
           data-testid="nav-claude"
           className="w-full px-4 py-2 text-left text-[13px]"
           style={navBtnStyle("claude")}
@@ -1835,6 +1898,7 @@ export function SettingsView() {
           {activeNav === "colorSchemes" && <ColorSchemesSection />}
           {activeNav === "keybindings" && <KeybindingsSection />}
           {activeNav === "convenience" && <ConvenienceSection />}
+          {activeNav === "workspaceDisplay" && <WorkspacesSection />}
           {activeNav === "claude" && <ClaudeSection />}
           {activeNav === "memo" && <MemoSection />}
         </div>

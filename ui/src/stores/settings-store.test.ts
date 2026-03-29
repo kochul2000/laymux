@@ -418,4 +418,59 @@ describe("settings-store", () => {
     expect(convenience.copyOnSelect).toBe(true);
     expect(convenience.scrollbarStyle).toBe("separate");
   });
+
+  // -- Workspace display settings --
+
+  it("has default workspaceDisplay with all items enabled", () => {
+    const { workspaceDisplay } = useSettingsStore.getState();
+    expect(workspaceDisplay.minimap).toBe(true);
+    expect(workspaceDisplay.environment).toBe(true);
+    expect(workspaceDisplay.activity).toBe(true);
+    expect(workspaceDisplay.path).toBe(true);
+    expect(workspaceDisplay.result).toBe(true);
+  });
+
+  it("setWorkspaceDisplay partial update", () => {
+    useSettingsStore.getState().setWorkspaceDisplay({ minimap: false, activity: false });
+    const { workspaceDisplay } = useSettingsStore.getState();
+    expect(workspaceDisplay.minimap).toBe(false);
+    expect(workspaceDisplay.environment).toBe(true);
+    expect(workspaceDisplay.activity).toBe(false);
+    expect(workspaceDisplay.path).toBe(true);
+    expect(workspaceDisplay.result).toBe(true);
+  });
+
+  it("loadFromSettings loads workspaceDisplay", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceDisplay: { minimap: false, environment: false, activity: true, path: true, result: false },
+    });
+    const { workspaceDisplay } = useSettingsStore.getState();
+    expect(workspaceDisplay.minimap).toBe(false);
+    expect(workspaceDisplay.environment).toBe(false);
+    expect(workspaceDisplay.result).toBe(false);
+  });
+
+  it("loadFromSettings fills missing workspaceDisplay fields with defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceDisplay: { minimap: false } as any,
+    });
+    const { workspaceDisplay } = useSettingsStore.getState();
+    expect(workspaceDisplay.minimap).toBe(false);
+    expect(workspaceDisplay.environment).toBe(true);
+    expect(workspaceDisplay.activity).toBe(true);
+    expect(workspaceDisplay.path).toBe(true);
+    expect(workspaceDisplay.result).toBe(true);
+  });
+
+  it("loadFromSettings without workspaceDisplay preserves defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      defaultProfile: "WSL",
+    });
+    const { workspaceDisplay } = useSettingsStore.getState();
+    expect(workspaceDisplay.minimap).toBe(true);
+    expect(workspaceDisplay.environment).toBe(true);
+    expect(workspaceDisplay.activity).toBe(true);
+    expect(workspaceDisplay.path).toBe(true);
+    expect(workspaceDisplay.result).toBe(true);
+  });
 });
