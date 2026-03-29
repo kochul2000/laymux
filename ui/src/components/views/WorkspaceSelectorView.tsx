@@ -8,6 +8,7 @@ import { computeWorkspaceSummary, abbreviatePath, formatCommand, formatRelativeT
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
+import type { WorkspaceDisplaySettings } from "@/stores/settings-store";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -42,6 +43,7 @@ function WorkspaceItem({
   panes,
   canClose,
   pathEllipsis,
+  displaySettings,
   onSelect,
   onClose,
   onDuplicate,
@@ -54,6 +56,7 @@ function WorkspaceItem({
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
+  displaySettings: WorkspaceDisplaySettings;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
@@ -173,7 +176,7 @@ function WorkspaceItem({
       {panes.length >= 1 ? (
         <div data-testid={`ws-row-2-${ws.id}`} className="mt-1 flex flex-col gap-0.5">
           {(() => {
-            const showMinimap = panes.length >= 2;
+            const showMinimap = displaySettings.minimap && panes.length >= 2;
             const minimapPanes = showMinimap ? panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h })) : [];
             const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
             return panes.map((pane, paneIdx) => {
@@ -197,32 +200,36 @@ function WorkspaceItem({
                       </span>
                     )}
                     <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
-                        {shortLabel(ts.label)}
-                      </span>
-                      <span
-                        data-testid={`terminal-activity-${ts.id}`}
-                        className="shrink-0 rounded px-1 text-[9px]"
-                        style={{
-                          color: actInfo.color,
-                          background: ts.activity?.type === "interactiveApp"
-                            ? (ts.activity?.name === "Claude" ? "rgba(217,119,87,0.15)" : "rgba(137,180,250,0.12)")
-                            : "rgba(255,255,255,0.04)",
-                          minWidth: 52,
-                          textAlign: "center",
-                          display: "inline-block",
-                          opacity: isActive ? 1 : 0.7,
-                        }}
-                      >
-                        {actInfo.label}{ts.outputActive ? "" : ""}
-                      </span>
+                      {displaySettings.profile && (
+                        <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
+                          {shortLabel(ts.label)}
+                        </span>
+                      )}
+                      {displaySettings.activity && (
+                        <span
+                          data-testid={`terminal-activity-${ts.id}`}
+                          className="shrink-0 rounded px-1 text-[9px]"
+                          style={{
+                            color: actInfo.color,
+                            background: ts.activity?.type === "interactiveApp"
+                              ? (ts.activity?.name === "Claude" ? "rgba(217,119,87,0.15)" : "rgba(137,180,250,0.12)")
+                              : "rgba(255,255,255,0.04)",
+                            minWidth: 52,
+                            textAlign: "center",
+                            display: "inline-block",
+                            opacity: isActive ? 1 : 0.7,
+                          }}
+                        >
+                          {actInfo.label}{ts.outputActive ? "" : ""}
+                        </span>
+                      )}
                       {ts.branch && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span className="shrink-0" style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}>{ts.branch}</span>
                         </>
                       )}
-                      {ts.cwd && (
+                      {displaySettings.path && ts.cwd && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span className="truncate" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", opacity: isActive ? 0.7 : 0.5, ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}) }}>
@@ -337,7 +344,7 @@ function WorkspaceItem({
 
       {/* Row 3: Last command OR notification — always rendered */}
       <div data-testid={`ws-row-3-${ws.id}`} className="mt-0.5 truncate text-xs" style={{ paddingLeft: 18, minHeight: "1.25rem" }}>
-        {cmdInfo ? (
+        {displaySettings.commandStatus && cmdInfo ? (
           <span className="flex items-center gap-1">
             <span data-testid={`cmd-status-${ws.id}`} style={{ color: cmdColor }}>
               {cmdIcon}
@@ -524,6 +531,7 @@ export function WorkspaceSelectorView() {
 
   const terminalInstances = useTerminalStore((s) => s.instances);
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
+  const workspaceDisplay = useSettingsStore((s) => s.convenience.workspaceDisplay);
   const terminalPorts = new Map<string, number[]>();
 
   const handleSelectWorkspace = (wsId: string) => {
@@ -587,6 +595,7 @@ export function WorkspaceSelectorView() {
               panes={ws.panes}
               canClose={workspaces.length > 1}
               pathEllipsis={pathEllipsis}
+              displaySettings={workspaceDisplay}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {

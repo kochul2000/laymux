@@ -47,6 +47,28 @@ export type PathEllipsisMode = "start" | "end";
 /** Terminal scrollbar rendering mode. */
 export type ScrollbarStyle = "overlay" | "separate";
 
+/** Controls which elements are displayed in WorkspaceSelectorView pane summaries. */
+export interface WorkspaceDisplaySettings {
+  /** Show pane position minimap. */
+  minimap: boolean;
+  /** Show profile label (WSL, PS, ...). */
+  profile: boolean;
+  /** Show running program / activity (Claude, shell, ...). */
+  activity: boolean;
+  /** Show working directory path. */
+  path: boolean;
+  /** Show last command status (icon + text + time). */
+  commandStatus: boolean;
+}
+
+export const DEFAULT_WORKSPACE_DISPLAY: WorkspaceDisplaySettings = {
+  minimap: true,
+  profile: true,
+  activity: true,
+  path: true,
+  commandStatus: true,
+};
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
@@ -60,6 +82,8 @@ export interface ConvenienceSettings {
   pathEllipsis: PathEllipsisMode;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
   scrollbarStyle: ScrollbarStyle;
+  /** Controls which elements are visible in workspace pane summaries. */
+  workspaceDisplay: WorkspaceDisplaySettings;
 }
 
 
@@ -389,7 +413,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, workspaceDisplay: { ...DEFAULT_WORKSPACE_DISPLAY } },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -507,7 +531,15 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? {
+          smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const,
+          workspaceDisplay: { ...DEFAULT_WORKSPACE_DISPLAY },
+          ...(data.convenience as Partial<ConvenienceSettings>),
+          // Deep-merge workspaceDisplay to fill missing fields
+          ...((data.convenience as Partial<ConvenienceSettings>).workspaceDisplay
+            ? { workspaceDisplay: { ...DEFAULT_WORKSPACE_DISPLAY, ...(data.convenience as Partial<ConvenienceSettings>).workspaceDisplay } }
+            : {}),
+        }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude

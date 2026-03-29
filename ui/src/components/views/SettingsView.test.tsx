@@ -1024,4 +1024,39 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("echo hello");
     });
   });
+
+  describe("workspace display settings", () => {
+    it("renders workspace display checkboxes in convenience section", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-convenience"));
+
+      expect(screen.getByTestId("ws-display-minimap")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-profile")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-activity")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-path")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-commandStatus")).toBeInTheDocument();
+    });
+
+    it("all checkboxes are checked by default", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-convenience"));
+
+      for (const key of ["minimap", "profile", "activity", "path", "commandStatus"]) {
+        const cb = screen.getByTestId(`ws-display-${key}`) as HTMLInputElement;
+        expect(cb.checked).toBe(true);
+      }
+    });
+
+    it("unchecking a checkbox updates the draft state", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-convenience"));
+
+      const minimapCb = screen.getByTestId("ws-display-minimap") as HTMLInputElement;
+      await user.click(minimapCb);
+      expect(minimapCb.checked).toBe(false);
+    });
+  });
 });

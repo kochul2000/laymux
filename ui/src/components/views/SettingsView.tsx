@@ -1097,6 +1097,41 @@ function ConvenienceSection() {
           </div>
         </div>
       </div>
+
+      {/* Workspace Display toggles */}
+      <div style={cardStyle} className="mt-4 p-4">
+        <p className="mb-2 text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+          Workspace Display
+        </p>
+        <p className="mb-3 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+          워크스페이스 목록에서 각 pane 요약에 표시할 항목을 선택합니다.
+        </p>
+        {([
+          { key: "minimap" as const, label: "Minimap", desc: "Pane 위치 미니맵" },
+          { key: "profile" as const, label: "Profile", desc: "실행 환경 (WSL, PS, ...)" },
+          { key: "activity" as const, label: "Activity", desc: "실행 프로그램 (Claude, shell, ...)" },
+          { key: "path" as const, label: "Path", desc: "작업 디렉터리 경로" },
+          { key: "commandStatus" as const, label: "Command Status", desc: "마지막 명령 결과" },
+        ]).map(({ key, label, desc }) => (
+          <div key={key} className="flex items-center gap-2 py-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid={`ws-display-${key}`}
+                type="checkbox"
+                checked={convenience.workspaceDisplay?.[key] ?? true}
+                onChange={(e) => {
+                  const current = convenience.workspaceDisplay ?? { minimap: true, profile: true, activity: true, path: true, commandStatus: true };
+                  updateConvenience({
+                    workspaceDisplay: { ...current, [key]: e.target.checked },
+                  });
+                }}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>{label}</span>
+              <span className="text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>{desc}</span>
+            </label>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

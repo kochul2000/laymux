@@ -5,6 +5,7 @@ import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { getListeningPorts } from "@/lib/tauri-api";
 
 vi.mock("@/lib/persist-session", () => ({
@@ -35,6 +36,7 @@ describe("WorkspaceSelectorView", () => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   it("renders workspace list", () => {
@@ -691,5 +693,98 @@ describe("WorkspaceSelectorView", () => {
     // There's no command icon, so we show a standalone notification dot
     const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
     expect(badge).toBeInTheDocument();
+  });
+
+  // -- workspaceDisplay settings --
+
+  describe("workspaceDisplay settings", () => {
+    function setupTerminalPane() {
+      // Change the default pane's view type to TerminalView
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      const pane = ws.panes[0];
+      useWorkspaceStore.setState({
+        workspaces: [{
+          ...ws,
+          panes: [{ ...pane, view: { type: "TerminalView", profile: "WSL", syncGroup: "Default" } }],
+        }],
+      });
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${pane.id}`,
+        profile: "WSL",
+        syncGroup: "Default",
+        workspaceId: ws.id,
+        label: "WSL",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${pane.id}`, {
+        cwd: "/home/user/project",
+        branch: "main",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: Date.now(),
+      });
+    }
+
+    it("hides profile label when profile is disabled", () => {
+      setupTerminalPane();
+      useSettingsStore.getState().setConvenience({
+        workspaceDisplay: {
+          minimap: true,
+          profile: false,
+          activity: true,
+          path: true,
+          commandStatus: true,
+        },
+      });
+      render(<WorkspaceSelectorView />);
+      // "WSL" label should not appear
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      const row2 = screen.getByTestId(`ws-row-2-${ws.id}`);
+      expect(row2.textContent).not.toContain("WSL");
+    });
+
+    it("hides path when path is disabled", () => {
+      setupTerminalPane();
+      useSettingsStore.getState().setConvenience({
+        workspaceDisplay: {
+          minimap: true,
+          profile: true,
+          activity: true,
+          path: false,
+          commandStatus: true,
+        },
+      });
+      render(<WorkspaceSelectorView />);
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      const row2 = screen.getByTestId(`ws-row-2-${ws.id}`);
+      expect(row2.textContent).not.toContain("project");
+    });
+
+    it("hides command status when commandStatus is disabled", () => {
+      setupTerminalPane();
+      useSettingsStore.getState().setConvenience({
+        workspaceDisplay: {
+          minimap: true,
+          profile: true,
+          activity: true,
+          path: true,
+          commandStatus: false,
+        },
+      });
+      render(<WorkspaceSelectorView />);
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      const row3 = screen.getByTestId(`ws-row-3-${ws.id}`);
+      expect(row3.textContent).not.toContain("npm test");
+    });
+
+    it("shows all elements when all display settings are enabled (default)", () => {
+      setupTerminalPane();
+      render(<WorkspaceSelectorView />);
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      const row2 = screen.getByTestId(`ws-row-2-${ws.id}`);
+      expect(row2.textContent).toContain("WSL");
+      expect(row2.textContent).toContain("project");
+      const row3 = screen.getByTestId(`ws-row-3-${ws.id}`);
+      expect(row3.textContent).toContain("npm test");
+    });
   });
 });

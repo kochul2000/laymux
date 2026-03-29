@@ -418,4 +418,79 @@ describe("settings-store", () => {
     expect(convenience.copyOnSelect).toBe(true);
     expect(convenience.scrollbarStyle).toBe("separate");
   });
+
+  // -- workspaceDisplay settings --
+
+  it("has default workspaceDisplay with all fields enabled", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.workspaceDisplay).toEqual({
+      minimap: true,
+      profile: true,
+      activity: true,
+      path: true,
+      commandStatus: true,
+    });
+  });
+
+  it("setConvenience updates workspaceDisplay partially", () => {
+    useSettingsStore.getState().setConvenience({
+      workspaceDisplay: {
+        minimap: false,
+        profile: true,
+        activity: true,
+        path: true,
+        commandStatus: true,
+      },
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.workspaceDisplay.minimap).toBe(false);
+    expect(convenience.workspaceDisplay.profile).toBe(true);
+  });
+
+  it("loadFromSettings restores workspaceDisplay", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+        workspaceDisplay: {
+          minimap: false,
+          profile: false,
+          activity: true,
+          path: true,
+          commandStatus: false,
+        },
+      },
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.workspaceDisplay.minimap).toBe(false);
+    expect(convenience.workspaceDisplay.profile).toBe(false);
+    expect(convenience.workspaceDisplay.commandStatus).toBe(false);
+  });
+
+  it("loadFromSettings fills missing workspaceDisplay with defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.workspaceDisplay).toEqual({
+      minimap: true,
+      profile: true,
+      activity: true,
+      path: true,
+      commandStatus: true,
+    });
+  });
 });
