@@ -187,6 +187,52 @@ impl Default for FontSettings {
     }
 }
 
+/// Profile defaults — inheritable settings for all profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileDefaults {
+    #[serde(default)]
+    pub color_scheme: String,
+    #[serde(default = "default_cursor_shape")]
+    pub cursor_shape: String,
+    #[serde(default)]
+    pub padding: PaddingSettings,
+    #[serde(default = "default_scrollback_lines")]
+    pub scrollback_lines: u32,
+    #[serde(default = "default_opacity")]
+    pub opacity: u8,
+    #[serde(default = "default_bell_style")]
+    pub bell_style: String,
+    #[serde(default = "default_close_on_exit")]
+    pub close_on_exit: String,
+    #[serde(default = "default_antialiasing_mode")]
+    pub antialiasing_mode: String,
+    #[serde(default)]
+    pub suppress_application_title: bool,
+    #[serde(default = "default_true")]
+    pub snap_on_input: bool,
+    #[serde(default)]
+    pub font: FontSettings,
+}
+
+impl Default for ProfileDefaults {
+    fn default() -> Self {
+        Self {
+            color_scheme: String::new(),
+            cursor_shape: default_cursor_shape(),
+            padding: PaddingSettings::default(),
+            scrollback_lines: default_scrollback_lines(),
+            opacity: default_opacity(),
+            bell_style: default_bell_style(),
+            close_on_exit: default_close_on_exit(),
+            antialiasing_mode: default_antialiasing_mode(),
+            suppress_application_title: false,
+            snap_on_input: true,
+            font: FontSettings::default(),
+        }
+    }
+}
+
 /// Layout pane definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -380,6 +426,12 @@ pub struct Settings {
     #[serde(default = "default_profile")]
     pub default_profile: String,
     #[serde(default)]
+    pub profile_defaults: ProfileDefaults,
+    #[serde(default)]
+    pub view_order: Vec<String>,
+    #[serde(default = "default_app_theme_id")]
+    pub app_theme_id: String,
+    #[serde(default)]
     pub layouts: Vec<Layout>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
@@ -389,6 +441,10 @@ pub struct Settings {
     pub convenience: ConvenienceSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
+}
+
+fn default_app_theme_id() -> String {
+    "catppuccin-mocha".into()
 }
 
 fn default_profile() -> String {
@@ -414,6 +470,9 @@ impl Default for Settings {
             keybindings: Vec::new(),
             font: None,
             default_profile: default_profile(),
+            profile_defaults: ProfileDefaults::default(),
+            view_order: Vec::new(),
+            app_theme_id: default_app_theme_id(),
             layouts: vec![Layout {
                 id: "default-layout".into(),
                 name: "Default".into(),
@@ -981,6 +1040,91 @@ mod tests {
     fn profile_font_none_by_default() {
         let profile = Profile::default();
         assert!(profile.font.is_none());
+    }
+
+    #[test]
+    fn profile_defaults_font_round_trip() {
+        let json = r#"{
+            "profileDefaults": {
+                "font": {"face": "JetBrainsMonoBigHangul", "size": 14, "weight": "normal"}
+            }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.profile_defaults.font.face, "JetBrainsMonoBigHangul");
+        assert_eq!(settings.profile_defaults.font.size, 14);
+
+        // Round-trip: serialize then deserialize
+        let serialized = serde_json::to_string_pretty(&settings).unwrap();
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.profile_defaults.font.face, "JetBrainsMonoBigHangul");
+    }
+
+    #[test]
+    fn profile_defaults_missing_uses_defaults() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.profile_defaults.font.face, "Cascadia Mono");
+        assert_eq!(settings.profile_defaults.font.size, 14);
+        assert_eq!(settings.profile_defaults.cursor_shape, "bar");
+        assert!(settings.profile_defaults.snap_on_input);
+    }
+
+    #[test]
+    fn profile_defaults_all_fields_round_trip() {
+        let json = r#"{
+            "profileDefaults": {
+                "colorScheme": "One Half Dark",
+                "cursorShape": "filledBox",
+                "padding": {"top": 4, "right": 4, "bottom": 4, "left": 4},
+                "scrollbackLines": 5000,
+                "opacity": 80,
+                "bellStyle": "none",
+                "closeOnExit": "always",
+                "antialiasingMode": "cleartype",
+                "suppressApplicationTitle": true,
+                "snapOnInput": false,
+                "font": {"face": "Fira Code", "size": 16, "weight": "bold"}
+            }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.profile_defaults.color_scheme, "One Half Dark");
+        assert_eq!(settings.profile_defaults.cursor_shape, "filledBox");
+        assert_eq!(settings.profile_defaults.padding.top, 4);
+        assert_eq!(settings.profile_defaults.scrollback_lines, 5000);
+        assert_eq!(settings.profile_defaults.opacity, 80);
+        assert_eq!(settings.profile_defaults.bell_style, "none");
+        assert_eq!(settings.profile_defaults.close_on_exit, "always");
+        assert!(settings.profile_defaults.suppress_application_title);
+        assert!(!settings.profile_defaults.snap_on_input);
+        assert_eq!(settings.profile_defaults.font.face, "Fira Code");
+        assert_eq!(settings.profile_defaults.font.weight, "bold");
+
+        let serialized = serde_json::to_string_pretty(&settings).unwrap();
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.profile_defaults, settings.profile_defaults);
+    }
+
+    #[test]
+    fn view_order_and_app_theme_round_trip() {
+        let json = r#"{
+            "viewOrder": ["TerminalView", "BrowserPreviewView"],
+            "appThemeId": "dracula"
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.view_order, vec!["TerminalView", "BrowserPreviewView"]);
+        assert_eq!(settings.app_theme_id, "dracula");
+
+        let serialized = serde_json::to_string_pretty(&settings).unwrap();
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.view_order, vec!["TerminalView", "BrowserPreviewView"]);
+        assert_eq!(reparsed.app_theme_id, "dracula");
+    }
+
+    #[test]
+    fn app_theme_id_defaults_when_missing() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.app_theme_id, "catppuccin-mocha");
     }
 
     #[test]

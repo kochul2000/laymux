@@ -95,12 +95,29 @@ export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
 }
 
+export interface ProfileDefaults {
+  colorScheme?: string;
+  cursorShape?: string;
+  padding?: PaddingSettings;
+  scrollbackLines?: number;
+  opacity?: number;
+  bellStyle?: string;
+  closeOnExit?: string;
+  antialiasingMode?: string;
+  suppressApplicationTitle?: boolean;
+  snapOnInput?: boolean;
+  font?: FontSettings;
+}
+
 export interface Settings {
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];
   font?: FontSettings;
   defaultProfile: string;
+  profileDefaults?: ProfileDefaults;
+  viewOrder?: string[];
+  appThemeId?: string;
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];

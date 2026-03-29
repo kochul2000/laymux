@@ -15,6 +15,9 @@ export async function persistSession(): Promise<void> {
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
     defaultProfile: settingsState.defaultProfile,
+    profileDefaults: { ...settingsState.profileDefaults },
+    viewOrder: settingsState.viewOrder ?? [],
+    appThemeId: settingsState.appThemeId ?? "catppuccin-mocha",
     // WARNING: Profile 필드를 추가할 때 여기에도 반드시 포함할 것.
     // 누락하면 settings.json 저장 시 해당 필드가 사라짐.
     // persist-session.test.ts에도 보존 테스트를 추가할 것.
@@ -106,11 +109,5 @@ export async function persistSession(): Promise<void> {
     })),
   };
 
-  // Extra fields the backend round-trips but aren't in the strict Settings type.
-  const extended = base as Settings & Record<string, unknown>;
-  extended.profileDefaults = { ...settingsState.profileDefaults };
-  extended.viewOrder = settingsState.viewOrder ?? [];
-  extended.appThemeId = settingsState.appThemeId ?? "catppuccin-mocha";
-
-  await saveSettings(extended);
+  await saveSettings(base);
 }

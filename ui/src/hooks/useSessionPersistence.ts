@@ -16,22 +16,20 @@ export function useSessionPersistence() {
   useEffect(() => {
     loadSettings()
       .then((rawSettings) => {
-        // Treat as loose record — disk data may have extra/missing fields
-        const settings = rawSettings as unknown as Record<string, unknown>;
         const sFont = rawSettings.font;
         const sProfiles = rawSettings.profiles;
         const sColorSchemes = rawSettings.colorSchemes;
         const sKeybindings = rawSettings.keybindings;
-        const sProfileDefaults = settings.profileDefaults as Record<string, unknown> | undefined;
-        const sViewOrder = settings.viewOrder;
-        const sAppThemeId = settings.appThemeId;
+        const sProfileDefaults = rawSettings.profileDefaults;
+        const sViewOrder = rawSettings.viewOrder;
+        const sAppThemeId = rawSettings.appThemeId;
 
         // Apply to settings store
         useSettingsStore.getState().loadFromSettings({
           ...(sFont ? { font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" } } : {}),
           defaultProfile: rawSettings.defaultProfile,
           profileDefaults: sProfileDefaults as Parameters<ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]>[0]["profileDefaults"],
-          viewOrder: Array.isArray(sViewOrder) ? sViewOrder : undefined,
+          viewOrder: Array.isArray(sViewOrder) ? sViewOrder as string[] : undefined,
           appThemeId: typeof sAppThemeId === "string" ? sAppThemeId : undefined,
           profiles: sProfiles?.map((p) => ({
             name: p.name,
@@ -50,6 +48,7 @@ export function useSessionPersistence() {
             antialiasingMode: (p.antialiasingMode ?? "grayscale") as import("@/stores/settings-store").AntialiasingMode,
             suppressApplicationTitle: p.suppressApplicationTitle ?? false,
             snapOnInput: p.snapOnInput ?? true,
+            ...(p.font ? { font: { face: p.font.face, size: p.font.size, weight: p.font.weight ?? "normal" } } : {}),
           })) ?? [],
           colorSchemes: sColorSchemes?.map((cs) => {
             const base = makeDefaultColorScheme();
@@ -59,6 +58,8 @@ export function useSessionPersistence() {
             keys: kb.keys,
             command: kb.command,
           })) ?? [],
+          ...(rawSettings.convenience ? { convenience: rawSettings.convenience as import("@/stores/settings-store").ConvenienceSettings } : {}),
+          ...(rawSettings.claude ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings } : {}),
         });
 
         // Apply layouts and workspaces to workspace store

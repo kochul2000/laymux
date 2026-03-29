@@ -610,7 +610,7 @@ const profileTabStyle = (active: boolean): React.CSSProperties => ({
 });
 
 function ProfileSection({ profileIndex }: { profileIndex: number }) {
-  const profile = useSettingsStore((s) => s.profiles[profileIndex]);
+  const storeProfile = useSettingsStore((s) => s.profiles[profileIndex]);
   const updateProfile = useSettingsStore((s) => s.updateProfile);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
   const rawProfileDefaults = useSettingsStore((s) => s.profileDefaults);
@@ -618,9 +618,15 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>("general");
   const monoFonts = useMonospacedFonts();
 
+  const [profile, setDraftProfile] = useDraft(
+    `profile-${profileIndex}`,
+    storeProfile,
+    (v) => { if (v) updateProfile(profileIndex, v as Partial<Profile>); },
+  );
+
   if (!profile) return null;
 
-  const update = (data: Partial<Profile>) => updateProfile(profileIndex, data);
+  const update = (data: Partial<Profile>) => setDraftProfile(prev => prev ? { ...prev, ...data } : prev);
 
   return (
     <div>

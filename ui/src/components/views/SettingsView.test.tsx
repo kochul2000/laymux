@@ -940,4 +940,88 @@ describe("SettingsView", () => {
       expect(state.claude.syncCwd).toBe("command");
     });
   });
+
+  // -- Profile fields draft (startupCommand, commandLine 등) --
+
+  describe("Profile field changes use draft (not direct store update)", () => {
+    it("does NOT update startupCommand in store until Save is clicked", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await navigateToProfile(user, "PowerShell");
+      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      await user.clear(input);
+      await user.type(input, "echo hello");
+
+      // Store should still have original value
+      expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("");
+      // UI should show draft value
+      expect(input.value).toBe("echo hello");
+    });
+
+    it("updates startupCommand in store after Save", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await navigateToProfile(user, "PowerShell");
+      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      await user.clear(input);
+      await user.type(input, "echo hello");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("echo hello");
+    });
+
+    it("Save button becomes enabled when profile field is changed", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await navigateToProfile(user, "PowerShell");
+      const saveBtn = screen.getByTestId("save-settings-btn");
+      expect(saveBtn).toBeDisabled();
+
+      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      await user.clear(input);
+      await user.type(input, "echo hello");
+
+      expect(saveBtn).not.toBeDisabled();
+    });
+
+    it("Discard restores profile field to last saved value", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await navigateToProfile(user, "PowerShell");
+      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      await user.clear(input);
+      await user.type(input, "echo hello");
+
+      await user.click(screen.getByTestId("discard-settings-btn"));
+      expect(input.value).toBe("");
+      expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("");
+    });
+
+    it("profile draft survives navigation away and back", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // Change startupCommand in PowerShell profile
+      await navigateToProfile(user, "PowerShell");
+      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      await user.clear(input);
+      await user.type(input, "echo hello");
+
+      // Navigate away to Convenience
+      await user.click(screen.getByTestId("nav-convenience"));
+
+      // Navigate back
+      await navigateToProfile(user, "PowerShell");
+      const inputAfter = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      expect(inputAfter.value).toBe("echo hello");
+
+      // Save should still work
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("echo hello");
+    });
+  });
 });
