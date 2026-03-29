@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle, getClaudeCompletionMessage } from "./activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle, getClaudeCompletionMessage, parseClaudeMode, isRalphActive } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -255,5 +255,48 @@ describe("Claude completion notification wiring (bug repro)", () => {
     const message = getClaudeCompletionMessage("✻ Fix the bug", "✳ Claude Code");
     expect(message).toBe("Fix the bug");
     expect(isGenericClaudeTitle(message)).toBe(false);
+  });
+});
+
+describe("parseClaudeMode", () => {
+  const claudeActivity = { type: "interactiveApp" as const, name: "Claude" };
+
+  it("returns undefined for non-Claude terminals", () => {
+    expect(parseClaudeMode("some title", { type: "shell" })).toBeUndefined();
+    expect(parseClaudeMode("some title", { type: "interactiveApp", name: "vim" })).toBeUndefined();
+    expect(parseClaudeMode("some title", undefined)).toBeUndefined();
+  });
+
+  it("returns idle for ✳ prefix title", () => {
+    expect(parseClaudeMode("✳ Claude Code", claudeActivity)).toBe("idle");
+  });
+
+  it("returns working for spinner prefix title", () => {
+    expect(parseClaudeMode("✶ Writing code...", claudeActivity)).toBe("working");
+  });
+
+  it("returns plan when title contains 'plan'", () => {
+    expect(parseClaudeMode("✶ Plan mode", claudeActivity)).toBe("plan");
+    expect(parseClaudeMode("✳ Plan: approach for fix", claudeActivity)).toBe("plan");
+  });
+
+  it("returns danger when title contains 'danger'", () => {
+    expect(parseClaudeMode("✳ Danger mode active", claudeActivity)).toBe("danger");
+  });
+
+  it("returns idle when title is undefined", () => {
+    expect(parseClaudeMode(undefined, claudeActivity)).toBe("idle");
+  });
+});
+
+describe("isRalphActive", () => {
+  it("returns true when title contains 'ralph'", () => {
+    expect(isRalphActive("✶ Ralph: fixing bugs")).toBe(true);
+    expect(isRalphActive("✳ Ralph loop active")).toBe(true);
+  });
+
+  it("returns false for normal Claude titles", () => {
+    expect(isRalphActive("✳ Claude Code")).toBe(false);
+    expect(isRalphActive(undefined)).toBe(false);
   });
 });
