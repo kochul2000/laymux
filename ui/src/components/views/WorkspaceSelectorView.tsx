@@ -191,7 +191,7 @@ function WorkspaceItem({
                   : undefined;
                 const actInfo = formatActivity(ts.activity);
                 return (
-                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
+                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
                     {showMinimap && wsDisplay.minimap && (
                       <span className="shrink-0" data-testid={`pane-minimap-${termId}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                         <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
@@ -270,7 +270,7 @@ function WorkspaceItem({
                 const url = (pane.view.url as string) ?? "";
                 const shortUrl = url.replace(/^https?:\/\//, "");
                 return (
-                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
+                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
                     {showMinimap && wsDisplay.minimap && (
                       <span className="shrink-0" data-testid={`pane-minimap-browser-${pane.id}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                         <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
@@ -311,7 +311,7 @@ function WorkspaceItem({
               }
               // EmptyView or other view types
               return (
-                <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
+                <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
                   {showMinimap && wsDisplay.minimap && (
                     <span className="shrink-0" data-testid={`pane-minimap-empty-${pane.id}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                       <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
