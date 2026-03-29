@@ -131,4 +131,77 @@ describe("useSessionPersistence", () => {
     expect(leftDock?.activeView).toBe("SettingsView");
     expect(leftDock?.visible).toBe(false);
   });
+
+  it("normalizes cwdReceive/cwdSend to explicit booleans when loading dock panes", async () => {
+    // Override loadSettings to return dock panes without cwdReceive/cwdSend
+    (loadSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      font: { face: "Consolas", size: 14 },
+      defaultProfile: "WSL",
+      profiles: [{ name: "WSL", commandLine: "wsl.exe" }],
+      colorSchemes: [],
+      keybindings: [],
+      layouts: [],
+      workspaces: [],
+      docks: [
+        {
+          position: "bottom",
+          activeView: "TerminalView",
+          views: ["TerminalView"],
+          visible: true,
+          size: 200,
+          panes: [
+            {
+              id: "dp-test1",
+              view: { type: "TerminalView", profile: "WSL" }, // no cwdReceive/cwdSend
+              x: 0, y: 0, w: 1, h: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    renderHook(() => useSessionPersistence());
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+
+    const bottomDock = useDockStore.getState().getDock("bottom");
+    const pane = bottomDock?.panes[0];
+    expect(pane?.view.cwdReceive).toBe(true);
+    expect(pane?.view.cwdSend).toBe(true);
+  });
+
+  it("preserves explicit cwdReceive=false from saved dock panes", async () => {
+    (loadSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      font: { face: "Consolas", size: 14 },
+      defaultProfile: "WSL",
+      profiles: [{ name: "WSL", commandLine: "wsl.exe" }],
+      colorSchemes: [],
+      keybindings: [],
+      layouts: [],
+      workspaces: [],
+      docks: [
+        {
+          position: "bottom",
+          activeView: "TerminalView",
+          views: ["TerminalView"],
+          visible: true,
+          size: 200,
+          panes: [
+            {
+              id: "dp-test1",
+              view: { type: "TerminalView", profile: "WSL", cwdReceive: false, cwdSend: false },
+              x: 0, y: 0, w: 1, h: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    renderHook(() => useSessionPersistence());
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+
+    const bottomDock = useDockStore.getState().getDock("bottom");
+    const pane = bottomDock?.panes[0];
+    expect(pane?.view.cwdReceive).toBe(false);
+    expect(pane?.view.cwdSend).toBe(false);
+  });
 });

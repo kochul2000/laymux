@@ -112,7 +112,16 @@ export function useSessionPersistence() {
             const loadedPanes = Array.isArray(savedAny.panes)
               ? (savedAny.panes as { id: string; view: { type: string; [k: string]: unknown }; x?: number; y?: number; w?: number; h?: number }[]).map((p) => ({
                   id: p.id || `dp-${crypto.randomUUID().slice(0, 8)}`,
-                  view: { ...p.view, type: (p.view.type as ViewType) || "EmptyView" },
+                  view: {
+                    ...p.view,
+                    type: (p.view.type as ViewType) || "EmptyView",
+                    // Normalize cwdReceive/cwdSend to explicit booleans for TerminalView
+                    // to prevent UI/backend mismatch (issue #24)
+                    ...(p.view.type === "TerminalView" ? {
+                      cwdReceive: (p.view.cwdReceive as boolean) ?? true,
+                      cwdSend: (p.view.cwdSend as boolean) ?? true,
+                    } : {}),
+                  },
                   x: p.x ?? 0,
                   y: p.y ?? 0,
                   w: p.w ?? 1,

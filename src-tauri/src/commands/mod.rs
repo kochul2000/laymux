@@ -29,6 +29,7 @@ pub fn create_terminal_session(
     cols: u16,
     rows: u16,
     sync_group: String,
+    cwd_receive: Option<bool>,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -63,7 +64,10 @@ pub fn create_terminal_session(
         env,
     };
 
-    let session = TerminalSession::new(id.clone(), config);
+    let mut session = TerminalSession::new(id.clone(), config);
+    if let Some(receive) = cwd_receive {
+        session.cwd_receive = receive;
+    }
 
     // Check for duplicate
     {
@@ -2635,5 +2639,41 @@ mod tests {
             result.iter().any(|f| f == "JetBrainsMonoBigHangul"),
             "System monospace fonts should include JetBrainsMonoBigHangul"
         );
+    }
+
+    // --- cwd_receive initialization tests ---
+
+    #[test]
+    fn terminal_session_defaults_cwd_receive_true() {
+        let session = TerminalSession::new("t1".into(), TerminalConfig::default());
+        assert!(session.cwd_receive, "New terminal should default to cwd_receive=true");
+    }
+
+    #[test]
+    fn filter_targets_cwd_receive_excludes_disabled() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let t1 = TerminalSession::new("t1".into(), TerminalConfig::default());
+            let mut t2 = TerminalSession::new("t2".into(), TerminalConfig::default());
+            t2.cwd_receive = false; // explicitly disabled
+            let t3 = TerminalSession::new("t3".into(), TerminalConfig::default());
+            terminals.insert("t1".into(), t1);
+            terminals.insert("t2".into(), t2);
+            terminals.insert("t3".into(), t3);
+        }
+
+        let targets = vec!["t1".into(), "t2".into(), "t3".into()];
+        let filtered = filter_targets_cwd_receive(&state, &targets);
+        assert!(filtered.contains(&"t1".to_string()), "t1 with cwd_receive=true should pass");
+        assert!(!filtered.contains(&"t2".to_string()), "t2 with cwd_receive=false should be excluded");
+        assert!(filtered.contains(&"t3".to_string()), "t3 with cwd_receive=true should pass");
+    }
+
+    #[test]
+    fn terminal_session_new_with_cwd_receive_false() {
+        let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+        session.cwd_receive = false;
+        assert!(!session.cwd_receive);
     }
 }

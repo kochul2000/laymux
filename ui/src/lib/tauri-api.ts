@@ -19,6 +19,7 @@ export async function createTerminalSession(
   cols: number,
   rows: number,
   syncGroup: string,
+  cwdReceive: boolean = true,
 ): Promise<TerminalSessionResult> {
   return invoke("create_terminal_session", {
     id,
@@ -26,6 +27,7 @@ export async function createTerminalSession(
     cols,
     rows,
     syncGroup,
+    cwdReceive,
   });
 }
 

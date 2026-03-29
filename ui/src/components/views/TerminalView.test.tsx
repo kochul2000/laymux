@@ -142,6 +142,7 @@ describe("TerminalView", () => {
         80,
         24,
         "grp",
+        true,
       );
     });
   });
@@ -664,21 +665,7 @@ describe("TerminalView", () => {
   // -- cwdReceive sync (issue #24) --
 
   describe("cwdReceive sync", () => {
-    it("syncs cwdReceive=false to backend AFTER createTerminalSession resolves", async () => {
-      const callOrder: string[] = [];
-      mockCreateTerminalSession.mockImplementation((...args: unknown[]) => {
-        callOrder.push("createTerminalSession");
-        return Promise.resolve({
-          id: args[0],
-          title: "Terminal",
-          config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
-        });
-      });
-      mockSetTerminalCwdReceive.mockImplementation((..._args: unknown[]) => {
-        callOrder.push("setTerminalCwdReceive");
-        return Promise.resolve(undefined);
-      });
-
+    it("passes cwdReceive=false atomically to createTerminalSession (no race condition)", async () => {
       render(
         <TerminalView
           instanceId="t-cwd1"
@@ -689,23 +676,14 @@ describe("TerminalView", () => {
       );
 
       await vi.waitFor(() => {
+        // cwdReceive is passed directly to createTerminalSession — no separate call needed
         expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "t-cwd1", "PowerShell", 80, 24, "default",
+          "t-cwd1", "PowerShell", 80, 24, "default", false,
         );
       });
-
-      await vi.waitFor(() => {
-        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd1", false);
-      });
-
-      // Critical: setTerminalCwdReceive must fire AFTER createTerminalSession
-      const createIdx = callOrder.indexOf("createTerminalSession");
-      const receiveIdx = callOrder.lastIndexOf("setTerminalCwdReceive");
-      expect(createIdx).toBeGreaterThanOrEqual(0);
-      expect(receiveIdx).toBeGreaterThan(createIdx);
     });
 
-    it("syncs cwdReceive=true (default) to backend after session creation", async () => {
+    it("passes cwdReceive=true (default) atomically to createTerminalSession", async () => {
       render(
         <TerminalView
           instanceId="t-cwd2"
@@ -716,11 +694,9 @@ describe("TerminalView", () => {
       );
 
       await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalled();
-      });
-
-      await vi.waitFor(() => {
-        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd2", true);
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-cwd2", "PowerShell", 80, 24, "default", true,
+        );
       });
     });
 
@@ -754,14 +730,7 @@ describe("TerminalView", () => {
       });
     });
 
-    it("does not call setTerminalCwdReceive with correct value before session resolves", async () => {
-      let resolveSession!: (value: unknown) => void;
-      mockCreateTerminalSession.mockImplementation(() => {
-        return new Promise((resolve) => {
-          resolveSession = resolve;
-        });
-      });
-
+    it("passes cwdReceive=false atomically to createTerminalSession", async () => {
       render(
         <TerminalView
           instanceId="t-cwd4"
@@ -772,25 +741,9 @@ describe("TerminalView", () => {
       );
 
       await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalled();
-      });
-
-      // Before session resolves, clear mock to track only post-creation calls
-      mockSetTerminalCwdReceive.mockClear();
-      await new Promise((r) => setTimeout(r, 0));
-
-      // No meaningful call should have fired since session is still pending
-      expect(mockSetTerminalCwdReceive).not.toHaveBeenCalled();
-
-      // Now resolve the session
-      resolveSession({
-        id: "t-cwd4",
-        title: "Terminal",
-        config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
-      });
-
-      await vi.waitFor(() => {
-        expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd4", false);
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-cwd4", "PowerShell", 80, 24, "default", false,
+        );
       });
     });
   });
