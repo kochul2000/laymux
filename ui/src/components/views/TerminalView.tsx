@@ -25,6 +25,7 @@ import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { setupImeHandler, disposeImeHandler } from "@/lib/ime-handler";
 
 import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, getClaudeCompletionMessage } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -415,6 +416,16 @@ export function TerminalView({
         // Open terminal now that container has real dimensions
         if (containerRef.current) {
           terminal.open(containerRef.current);
+
+          // Fix IME composition position for CJK input (Korean, Chinese, Japanese).
+          // Must be called after terminal.open() so the xterm DOM structure exists.
+          const xtermEl = containerRef.current.querySelector(".xterm");
+          if (xtermEl) {
+            setupImeHandler(xtermEl as HTMLElement, {
+              fontSize: settingsState.font.size,
+              fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+            });
+          }
         }
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
@@ -455,6 +466,11 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      // Clean up IME handler
+      const xtermEl = containerRef.current?.querySelector(".xterm");
+      if (xtermEl) {
+        disposeImeHandler(xtermEl as HTMLElement);
+      }
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

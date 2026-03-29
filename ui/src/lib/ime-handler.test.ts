@@ -1,0 +1,180 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { setupImeHandler, disposeImeHandler } from "./ime-handler";
+
+describe("ime-handler", () => {
+  let container: HTMLDivElement;
+  let textarea: HTMLTextAreaElement;
+  let screenElement: HTMLDivElement;
+
+  beforeEach(() => {
+    // Build a minimal xterm-like DOM structure
+    container = document.createElement("div");
+    container.classList.add("xterm");
+
+    // xterm-helper-textarea (hidden offscreen by default)
+    const helpers = document.createElement("div");
+    helpers.classList.add("xterm-helpers");
+    textarea = document.createElement("textarea");
+    textarea.classList.add("xterm-helper-textarea");
+    textarea.style.position = "absolute";
+    textarea.style.left = "-9999em";
+    textarea.style.top = "0";
+    helpers.appendChild(textarea);
+    container.appendChild(helpers);
+
+    // xterm-screen (canvas area)
+    screenElement = document.createElement("div");
+    screenElement.classList.add("xterm-screen");
+    container.appendChild(screenElement);
+
+    // composition-view
+    const compositionView = document.createElement("div");
+    compositionView.classList.add("composition-view");
+    container.appendChild(compositionView);
+
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    disposeImeHandler(container);
+    document.body.removeChild(container);
+  });
+
+  it("finds and returns the textarea element from the xterm container", () => {
+    const result = setupImeHandler(container);
+    expect(result).toBe(true);
+  });
+
+  it("returns false when no textarea is found", () => {
+    // Remove the textarea
+    textarea.remove();
+    const result = setupImeHandler(container);
+    expect(result).toBe(false);
+  });
+
+  it("hides the composition-view via CSS to prevent duplicate display", () => {
+    setupImeHandler(container);
+    const compositionView = container.querySelector(".composition-view") as HTMLElement;
+    // The composition-view should be hidden since we handle IME ourselves
+    expect(compositionView.style.display).toBe("none");
+  });
+
+  it("moves textarea near cursor position on compositionstart", () => {
+    setupImeHandler(container);
+
+    // Mock getBoundingClientRect for screen element
+    vi.spyOn(screenElement, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 50,
+      right: 900,
+      bottom: 450,
+      width: 800,
+      height: 400,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    // Find the cursor element or simulate cursor position
+    // xterm.js uses .xterm-cursor-layer or the active row
+    // For this test, we set cursor position via mock
+
+    // Dispatch compositionstart on textarea
+    const event = new Event("compositionstart", { bubbles: true });
+    textarea.dispatchEvent(event);
+
+    // Textarea should no longer be at -9999em
+    expect(textarea.style.left).not.toBe("-9999em");
+  });
+
+  it("resets textarea position on compositionend", () => {
+    setupImeHandler(container);
+
+    // Trigger compositionstart first
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // Then compositionend
+    textarea.dispatchEvent(new Event("compositionend", { bubbles: true }));
+
+    // Textarea should be moved back offscreen
+    expect(textarea.style.left).toBe("-9999em");
+  });
+
+  it("makes textarea visible during composition for IME popup positioning", () => {
+    setupImeHandler(container);
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // During composition, textarea opacity should allow IME to position correctly
+    // The textarea needs to be "visible" to the IME system (not opacity: 0)
+    expect(textarea.style.zIndex).not.toBe("-5");
+  });
+
+  it("restores textarea styles after composition ends", () => {
+    setupImeHandler(container);
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+    textarea.dispatchEvent(new Event("compositionend", { bubbles: true }));
+
+    // After composition, textarea should be hidden again
+    expect(textarea.style.left).toBe("-9999em");
+    expect(textarea.style.zIndex).toBe("-5");
+  });
+
+  it("cleans up event listeners on dispose", () => {
+    setupImeHandler(container);
+
+    const removeListenerSpy = vi.spyOn(textarea, "removeEventListener");
+    disposeImeHandler(container);
+
+    // Should have removed compositionstart and compositionend listeners
+    expect(removeListenerSpy).toHaveBeenCalledWith("compositionstart", expect.any(Function));
+    expect(removeListenerSpy).toHaveBeenCalledWith("compositionend", expect.any(Function));
+  });
+
+  it("positions textarea at bottom-left of screen element as fallback", () => {
+    setupImeHandler(container);
+
+    // Mock screen element bounding rect
+    vi.spyOn(screenElement, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 50,
+      right: 900,
+      bottom: 450,
+      width: 800,
+      height: 400,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    // Mock container bounding rect
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 50,
+      right: 900,
+      bottom: 450,
+      width: 800,
+      height: 400,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // The textarea should be positioned within the container (not at -9999em)
+    const left = parseInt(textarea.style.left, 10);
+    expect(left).toBeGreaterThanOrEqual(0);
+  });
+
+  it("applies correct font styling to textarea during composition", () => {
+    setupImeHandler(container, { fontSize: 16, fontFamily: "'Cascadia Mono', monospace" });
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    expect(textarea.style.fontSize).toBe("16px");
+    // Browser DOM normalizes single quotes to double quotes in fontFamily
+    expect(textarea.style.fontFamily).toContain("Cascadia Mono");
+  });
+});
