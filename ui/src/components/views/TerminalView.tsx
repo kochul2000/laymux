@@ -419,11 +419,13 @@ export function TerminalView({
 
           // Fix IME composition position for CJK input (Korean, Chinese, Japanese).
           // Must be called after terminal.open() so the xterm DOM structure exists.
+          // Passing the Terminal instance enables precise cursor-cell positioning.
           const xtermEl = containerRef.current.querySelector(".xterm");
           if (xtermEl) {
             setupImeHandler(xtermEl as HTMLElement, {
               fontSize: settingsState.font.size,
               fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+              terminal,
             });
           }
         }

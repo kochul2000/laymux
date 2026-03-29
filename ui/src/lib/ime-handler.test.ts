@@ -75,10 +75,6 @@ describe("ime-handler", () => {
       toJSON: () => ({}),
     });
 
-    // Find the cursor element or simulate cursor position
-    // xterm.js uses .xterm-cursor-layer or the active row
-    // For this test, we set cursor position via mock
-
     // Dispatch compositionstart on textarea
     const event = new Event("compositionstart", { bubbles: true });
     textarea.dispatchEvent(event);
@@ -176,5 +172,93 @@ describe("ime-handler", () => {
     expect(textarea.style.fontSize).toBe("16px");
     // Browser DOM normalizes single quotes to double quotes in fontFamily
     expect(textarea.style.fontFamily).toContain("Cascadia Mono");
+  });
+
+  it("uses terminal buffer cursor position with render dimensions for exact positioning", () => {
+    // Create a mock Terminal instance with buffer and render service
+    const mockTerminal = {
+      buffer: {
+        active: { cursorX: 10, cursorY: 5 },
+      },
+      cols: 80,
+      rows: 24,
+      _core: {
+        _renderService: {
+          dimensions: {
+            css: {
+              cell: { width: 8.5, height: 17 },
+            },
+          },
+        },
+      },
+    };
+
+    setupImeHandler(container, {
+      fontSize: 14,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      terminal: mockTerminal as any,
+    });
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // Expected: cursorX * cellWidth = 10 * 8.5 = 85
+    // Expected: cursorY * cellHeight = 5 * 17 = 85
+    expect(textarea.style.left).toBe("85px");
+    expect(textarea.style.top).toBe("85px");
+  });
+
+  it("falls back to cols/rows estimation when render dimensions unavailable", () => {
+    const mockTerminal = {
+      buffer: {
+        active: { cursorX: 5, cursorY: 2 },
+      },
+      cols: 80,
+      rows: 24,
+      _core: {},
+    };
+
+    // Mock screen and container bounding rects for fallback calculation
+    vi.spyOn(screenElement, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 50,
+      right: 900,
+      bottom: 530,
+      width: 800,
+      height: 480,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 50,
+      right: 900,
+      bottom: 530,
+      width: 800,
+      height: 480,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
+    });
+
+    setupImeHandler(container, {
+      fontSize: 14,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      terminal: mockTerminal as any,
+    });
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // cellWidth = 800/80 = 10, cellHeight = 480/24 = 20
+    // left = 0 (screen offset) + 5*10 = 50, top = 0 + 2*20 = 40
+    expect(textarea.style.left).toBe("50px");
+    expect(textarea.style.top).toBe("40px");
+  });
+
+  it("does not dispose twice (idempotent)", () => {
+    setupImeHandler(container);
+    disposeImeHandler(container);
+    // Second dispose should be a no-op (no error)
+    disposeImeHandler(container);
   });
 });

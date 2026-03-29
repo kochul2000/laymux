@@ -8,15 +8,19 @@
  *
  * This handler:
  * 1. Hides xterm's built-in composition-view (which has positioning bugs)
- * 2. On compositionstart, moves the textarea to a visible position near the
- *    xterm cursor so the OS IME popup appears at the correct location
+ * 2. On compositionstart, moves the textarea to the exact cursor cell position
+ *    so the OS IME popup appears at the correct location
  * 3. On compositionend, restores the textarea to its original offscreen position
  */
+
+import type { Terminal } from "@xterm/xterm";
 
 /** Options for IME handler setup */
 export interface ImeHandlerOptions {
   fontSize?: number;
   fontFamily?: string;
+  /** xterm.js Terminal instance — used to read cursor position from buffer */
+  terminal?: Terminal;
 }
 
 /** Internal state stored per container for cleanup */
@@ -30,13 +34,78 @@ interface ImeState {
 const handlerMap = new WeakMap<HTMLElement, ImeState>();
 
 /**
+ * Compute the pixel position of the terminal cursor within the container.
+ *
+ * Uses xterm.js internal render dimensions when the Terminal instance is
+ * provided. Falls back to measuring character dimensions via a temporary span
+ * when internal APIs are unavailable (e.g., before first render or in tests).
+ */
+function getCursorPixelPosition(
+  container: HTMLElement,
+  terminal?: Terminal,
+): { left: number; top: number } {
+  if (terminal) {
+    const cursorX = terminal.buffer.active.cursorX;
+    const cursorY = terminal.buffer.active.cursorY;
+
+    // Try to read cell dimensions from xterm.js internal render service.
+    // This is the most accurate source, reflecting current font and DPI.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const core = (terminal as any)._core;
+    const dims = core?._renderService?.dimensions;
+    if (dims) {
+      const cellWidth = dims.css.cell.width;
+      const cellHeight = dims.css.cell.height;
+      return {
+        left: cursorX * cellWidth,
+        top: cursorY * cellHeight,
+      };
+    }
+
+    // Fallback: measure character size from the xterm-screen element
+    const screen = container.querySelector<HTMLElement>(".xterm-screen");
+    if (screen) {
+      const screenRect = screen.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const offsetX = screenRect.left - containerRect.left;
+      const offsetY = screenRect.top - containerRect.top;
+
+      // Estimate cell size from screen dimensions and terminal cols/rows
+      const cols = terminal.cols;
+      const rows = terminal.rows;
+      if (cols > 0 && rows > 0) {
+        const cellWidth = screenRect.width / cols;
+        const cellHeight = screenRect.height / rows;
+        return {
+          left: offsetX + cursorX * cellWidth,
+          top: offsetY + cursorY * cellHeight,
+        };
+      }
+    }
+  }
+
+  // Ultimate fallback: bottom-left of the screen area
+  const screen = container.querySelector<HTMLElement>(".xterm-screen");
+  if (screen) {
+    const screenRect = screen.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return {
+      left: screenRect.left - containerRect.left,
+      top: screenRect.bottom - containerRect.top - 20,
+    };
+  }
+
+  return { left: 0, top: 0 };
+}
+
+/**
  * Set up IME composition handling for an xterm.js container.
  *
  * Call this after `terminal.open(container)` so that the xterm DOM structure
  * (including .xterm-helper-textarea) exists.
  *
  * @param container - The xterm.js container element (has class "xterm")
- * @param options - Optional font settings for the composition textarea
+ * @param options - Optional font settings and Terminal instance for cursor tracking
  * @returns true if setup succeeded, false if textarea was not found
  */
 export function setupImeHandler(
@@ -57,33 +126,11 @@ export function setupImeHandler(
   }
 
   const onCompositionStart = () => {
-    // Position the textarea within the visible area so the OS IME popup
-    // appears near the terminal cursor.
-    const screen = container.querySelector<HTMLElement>(".xterm-screen");
-    const cursorRow = container.querySelector<HTMLElement>(".xterm-cursor-layer");
-
-    let left = 0;
-    let top = 0;
-
-    if (screen) {
-      const screenRect = screen.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-
-      // Try to find the cursor position from the cursor layer or active row
-      if (cursorRow) {
-        const cursorRect = cursorRow.getBoundingClientRect();
-        left = cursorRect.left - containerRect.left;
-        top = cursorRect.top - containerRect.top;
-      } else {
-        // Fallback: bottom-left of the screen area
-        left = screenRect.left - containerRect.left;
-        top = screenRect.bottom - containerRect.top - 20; // 20px above bottom
-      }
-    }
+    const pos = getCursorPixelPosition(container, options?.terminal);
 
     // Move textarea into visible area for IME positioning
-    textarea.style.left = `${Math.max(0, left)}px`;
-    textarea.style.top = `${Math.max(0, top)}px`;
+    textarea.style.left = `${Math.max(0, pos.left)}px`;
+    textarea.style.top = `${Math.max(0, pos.top)}px`;
     textarea.style.zIndex = "10";
     textarea.style.width = "1px";
     textarea.style.height = "1em";
