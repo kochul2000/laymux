@@ -85,6 +85,20 @@ describe("persistSession", () => {
     expect(savedArg.profiles[0].startupCommand).toBe("/home/user/init.sh");
   });
 
+  it("MemoView pane does not store content in settings", async () => {
+    // MemoView content is stored in memo.json, not in settings.json
+    useWorkspaceStore.getState().setPaneView(0, {
+      type: "MemoView",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const pane = savedArg.workspaces[0].panes[0];
+    expect(pane.view.type).toBe("MemoView");
+    expect(pane.view.content).toBeUndefined();
+  });
+
   it("preserves dock panes with view config through save", async () => {
     // Set up a dock pane with a profile (TerminalView with WSL)
     useDockStore.getState().setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
