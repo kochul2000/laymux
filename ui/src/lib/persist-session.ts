@@ -91,6 +91,7 @@ export async function persistSession(): Promise<void> {
       })),
     })),
     convenience: { ...settingsState.convenience },
+    workspaceDisplay: { ...settingsState.workspaceDisplay },
     claude: { ...settingsState.claude },
     docks: dockState.docks.map((d) => ({
       position: d.position,

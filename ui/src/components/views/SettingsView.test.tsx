@@ -1024,4 +1024,43 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().profiles[0].startupCommand).toBe("echo hello");
     });
   });
+
+  describe("WorkspaceDisplaySection", () => {
+    it("renders all workspace display toggles", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      expect(screen.getByTestId("ws-display-minimap-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-environment-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-activity-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-path-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("ws-display-result-toggle")).toBeInTheDocument();
+    });
+
+    it("all toggles default to checked", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const minimap = screen.getByTestId("ws-display-minimap-toggle") as HTMLInputElement;
+      const env = screen.getByTestId("ws-display-environment-toggle") as HTMLInputElement;
+      expect(minimap.checked).toBe(true);
+      expect(env.checked).toBe(true);
+    });
+
+    it("toggling a checkbox and saving updates store", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const minimap = screen.getByTestId("ws-display-minimap-toggle");
+      await user.click(minimap);
+      expect((minimap as HTMLInputElement).checked).toBe(false);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().workspaceDisplay.minimap).toBe(false);
+      expect(useSettingsStore.getState().workspaceDisplay.environment).toBe(true);
+    });
+  });
 });
