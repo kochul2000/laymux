@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -28,7 +28,7 @@ const inputStyle: React.CSSProperties = {
 };
 const inputFocusStyle: React.CSSProperties = {
   ...inputStyle,
-  borderColor: "var(--accent)",
+  border: "1px solid var(--accent)",
 };
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
@@ -137,11 +137,15 @@ function useMonospacedFonts() {
 }
 
 function StartupSection() {
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const storeDefaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
   const profiles = useSettingsStore((s) => s.profiles);
-  const appThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
+  const storeAppThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
   const setAppTheme = useSettingsStore((s) => s.setAppTheme);
+
+  // Draft state — only committed to store on Save
+  const [draftAppTheme, setDraftAppTheme] = useDraft("startup-appTheme", storeAppThemeId, setAppTheme);
+  const [draftDefaultProfile, setDraftDefaultProfile] = useDraft("startup-defaultProfile", storeDefaultProfile, setDefaultProfile);
 
   return (
     <div>
@@ -161,8 +165,8 @@ function StartupSection() {
             </div>
             <FocusSelect
               data-testid="app-theme-select"
-              value={appThemeId}
-              onChange={(e) => setAppTheme(e.target.value)}
+              value={draftAppTheme}
+              onChange={(e) => setDraftAppTheme(e.target.value)}
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
               {builtinAppThemes.map((t) => (
@@ -187,8 +191,8 @@ function StartupSection() {
             </div>
             <FocusSelect
               data-testid="default-profile-select"
-              value={defaultProfile}
-              onChange={(e) => setDefaultProfile(e.target.value)}
+              value={draftDefaultProfile}
+              onChange={(e) => setDraftDefaultProfile(e.target.value)}
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
               {profiles
@@ -553,10 +557,17 @@ const fallbackDefaults: ProfileDefaults = {
 
 function DefaultsSection() {
   const rawDefaults = useSettingsStore((s) => s.profileDefaults);
-  const profileDefaults = rawDefaults ?? fallbackDefaults;
+  const storeDefaults = rawDefaults ?? fallbackDefaults;
   const setProfileDefaults = useSettingsStore((s) => s.setProfileDefaults);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
   const monoFonts = useMonospacedFonts();
+  const [draftDefaults, setDraftDefaults] = useDraft(
+    "profileDefaults",
+    storeDefaults,
+    (v) => setProfileDefaults(v as Partial<ProfileDefaults>),
+  );
+  const updateDefaults = (partial: Partial<ProfileDefaults>) =>
+    setDraftDefaults(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -566,20 +577,20 @@ function DefaultsSection() {
       </p>
 
       <FontFields
-        font={profileDefaults.font}
-        onChange={(font) => setProfileDefaults({ font })}
+        font={draftDefaults.font}
+        onChange={(font) => updateDefaults({ font })}
         monoFonts={monoFonts}
       />
 
       <AppearanceFields
-        data={profileDefaults}
-        onChange={(d) => setProfileDefaults(d as Partial<ProfileDefaults>)}
+        data={draftDefaults}
+        onChange={updateDefaults}
         colorSchemes={colorSchemes}
       />
 
       <AdvancedFields
-        data={profileDefaults}
-        onChange={(d) => setProfileDefaults(d as Partial<ProfileDefaults>)}
+        data={draftDefaults}
+        onChange={updateDefaults}
       />
     </div>
   );
@@ -917,8 +928,10 @@ function ColorSchemesSection() {
 // -- Section: Convenience --
 
 function ConvenienceSection() {
-  const convenience = useSettingsStore((s) => s.convenience);
+  const storeConvenience = useSettingsStore((s) => s.convenience);
   const setConvenience = useSettingsStore((s) => s.setConvenience);
+  const [convenience, setDraftConvenience] = useDraft("convenience", storeConvenience, (v) => setConvenience(v));
+  const updateConvenience = (partial: Partial<typeof convenience>) => setDraftConvenience(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -939,7 +952,7 @@ function ConvenienceSection() {
                 data-testid="smart-paste-toggle"
                 type="checkbox"
                 checked={convenience.smartPaste}
-                onChange={(e) => setConvenience({ smartPaste: e.target.checked })}
+                onChange={(e) => updateConvenience({ smartPaste: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.smartPaste ? "Enabled" : "Disabled"}
@@ -962,7 +975,7 @@ function ConvenienceSection() {
                 data-testid="copy-on-select-toggle"
                 type="checkbox"
                 checked={convenience.copyOnSelect}
-                onChange={(e) => setConvenience({ copyOnSelect: e.target.checked })}
+                onChange={(e) => updateConvenience({ copyOnSelect: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.copyOnSelect ? "Enabled" : "Disabled"}
@@ -985,7 +998,7 @@ function ConvenienceSection() {
               className={inputCls}
               placeholder="(default: %APPDATA%\laymux\paste-images)"
               value={convenience.pasteImageDir}
-              onChange={(e) => setConvenience({ pasteImageDir: e.target.value })}
+              onChange={(e) => updateConvenience({ pasteImageDir: e.target.value })}
             />
           </div>
         </div>
@@ -1008,7 +1021,7 @@ function ConvenienceSection() {
               className={inputCls}
               style={{ width: 70 }}
               value={convenience.hoverIdleSeconds}
-              onChange={(e) => setConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => updateConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>초</span>
           </div>
@@ -1027,7 +1040,7 @@ function ConvenienceSection() {
               data-testid="notification-dismiss-select"
               className={inputCls}
               value={convenience.notificationDismiss}
-              onChange={(e) => setConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
+              onChange={(e) => updateConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
             >
               <option value="workspace">워크스페이스 선택 시 자동 해제</option>
               <option value="paneFocus">Pane 포커스 시 자동 해제</option>
@@ -1085,8 +1098,10 @@ function ConvenienceSection() {
 // -- Section: Claude Code --
 
 function ClaudeSection() {
-  const claude = useSettingsStore((s) => s.claude);
+  const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
+  const [claude, setDraftClaude] = useDraft("claude", storeClaude, (v) => setClaude(v));
+  const updateClaude = (partial: Partial<typeof claude>) => setDraftClaude(prev => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -1106,7 +1121,7 @@ function ClaudeSection() {
               data-testid="claude-sync-cwd-select"
               className={inputCls}
               value={claude.syncCwd}
-              onChange={(e) => setClaude({ syncCwd: e.target.value as "skip" | "command" })}
+              onChange={(e) => updateClaude({ syncCwd: e.target.value as "skip" | "command" })}
             >
               <option value="skip">Skip (전파하지 않음)</option>
               <option value="command">Command (유휴 시 ! cd 전송)</option>
@@ -1401,6 +1416,79 @@ function KeybindingsSection() {
   );
 }
 
+// -- Draft flush context --
+// Sections register flush/reset callbacks that SettingsView invokes on Save/Discard.
+
+type FlushFn = () => void;
+interface SettingsDraftCtx {
+  registerFlush: (id: string, fn: FlushFn) => void;
+  registerReset: (id: string, fn: FlushFn) => void;
+  markDirty: () => void;
+  draftValues: React.MutableRefObject<Map<string, unknown>>;
+}
+const defaultDraftValues = { current: new Map<string, unknown>() };
+const SettingsDraftContext = createContext<SettingsDraftCtx>({
+  registerFlush: () => {},
+  registerReset: () => {},
+  markDirty: () => {},
+  draftValues: defaultDraftValues,
+});
+
+/** Hook for sections to register flush/reset callbacks. */
+function useSettingsDraft() {
+  return useContext(SettingsDraftContext);
+}
+
+/** Hook: local draft state that flushes on Save and resets on Discard.
+ *  Draft values are persisted in a shared Map so they survive section unmount/remount. */
+function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const { registerFlush, registerReset, markDirty, draftValues } = useSettingsDraft();
+
+  const setterRef = useRef(storeSetter);
+  setterRef.current = storeSetter;
+  const storeRef = useRef(storeValue);
+  storeRef.current = storeValue;
+
+  // Restore preserved draft on remount, otherwise use store value
+  const [draft, setDraft] = useState<T>(
+    () => draftValues.current.has(id) ? draftValues.current.get(id) as T : storeValue,
+  );
+
+  // Keep shared map in sync with local draft
+  useEffect(() => {
+    draftValues.current.set(id, draft);
+  }, [id, draft, draftValues]);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Register flush/reset once — intentionally no cleanup so callbacks survive unmount
+  useEffect(() => {
+    registerFlush(id, () => {
+      const val = draftValues.current.get(id);
+      if (val !== undefined) setterRef.current(val as T);
+    });
+    registerReset(id, () => {
+      draftValues.current.delete(id);
+      if (mountedRef.current) setDraft(storeRef.current);
+    });
+  }, [id, registerFlush, registerReset, draftValues]);
+
+  const wrappedSetDraft: React.Dispatch<React.SetStateAction<T>> = useCallback((action) => {
+    setDraft((prev) => {
+      const next = typeof action === "function" ? (action as (p: T) => T)(prev) : action;
+      draftValues.current.set(id, next);
+      return next;
+    });
+    markDirty();
+  }, [id, markDirty, draftValues]);
+
+  return [draft, wrappedSetDraft];
+}
+
 // -- Main SettingsView --
 
 export function SettingsView() {
@@ -1440,7 +1528,25 @@ export function SettingsView() {
   const [navHover, setNavHover] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Draft flush/reset registry — sections register callbacks invoked on Save/Discard
+  const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
+  const draftValuesRef = useRef<Map<string, unknown>>(new Map());
+  const [dirty, setDirty] = useState(false);
+  const registerFlush = useCallback((id: string, fn: FlushFn) => {
+    flushMapRef.current.set(id, fn);
+  }, []);
+  const registerReset = useCallback((id: string, fn: FlushFn) => {
+    resetMapRef.current.set(id, fn);
+  }, []);
+  const markDirty = useCallback(() => setDirty(true), []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, draftValues: draftValuesRef }).current;
+
   const handleSave = () => {
+    // Flush all draft states to store first
+    for (const fn of flushMapRef.current.values()) fn();
+    draftValuesRef.current.clear();
+    setDirty(false);
     clearTimeout(saveTimerRef.current);
     persistSession()
       .then(() => {
@@ -1451,6 +1557,12 @@ export function SettingsView() {
         setSaveLabel("Error!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 2000);
       });
+  };
+
+  const handleDiscard = () => {
+    for (const fn of resetMapRef.current.values()) fn();
+    draftValuesRef.current.clear();
+    setDirty(false);
   };
 
   const navBtnStyle = (id: string): React.CSSProperties => {
@@ -1466,6 +1578,7 @@ export function SettingsView() {
   };
 
   return (
+    <SettingsDraftContext.Provider value={draftCtx}>
     <div data-testid="settings-view" className="flex h-full" style={{ color: "var(--text-primary)" }}>
       {/* Sidebar Navigation */}
       <nav
@@ -1616,20 +1729,39 @@ export function SettingsView() {
 
         {/* Sticky save bar — always visible at bottom */}
         <div
-          className="sticky bottom-0 flex items-center justify-end px-4 py-3"
+          className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
           style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
         >
           <button
+            data-testid="discard-settings-btn"
+            onClick={handleDiscard}
+            disabled={!dirty}
+            className="px-5 py-2 text-[13px] font-medium"
+            style={{
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+              cursor: dirty ? "pointer" : "default",
+              transition: "all 0.15s",
+              borderRadius: 4,
+              opacity: dirty ? 1 : 0.4,
+            }}
+          >
+            Discard changes
+          </button>
+          <button
             data-testid="save-settings-btn"
             onClick={handleSave}
-            className="mx-1 px-8 py-2 text-[13px] font-medium"
+            disabled={!dirty}
+            className="px-8 py-2 text-[13px] font-medium"
             style={{
               background: saveLabel === "Saved!" ? "var(--green)" : saveLabel === "Error!" ? "var(--red)" : "var(--accent)",
               color: "var(--bg-base)",
               border: "none",
-              cursor: "pointer",
+              cursor: dirty ? "pointer" : "default",
               transition: "all 0.15s",
               borderRadius: 4,
+              opacity: dirty ? 1 : 0.4,
             }}
           >
             {saveLabel}
@@ -1637,5 +1769,6 @@ export function SettingsView() {
         </div>
       </div>
     </div>
+    </SettingsDraftContext.Provider>
   );
 }
