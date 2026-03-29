@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -102,6 +102,30 @@ describe("AppLayout", () => {
     await user.click(screen.getByTestId("notification-panel-close"));
 
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  // --- Layout Mode Toggle (Issue #6) ---
+
+  it("layout mode toggle does not remount dock components", () => {
+    const { rerender } = render(<AppLayout />);
+    const dockBefore = screen.getByTestId("dock-left");
+
+    act(() => { useDockStore.getState().toggleLayoutMode(); });
+    rerender(<AppLayout />);
+
+    const dockAfter = screen.getByTestId("dock-left");
+    expect(dockAfter).toBe(dockBefore); // Same DOM node, not recreated
+  });
+
+  it("dock pane IDs remain stable after toggleLayoutMode", () => {
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView");
+    const paneIdBefore = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+
+    render(<AppLayout />);
+    act(() => { useDockStore.getState().toggleLayoutMode(); });
+
+    const paneIdAfter = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+    expect(paneIdAfter).toBe(paneIdBefore);
   });
 
   it("notification panel overlay shows only active workspace notifications", () => {
