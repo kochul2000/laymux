@@ -256,9 +256,10 @@ const handlers: HandlerMap = {
  *  composite each WebGL canvas (xterm.js terminals) onto the result manually. */
 export async function captureScreenshot(): Promise<string> {
   const root = document.documentElement;
+  const scale = window.devicePixelRatio || 1;
   const result = await html2canvas(root, {
     backgroundColor: null,
-    scale: 1,
+    scale,
     logging: false,
   });
 
@@ -269,7 +270,7 @@ export async function captureScreenshot(): Promise<string> {
       if (c.width === 0 || c.height === 0) return;
       const rect = c.getBoundingClientRect();
       try {
-        ctx.drawImage(c, rect.left, rect.top, rect.width, rect.height);
+        ctx.drawImage(c, rect.left * scale, rect.top * scale, rect.width * scale, rect.height * scale);
       } catch {
         // drawImage may fail for tainted/cross-origin canvases — ignore
       }
