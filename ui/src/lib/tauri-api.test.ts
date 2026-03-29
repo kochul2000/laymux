@@ -61,8 +61,22 @@ describe("tauri-api", () => {
         cols: 80,
         rows: 24,
         syncGroup: "default",
+        cwdReceive: true,
       });
       expect(result).toEqual(mockResult);
+    });
+
+    it("passes cwdReceive=false to backend", async () => {
+      mockInvoke.mockResolvedValue({ id: "t1", title: "Terminal", config: { profile: "WSL", cols: 80, rows: 24, sync_group: "", env: [] } });
+      await createTerminalSession("t1", "WSL", 80, 24, "", false);
+      expect(mockInvoke).toHaveBeenCalledWith("create_terminal_session", {
+        id: "t1",
+        profile: "WSL",
+        cols: 80,
+        rows: 24,
+        syncGroup: "",
+        cwdReceive: false,
+      });
     });
   });
 

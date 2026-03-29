@@ -457,9 +457,8 @@ export function TerminalView({
           terminal.cols,
           terminal.rows,
           syncGroup,
-        ).then(() => {
-          setTerminalCwdReceive(instanceId, cwdReceiveRef.current).catch(() => {});
-        }).catch(() => {});
+          cwdReceiveRef.current,
+        ).catch(() => {});
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
