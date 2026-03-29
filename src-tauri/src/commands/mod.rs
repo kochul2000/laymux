@@ -1879,7 +1879,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn normalize_powershell_osc7_windows_path() {
         // PowerShell emits: file://localhost/C:/Users/kochul → /mnt/c/Users/kochul
         assert_eq!(
@@ -2448,7 +2447,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn normalize_powershell_provider_path() {
         // PowerShell at UNC path emits provider prefix
         assert_eq!(
@@ -2467,6 +2465,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn extract_distro_from_osc99_path() {
         // OSC 9;9 sends //wsl.localhost/Ubuntu-22.04/home/kochul
         assert_eq!(

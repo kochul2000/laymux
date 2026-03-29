@@ -143,7 +143,7 @@ pub fn send_message<R: BufRead, W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufReader, Cursor};
+    use std::io::BufReader;
 
     #[test]
     fn parse_sync_cwd() {
