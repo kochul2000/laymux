@@ -83,11 +83,13 @@ export function useKeyboardShortcuts() {
               if (focusedPaneIndex === null) setFocusedPane(0);
               return;
             }
-            // Other directions while in dock: try to navigate to another dock
+            // Other directions while in dock: try to navigate to another dock.
+            // Note: pressing the same direction as the dock's own side (e.g., ArrowLeft
+            // in Left Dock) is intentionally a no-op — there's nothing further in that direction.
             if (dockArrowNav) {
               const targetDock = getDockForDirection(direction);
               const targetState = dockStore.getDock(targetDock);
-              if (targetState?.visible && targetDock !== focusedDock) {
+              if (targetState?.visible && targetState.panes.length > 0 && targetDock !== focusedDock) {
                 dockStore.setFocusedDock(targetDock);
                 return;
               }
@@ -108,7 +110,7 @@ export function useKeyboardShortcuts() {
             // No pane in that direction → try to enter a dock
             const targetDock = getDockForDirection(direction);
             const targetState = dockStore.getDock(targetDock);
-            if (targetState?.visible) {
+            if (targetState?.visible && targetState.panes.length > 0) {
               dockStore.setFocusedDock(targetDock);
               useGridStore.getState().setFocusedPane(null);
             }

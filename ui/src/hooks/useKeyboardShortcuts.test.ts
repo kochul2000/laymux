@@ -377,7 +377,8 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("Alt+Arrow navigates between docks", () => {
-    // Both left and top docks are visible by default
+    // Top dock is visible but has no panes by default — add a view so it's navigable
+    useDockStore.getState().setDockActiveView("top", "SettingsView");
     useDockStore.getState().setFocusedDock("left");
     renderHook(() => useKeyboardShortcuts());
 
@@ -452,6 +453,86 @@ describe("useKeyboardShortcuts", () => {
     fireKey("ArrowRight", { altKey: true });
 
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("Alt+Arrow does not enter dock with no panes (empty dock)", () => {
+    // Top dock is visible but has no panes by default
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+
+    // Should NOT enter empty dock
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("Alt+Arrow does not navigate to empty dock from another dock", () => {
+    // Top dock is visible but has no panes by default
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+
+    // Should stay on left dock — top dock has no panes
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow same direction as dock position is a no-op", () => {
+    // Left Dock → ArrowLeft should do nothing (intentional)
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowLeft", { altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow in dock when all other docks are hidden stays put", () => {
+    // Hide all docks except left
+    useDockStore.getState().toggleDockVisible("top");
+    useDockStore.getState().toggleDockVisible("bottom");
+    useDockStore.getState().toggleDockVisible("right");
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+
+    fireKey("ArrowDown", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow exit dock restores pane 0 when focusedPaneIndex was non-null before", () => {
+    // Set focusedPaneIndex to 2, then enter dock (clears it), then exit
+    useWorkspaceStore.setState({
+      ...useWorkspaceStore.getState(),
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          layoutId: "default-layout",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
+            { id: "p2", x: 0.33, y: 0, w: 0.34, h: 1, view: { type: "TerminalView" } },
+            { id: "p3", x: 0.67, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+    });
+    useGridStore.setState({ focusedPaneIndex: 2 });
+    renderHook(() => useKeyboardShortcuts());
+
+    // Enter left dock from pane 0 (leftmost)
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    fireKey("ArrowLeft", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+
+    // Exit back — currently restores to 0 (known limitation, see PR #66 review comment #2)
+    fireKey("ArrowRight", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
   // --- Ctrl+Alt+ArrowLeft/Right: notification-based pane navigation ---
