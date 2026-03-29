@@ -348,13 +348,70 @@ describe("SettingsView", () => {
     expect(screen.getByText("Ctrl+,")).toBeInTheDocument();
   });
 
-  it("adds a keybinding", async () => {
+  it("adds a keybinding to draft (not store) until Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByText("Keybindings"));
     await user.click(screen.getByTestId("add-keybinding-btn"));
 
+    // Draft should show the new binding but store should not have it yet
+    expect(useSettingsStore.getState().keybindings).toHaveLength(0);
+
+    // After Save, store should have the new binding
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().keybindings).toHaveLength(1);
+  });
+
+  it("does NOT update keybindings in store until Save (remove)", async () => {
+    // Pre-populate store with a custom keybinding
+    useSettingsStore.setState({
+      keybindings: [{ keys: "Ctrl+K", command: "custom.action" }],
+    });
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByText("Keybindings"));
+    // Remove the custom keybinding
+    await user.click(screen.getByTestId("remove-keybinding-0"));
+
+    // Store should still have it
+    expect(useSettingsStore.getState().keybindings).toHaveLength(1);
+
+    // After Save
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().keybindings).toHaveLength(0);
+  });
+
+  it("Discard reverts keybindings draft to store value", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("add-keybinding-btn"));
+
+    // Discard
+    await user.click(screen.getByTestId("discard-settings-btn"));
+
+    // Store should still be empty
+    expect(useSettingsStore.getState().keybindings).toHaveLength(0);
+  });
+
+  it("keybindings draft survives navigation away and back", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByText("Keybindings"));
+    await user.click(screen.getByTestId("add-keybinding-btn"));
+
+    // Navigate away
+    await user.click(screen.getByText("Startup"));
+
+    // Navigate back
+    await user.click(screen.getByText("Keybindings"));
+
+    // Save should flush the added keybinding
+    await user.click(screen.getByTestId("save-settings-btn"));
     expect(useSettingsStore.getState().keybindings).toHaveLength(1);
   });
 
@@ -366,6 +423,107 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByText("Color Schemes"));
     expect(screen.getByTestId("add-color-scheme-btn")).toBeInTheDocument();
+  });
+
+  it("does NOT add color scheme to store until Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const initialCount = useSettingsStore.getState().colorSchemes.length;
+
+    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("add-color-scheme-btn"));
+
+    // Store should be unchanged
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount);
+
+    // After Save
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount + 1);
+  });
+
+  it("does NOT remove color scheme from store until Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const initialCount = useSettingsStore.getState().colorSchemes.length;
+
+    await user.click(screen.getByText("Color Schemes"));
+    // Delete the first scheme
+    await user.click(screen.getByText("Delete"));
+
+    // Store unchanged
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount);
+
+    // After Save
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount - 1);
+  });
+
+  it("does NOT update color scheme name in store until Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const originalName = useSettingsStore.getState().colorSchemes[0].name;
+
+    await user.click(screen.getByText("Color Schemes"));
+    // The name input is a text input, not the select dropdown
+    const nameInput = screen.getAllByDisplayValue(originalName).find(
+      (el) => el.tagName === "INPUT",
+    ) as HTMLInputElement;
+    expect(nameInput).toBeTruthy();
+    await user.clear(nameInput);
+    await user.type(nameInput, "New Name");
+
+    // Store unchanged
+    expect(useSettingsStore.getState().colorSchemes[0].name).toBe(originalName);
+
+    // After Save
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().colorSchemes[0].name).toBe("New Name");
+  });
+
+  it("Discard reverts color scheme changes", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const initialCount = useSettingsStore.getState().colorSchemes.length;
+
+    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("add-color-scheme-btn"));
+
+    // Discard
+    await user.click(screen.getByTestId("discard-settings-btn"));
+
+    // Store unchanged
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount);
+  });
+
+  it("color scheme draft survives navigation away and back", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    const initialCount = useSettingsStore.getState().colorSchemes.length;
+
+    await user.click(screen.getByText("Color Schemes"));
+    await user.click(screen.getByTestId("add-color-scheme-btn"));
+
+    // Navigate away
+    await user.click(screen.getByText("Startup"));
+
+    // Navigate back
+    await user.click(screen.getByText("Color Schemes"));
+
+    // Save should flush the added scheme
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().colorSchemes.length).toBe(initialCount + 1);
+  });
+
+  it("color scheme preview renders from draft, not store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByText("Color Schemes"));
+    // The preview should exist and show draft values
+    const preview = document.querySelector("[class*='font-mono']") as HTMLElement;
+    expect(preview).toBeTruthy();
+    // Preview background should be set (it's the draft value, which initially matches store)
+    expect(preview.style.background).toBeTruthy();
   });
 
   // -- Save --

@@ -189,9 +189,11 @@ interface SettingsState {
   addProfile: (profile: Profile) => void;
   removeProfile: (index: number) => void;
   updateProfile: (index: number, data: Partial<Profile>) => void;
+  setColorSchemes: (schemes: ColorScheme[]) => void;
   addColorScheme: (scheme: ColorScheme) => void;
   removeColorScheme: (index: number) => void;
   updateColorScheme: (index: number, data: Partial<ColorScheme>) => void;
+  setKeybindings: (keybindings: Keybinding[]) => void;
   addKeybinding: (keybinding: Keybinding) => void;
   removeKeybinding: (index: number) => void;
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
@@ -442,6 +444,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ),
     })),
 
+  setColorSchemes: (schemes) => set({ colorSchemes: schemes }),
+
   addColorScheme: (scheme) =>
     set((state) => ({ colorSchemes: [...state.colorSchemes, scheme] })),
 
@@ -456,6 +460,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         i === index ? ({ ...cs, ...data } as ColorScheme) : cs,
       ),
     })),
+
+  setKeybindings: (keybindings) => set({ keybindings }),
 
   addKeybinding: (keybinding) =>
     set((state) => ({ keybindings: [...state.keybindings, keybinding] })),
