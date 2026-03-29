@@ -1,6 +1,6 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
-import { parseClaudeMode, isRalphActive, type ClaudeMode } from "@/lib/activity-detection";
+import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
@@ -204,7 +204,7 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
 
 const CLAUDE_MODE_LABELS: Record<ClaudeMode, { suffix: string; icon: string }> = {
   idle: { suffix: "", icon: "✳" },
-  working: { suffix: "", icon: "⟳" },
+  working: { suffix: "", icon: "✶" },
   plan: { suffix: " Plan", icon: "📋" },
   danger: { suffix: " Danger", icon: "⚠" },
 };

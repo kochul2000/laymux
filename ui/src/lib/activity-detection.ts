@@ -73,9 +73,10 @@ export function parseClaudeMode(
   if (activity?.type !== "interactiveApp" || activity.name !== "Claude") return undefined;
   if (!title) return "idle";
 
-  // Check for plan mode indicator (case-insensitive)
+  // Priority: plan > danger > idle/working.
+  // Claude Code title may contain both mode keywords and idle/working prefix.
+  // We check mode keywords first so "✳ Plan: approach" returns "plan", not "idle".
   if (/\bplan\b/i.test(title)) return "plan";
-  // Check for danger mode indicator
   if (/\bdanger\b/i.test(title)) return "danger";
 
   // Idle vs working based on prefix character
@@ -85,11 +86,12 @@ export function parseClaudeMode(
 
 /**
  * Check if the title indicates Ralph (autonomous loop) is active.
- * Ralph typically sets a distinctive title pattern.
+ * Ralph loop sets titles like "✶ Ralph: fixing bugs" or "✳ Ralph loop active".
+ * We match "Ralph:" or "Ralph loop" to avoid false positives from file/variable names.
  */
 export function isRalphActive(title: string | undefined): boolean {
   if (!title) return false;
-  return /\bralph\b/i.test(title);
+  return /\bRalph[:\s]+(loop\b|[^)]*)/i.test(title);
 }
 
 export type ClaudeTaskTransition = "started" | "completed";
