@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -42,16 +42,14 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("dock-right")).toBeInTheDocument();
   });
 
-  it("CSS-hides dock when toggled invisible with dockPersistState on", () => {
+  it("keeps dock in DOM when toggled invisible with dockPersistState on", () => {
     useSettingsStore.setState({
       convenience: { ...useSettingsStore.getState().convenience, dockPersistState: true },
     });
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
-    const dock = screen.getByTestId("dock-left");
-    expect(dock).toBeInTheDocument();
-    // display:none is on the wrapper div (parent)
-    expect(dock.parentElement!.style.display).toBe("none");
+    // Dock content remains in DOM (inside 0px grid cell with overflow:hidden)
+    expect(screen.getByTestId("dock-left")).toBeInTheDocument();
   });
 
   it("removes dock from DOM when toggled invisible with dockPersistState off", () => {
@@ -119,6 +117,30 @@ describe("AppLayout", () => {
     await user.click(screen.getByTestId("notification-panel-close"));
 
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  // --- Layout Mode Toggle (Issue #6) ---
+
+  it("layout mode toggle does not remount dock components", () => {
+    const { rerender } = render(<AppLayout />);
+    const dockBefore = screen.getByTestId("dock-left");
+
+    act(() => { useDockStore.getState().toggleLayoutMode(); });
+    rerender(<AppLayout />);
+
+    const dockAfter = screen.getByTestId("dock-left");
+    expect(dockAfter).toBe(dockBefore); // Same DOM node, not recreated
+  });
+
+  it("dock pane IDs remain stable after toggleLayoutMode", () => {
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView");
+    const paneIdBefore = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+
+    render(<AppLayout />);
+    act(() => { useDockStore.getState().toggleLayoutMode(); });
+
+    const paneIdAfter = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+    expect(paneIdAfter).toBe(paneIdBefore);
   });
 
   it("notification panel overlay shows only active workspace notifications", () => {

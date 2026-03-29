@@ -2,10 +2,12 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MemoView } from "./MemoView";
 import { loadMemo, saveMemo } from "@/lib/tauri-api";
+import { useSettingsStore } from "@/stores/settings-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
   saveMemo: vi.fn().mockResolvedValue(undefined),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("MemoView", () => {
@@ -13,6 +15,7 @@ describe("MemoView", () => {
     vi.useFakeTimers();
     vi.mocked(loadMemo).mockClear().mockResolvedValue("");
     vi.mocked(saveMemo).mockClear().mockResolvedValue(undefined);
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -83,6 +86,23 @@ describe("MemoView", () => {
     unmount();
 
     expect(saveMemo).toHaveBeenCalledWith("pane-3", "pending");
+  });
+
+  it("applies memo padding from settings", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      memo: { paddingTop: 20, paddingRight: 10, paddingBottom: 5, paddingLeft: 15 },
+    });
+
+    render(<MemoView memoKey="pane-pad" />);
+    const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+    expect(textarea.style.padding).toBe("20px 10px 5px 15px");
+  });
+
+  it("uses default padding (12px) when no memo settings customized", () => {
+    render(<MemoView memoKey="pane-default-pad" />);
+    const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+    expect(textarea.style.padding).toBe("12px");
   });
 
   it("renders empty when loadMemo fails", async () => {

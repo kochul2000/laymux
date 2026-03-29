@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ClaudeSyncCwdMode, ClaudeSettings } from "../lib/tauri-api";
+import type { ClaudeSyncCwdMode, ClaudeSettings, MemoSettings } from "../lib/tauri-api";
 
 export interface FontSettings {
   face: string;
@@ -62,8 +62,12 @@ export interface ConvenienceSettings {
   scrollbarStyle: ScrollbarStyle;
   /** Keep dock state in background when hidden. */
   dockPersistState: boolean;
+  /** Allow Alt+Arrow to navigate into/out of dock areas. */
+  dockArrowNav: boolean;
 }
 
+
+export type { MemoSettings } from "../lib/tauri-api";
 
 export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
@@ -175,12 +179,14 @@ interface SettingsState {
   appThemeId: string;
   convenience: ConvenienceSettings;
   claude: ClaudeSettings;
+  memo: MemoSettings;
 
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppTheme: (themeId: string) => void;
   setConvenience: (data: Partial<ConvenienceSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
+  setMemo: (data: Partial<MemoSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   addProfile: (profile: Profile) => void;
   removeProfile: (index: number) => void;
@@ -193,10 +199,12 @@ interface SettingsState {
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
   /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
   resolveFont: (profileName: string) => FontSettings;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">> & { font?: FontSettings }) => void;
+  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude" | "memo">> & { font?: FontSettings }) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
+
+const DEFAULT_MEMO_PADDING: MemoSettings = { paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
 
@@ -391,8 +399,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true, dockArrowNav: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
+  memo: { ...DEFAULT_MEMO_PADDING },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -404,6 +413,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setClaude: (data) =>
     set((state) => ({
       claude: { ...state.claude, ...data },
+    })),
+
+  setMemo: (data) =>
+    set((state) => ({
+      memo: { ...state.memo, ...data },
     })),
 
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
@@ -509,11 +523,15 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true, dockArrowNav: true, ...(data.convenience as Partial<ConvenienceSettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
+      : undefined;
+    // Ensure memo settings have all fields (backwards compat)
+    const memo = data.memo
+      ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
       : undefined;
 
     // Strip legacy font field before spreading into state
@@ -526,6 +544,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
       ...(claude ? { claude } : {}),
+      ...(memo ? { memo } : {}),
     }));
   },
 }));

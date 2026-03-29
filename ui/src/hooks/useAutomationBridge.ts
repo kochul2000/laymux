@@ -163,6 +163,11 @@ const handlers: HandlerMap = {
       );
       return ok({ viewSet: true });
     },
+    toggleLayoutMode: () => {
+      useDockStore.getState().toggleLayoutMode();
+      const { layoutMode } = useDockStore.getState();
+      return ok({ layoutMode });
+    },
   },
 
   settings: {

@@ -95,6 +95,13 @@ export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
 }
 
+export interface MemoSettings {
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+}
+
 export interface ProfileDefaults {
   colorScheme?: string;
   cursorShape?: string;
@@ -123,6 +130,7 @@ export interface Settings {
   docks: DockSetting[];
   convenience: ConvenienceSettings;
   claude: ClaudeSettings;
+  memo: MemoSettings;
 }
 
 export interface ColorScheme {
