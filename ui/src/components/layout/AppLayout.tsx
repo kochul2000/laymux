@@ -135,7 +135,7 @@ export function AppLayout() {
           [isLR ? "width" : "height"]: dock.size,
           [`border${borderSide}`]: `1px solid var(--border)`,
           background: "var(--bg-surface)",
-          ...(hidden ? { display: "none" } : {}),
+          display: hidden ? "none" : undefined,
         }}
         onMouseDown={() => {
           setFocusedDock(pos);
