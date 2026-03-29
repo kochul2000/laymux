@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ClaudeSyncCwdMode, ClaudeSettings } from "../lib/tauri-api";
+import type { ClaudeSyncCwdMode, ClaudeSettings, MemoSettings } from "../lib/tauri-api";
 
 export interface FontSettings {
   face: string;
@@ -63,12 +63,7 @@ export interface ConvenienceSettings {
 }
 
 
-export interface MemoSettings {
-  paddingTop: number;
-  paddingRight: number;
-  paddingBottom: number;
-  paddingLeft: number;
-}
+export type { MemoSettings } from "../lib/tauri-api";
 
 export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
@@ -204,6 +199,8 @@ interface SettingsState {
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
+
+const DEFAULT_MEMO_PADDING: MemoSettings = { paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
 
@@ -400,7 +397,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   appThemeId: "catppuccin-mocha",
   convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
-  memo: { paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 },
+  memo: { ...DEFAULT_MEMO_PADDING },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -530,7 +527,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // Ensure memo settings have all fields (backwards compat)
     const memo = data.memo
-      ? { paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, ...(data.memo as Partial<MemoSettings>) }
+      ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
       : undefined;
 
     // Strip legacy font field before spreading into state
