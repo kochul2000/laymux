@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -120,28 +120,31 @@ export function AppLayout() {
 
   const dockPersistState = useSettingsStore((s) => s.convenience.dockPersistState);
 
-  const renderDock = (dock: typeof top, borderSide: string) => {
+  const gridStyles = useMemo((): React.CSSProperties => {
+    const topSize = top?.visible ? `${top.size}px` : "0px";
+    const bottomSize = bottom?.visible ? `${bottom.size}px` : "0px";
+    const leftSize = left?.visible ? `${left.size}px` : "0px";
+    const rightSize = right?.visible ? `${right.size}px` : "0px";
+
+    return {
+      display: "grid",
+      gridTemplateAreas:
+        layoutMode === "horizontal"
+          ? `"top top top" "left ws right" "bottom bottom bottom"`
+          : `"left top right" "left ws right" "left bottom right"`,
+      gridTemplateColumns: `${leftSize} 1fr ${rightSize}`,
+      gridTemplateRows: `${topSize} 1fr ${bottomSize}`,
+    };
+  }, [layoutMode, top?.visible, top?.size, bottom?.visible, bottom?.size,
+    left?.visible, left?.size, right?.visible, right?.size]);
+
+  const renderDockContent = (dock: typeof top, pos: DockPosition, borderSide: string) => {
     if (!dock) return null;
-    // When not visible: unmount if persistState is off, CSS-hide if on
+    // When not visible: unmount if persistState is off, keep in DOM if on
     if (!dock.visible && !dockPersistState) return null;
-    const pos = dock.position;
-    const isLR = pos === "left" || pos === "right";
     const isFocused = focusedDock === pos;
-    const hidden = !dock.visible && dockPersistState;
     return (
-      <div
-        className={`relative shrink-0 ${isLR ? "" : "w-full"}`}
-        style={{
-          [isLR ? "width" : "height"]: dock.size,
-          [`border${borderSide}`]: `1px solid var(--border)`,
-          background: "var(--bg-surface)",
-          ...(hidden ? { display: "none" } : {}),
-        }}
-        onMouseDown={() => {
-          setFocusedDock(pos);
-          useGridStore.getState().setFocusedPane(null);
-        }}
-      >
+      <>
         <Dock
           position={pos}
           activeView={dock.activeView}
@@ -160,48 +163,58 @@ export function AppLayout() {
             style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
           />
         )}
-      </div>
+      </>
     );
   };
 
-  const topDock = renderDock(top, "Bottom");
-  const bottomDock = renderDock(bottom, "Top");
-  const leftDock = renderDock(left, "Right");
-  const rightDock = renderDock(right, "Left");
-
-  const workspace = (
-    <div className="min-w-0 flex-1">
-      <WorkspaceArea />
-    </div>
-  );
-
-  const content =
-    layoutMode === "horizontal" ? (
-      <>
-        {topDock}
-        <div className="flex min-h-0 flex-1">
-          {leftDock}
-          {workspace}
-          {rightDock}
-        </div>
-        {bottomDock}
-      </>
-    ) : (
-      <div className="flex min-h-0 flex-1">
-        {leftDock}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {topDock}
-          {workspace}
-          {bottomDock}
-        </div>
-        {rightDock}
-      </div>
-    );
+  const dockAreaStyle = (pos: DockPosition, borderSide: string, dock: typeof top): React.CSSProperties => {
+    const areaMap = { top: "top", bottom: "bottom", left: "left", right: "right" } as const;
+    if (!dock?.visible) return { gridArea: areaMap[pos], overflow: "hidden" };
+    return {
+      gridArea: areaMap[pos],
+      position: "relative",
+      overflow: "hidden",
+      [`border${borderSide}`]: "1px solid var(--border)",
+      background: "var(--bg-surface)",
+    };
+  };
 
   return (
     <div className="flex h-full flex-col">
       <GridEditToolbar />
-      {content}
+      <div className="min-h-0 flex-1" style={gridStyles}>
+        <div
+          key="dock-top"
+          style={dockAreaStyle("top", "Bottom", top)}
+          onMouseDown={top?.visible ? () => { setFocusedDock("top"); useGridStore.getState().setFocusedPane(null); } : undefined}
+        >
+          {renderDockContent(top, "top", "Bottom")}
+        </div>
+        <div
+          key="dock-left"
+          style={dockAreaStyle("left", "Right", left)}
+          onMouseDown={left?.visible ? () => { setFocusedDock("left"); useGridStore.getState().setFocusedPane(null); } : undefined}
+        >
+          {renderDockContent(left, "left", "Right")}
+        </div>
+        <div key="dock-ws" style={{ gridArea: "ws", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+          <WorkspaceArea />
+        </div>
+        <div
+          key="dock-right"
+          style={dockAreaStyle("right", "Left", right)}
+          onMouseDown={right?.visible ? () => { setFocusedDock("right"); useGridStore.getState().setFocusedPane(null); } : undefined}
+        >
+          {renderDockContent(right, "right", "Left")}
+        </div>
+        <div
+          key="dock-bottom"
+          style={dockAreaStyle("bottom", "Top", bottom)}
+          onMouseDown={bottom?.visible ? () => { setFocusedDock("bottom"); useGridStore.getState().setFocusedPane(null); } : undefined}
+        >
+          {renderDockContent(bottom, "bottom", "Top")}
+        </div>
+      </div>
 
       {/* Notification Panel Overlay */}
       {notificationPanelOpen && createPortal(

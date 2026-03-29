@@ -72,6 +72,7 @@ export function TerminalView({
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
@@ -132,6 +133,7 @@ export function TerminalView({
     });
 
     const fitAddon = new FitAddon();
+    fitAddonRef.current = fitAddon;
     const webLinksAddon = new WebLinksAddon((_event, uri) => {
       openExternal(uri).catch(() => {});
     });
@@ -538,6 +540,20 @@ export function TerminalView({
       term.options.fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
     } catch { /* xterm mock may not support options setter */ }
   }, [currentSchemeName, colorSchemes, font]);
+
+  // Reactively update xterm overviewRuler width when scrollbarStyle changes
+  const scrollbarStyleForEffect = useSettingsStore(
+    (s) => s.convenience.scrollbarStyle ?? "overlay",
+  );
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term?.options) return;
+    try {
+      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
+      term.options.overviewRuler = { width: newWidth };
+      fitAddonRef.current?.fit();
+    } catch { /* xterm mock may not support options setter */ }
+  }, [scrollbarStyleForEffect]);
 
   // Resolve terminal background for padding area
   const termBg = (() => {

@@ -40,12 +40,14 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon = vi.fn();
     cols = 80;
     rows = 24;
+    options: Record<string, unknown> = {};
   },
 }));
 
+const mockFit = vi.fn();
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class MockFitAddon {
-    fit = vi.fn();
+    fit = mockFit;
     dispose = vi.fn();
   },
 }));
@@ -594,6 +596,63 @@ describe("TerminalView", () => {
     const container = screen.getByTestId("terminal-view-t-sb2");
     expect(container.classList.contains("scrollbar-separate")).toBe(true);
     expect(container.classList.contains("scrollbar-overlay")).toBe(false);
+  });
+
+  it("updates xterm overviewRuler and re-fits when scrollbarStyle changes dynamically", async () => {
+    render(
+      <TerminalView instanceId="t-sb-dyn" profile="PowerShell" syncGroup="" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockFit.mockClear();
+
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+    });
+
+    await vi.waitFor(() => {
+      const container = screen.getByTestId("terminal-view-t-sb-dyn");
+      expect(container.classList.contains("scrollbar-separate")).toBe(true);
+    });
+
+    await vi.waitFor(() => {
+      expect(mockFit).toHaveBeenCalled();
+    });
+  });
+
+  it("updates xterm overviewRuler when scrollbarStyle changes from separate to overlay", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+    });
+
+    render(
+      <TerminalView instanceId="t-sb-rev" profile="PowerShell" syncGroup="" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockFit.mockClear();
+
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "overlay" as const },
+    });
+
+    await vi.waitFor(() => {
+      const container = screen.getByTestId("terminal-view-t-sb-rev");
+      expect(container.classList.contains("scrollbar-overlay")).toBe(true);
+    });
+
+    await vi.waitFor(() => {
+      expect(mockFit).toHaveBeenCalled();
+    });
   });
 
   it("clamps font size to maximum 72", async () => {

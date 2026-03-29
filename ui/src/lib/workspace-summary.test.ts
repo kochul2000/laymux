@@ -417,8 +417,28 @@ describe("formatActivity", () => {
 
   it("returns Claude brand color (#D97757) for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
-    expect(result.label).toBe("Claude");
+    expect(result.label).toContain("Claude");
     expect(result.color).toBe("#D97757");
+  });
+
+  it("shows Claude mode from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Plan: approach");
+    expect(result.label).toContain("Plan");
+    expect(result.claudeMode).toBe("plan");
+    expect(result.color).toBe("var(--yellow)");
+  });
+
+  it("shows Claude danger mode from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Danger mode");
+    expect(result.label).toContain("Danger");
+    expect(result.claudeMode).toBe("danger");
+    expect(result.color).toBe("var(--red)");
+  });
+
+  it("shows Ralph indicator from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
+    expect(result.ralph).toBe(true);
+    expect(result.label).toContain("®");
   });
 });
 

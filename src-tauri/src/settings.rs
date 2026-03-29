@@ -353,6 +353,9 @@ pub struct ConvenienceSettings {
     /// Keep dock state in background when hidden.
     #[serde(default = "default_true")]
     pub dock_persist_state: bool,
+    /// Allow Alt+Arrow to navigate into/out of dock areas.
+    #[serde(default = "default_true")]
+    pub dock_arrow_nav: bool,
 }
 
 impl Default for ConvenienceSettings {
@@ -364,6 +367,36 @@ impl Default for ConvenienceSettings {
             path_ellipsis: PathEllipsisMode::default(),
             scrollbar_style: "overlay".to_string(),
             dock_persist_state: true,
+            dock_arrow_nav: true,
+        }
+    }
+}
+
+fn default_memo_padding() -> u32 {
+    12
+}
+
+/// MemoView settings (padding, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoSettings {
+    #[serde(default = "default_memo_padding")]
+    pub padding_top: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_right: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_bottom: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_left: u32,
+}
+
+impl Default for MemoSettings {
+    fn default() -> Self {
+        Self {
+            padding_top: 12,
+            padding_right: 12,
+            padding_bottom: 12,
+            padding_left: 12,
         }
     }
 }
@@ -445,6 +478,8 @@ pub struct Settings {
     pub convenience: ConvenienceSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
+    #[serde(default)]
+    pub memo: MemoSettings,
 }
 
 fn default_app_theme_id() -> String {
@@ -515,6 +550,7 @@ impl Default for Settings {
             ],
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
+            memo: MemoSettings::default(),
         }
     }
 }
