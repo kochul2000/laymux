@@ -261,6 +261,26 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
   });
 });
 
+describe("getLastCommandForWorkspace — interactive app cleanup", () => {
+  it("returns null when terminal had interactiveApp command that was cleared", () => {
+    // After an interactive app exits, lastCommand should be cleared.
+    // This simulates the state AFTER clearCommandState was called.
+    const terminals = [
+      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+    ];
+    expect(getLastCommandForWorkspace(terminals)).toBeNull();
+  });
+
+  it("returns other terminal command after one terminal's command state was cleared", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+      makeTerminal({ id: "t2", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result).toEqual({ command: "npm test", exitCode: 0, timestamp: 200 });
+  });
+});
+
 describe("abbreviatePath", () => {
   it("shortens Unix home directory to ~", () => {
     expect(abbreviatePath("/home/user/dev/project")).toBe("~/dev/project");

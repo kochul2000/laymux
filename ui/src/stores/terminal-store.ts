@@ -44,6 +44,7 @@ interface TerminalStoreState {
     id: string,
     info: Partial<Pick<TerminalInstance, "cwd" | "branch" | "title" | "lastCommand" | "lastExitCode" | "lastCommandAt" | "activity" | "outputActive" | "syncGroup">>,
   ) => void;
+  clearCommandState: (id: string) => void;
   updateTerminalActivity: (id: string) => void;
   setTerminalFocus: (id: string) => void;
 }
@@ -86,6 +87,16 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
     set((state) => ({
       instances: state.instances.map((inst) =>
         inst.id === id ? { ...inst, ...info } : inst,
+      ),
+    }));
+  },
+
+  clearCommandState: (id) => {
+    set((state) => ({
+      instances: state.instances.map((inst) =>
+        inst.id === id
+          ? { ...inst, lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }
+          : inst,
       ),
     }));
   },

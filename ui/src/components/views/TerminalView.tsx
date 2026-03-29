@@ -367,6 +367,12 @@ export function TerminalView({
         }
       } else if (leaveAlt && !enterAlt && inAltScreen) {
         inAltScreen = false;
+        // If leaving an interactive app (Claude, vim, etc.), clear stale command state
+        // so WorkspaceSelectorView does not show leftover info after the app exits.
+        const prevInst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+        if (prevInst?.activity?.type === "interactiveApp") {
+          useTerminalStore.getState().clearCommandState(instanceId);
+        }
         useTerminalStore.getState().updateInstanceInfo(instanceId, {
           activity: { type: "shell" },
         });
