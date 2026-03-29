@@ -213,14 +213,71 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
     expect(summary.terminalSummaries).toHaveLength(0);
   });
 
-  it("includes syncGroup-matched terminals in count", () => {
+  it("excludes dock terminals (empty workspaceId) from summary", () => {
     const terminals = [
       makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
       makeTerminal({ id: "t2", workspaceId: "", syncGroup: "MyWS", profile: "PS", label: "PS" }),
     ];
     const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), [], "MyWS");
-    expect(summary.terminalCount).toBe(2);
-    expect(summary.terminalSummaries).toHaveLength(2);
+    // Dock terminal (workspaceId="") should NOT be included even if syncGroup matches
+    expect(summary.terminalCount).toBe(1);
+    expect(summary.terminalSummaries).toHaveLength(1);
+    expect(summary.terminalSummaries[0].id).toBe("t1");
+  });
+
+  it("does not show dock terminal last command in workspace summary", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 100 }),
+      makeTerminal({ id: "dock-t", workspaceId: "", syncGroup: "MyWS", lastCommand: "cargo build", lastExitCode: 1, lastCommandAt: 200 }),
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), [], "MyWS");
+    // Should show workspace terminal's command, not dock terminal's more recent command
+    expect(summary.lastCommand?.command).toBe("npm test");
+    expect(summary.lastCommand?.exitCode).toBe(0);
+  });
+
+  it("includes hasUnreadNotification in terminal summaries", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+      makeTerminal({ id: "t2", workspaceId: "ws-1", profile: "PS", label: "PS" }),
+    ];
+    const notifications: Notification[] = [
+      makeNotification({ id: "n1", workspaceId: "ws-1", terminalId: "t1", readAt: null }),
+      makeNotification({ id: "n2", workspaceId: "ws-1", terminalId: "t2", readAt: Date.now() }), // already read
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), notifications);
+    const t1Summary = summary.terminalSummaries.find((ts) => ts.id === "t1");
+    const t2Summary = summary.terminalSummaries.find((ts) => ts.id === "t2");
+    expect(t1Summary?.hasUnreadNotification).toBe(true);
+    expect(t2Summary?.hasUnreadNotification).toBe(false);
+  });
+
+  it("hasUnreadNotification is false when no notifications exist", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), []);
+    expect(summary.terminalSummaries[0].hasUnreadNotification).toBe(false);
+  });
+});
+
+describe("getLastCommandForWorkspace — interactive app cleanup", () => {
+  it("returns null when terminal had interactiveApp command that was cleared", () => {
+    // After an interactive app exits, lastCommand should be cleared.
+    // This simulates the state AFTER clearCommandState was called.
+    const terminals = [
+      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+    ];
+    expect(getLastCommandForWorkspace(terminals)).toBeNull();
+  });
+
+  it("returns other terminal command after one terminal's command state was cleared", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+      makeTerminal({ id: "t2", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result).toEqual({ command: "npm test", exitCode: 0, timestamp: 200 });
   });
 });
 

@@ -5,6 +5,39 @@ use std::thread;
 
 use crate::terminal::TerminalSession;
 
+/// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
+/// in a path string. Also expands `~` as a shorthand for the user's home directory.
+fn expand_env_in_path(path: &str) -> String {
+    let mut result = path.to_string();
+
+    // Expand ~ to home directory
+    if result == "~" || result.starts_with("~/") || result.starts_with("~\\") {
+        if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
+            result = format!("{}{}", home, &result[1..]);
+        }
+    }
+
+    // Expand %VAR% style environment variables
+    let mut search_from = 0;
+    while let Some(rel_start) = result[search_from..].find('%') {
+        let start = search_from + rel_start;
+        if let Some(end) = result[start + 1..].find('%') {
+            let var_name = &result[start + 1..start + 1 + end];
+            if let Ok(val) = std::env::var(var_name) {
+                result = format!("{}{}{}", &result[..start], val, &result[start + 2 + end..]);
+                search_from = start + val.len();
+            } else {
+                // Variable not found — skip past it to avoid infinite loop
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    result
+}
+
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -82,6 +115,15 @@ where
         cmd.env(key, value);
     }
 
+    // Set starting directory if configured
+    if !session.config.starting_directory.is_empty() {
+        let dir = expand_env_in_path(&session.config.starting_directory);
+        let path = std::path::Path::new(&dir);
+        if path.is_dir() {
+            cmd.cwd(path);
+        }
+    }
+
     pair.slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
@@ -136,10 +178,27 @@ mod tests {
                 profile: profile.into(),
                 command_line: String::new(),
                 startup_command: String::new(),
+                starting_directory: String::new(),
                 cols: 80,
                 rows: 24,
                 sync_group: "test-group".into(),
                 env: vec![("TEST_VAR".into(), "hello".into())],
+            },
+        )
+    }
+
+    fn make_test_session_with_cwd(profile: &str, cwd: &str) -> TerminalSession {
+        TerminalSession::new(
+            "test-pty-cwd".into(),
+            TerminalConfig {
+                profile: profile.into(),
+                command_line: String::new(),
+                startup_command: String::new(),
+                starting_directory: cwd.into(),
+                cols: 80,
+                rows: 24,
+                sync_group: "test-group".into(),
+                env: vec![],
             },
         )
     }
@@ -198,6 +257,43 @@ mod tests {
     }
 
     #[test]
+    fn spawn_pty_with_starting_directory() {
+        // Use TEMP dir which always exists on Windows
+        let temp_dir = std::env::temp_dir();
+        let temp_str = temp_dir.to_string_lossy().to_string();
+        let session = make_test_session_with_cwd("PowerShell", &temp_str);
+        let (tx, rx) = mpsc::channel();
+
+        let handle = spawn_pty(&session, move |data| {
+            let _ = tx.send(data);
+        });
+
+        assert!(handle.is_ok(), "PTY spawn should succeed with starting_directory");
+        let handle = handle.unwrap();
+
+        // Ask PowerShell for its current directory
+        let _ = handle.write(b"(Get-Location).Path\r\n");
+
+        let mut output = String::new();
+        for _ in 0..30 {
+            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
+                output.push_str(&String::from_utf8_lossy(&data));
+                // temp dir path should appear (case-insensitive check)
+                if output.to_lowercase().contains(&temp_str.to_lowercase().replace('\\', "\\")) {
+                    break;
+                }
+            }
+        }
+        // The output should contain the temp directory path
+        assert!(
+            output.to_lowercase().contains("temp"),
+            "PowerShell should start in the specified directory. Got: {output}"
+        );
+
+        let _ = handle.write(b"exit\r\n");
+    }
+
+    #[test]
     fn spawn_pty_sets_env_vars() {
         let session = make_test_session("PowerShell");
         let (tx, rx) = mpsc::channel();
@@ -224,5 +320,32 @@ mod tests {
         );
 
         let _ = handle.write(b"exit\r\n");
+    }
+
+    #[test]
+    fn expand_env_expands_percent_vars() {
+        // %TEMP% should exist on Windows
+        let result = expand_env_in_path("%TEMP%");
+        assert!(!result.contains('%'), "Should expand %TEMP%. Got: {result}");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn expand_env_expands_tilde() {
+        let result = expand_env_in_path("~");
+        assert!(!result.starts_with('~'), "Should expand ~. Got: {result}");
+    }
+
+    #[test]
+    fn expand_env_preserves_plain_path() {
+        let result = expand_env_in_path("C:\\Users\\test");
+        assert_eq!(result, "C:\\Users\\test");
+    }
+
+    #[test]
+    fn expand_env_handles_unknown_var() {
+        let result = expand_env_in_path("%NONEXISTENT_VAR_12345%");
+        // Should not panic, returns the original
+        assert_eq!(result, "%NONEXISTENT_VAR_12345%");
     }
 }

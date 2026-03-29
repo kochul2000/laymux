@@ -6,11 +6,11 @@ describe("settings-store", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
-  it("has default font settings", () => {
-    const { font } = useSettingsStore.getState();
-    expect(font.face).toBe("Cascadia Mono");
-    expect(font.size).toBe(14);
-    expect(font.weight).toBe("normal");
+  it("has default font in profileDefaults", () => {
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Cascadia Mono");
+    expect(profileDefaults.font.size).toBe(14);
+    expect(profileDefaults.font.weight).toBe("normal");
   });
 
   it("has default profiles", () => {
@@ -25,12 +25,12 @@ describe("settings-store", () => {
     expect(defaultProfile).toBe("PowerShell");
   });
 
-  it("updates font settings", () => {
-    useSettingsStore.getState().setFont({ face: "Fira Code", size: 16, weight: "normal" });
-    const { font } = useSettingsStore.getState();
-    expect(font.face).toBe("Fira Code");
-    expect(font.size).toBe(16);
-    expect(font.weight).toBe("normal");
+  it("updates font in profileDefaults", () => {
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "Fira Code", size: 16, weight: "normal" } });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+    expect(profileDefaults.font.weight).toBe("normal");
   });
 
   it("updates default profile", () => {
@@ -105,7 +105,7 @@ describe("settings-store", () => {
 
   it("loads settings from external data", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "JetBrains Mono", size: 13, weight: "normal" },
+      profileDefaults: { font: { face: "JetBrains Mono", size: 13, weight: "normal" } } as any,
       defaultProfile: "WSL",
       profiles: [{
         name: "WSL", commandLine: "wsl.exe", startupCommand: "", colorScheme: "", startingDirectory: "", hidden: false,
@@ -118,7 +118,7 @@ describe("settings-store", () => {
       keybindings: [],
     });
     const state = useSettingsStore.getState();
-    expect(state.font.face).toBe("JetBrains Mono");
+    expect(state.profileDefaults.font.face).toBe("JetBrains Mono");
     expect(state.defaultProfile).toBe("WSL");
     expect(state.profiles).toHaveLength(1);
   });
@@ -175,27 +175,103 @@ describe("settings-store", () => {
     expect(profile.snapOnInput).toBe(false);
   });
 
-  it("updates font weight", () => {
-    useSettingsStore.getState().setFont({ face: "Cascadia Mono", size: 14, weight: "bold" });
-    expect(useSettingsStore.getState().font.weight).toBe("bold");
+  it("updates font weight in profileDefaults", () => {
+    useSettingsStore.getState().setProfileDefaults({ font: { face: "Cascadia Mono", size: 14, weight: "bold" } });
+    expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("bold");
   });
 
-  it("loadFromSettings handles font without weight (backwards compat)", () => {
+  it("loadFromSettings handles profileDefaults.font without weight (backwards compat)", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16 } as any,
+      profileDefaults: { font: { face: "Fira Code", size: 16 } } as any,
     });
-    const { font } = useSettingsStore.getState();
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+    expect(profileDefaults.font.weight).toBe("normal");
+  });
+
+  it("loadFromSettings handles profileDefaults.font with explicit undefined weight", () => {
+    useSettingsStore.getState().loadFromSettings({
+      profileDefaults: { font: { face: "Fira Code", size: 16, weight: undefined } } as any,
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.weight).toBe("normal");
+  });
+
+  // -- resolveFont --
+
+  it("resolveFont returns profileDefaults font when profile has no font override", () => {
+    const font = useSettingsStore.getState().resolveFont("PowerShell");
+    expect(font.face).toBe("Cascadia Mono");
+    expect(font.size).toBe(14);
+  });
+
+  it("resolveFont returns profile font override when set", () => {
+    useSettingsStore.getState().updateProfile(0, { font: { face: "Fira Code", size: 18, weight: "bold" } });
+    const font = useSettingsStore.getState().resolveFont("PowerShell");
     expect(font.face).toBe("Fira Code");
-    expect(font.size).toBe(16);
-    expect(font.weight).toBe("normal");
+    expect(font.size).toBe(18);
+    expect(font.weight).toBe("bold");
   });
 
-  it("loadFromSettings handles font with explicit undefined weight", () => {
+  it("resolveFont returns default font for unknown profile", () => {
+    const font = useSettingsStore.getState().resolveFont("NonExistent");
+    expect(font.face).toBe("Cascadia Mono");
+    expect(font.size).toBe(14);
+  });
+
+  it("loadFromSettings migrates root-level font to profileDefaults when profileDefaults.font absent", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: undefined } as any,
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { colorScheme: "Catppuccin Mocha" } as any,
     });
-    const { font } = useSettingsStore.getState();
-    expect(font.weight).toBe("normal");
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+    expect(profileDefaults.font.weight).toBe("normal");
+  });
+
+  it("loadFromSettings migrates root-level font when no profileDefaults provided", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+  });
+
+  it("loadFromSettings prefers profileDefaults.font over root-level font", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "JetBrains Mono", size: 13, weight: "normal" } } as any,
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("JetBrains Mono");
+    expect(profileDefaults.font.size).toBe(13);
+  });
+
+  it("loadFromSettings does not leak root-level font into store state", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    const state = useSettingsStore.getState() as Record<string, unknown>;
+    expect(state.font).toBeUndefined();
+  });
+
+  it("profile font override is persisted through loadFromSettings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      profiles: [{
+        name: "Custom", commandLine: "bash", startupCommand: "", colorScheme: "", startingDirectory: "", hidden: false,
+        cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
+        scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
+        closeOnExit: "automatic", antialiasingMode: "grayscale",
+        suppressApplicationTitle: false, snapOnInput: true,
+        font: { face: "JetBrains Mono", size: 16, weight: "bold" },
+      }],
+    });
+    const font = useSettingsStore.getState().resolveFont("Custom");
+    expect(font.face).toBe("JetBrains Mono");
+    expect(font.size).toBe(16);
   });
 
   // -- Convenience settings --
@@ -238,7 +314,7 @@ describe("settings-store", () => {
 
   it("loadFromSettings without convenience preserves defaults", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
     });
     const { convenience } = useSettingsStore.getState();
     expect(convenience.smartPaste).toBe(true);
@@ -295,9 +371,51 @@ describe("settings-store", () => {
 
   it("loadFromSettings without claude preserves defaults", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
     });
     const { claude } = useSettingsStore.getState();
     expect(claude.syncCwd).toBe("skip");
+  });
+
+  // -- Scrollbar style settings --
+
+  it("has default scrollbarStyle as overlay", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("setConvenience updates scrollbarStyle", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+  });
+
+  it("setConvenience updates scrollbarStyle back to overlay", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "overlay" });
+    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("loadFromSettings loads scrollbarStyle", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "separate" as const },
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("separate");
+  });
+
+  it("loadFromSettings fills missing scrollbarStyle with default overlay", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarStyle).toBe("overlay");
+  });
+
+  it("setConvenience does not affect other convenience fields when setting scrollbarStyle", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.smartPaste).toBe(true);
+    expect(convenience.copyOnSelect).toBe(true);
+    expect(convenience.scrollbarStyle).toBe("separate");
   });
 });

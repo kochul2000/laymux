@@ -24,6 +24,7 @@ const viewIcons: Record<ViewType, string> = {
   SettingsView: "\u2699",
   TerminalView: ">_",
   BrowserPreviewView: "\u25ce",
+  MemoView: "\u270e",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
 };

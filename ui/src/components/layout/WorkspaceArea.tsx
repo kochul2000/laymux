@@ -120,6 +120,7 @@ export function WorkspaceArea() {
                   viewConfig={pane.view}
                   onSelectView={isActive ? (config) => setPaneView(i, config) : undefined}
                   workspaceName={ws.name}
+                  workspaceId={ws.id}
                   paneId={pane.id}
                   isFocused={isFocused}
                   onKeyboardActivity={() => {

@@ -50,8 +50,12 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
+let capturedLinkHandler: ((event: MouseEvent, uri: string) => void) | null = null;
 vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class MockWebLinksAddon {
+    constructor(handler?: (event: MouseEvent, uri: string) => void) {
+      if (handler) capturedLinkHandler = handler;
+    }
     dispose = vi.fn();
   },
 }));
@@ -69,6 +73,7 @@ const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "" });
 const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
+const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
@@ -80,6 +85,7 @@ vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
   setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
+  openExternal: (...args: unknown[]) => mockOpenExternal(...args),
 }));
 
 describe("TerminalView", () => {
@@ -87,6 +93,7 @@ describe("TerminalView", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     capturedKeyHandler = null;
+    capturedLinkHandler = null;
     vi.clearAllMocks();
   });
 
@@ -510,11 +517,7 @@ describe("TerminalView", () => {
   // -- Ctrl+Wheel Zoom --
 
   it("increases font size on Ctrl+Wheel scroll up", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
+    // Font is now resolved from profile -> profileDefaults
     render(
       <TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />,
     );
@@ -523,15 +526,11 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(15);
+    // Ctrl+Wheel sets font override on the profile
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(15);
   });
 
   it("decreases font size on Ctrl+Wheel scroll down", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
     render(
       <TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />,
     );
@@ -540,15 +539,10 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(13);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(13);
   });
 
   it("does not change font size on wheel without Ctrl", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-    });
-
     render(
       <TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />,
     );
@@ -557,14 +551,13 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(14);
+    // No font override should be set
+    expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
   });
 
   it("clamps font size to minimum 6", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 6, weight: "normal" },
-    });
+    // Set profile font override to minimum
+    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
 
     render(
       <TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />,
@@ -574,14 +567,36 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(6);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(6);
+  });
+
+  // -- Scrollbar style --
+
+  it("applies scrollbar-overlay class by default", () => {
+    render(
+      <TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />,
+    );
+    const container = screen.getByTestId("terminal-view-t-sb1");
+    expect(container.classList.contains("scrollbar-overlay")).toBe(true);
+    expect(container.classList.contains("scrollbar-separate")).toBe(false);
+  });
+
+  it("applies scrollbar-separate class when setting is separate", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+    });
+
+    render(
+      <TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />,
+    );
+    const container = screen.getByTestId("terminal-view-t-sb2");
+    expect(container.classList.contains("scrollbar-separate")).toBe(true);
+    expect(container.classList.contains("scrollbar-overlay")).toBe(false);
   });
 
   it("clamps font size to maximum 72", async () => {
-    useSettingsStore.setState({
-      ...useSettingsStore.getState(),
-      font: { face: "Cascadia Mono", size: 72, weight: "normal" },
-    });
+    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
 
     render(
       <TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />,
@@ -591,7 +606,7 @@ describe("TerminalView", () => {
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(useSettingsStore.getState().font.size).toBe(72);
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(72);
   });
 
   it("prevents default browser zoom on Ctrl+Wheel", async () => {
@@ -605,6 +620,45 @@ describe("TerminalView", () => {
     container.dispatchEvent(event);
 
     expect(preventDefaultSpy).toHaveBeenCalled();
+  });
+
+  // -- URL link click (issue #29) --
+
+  describe("URL link click", () => {
+    it("passes a custom handler to WebLinksAddon that calls openExternal", async () => {
+      render(
+        <TerminalView instanceId="t-link1" profile="PowerShell" syncGroup="" />,
+      );
+
+      // WebLinksAddon should have been constructed with a handler
+      expect(capturedLinkHandler).not.toBeNull();
+
+      // Simulate clicking a link
+      const fakeEvent = new MouseEvent("click");
+      capturedLinkHandler!(fakeEvent, "https://example.com");
+
+      await vi.waitFor(() => {
+        expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
+      });
+    });
+
+    it("handles openExternal failure gracefully (does not throw)", async () => {
+      mockOpenExternal.mockRejectedValueOnce(new Error("shell open failed"));
+
+      render(
+        <TerminalView instanceId="t-link2" profile="PowerShell" syncGroup="" />,
+      );
+
+      expect(capturedLinkHandler).not.toBeNull();
+
+      // Should not throw even when openExternal fails
+      const fakeEvent = new MouseEvent("click");
+      expect(() => capturedLinkHandler!(fakeEvent, "https://example.com")).not.toThrow();
+
+      await vi.waitFor(() => {
+        expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
+      });
+    });
   });
 
   // -- cwdReceive sync (issue #24) --

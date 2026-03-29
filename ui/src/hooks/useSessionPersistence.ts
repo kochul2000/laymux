@@ -28,7 +28,7 @@ export function useSessionPersistence() {
 
         // Apply to settings store
         useSettingsStore.getState().loadFromSettings({
-          font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" },
+          ...(sFont ? { font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" } } : {}),
           defaultProfile: rawSettings.defaultProfile,
           profileDefaults: sProfileDefaults as Parameters<ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]>[0]["profileDefaults"],
           viewOrder: Array.isArray(sViewOrder) ? sViewOrder : undefined,

@@ -230,9 +230,33 @@ function WorkspaceItem({
                           </span>
                         </>
                       )}
-                      {tCmdIcon && (
-                        <span className="shrink-0" style={{ color: tCmdColor }}>{tCmdIcon}</span>
-                      )}
+                      {tCmdIcon ? (
+                        <span
+                          data-testid={`pane-cmd-badge-${ts.id}`}
+                          className="shrink-0"
+                          style={{
+                            color: tCmdColor,
+                            border: ts.hasUnreadNotification ? "1.5px solid var(--accent)" : "1.5px solid transparent",
+                            borderRadius: 3,
+                            padding: "0 1px",
+                            lineHeight: 1,
+                          }}
+                        >
+                          {tCmdIcon}
+                        </span>
+                      ) : ts.hasUnreadNotification ? (
+                        <span
+                          data-testid={`pane-notif-dot-${ts.id}`}
+                          className="shrink-0"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: "var(--accent)",
+                            display: "inline-block",
+                          }}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 );
