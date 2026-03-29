@@ -181,7 +181,7 @@ interface SettingsState {
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
   /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
   resolveFont: (profileName: string) => FontSettings;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">>) => void;
+  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">> & { font?: FontSettings }) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
@@ -207,7 +207,6 @@ function makeProfile(
   commandLine: string,
   overrides?: Partial<Profile>,
 ): Profile {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { font: _font, ...rest } = defaultProfileDefaults;
   return {
     name,
@@ -227,7 +226,6 @@ export function makeProfileFromDefaults(
   commandLine: string,
   defaults: ProfileDefaults,
 ): Profile {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { font: _font, ...rest } = defaults;
   return {
     name,
@@ -459,6 +457,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
 
   loadFromSettings: (data) => {
+    // Legacy migration: root-level font → profileDefaults.font
+    const legacyFont = data.font;
+
     // Ensure profiles have all required fields (backwards compat)
     const profiles = data.profiles?.map((p) => ({
       ...makeProfile(p.name, p.commandLine),
@@ -468,16 +469,21 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(p.font ? { font: { ...p.font, weight: p.font.weight ?? "normal" } } : {}),
     }));
     // Ensure profileDefaults has all fields (backwards compat)
+    // If root-level font exists but profileDefaults.font doesn't, migrate it
+    const resolvedProfileDefaultsFont = data.profileDefaults?.font
+      ? { ...DEFAULT_FONT, ...data.profileDefaults.font, weight: data.profileDefaults.font.weight ?? "normal" }
+      : legacyFont
+        ? { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" }
+        : defaultProfileDefaults.font;
     const profileDefaults = data.profileDefaults
       ? {
           ...defaultProfileDefaults,
           ...data.profileDefaults,
-          // Ensure font in profileDefaults has weight
-          font: data.profileDefaults.font
-            ? { ...DEFAULT_FONT, ...data.profileDefaults.font, weight: data.profileDefaults.font.weight ?? "normal" }
-            : defaultProfileDefaults.font,
+          font: resolvedProfileDefaultsFont,
         }
-      : undefined;
+      : legacyFont
+        ? { ...defaultProfileDefaults, font: { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" } }
+        : undefined;
     // Merge loaded color schemes with builtins (builtins first, user schemes appended)
     const loadedSchemes = data.colorSchemes?.map((cs) => ({
       ...makeDefaultColorScheme(),
@@ -498,9 +504,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
 
+    // Strip legacy font field before spreading into state
+    const { font: _legacyFont, ...rest } = data;
     set((state) => ({
       ...state,
-      ...data,
+      ...rest,
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),

@@ -220,6 +220,44 @@ describe("settings-store", () => {
     expect(font.size).toBe(14);
   });
 
+  it("loadFromSettings migrates root-level font to profileDefaults when profileDefaults.font absent", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { colorScheme: "Catppuccin Mocha" } as any,
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+    expect(profileDefaults.font.weight).toBe("normal");
+  });
+
+  it("loadFromSettings migrates root-level font when no profileDefaults provided", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("Fira Code");
+    expect(profileDefaults.font.size).toBe(16);
+  });
+
+  it("loadFromSettings prefers profileDefaults.font over root-level font", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "JetBrains Mono", size: 13, weight: "normal" } } as any,
+    });
+    const { profileDefaults } = useSettingsStore.getState();
+    expect(profileDefaults.font.face).toBe("JetBrains Mono");
+    expect(profileDefaults.font.size).toBe(13);
+  });
+
+  it("loadFromSettings does not leak root-level font into store state", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    const state = useSettingsStore.getState() as Record<string, unknown>;
+    expect(state.font).toBeUndefined();
+  });
+
   it("profile font override is persisted through loadFromSettings", () => {
     useSettingsStore.getState().loadFromSettings({
       profiles: [{
