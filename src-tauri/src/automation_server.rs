@@ -492,6 +492,30 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/ui/notifications",
                 "description": "Toggle the notification panel overlay open/closed."
+            },
+            {
+                "method": "POST", "path": "/api/v1/docks/{position}/split",
+                "description": "Split a dock pane. position: top|bottom|left|right.",
+                "body": { "paneId": "(optional) string — ID of the pane to split" }
+            },
+            {
+                "method": "DELETE", "path": "/api/v1/docks/{position}/panes/{paneId}",
+                "description": "Remove a pane from a dock. position: top|bottom|left|right."
+            },
+            {
+                "method": "PUT", "path": "/api/v1/settings/app-theme",
+                "description": "Set the application color theme.",
+                "body": { "themeId": "string — theme ID (e.g. \"catppuccin-mocha\")" }
+            },
+            {
+                "method": "PUT", "path": "/api/v1/settings/profile-defaults",
+                "description": "Set default values for terminal profiles.",
+                "body": "object — profile default settings"
+            },
+            {
+                "method": "PUT", "path": "/api/v1/settings/profiles/{index}",
+                "description": "Update a specific terminal profile by index.",
+                "body": "object — profile fields to update"
             }
         ],
         "tips": [

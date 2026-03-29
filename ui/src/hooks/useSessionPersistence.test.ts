@@ -86,8 +86,9 @@ describe("useSessionPersistence", () => {
     });
 
     const settingsState = useSettingsStore.getState();
-    expect(settingsState.font.face).toBe("Fira Code");
-    expect(settingsState.font.size).toBe(16);
+    // Legacy root-level font is migrated to profileDefaults.font
+    expect(settingsState.profileDefaults.font.face).toBe("Fira Code");
+    expect(settingsState.profileDefaults.font.size).toBe(16);
     expect(settingsState.defaultProfile).toBe("WSL");
   });
 

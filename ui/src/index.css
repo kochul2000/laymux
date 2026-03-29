@@ -47,16 +47,10 @@ body {
 }
 
 /*
- * Terminal scrollbar styles.
- *
- * xterm.js v6 uses a custom scrollbar (.xterm-scrollable-element > .scrollbar)
- * rendered as position:absolute overlay. The native viewport scrollbar
- * (.xterm-viewport) is hidden by the global ::-webkit-scrollbar { width: 0 }.
- *
- * The key difference between modes is the overviewRuler.width passed to xterm:
- *   - overlay (default): overviewRuler.width = 0 → FitAddon uses full width
- *   - separate: overviewRuler.width = 14 → FitAddon reserves scrollbar space
+ * Terminal scrollbar styles:
+ * xterm.js v6 custom scrollbar controlled via overviewRuler.width in TerminalView.
+ *   - overlay (default): width = 0, FitAddon uses full container width
+ *   - separate: width = 14, FitAddon reserves scrollbar space
+ * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
  */
-
-
 

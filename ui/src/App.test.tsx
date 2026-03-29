@@ -17,7 +17,6 @@ vi.mock("@/lib/tauri-api", () => {
     closeTerminalSession: vi.fn().mockResolvedValue(undefined),
     onTerminalOutput: vi.fn().mockResolvedValue(unlisten),
     loadSettings: vi.fn().mockResolvedValue({
-      font: { face: "Consolas", size: 14 },
       defaultProfile: "PowerShell",
       profiles: [],
       colorSchemes: [],

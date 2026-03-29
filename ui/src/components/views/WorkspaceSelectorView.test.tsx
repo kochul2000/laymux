@@ -447,6 +447,36 @@ describe("WorkspaceSelectorView", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
+  it("does not show dock terminal last command in active workspace summary", () => {
+    useWorkspaceStore.setState({
+      workspaces: [{
+        id: "ws-default", name: "Default", layoutId: "default-layout",
+        panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
+      }],
+      activeWorkspaceId: "ws-default",
+    });
+    // Workspace terminal with old command
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test", lastExitCode: 0, lastCommandAt: Date.now() - 60000,
+    });
+    // Dock terminal with newer command (should NOT appear in workspace summary)
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-dock-bottom", profile: "WSL", syncGroup: "Default", workspaceId: "",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-dock-bottom", {
+      lastCommand: "cargo build", lastExitCode: 1, lastCommandAt: Date.now(),
+    });
+
+    render(<WorkspaceSelectorView />);
+    // Should show workspace terminal's command, not dock's
+    expect(screen.getByText(/npm test/)).toBeInTheDocument();
+    expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+  });
+
   it("workspace items always render 3 rows even without data", () => {
     render(<WorkspaceSelectorView />);
     const item = screen.getByTestId("workspace-item-ws-default");
