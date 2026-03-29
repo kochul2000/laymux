@@ -12,13 +12,14 @@ interface ViewRendererProps {
   viewConfig?: ViewInstanceConfig;
   onSelectView?: (config: ViewInstanceConfig) => void;
   workspaceName?: string;
+  workspaceId?: string;
   paneId?: string;
   emptyViewContext?: EmptyViewContext;
   isFocused?: boolean;
   onKeyboardActivity?: () => void;
 }
 
-export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
+export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, workspaceId, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   switch (viewType) {
     case "WorkspaceSelectorView":
@@ -45,6 +46,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
             syncGroup={effectiveSyncGroup}
             cwdSend={(viewConfig?.cwdSend as boolean) ?? true}
             cwdReceive={(viewConfig?.cwdReceive as boolean) ?? true}
+            workspaceId={workspaceId}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
           />

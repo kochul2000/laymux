@@ -95,9 +95,7 @@ export function computeWorkspaceSummary(
   workspaceName?: string,
 ): WorkspaceSummary {
   const wsTerminals = terminals.filter(
-    (t) =>
-      t.workspaceId === workspaceId ||
-      (workspaceName && t.syncGroup === workspaceName),
+    (t) => t.workspaceId === workspaceId,
   );
   const wsNotifications = notifications.filter(
     (n) => n.workspaceId === workspaceId,
