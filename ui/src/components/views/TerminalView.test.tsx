@@ -740,4 +740,51 @@ describe("TerminalView", () => {
       });
     });
   });
+
+  // -- Scrollbar overlay mode --
+
+  describe("scrollbar mode", () => {
+    it("applies scrollbar-overlay class by default", () => {
+      render(
+        <TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />,
+      );
+      const container = screen.getByTestId("terminal-view-t-sb1");
+      expect(container.classList.contains("scrollbar-overlay")).toBe(true);
+      expect(container.classList.contains("scrollbar-separate")).toBe(false);
+    });
+
+    it("applies scrollbar-separate class when setting is separate", () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        convenience: { ...useSettingsStore.getState().convenience, scrollbarMode: "separate" as const },
+      });
+
+      render(
+        <TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />,
+      );
+      const container = screen.getByTestId("terminal-view-t-sb2");
+      expect(container.classList.contains("scrollbar-separate")).toBe(true);
+      expect(container.classList.contains("scrollbar-overlay")).toBe(false);
+    });
+
+    it("reactively switches scrollbar class when setting changes", () => {
+      const { rerender } = render(
+        <TerminalView instanceId="t-sb3" profile="PowerShell" syncGroup="" />,
+      );
+      const container = screen.getByTestId("terminal-view-t-sb3");
+      expect(container.classList.contains("scrollbar-overlay")).toBe(true);
+
+      // Change setting to separate
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        convenience: { ...useSettingsStore.getState().convenience, scrollbarMode: "separate" as const },
+      });
+
+      rerender(
+        <TerminalView instanceId="t-sb3" profile="PowerShell" syncGroup="" />,
+      );
+      expect(container.classList.contains("scrollbar-separate")).toBe(true);
+      expect(container.classList.contains("scrollbar-overlay")).toBe(false);
+    });
+  });
 });

@@ -262,6 +262,22 @@ impl Default for ClaudeSettings {
     }
 }
 
+/// Terminal scrollbar display mode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ScrollbarMode {
+    /// Scrollbar overlaps terminal content (default, saves space).
+    Overlay,
+    /// Scrollbar has its own dedicated space.
+    Separate,
+}
+
+impl Default for ScrollbarMode {
+    fn default() -> Self {
+        Self::Overlay
+    }
+}
+
 /// Convenience feature settings (smart paste, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -273,6 +289,9 @@ pub struct ConvenienceSettings {
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
+    /// Terminal scrollbar display mode: overlay (default) or separate.
+    #[serde(default)]
+    pub scrollbar_mode: ScrollbarMode,
 }
 
 impl Default for ConvenienceSettings {
@@ -281,6 +300,7 @@ impl Default for ConvenienceSettings {
             smart_paste: true,
             paste_image_dir: String::new(),
             copy_on_select: true,
+            scrollbar_mode: ScrollbarMode::default(),
         }
     }
 }
@@ -696,6 +716,47 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.convenience.smart_paste);
         assert_eq!(settings.convenience.paste_image_dir, "");
+    }
+
+    #[test]
+    fn scrollbar_mode_default_is_overlay() {
+        let settings = Settings::default();
+        assert_eq!(settings.convenience.scrollbar_mode, ScrollbarMode::Overlay);
+    }
+
+    #[test]
+    fn scrollbar_mode_deserialize_overlay() {
+        let json = r#"{"convenience": {"scrollbarMode": "overlay"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_mode, ScrollbarMode::Overlay);
+    }
+
+    #[test]
+    fn scrollbar_mode_deserialize_separate() {
+        let json = r#"{"convenience": {"scrollbarMode": "separate"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_mode, ScrollbarMode::Separate);
+    }
+
+    #[test]
+    fn scrollbar_mode_defaults_to_overlay_when_missing() {
+        let json = r#"{"convenience": {"smartPaste": true}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.scrollbar_mode, ScrollbarMode::Overlay);
+    }
+
+    #[test]
+    fn scrollbar_mode_round_trip() {
+        let settings = Settings {
+            convenience: ConvenienceSettings {
+                scrollbar_mode: ScrollbarMode::Separate,
+                ..ConvenienceSettings::default()
+            },
+            ..Settings::default()
+        };
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.convenience.scrollbar_mode, ScrollbarMode::Separate);
     }
 
     #[test]

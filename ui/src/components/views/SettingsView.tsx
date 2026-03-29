@@ -990,6 +990,27 @@ function ConvenienceSection() {
             </FocusSelect>
           </div>
         </div>
+
+        {/* Scrollbar mode */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Scrollbar Mode</span>
+            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              터미널 스크롤바 표시 방식
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="scrollbar-mode-select"
+              className={inputCls}
+              value={convenience.scrollbarMode ?? "overlay"}
+              onChange={(e) => setConvenience({ scrollbarMode: e.target.value as "overlay" | "separate" })}
+            >
+              <option value="overlay">겹쳐서 위에 보여주기 (Overlay)</option>
+              <option value="separate">별도 공간 할당 (Separate)</option>
+            </FocusSelect>
+          </div>
+        </div>
       </div>
     </div>
   );

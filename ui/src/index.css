@@ -46,5 +46,58 @@ body {
   height: 0;
 }
 
+/* ── Terminal Scrollbar Modes ── */
+
+/*
+ * Overlay mode (default): scrollbar floats over terminal content,
+ * transparent by default and visible on hover. No extra space consumed.
+ */
+.scrollbar-overlay .xterm-viewport {
+  overflow-y: auto !important;
+}
+.scrollbar-overlay .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-overlay .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-overlay .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+.scrollbar-overlay .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+/* Position viewport to overlap screen area so scrollbar doesn't eat space */
+.scrollbar-overlay .xterm .xterm-viewport {
+  right: 0;
+}
+.scrollbar-overlay .xterm .xterm-screen {
+  width: 100% !important;
+}
+
+/*
+ * Separate mode: scrollbar has its own dedicated space (standard browser behavior).
+ * The terminal viewport's native scrollbar is fully visible.
+ */
+.scrollbar-separate .xterm-viewport {
+  overflow-y: scroll !important;
+}
+.scrollbar-separate .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scrollbar-separate .xterm-viewport::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+.scrollbar-separate .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 5px;
+}
+.scrollbar-separate .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
 
 

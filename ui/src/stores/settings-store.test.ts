@@ -280,4 +280,51 @@ describe("settings-store", () => {
     const { claude } = useSettingsStore.getState();
     expect(claude.syncCwd).toBe("skip");
   });
+
+  // -- Scrollbar mode settings --
+
+  it("has default scrollbarMode of overlay in convenience settings", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.scrollbarMode).toBe("overlay");
+  });
+
+  it("setConvenience updates scrollbarMode to separate", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarMode: "separate" });
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("separate");
+  });
+
+  it("setConvenience updates scrollbarMode to overlay", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarMode: "separate" });
+    useSettingsStore.getState().setConvenience({ scrollbarMode: "overlay" });
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("overlay");
+  });
+
+  it("setConvenience scrollbarMode does not affect other convenience fields", () => {
+    useSettingsStore.getState().setConvenience({ scrollbarMode: "separate" });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.smartPaste).toBe(true);
+    expect(convenience.copyOnSelect).toBe(true);
+    expect(convenience.scrollbarMode).toBe("separate");
+  });
+
+  it("loadFromSettings loads scrollbarMode from convenience", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarMode: "separate" as const },
+    });
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("separate");
+  });
+
+  it("loadFromSettings fills missing scrollbarMode with overlay default", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("overlay");
+  });
+
+  it("loadFromSettings without convenience preserves scrollbarMode default", () => {
+    useSettingsStore.getState().loadFromSettings({
+      font: { face: "Fira Code", size: 16, weight: "normal" },
+    });
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("overlay");
+  });
 });

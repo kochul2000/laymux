@@ -527,6 +527,9 @@ export function TerminalView({
     return scheme?.background || "#1e1e2e";
   })();
 
+  // Read scrollbar mode from convenience settings
+  const scrollbarMode = useSettingsStore((s) => s.convenience.scrollbarMode ?? "overlay");
+
   // Read padding from profile settings
   const padding = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profile)?.padding,
@@ -536,10 +539,12 @@ export function TerminalView({
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
+  const scrollbarCls = scrollbarMode === "separate" ? "scrollbar-separate" : "scrollbar-overlay";
+
   return (
     <div
       data-testid={`terminal-view-${instanceId}`}
-      className="h-full w-full"
+      className={`h-full w-full ${scrollbarCls}`}
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,

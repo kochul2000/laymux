@@ -397,4 +397,30 @@ describe("SettingsView", () => {
     await user.selectOptions(select, "command");
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
   });
+
+  // -- Scrollbar mode setting --
+
+  it("shows scrollbar mode select in Convenience section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-convenience"));
+    expect(screen.getByTestId("scrollbar-mode-select")).toBeInTheDocument();
+  });
+
+  it("scrollbar mode defaults to overlay", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("scrollbar-mode-select") as HTMLSelectElement;
+    expect(select.value).toBe("overlay");
+  });
+
+  it("changing scrollbar mode updates store", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("scrollbar-mode-select");
+    await user.selectOptions(select, "separate");
+    expect(useSettingsStore.getState().convenience.scrollbarMode).toBe("separate");
+  });
 });
