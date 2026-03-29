@@ -1502,6 +1502,7 @@ interface SettingsDraftCtx {
   registerFlush: (id: string, fn: FlushFn) => void;
   registerReset: (id: string, fn: FlushFn) => void;
   markDirty: () => void;
+  clearDirty: () => void;
   draftValues: React.MutableRefObject<Map<string, unknown>>;
 }
 const defaultDraftValues = { current: new Map<string, unknown>() };
@@ -1509,6 +1510,7 @@ const SettingsDraftContext = createContext<SettingsDraftCtx>({
   registerFlush: () => {},
   registerReset: () => {},
   markDirty: () => {},
+  clearDirty: () => {},
   draftValues: defaultDraftValues,
 });
 
@@ -1520,7 +1522,7 @@ function useSettingsDraft() {
 /** Hook: local draft state that flushes on Save and resets on Discard.
  *  Draft values are persisted in a shared Map so they survive section unmount/remount. */
 function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const { registerFlush, registerReset, markDirty, draftValues } = useSettingsDraft();
+  const { registerFlush, registerReset, markDirty, clearDirty, draftValues } = useSettingsDraft();
 
   const setterRef = useRef(storeSetter);
   setterRef.current = storeSetter;
@@ -1536,6 +1538,19 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
   useEffect(() => {
     draftValues.current.set(id, draft);
   }, [id, draft, draftValues]);
+
+  // #51: Sync draft when store value changes externally (e.g. settings.json hot-reload)
+  // Uses JSON serialization to detect deep changes — Windows Terminal approach: full reset.
+  const prevStoreJson = useRef(JSON.stringify(storeValue));
+  useEffect(() => {
+    const json = JSON.stringify(storeValue);
+    if (json !== prevStoreJson.current) {
+      prevStoreJson.current = json;
+      setDraft(storeValue);
+      draftValues.current.set(id, storeValue);
+      clearDirty();
+    }
+  }, [storeValue, id, draftValues, clearDirty]);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -1618,7 +1633,8 @@ export function SettingsView() {
     resetMapRef.current.set(id, fn);
   }, []);
   const markDirty = useCallback(() => setDirty(true), []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, draftValues: draftValuesRef }).current;
+  const clearDirty = useCallback(() => setDirty(false), []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, clearDirty, draftValues: draftValuesRef }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
