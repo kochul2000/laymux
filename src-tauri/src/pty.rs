@@ -70,10 +70,7 @@ impl PtyHandle {
 
 /// Spawn a PTY process for the given terminal session.
 /// Returns a PtyHandle and starts a reader thread that calls `on_output` with data chunks.
-pub fn spawn_pty<F>(
-    session: &TerminalSession,
-    on_output: F,
-) -> Result<PtyHandle, String>
+pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle, String>
 where
     F: Fn(Vec<u8>) + Send + 'static,
 {
@@ -268,7 +265,10 @@ mod tests {
             let _ = tx.send(data);
         });
 
-        assert!(handle.is_ok(), "PTY spawn should succeed with starting_directory");
+        assert!(
+            handle.is_ok(),
+            "PTY spawn should succeed with starting_directory"
+        );
         let handle = handle.unwrap();
 
         // Ask PowerShell for its current directory
@@ -279,7 +279,10 @@ mod tests {
             if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
                 output.push_str(&String::from_utf8_lossy(&data));
                 // temp dir path should appear (case-insensitive check)
-                if output.to_lowercase().contains(&temp_str.to_lowercase().replace('\\', "\\")) {
+                if output
+                    .to_lowercase()
+                    .contains(&temp_str.to_lowercase().replace('\\', "\\"))
+                {
                     break;
                 }
             }
@@ -300,7 +303,8 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
-        }).unwrap();
+        })
+        .unwrap();
 
         // Check that LX_TERMINAL_ID is set
         let _ = handle.write(b"echo $env:LX_TERMINAL_ID\r\n");

@@ -31,10 +31,10 @@ interface PaneControlBarProps {
 }
 
 // ─── Design tokens ───────────────────────────────────────
-const BAR_H = 28;                     // bar height in px
-const BTN_H = 22;                     // button height
-const BTN_MIN_W = 22;                 // icon-only button width
-const RADIUS = 2;                     // border radius
+const BAR_H = 28; // bar height in px
+const BTN_H = 22; // button height
+const BTN_MIN_W = 22; // icon-only button width
+const RADIUS = 2; // border radius
 
 const barBg = "var(--bg-surface)";
 const barBgHover = "rgba(24,24,37,0.96)";
@@ -75,8 +75,12 @@ function BarBtn({
         transition: "background 0.1s",
         ...style,
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.background = "transparent";
+      }}
     >
       {children}
     </button>
@@ -99,12 +103,12 @@ function ViewSelect({
   const visibleProfiles = profiles.filter((p) => !p.hidden);
 
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const effectiveProfile = currentView.type === "TerminalView"
-    ? ((currentView.profile as string) || defaultProfile || visibleProfiles[0]?.name || "")
-    : "";
-  const value = currentView.type === "TerminalView"
-    ? `TerminalView:${effectiveProfile}`
-    : currentView.type;
+  const effectiveProfile =
+    currentView.type === "TerminalView"
+      ? (currentView.profile as string) || defaultProfile || visibleProfiles[0]?.name || ""
+      : "";
+  const value =
+    currentView.type === "TerminalView" ? `TerminalView:${effectiveProfile}` : currentView.type;
 
   return (
     <select
@@ -134,7 +138,9 @@ function ViewSelect({
     >
       <option value="EmptyView">Empty</option>
       {visibleProfiles.map((p) => (
-        <option key={p.name} value={`TerminalView:${p.name}`}>{p.name}</option>
+        <option key={p.name} value={`TerminalView:${p.name}`}>
+          {p.name}
+        </option>
       ))}
       <option value="BrowserPreviewView">Browser</option>
       <option value="MemoView">Memo</option>
@@ -164,70 +170,121 @@ function BarContent({
         <ViewSelect currentView={currentView} onChange={actions.onChangeView} />
       )}
 
-      {currentView.type === "TerminalView" && actions.onToggleCwdSend && (() => {
-        const isOn = (currentView.cwdSend ?? true) as boolean;
-        return (
-          <>
-            <Sep />
+      {currentView.type === "TerminalView" &&
+        actions.onToggleCwdSend &&
+        (() => {
+          const isOn = (currentView.cwdSend ?? true) as boolean;
+          return (
+            <>
+              <Sep />
+              <BarBtn
+                testId="pane-control-cwd-send"
+                onClick={actions.onToggleCwdSend}
+                title={isOn ? "CWD Send (on)" : "CWD Send (off)"}
+                active={isOn}
+                style={isOn ? undefined : { opacity: 0.4 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M4 5l3-3 3 3Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                    fill={isOn ? "currentColor" : "none"}
+                  />
+                  <path d="M7 5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </BarBtn>
+            </>
+          );
+        })()}
+      {currentView.type === "TerminalView" &&
+        actions.onToggleCwdReceive &&
+        (() => {
+          const isOn = (currentView.cwdReceive ?? true) as boolean;
+          return (
             <BarBtn
-              testId="pane-control-cwd-send"
-              onClick={actions.onToggleCwdSend}
-              title={isOn ? "CWD Send (on)" : "CWD Send (off)"}
+              testId="pane-control-cwd-receive"
+              onClick={actions.onToggleCwdReceive}
+              title={isOn ? "CWD Receive (on)" : "CWD Receive (off)"}
               active={isOn}
               style={isOn ? undefined : { opacity: 0.4 }}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M4 5l3-3 3 3Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"
-                  fill={isOn ? "currentColor" : "none"} />
-                <path d="M7 5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                <path
+                  d="M4 7l3 3 3-3Z"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                  fill={isOn ? "currentColor" : "none"}
+                />
+                <path d="M7 2v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                 <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
             </BarBtn>
-          </>
-        );
-      })()}
-      {currentView.type === "TerminalView" && actions.onToggleCwdReceive && (() => {
-        const isOn = (currentView.cwdReceive ?? true) as boolean;
-        return (
-          <BarBtn
-            testId="pane-control-cwd-receive"
-            onClick={actions.onToggleCwdReceive}
-            title={isOn ? "CWD Receive (on)" : "CWD Receive (off)"}
-            active={isOn}
-            style={isOn ? undefined : { opacity: 0.4 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M4 7l3 3 3-3Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"
-                fill={isOn ? "currentColor" : "none"} />
-              <path d="M7 2v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-            </svg>
-          </BarBtn>
-        );
-      })()}
+          );
+        })()}
 
       <Sep />
 
       {actions.onSplitH && (
         <BarBtn testId="pane-control-split-h" onClick={actions.onSplitH} title="Split horizontal">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="1" y="1" width="12" height="5" rx="1" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="1" y="8" width="12" height="5" rx="1" stroke="currentColor" strokeWidth="1.2" />
+            <rect
+              x="1"
+              y="1"
+              width="12"
+              height="5"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="1"
+              y="8"
+              width="12"
+              height="5"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
           </svg>
         </BarBtn>
       )}
       {actions.onSplitV && (
         <BarBtn testId="pane-control-split-v" onClick={actions.onSplitV} title="Split vertical">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="1" y="1" width="5" height="12" rx="1" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="8" y="1" width="5" height="12" rx="1" stroke="currentColor" strokeWidth="1.2" />
+            <rect
+              x="1"
+              y="1"
+              width="5"
+              height="12"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="8"
+              y="1"
+              width="5"
+              height="12"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
           </svg>
         </BarBtn>
       )}
       {actions.onClear && (
         <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M5 3l5 5-3 3-5-5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            <path
+              d="M5 3l5 5-3 3-5-5z"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinejoin="round"
+            />
             <path d="M2 11h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             <path d="M5 3l2.5-1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
           </svg>
@@ -236,7 +293,12 @@ function BarContent({
       {actions.onDelete && (
         <BarBtn testId="pane-control-delete" onClick={actions.onDelete} title="Delete pane" danger>
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <path
+              d="M3 3l6 6M9 3l-6 6"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
           </svg>
         </BarBtn>
       )}
@@ -250,8 +312,13 @@ function BarContent({
         active={mode === "pinned"}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M4.5 3L5 5.5h2L7.5 3" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"
-            fill={mode === "pinned" ? "currentColor" : "none"} />
+          <path
+            d="M4.5 3L5 5.5h2L7.5 3"
+            stroke="currentColor"
+            strokeWidth="1.1"
+            strokeLinejoin="round"
+            fill={mode === "pinned" ? "currentColor" : "none"}
+          />
           <path d="M6 1.5V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
           <path d="M3.5 5.5h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
           <path d="M6 5.5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
@@ -263,7 +330,9 @@ function BarContent({
         title="Minimize"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <circle cx="3" cy="6" r="1" /><circle cx="6" cy="6" r="1" /><circle cx="9" cy="6" r="1" />
+          <circle cx="3" cy="6" r="1" />
+          <circle cx="6" cy="6" r="1" />
+          <circle cx="9" cy="6" r="1" />
         </svg>
       </BarBtn>
     </div>
@@ -271,13 +340,13 @@ function BarContent({
 }
 
 /** Minimized: just a small button that expands the full bar on click. */
-function MinimizedButton({
-  onExpand,
-}: {
-  onExpand: () => void;
-}) {
+function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   return (
-    <div className="absolute right-1 top-1 z-30 flex items-center" style={{ height: BAR_H }} onClick={(e) => e.stopPropagation()}>
+    <div
+      className="absolute right-1 top-1 z-30 flex items-center"
+      style={{ height: BAR_H }}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         data-testid="pane-control-menu-btn"
         onClick={onExpand}
@@ -290,12 +359,18 @@ function MinimizedButton({
           border: `1px solid ${borderClr}`,
           borderRadius: RADIUS,
         }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-overlay)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.4)"; }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "var(--bg-overlay)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.4)";
+        }}
         title="Expand control bar"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <circle cx="3" cy="6" r="1" /><circle cx="6" cy="6" r="1" /><circle cx="9" cy="6" r="1" />
+          <circle cx="3" cy="6" r="1" />
+          <circle cx="6" cy="6" r="1" />
+          <circle cx="9" cy="6" r="1" />
         </svg>
       </button>
     </div>
@@ -303,12 +378,7 @@ function MinimizedButton({
 }
 
 // ─── Main component ─────────────────────────────────────
-export function PaneControlBar({
-  currentView,
-  actions,
-  hovered,
-  children,
-}: PaneControlBarProps) {
+export function PaneControlBar({ currentView, actions, hovered, children }: PaneControlBarProps) {
   const [mode, setMode] = useState<ControlBarMode>("hover");
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";

@@ -82,9 +82,7 @@ describe("useSyncEvents", () => {
       targets: ["t1"],
     });
 
-    const instance = useTerminalStore.getState().instances.find(
-      (i) => i.id === "t1",
-    );
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.cwd).toBe("/home/user/project");
   });
 
@@ -105,9 +103,7 @@ describe("useSyncEvents", () => {
       groupId: "g1",
     });
 
-    const instance = useTerminalStore.getState().instances.find(
-      (i) => i.id === "t1",
-    );
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.branch).toBe("feature/login");
   });
 
@@ -159,9 +155,7 @@ describe("useSyncEvents", () => {
     const callback = mockOnSetTabTitle.mock.calls[0][0];
     callback({ title: "~/project", terminalId: "t1" });
 
-    const instance = useTerminalStore.getState().instances.find(
-      (i) => i.id === "t1",
-    );
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.title).toBe("~/project");
   });
 

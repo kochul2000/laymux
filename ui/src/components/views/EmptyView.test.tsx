@@ -86,9 +86,7 @@ describe("EmptyView", () => {
     // Press "1" - should select first option (first terminal profile)
     await user.keyboard("1");
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "TerminalView" }),
-    );
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: "TerminalView" }));
   });
 
   it("grabs DOM focus when isFocused becomes true", () => {

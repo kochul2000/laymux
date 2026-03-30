@@ -67,10 +67,7 @@ function evaluateCondition(when: string, event: OscEvent): boolean {
     }
 
     // Create a safe evaluation context
-    const fn = new Function(
-      ...Object.keys(vars),
-      `return (${when});`,
-    );
+    const fn = new Function(...Object.keys(vars), `return (${when});`);
     return !!fn(...Object.values(vars));
   } catch {
     return false;

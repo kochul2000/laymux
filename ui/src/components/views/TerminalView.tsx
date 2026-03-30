@@ -18,16 +18,19 @@ import {
   updateTerminalSyncGroup,
   openExternal,
 } from "@/lib/tauri-api";
-import {
-  colorSchemeToXtermTheme,
-  type WTColorScheme,
-} from "@/lib/color-scheme";
+import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, getClaudeCompletionMessage } from "@/lib/activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectClaudeTaskTransition,
+  extractClaudeTaskDesc,
+  getClaudeCompletionMessage,
+} from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -92,12 +95,9 @@ export function TerminalView({
 
     // Resolve theme from settings color scheme (profile → profileDefaults → none)
     const settingsState = useSettingsStore.getState();
-    const profileConfig = settingsState.profiles.find(
-      (p) => p.name === profile,
-    );
-    const schemeName = profileConfig?.colorScheme
-      || settingsState.profileDefaults?.colorScheme
-      || "CampbellClear";
+    const profileConfig = settingsState.profiles.find((p) => p.name === profile);
+    const schemeName =
+      profileConfig?.colorScheme || settingsState.profileDefaults?.colorScheme || "CampbellClear";
     const colorScheme = schemeName
       ? settingsState.colorSchemes.find((cs) => cs.name === schemeName)
       : undefined;
@@ -239,12 +239,17 @@ export function TerminalView({
         const message = getClaudeCompletionMessage(prevTitle, title);
         const wsId = resolveWorkspaceId(instanceId);
         useNotificationStore.getState().addNotification({
-          terminalId: instanceId, workspaceId: wsId, message, level: "success",
+          terminalId: instanceId,
+          workspaceId: wsId,
+          message,
+          level: "success",
         });
       } else if (transition === "started") {
         const taskDesc = extractClaudeTaskDesc(title);
         updateInstanceInfo(instanceId, {
-          lastCommand: taskDesc || "Claude task", lastExitCode: undefined, lastCommandAt: Date.now(),
+          lastCommand: taskDesc || "Claude task",
+          lastExitCode: undefined,
+          lastCommandAt: Date.now(),
         });
       }
     });
@@ -347,8 +352,10 @@ export function TerminalView({
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
-      const enterAlt = text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
-      const leaveAlt = text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
+      const enterAlt =
+        text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
+      const leaveAlt =
+        text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
       if (enterAlt && !leaveAlt && !inAltScreen) {
         inAltScreen = true;
         // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
@@ -482,9 +489,9 @@ export function TerminalView({
       terminal.dispose();
       unregisterInstance(instanceId);
     };
-  // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
-  // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
+    // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, registerInstance, unregisterInstance]);
 
   // Lightweight update when syncGroup changes — no terminal recreation
@@ -538,7 +545,9 @@ export function TerminalView({
         : defaultTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
-    } catch { /* xterm mock may not support options setter */ }
+    } catch {
+      /* xterm mock may not support options setter */
+    }
   }, [currentSchemeName, colorSchemes, font]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
@@ -552,7 +561,9 @@ export function TerminalView({
       const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
       term.options.overviewRuler = { width: newWidth };
       fitAddonRef.current?.fit();
-    } catch { /* xterm mock may not support options setter */ }
+    } catch {
+      /* xterm mock may not support options setter */
+    }
   }, [scrollbarStyleForEffect]);
 
   // Resolve terminal background for padding area
@@ -564,9 +575,7 @@ export function TerminalView({
   })();
 
   // Read padding from profile settings
-  const padding = useSettingsStore(
-    (s) => s.profiles.find((p) => p.name === profile)?.padding,
-  );
+  const padding = useSettingsStore((s) => s.profiles.find((p) => p.name === profile)?.padding);
   const pt = padding?.top ?? 8;
   const pr = padding?.right ?? 8;
   const pb = padding?.bottom ?? 8;
@@ -574,9 +583,7 @@ export function TerminalView({
 
   // Scrollbar style: overlay (default) renders on top of terminal content,
   // separate reserves space for the scrollbar.
-  const scrollbarStyle = useSettingsStore(
-    (s) => s.convenience.scrollbarStyle ?? "overlay",
-  );
+  const scrollbarStyle = useSettingsStore((s) => s.convenience.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
   return (

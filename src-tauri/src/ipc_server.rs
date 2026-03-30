@@ -76,8 +76,7 @@ where
         // Remove stale socket
         let _ = std::fs::remove_file(&path);
 
-        let listener =
-            UnixListener::bind(&path).map_err(|e| format!("Bind error: {e}"))?;
+        let listener = UnixListener::bind(&path).map_err(|e| format!("Bind error: {e}"))?;
 
         let path_clone = path.clone();
         std::thread::spawn(move || {
@@ -102,8 +101,8 @@ where
     {
         // On Windows, use a TCP listener on localhost as a simple IPC mechanism.
         // Named pipes require additional crate support; TCP localhost is simpler and works.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("Bind error: {e}"))?;
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Bind error: {e}"))?;
         let local_addr = listener
             .local_addr()
             .map_err(|e| format!("Addr error: {e}"))?;
@@ -126,11 +125,7 @@ where
                             };
                             let mut reader = BufReader::new(&stream);
                             let mut writer = writer;
-                            let _ = handle_ipc_stream(
-                                &mut reader,
-                                &mut writer,
-                                |msg| handler(msg),
-                            );
+                            let _ = handle_ipc_stream(&mut reader, &mut writer, |msg| handler(msg));
                         });
                     }
                     Err(_) => break,
@@ -158,9 +153,7 @@ mod tests {
         let mut output = Vec::new();
 
         let result = handle_ipc_stream(&mut reader, &mut output, |msg| match msg {
-            LxMessage::Notify { message, .. } => {
-                LxResponse::ok(Some(format!("got: {message}")))
-            }
+            LxMessage::Notify { message, .. } => LxResponse::ok(Some(format!("got: {message}"))),
             _ => LxResponse::err("unexpected".into()),
         });
 
@@ -176,9 +169,7 @@ mod tests {
         let mut reader = BufReader::new(Cursor::new("not json\n"));
         let mut output = Vec::new();
 
-        let result = handle_ipc_stream(&mut reader, &mut output, |_| {
-            LxResponse::ok(None)
-        });
+        let result = handle_ipc_stream(&mut reader, &mut output, |_| LxResponse::ok(None));
 
         assert!(result.is_ok());
         let response_str = String::from_utf8(output).unwrap();
@@ -192,9 +183,7 @@ mod tests {
         let mut reader = BufReader::new(Cursor::new("\n\n"));
         let mut output = Vec::new();
 
-        let result = handle_ipc_stream(&mut reader, &mut output, |_| {
-            LxResponse::ok(None)
-        });
+        let result = handle_ipc_stream(&mut reader, &mut output, |_| LxResponse::ok(None));
 
         assert!(result.is_ok());
         assert!(output.is_empty()); // No response for empty lines

@@ -71,7 +71,12 @@ fn default_padding_val() -> u16 {
 
 impl Default for PaddingSettings {
     fn default() -> Self {
-        Self { top: 8, right: 8, bottom: 8, left: 8 }
+        Self {
+            top: 8,
+            right: 8,
+            bottom: 8,
+            left: 8,
+        }
     }
 }
 
@@ -140,12 +145,24 @@ impl Default for Profile {
     }
 }
 
-fn default_cursor_shape() -> String { "bar".into() }
-fn default_scrollback_lines() -> u32 { 9001 }
-fn default_opacity() -> u8 { 100 }
-fn default_bell_style() -> String { "audible".into() }
-fn default_close_on_exit() -> String { "automatic".into() }
-fn default_antialiasing_mode() -> String { "grayscale".into() }
+fn default_cursor_shape() -> String {
+    "bar".into()
+}
+fn default_scrollback_lines() -> u32 {
+    9001
+}
+fn default_opacity() -> u8 {
+    100
+}
+fn default_bell_style() -> String {
+    "audible".into()
+}
+fn default_close_on_exit() -> String {
+    "automatic".into()
+}
+fn default_antialiasing_mode() -> String {
+    "grayscale".into()
+}
 
 /// Keybinding entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -540,16 +557,14 @@ impl Default for Settings {
                     },
                 }],
             }],
-            docks: vec![
-                DockSetting {
-                    position: "left".into(),
-                    active_view: Some("WorkspaceSelectorView".into()),
-                    views: vec!["WorkspaceSelectorView".into()],
-                    visible: true,
-                    size: default_dock_size(),
-                    panes: Vec::new(),
-                },
-            ],
+            docks: vec![DockSetting {
+                position: "left".into(),
+                active_view: Some("WorkspaceSelectorView".into()),
+                views: vec!["WorkspaceSelectorView".into()],
+                visible: true,
+                size: default_dock_size(),
+                panes: Vec::new(),
+            }],
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
@@ -612,7 +627,9 @@ fn migrate_settings(settings: &mut Settings) {
     }
 
     // Remove CMD from profiles list
-    settings.profiles.retain(|p| !p.name.eq_ignore_ascii_case("cmd"));
+    settings
+        .profiles
+        .retain(|p| !p.name.eq_ignore_ascii_case("cmd"));
 
     // Deduplicate workspace names
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -684,7 +701,8 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
 }
 
@@ -785,7 +803,15 @@ mod tests {
     fn profile_new_fields_default() {
         let profile = Profile::default();
         assert_eq!(profile.cursor_shape, "bar");
-        assert_eq!(profile.padding, PaddingSettings { top: 8, right: 8, bottom: 8, left: 8 });
+        assert_eq!(
+            profile.padding,
+            PaddingSettings {
+                top: 8,
+                right: 8,
+                bottom: 8,
+                left: 8
+            }
+        );
         assert_eq!(profile.scrollback_lines, 9001);
         assert_eq!(profile.opacity, 100);
         assert_eq!(profile.tab_title, "");
@@ -964,7 +990,9 @@ mod tests {
     #[test]
     fn claude_settings_round_trip() {
         let settings = Settings {
-            claude: ClaudeSettings { sync_cwd: ClaudeSyncCwdMode::Command },
+            claude: ClaudeSettings {
+                sync_cwd: ClaudeSyncCwdMode::Command,
+            },
             ..Settings::default()
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -974,7 +1002,11 @@ mod tests {
 
     #[test]
     fn font_weight_round_trip() {
-        let font = FontSettings { face: "Fira Code".into(), size: 14, weight: "bold".into() };
+        let font = FontSettings {
+            face: "Fira Code".into(),
+            size: 14,
+            weight: "bold".into(),
+        };
         let json = serde_json::to_string(&font).unwrap();
         let parsed: FontSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.weight, "bold");
@@ -1034,21 +1066,32 @@ mod tests {
             name: "Test".into(),
             layout_id: None,
             panes: vec![WorkspacePane {
-                x: 0.0, y: 0.0, w: 1.0, h: 1.0,
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
                 view: serde_json::from_value(serde_json::json!({
                     "type": "TerminalView",
                     "profile": "CMD"
-                })).unwrap(),
+                }))
+                .unwrap(),
             }],
         }];
         migrate_settings(&mut settings);
-        assert_eq!(settings.workspaces[0].panes[0].view.extra["profile"], "PowerShell");
+        assert_eq!(
+            settings.workspaces[0].panes[0].view.extra["profile"],
+            "PowerShell"
+        );
     }
 
     #[test]
     fn migrate_removes_cmd_from_profiles() {
         let mut settings = Settings::default();
-        settings.profiles.push(Profile { name: "CMD".into(), command_line: "cmd.exe".into(), ..Profile::default() });
+        settings.profiles.push(Profile {
+            name: "CMD".into(),
+            command_line: "cmd.exe".into(),
+            ..Profile::default()
+        });
         assert_eq!(settings.profiles.len(), 3);
         migrate_settings(&mut settings);
         assert_eq!(settings.profiles.len(), 2);
@@ -1059,12 +1102,31 @@ mod tests {
     fn migrate_deduplicates_workspace_names() {
         let mut settings = Settings::default();
         settings.workspaces = vec![
-            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
-            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
-            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
+            Workspace {
+                id: "ws-1".into(),
+                name: "Dev".into(),
+                layout_id: None,
+                panes: vec![],
+            },
+            Workspace {
+                id: "ws-2".into(),
+                name: "Dev".into(),
+                layout_id: None,
+                panes: vec![],
+            },
+            Workspace {
+                id: "ws-3".into(),
+                name: "Dev".into(),
+                layout_id: None,
+                panes: vec![],
+            },
         ];
         migrate_settings(&mut settings);
-        let names: Vec<&str> = settings.workspaces.iter().map(|w| w.name.as_str()).collect();
+        let names: Vec<&str> = settings
+            .workspaces
+            .iter()
+            .map(|w| w.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Dev", "Dev (2)", "Dev (3)"]);
     }
 
@@ -1092,13 +1154,19 @@ mod tests {
             }
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.profile_defaults.font.face, "JetBrainsMonoBigHangul");
+        assert_eq!(
+            settings.profile_defaults.font.face,
+            "JetBrainsMonoBigHangul"
+        );
         assert_eq!(settings.profile_defaults.font.size, 14);
 
         // Round-trip: serialize then deserialize
         let serialized = serde_json::to_string_pretty(&settings).unwrap();
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(reparsed.profile_defaults.font.face, "JetBrainsMonoBigHangul");
+        assert_eq!(
+            reparsed.profile_defaults.font.face,
+            "JetBrainsMonoBigHangul"
+        );
     }
 
     #[test]
@@ -1153,12 +1221,18 @@ mod tests {
             "appThemeId": "dracula"
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.view_order, vec!["TerminalView", "BrowserPreviewView"]);
+        assert_eq!(
+            settings.view_order,
+            vec!["TerminalView", "BrowserPreviewView"]
+        );
         assert_eq!(settings.app_theme_id, "dracula");
 
         let serialized = serde_json::to_string_pretty(&settings).unwrap();
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(reparsed.view_order, vec!["TerminalView", "BrowserPreviewView"]);
+        assert_eq!(
+            reparsed.view_order,
+            vec!["TerminalView", "BrowserPreviewView"]
+        );
         assert_eq!(reparsed.app_theme_id, "dracula");
     }
 
@@ -1179,7 +1253,11 @@ mod tests {
     #[test]
     fn profile_font_serialized_when_some() {
         let mut profile = Profile::default();
-        profile.font = Some(FontSettings { face: "Mono".into(), size: 12, weight: "normal".into() });
+        profile.font = Some(FontSettings {
+            face: "Mono".into(),
+            size: 12,
+            weight: "normal".into(),
+        });
         let json = serde_json::to_string(&profile).unwrap();
         assert!(json.contains("\"font\""));
         let parsed: Profile = serde_json::from_str(&json).unwrap();

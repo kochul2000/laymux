@@ -78,8 +78,8 @@ describe("Workspace Store E2E", () => {
     it("should handle multiple sequential splits", () => {
       // Split into 4 panes (2x2 grid)
       useWorkspaceStore.getState().splitPane(0, "horizontal"); // 2 panes stacked
-      useWorkspaceStore.getState().splitPane(0, "vertical");   // top-left splits
-      useWorkspaceStore.getState().splitPane(2, "vertical");   // bottom splits
+      useWorkspaceStore.getState().splitPane(0, "vertical"); // top-left splits
+      useWorkspaceStore.getState().splitPane(2, "vertical"); // bottom splits
 
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(ws.panes.length).toBe(4);
@@ -269,8 +269,18 @@ describe("Terminal Store E2E", () => {
   it("should register and unregister terminals", () => {
     const store = useTerminalStore.getState();
     store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t2", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g2", workspaceId: "ws-1" });
+    store.registerInstance({
+      id: "t2",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "g2",
+      workspaceId: "ws-1",
+    });
 
     expect(useTerminalStore.getState().instances.length).toBe(3);
 
@@ -281,9 +291,24 @@ describe("Terminal Store E2E", () => {
 
   it("should filter by sync group", () => {
     const store = useTerminalStore.getState();
-    store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t2", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "project-b", workspaceId: "ws-1" });
+    store.registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "project-a",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t2",
+      profile: "WSL",
+      syncGroup: "project-a",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "project-b",
+      workspaceId: "ws-1",
+    });
     store.registerInstance({ id: "t4", profile: "WSL", syncGroup: "", workspaceId: "ws-1" }); // independent
 
     const groupA = useTerminalStore.getState().getInstancesBySyncGroup("project-a");
@@ -300,7 +325,9 @@ describe("Terminal Store E2E", () => {
   });
 
   it("should update instance info partially", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
 
     useTerminalStore.getState().updateInstanceInfo("t1", { cwd: "/home/user" });
     expect(useTerminalStore.getState().instances[0].cwd).toBe("/home/user");
@@ -321,7 +348,9 @@ describe("Terminal Store E2E", () => {
   });
 
   it("should handle unregistering nonexistent instance", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
     useTerminalStore.getState().unregisterInstance("nonexistent");
     expect(useTerminalStore.getState().instances.length).toBe(1);
   });
@@ -352,7 +381,14 @@ describe("Dock Store E2E", () => {
       docks: [
         { position: "top", activeView: null, views: [], visible: true, size: 200, panes: [] },
         { position: "bottom", activeView: null, views: [], visible: true, size: 200, panes: [] },
-        { position: "left", activeView: "WorkspaceSelectorView", views: ["WorkspaceSelectorView", "SettingsView"], visible: true, size: 250, panes: [] },
+        {
+          position: "left",
+          activeView: "WorkspaceSelectorView",
+          views: ["WorkspaceSelectorView", "SettingsView"],
+          visible: true,
+          size: 250,
+          panes: [],
+        },
         { position: "right", activeView: null, views: [], visible: true, size: 200, panes: [] },
       ],
     });
@@ -457,8 +493,12 @@ describe("Notification Store E2E", () => {
   });
 
   it("should mark read per workspace without affecting others", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "msg1" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-2", message: "msg2" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "msg1" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-2", message: "msg2" });
 
     useNotificationStore.getState().markWorkspaceAsRead("ws-1");
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(0);
@@ -466,9 +506,15 @@ describe("Notification Store E2E", () => {
   });
 
   it("should get latest notification per workspace", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "first" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "second" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "third" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "first" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "second" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "third" });
 
     const latest = useNotificationStore.getState().getLatestNotification("ws-1");
     expect(latest?.message).toBe("third");
@@ -486,7 +532,9 @@ describe("Notification Store E2E", () => {
 
   it("should handle many notifications", () => {
     for (let i = 0; i < 1000; i++) {
-      useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: `Notification ${i}` });
+      useNotificationStore
+        .getState()
+        .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: `Notification ${i}` });
     }
     expect(useNotificationStore.getState().notifications.length).toBe(1000);
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(1000);
@@ -496,9 +544,13 @@ describe("Notification Store E2E", () => {
   });
 
   it("should add notifications after mark-read and show new unread", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "old" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "old" });
     useNotificationStore.getState().markWorkspaceAsRead("ws-1");
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "new" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "new" });
 
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(1);
     expect(useNotificationStore.getState().getLatestNotification("ws-1")?.message).toBe("new");
@@ -510,26 +562,58 @@ describe("Notification Store E2E", () => {
 // ============================================================================
 
 /** Helper: build a full Profile with defaults for test mocks. */
-function makeTestProfile(overrides: { name: string; commandLine: string; colorScheme?: string; startingDirectory?: string; hidden?: boolean }): import("@/stores/settings-store").Profile {
+function makeTestProfile(overrides: {
+  name: string;
+  commandLine: string;
+  colorScheme?: string;
+  startingDirectory?: string;
+  hidden?: boolean;
+}): import("@/stores/settings-store").Profile {
   return {
-    colorScheme: "", startingDirectory: "", hidden: false, startupCommand: "",
-    cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
-    scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
-    closeOnExit: "automatic", antialiasingMode: "grayscale",
-    suppressApplicationTitle: false, snapOnInput: true,
+    colorScheme: "",
+    startingDirectory: "",
+    hidden: false,
+    startupCommand: "",
+    cursorShape: "bar",
+    padding: { top: 8, right: 8, bottom: 8, left: 8 },
+    scrollbackLines: 9001,
+    opacity: 100,
+    tabTitle: "",
+    bellStyle: "audible",
+    closeOnExit: "automatic",
+    antialiasingMode: "grayscale",
+    suppressApplicationTitle: false,
+    snapOnInput: true,
     ...overrides,
   };
 }
 
 /** Helper: build a full ColorScheme with defaults for test mocks. */
-function makeTestColorScheme(overrides: { name: string; foreground?: string; background?: string }): import("@/stores/settings-store").ColorScheme {
+function makeTestColorScheme(overrides: {
+  name: string;
+  foreground?: string;
+  background?: string;
+}): import("@/stores/settings-store").ColorScheme {
   return {
-    foreground: "#CCCCCC", background: "#1E1E1E", cursorColor: "#FFFFFF",
-    selectionBackground: "#264F78", black: "#0C0C0C", red: "#C50F1F",
-    green: "#13A10E", yellow: "#C19C00", blue: "#0037DA", purple: "#881798",
-    cyan: "#3A96DD", white: "#CCCCCC", brightBlack: "#767676",
-    brightRed: "#E74856", brightGreen: "#16C60C", brightYellow: "#F9F1A5",
-    brightBlue: "#3B78FF", brightPurple: "#B4009E", brightCyan: "#61D6D6",
+    foreground: "#CCCCCC",
+    background: "#1E1E1E",
+    cursorColor: "#FFFFFF",
+    selectionBackground: "#264F78",
+    black: "#0C0C0C",
+    red: "#C50F1F",
+    green: "#13A10E",
+    yellow: "#C19C00",
+    blue: "#0037DA",
+    purple: "#881798",
+    cyan: "#3A96DD",
+    white: "#CCCCCC",
+    brightBlack: "#767676",
+    brightRed: "#E74856",
+    brightGreen: "#16C60C",
+    brightYellow: "#F9F1A5",
+    brightBlue: "#3B78FF",
+    brightPurple: "#B4009E",
+    brightCyan: "#61D6D6",
     brightWhite: "#F2F2F2",
     ...overrides,
   };
@@ -552,9 +636,7 @@ describe("Settings Store E2E", () => {
     useSettingsStore.getState().loadFromSettings({
       profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
       defaultProfile: "WSL",
-      colorSchemes: [
-        makeTestColorScheme({ name: "Dark", foreground: "#fff", background: "#000" }),
-      ],
+      colorSchemes: [makeTestColorScheme({ name: "Dark", foreground: "#fff", background: "#000" })],
     });
 
     const state = useSettingsStore.getState();
@@ -568,12 +650,16 @@ describe("Settings Store E2E", () => {
   });
 
   it("should add and remove color schemes", () => {
-    useSettingsStore.getState().addColorScheme(
-      makeTestColorScheme({ name: "Solarized", foreground: "#839496", background: "#002b36" }),
-    );
-    useSettingsStore.getState().addColorScheme(
-      makeTestColorScheme({ name: "Monokai", foreground: "#F8F8F2", background: "#272822" }),
-    );
+    useSettingsStore
+      .getState()
+      .addColorScheme(
+        makeTestColorScheme({ name: "Solarized", foreground: "#839496", background: "#002b36" }),
+      );
+    useSettingsStore
+      .getState()
+      .addColorScheme(
+        makeTestColorScheme({ name: "Monokai", foreground: "#F8F8F2", background: "#272822" }),
+      );
 
     expect(useSettingsStore.getState().colorSchemes.length).toBe(2);
 
@@ -593,22 +679,30 @@ describe("Settings Store E2E", () => {
   });
 
   it("should handle removing at out-of-range index", () => {
-    useSettingsStore.getState().addColorScheme(makeTestColorScheme({ name: "Test", foreground: "", background: "" }));
+    useSettingsStore
+      .getState()
+      .addColorScheme(makeTestColorScheme({ name: "Test", foreground: "", background: "" }));
     useSettingsStore.getState().removeColorScheme(99);
     // Should not remove anything
     expect(useSettingsStore.getState().colorSchemes.length).toBe(1);
   });
 
   it("should handle font size edge values via profileDefaults", () => {
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "Mono", size: 0, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Mono", size: 0, weight: "normal" } });
     expect(useSettingsStore.getState().profileDefaults.font.size).toBe(0);
 
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "Mono", size: 999, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Mono", size: 999, weight: "normal" } });
     expect(useSettingsStore.getState().profileDefaults.font.size).toBe(999);
   });
 
   it("should handle empty font face via profileDefaults", () => {
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "", size: 14, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "", size: 14, weight: "normal" } });
     expect(useSettingsStore.getState().profileDefaults.font.face).toBe("");
   });
 });
@@ -764,9 +858,7 @@ describe("OSC Parser E2E", () => {
     });
 
     it("should handle malformed 'when' condition gracefully", () => {
-      const hooks: OscHook[] = [
-        { osc: 7, when: "this.is.invalid(((syntax", run: "cmd" },
-      ];
+      const hooks: OscHook[] = [{ osc: 7, when: "this.is.invalid(((syntax", run: "cmd" }];
       const event: OscEvent = { code: 7, data: "/path" };
       // Should not throw, returns empty
       expect(matchHook(hooks, event).length).toBe(0);
@@ -905,7 +997,7 @@ describe("Lx Command Parser E2E", () => {
     });
 
     it("should parse send-command with quoted string", () => {
-      const result = parseLxCommand("lx send-command \"echo hello world\" --group g1");
+      const result = parseLxCommand('lx send-command "echo hello world" --group g1');
       expect(result!.action).toBe("send-command");
       expect(result!.args).toEqual(["echo hello world"]);
       expect(result!.flags["group"]).toBe("g1");
@@ -1035,7 +1127,14 @@ describe("Cross-Store Integration E2E", () => {
       docks: [
         { position: "top", activeView: null, views: [], visible: true, size: 200, panes: [] },
         { position: "bottom", activeView: null, views: [], visible: true, size: 200, panes: [] },
-        { position: "left", activeView: "WorkspaceSelectorView", views: ["WorkspaceSelectorView"], visible: true, size: 250, panes: [] },
+        {
+          position: "left",
+          activeView: "WorkspaceSelectorView",
+          views: ["WorkspaceSelectorView"],
+          visible: true,
+          size: 250,
+          panes: [],
+        },
         { position: "right", activeView: null, views: [], visible: true, size: 200, panes: [] },
       ],
     });
@@ -1044,8 +1143,15 @@ describe("Cross-Store Integration E2E", () => {
 
   it("should simulate full workspace session with terminals and notifications", () => {
     // 1. Register terminals in a workspace
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "Project A", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "PowerShell", syncGroup: "Project A", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "Project A", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({
+      id: "t2",
+      profile: "PowerShell",
+      syncGroup: "Project A",
+      workspaceId: "ws-1",
+    });
 
     // 2. Receive sync-cwd event (simulate backend event)
     const targets = ["t1", "t2"];
@@ -1055,7 +1161,9 @@ describe("Cross-Store Integration E2E", () => {
 
     // 3. Receive notification
     const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: activeWsId, message: "Build complete" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: activeWsId, message: "Build complete" });
 
     // 4. Verify state
     const instances = useTerminalStore.getState().instances;
@@ -1068,9 +1176,18 @@ describe("Cross-Store Integration E2E", () => {
   });
 
   it("should simulate sync-branch updating all group terminals", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "other", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t2", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "other",
+      workspaceId: "ws-1",
+    });
 
     // Sync branch for "dev" group
     const groupTerminals = useTerminalStore.getState().getInstancesBySyncGroup("dev");
@@ -1118,9 +1235,15 @@ describe("Cross-Store Integration E2E", () => {
     const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
 
     // Notifications arrive for both workspaces
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Build failed" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Tests passed" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Retry started" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Build failed" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Tests passed" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Retry started" });
 
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(2);
     expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(1);
@@ -1132,9 +1255,15 @@ describe("Cross-Store Integration E2E", () => {
   });
 
   it("should simulate terminal close and sync group cleanup", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t2", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
 
     expect(useTerminalStore.getState().getInstancesBySyncGroup("g1").length).toBe(3);
 
@@ -1267,7 +1396,6 @@ describe("Complex Workspace Layout Scenarios", () => {
     // All have 3 panes from the dev-split layout
     for (const ws of workspaces) {
       expect(ws.panes.length).toBe(3);
-
     }
   });
 

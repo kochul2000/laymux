@@ -25,7 +25,9 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
   for (const app of INTERACTIVE_APPS) {
     // Use word boundary matching to avoid false positives
     // e.g. "vi" should not match "Review", "vim" should not match "environment"
-    const pattern = new RegExp(`(?:^|[\\s\\-:])${app.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[\\s\\-:])`);
+    const pattern = new RegExp(
+      `(?:^|[\\s\\-:])${app.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[\\s\\-:])`,
+    );
     if (pattern.test(title) || title === app.title) {
       return { type: "interactiveApp", name: app.name };
     }
@@ -109,11 +111,11 @@ export function isClaudeIdle(title: string): boolean {
 /** Strip the prefix character (✳ or spinner) from a Claude title to extract the task description. */
 export function extractClaudeTaskDesc(title: string): string {
   // Strip idle prefix (correct or garbled)
-  let result = title.replace(/^\u2733\s*/, "");           // ✳ (correct UTF-8)
-  result = result.replace(/^\udce2\uc454\s*/, "");        // garbled ✳
+  let result = title.replace(/^\u2733\s*/, ""); // ✳ (correct UTF-8)
+  result = result.replace(/^\udce2\uc454\s*/, ""); // garbled ✳
   // If still has a single non-ASCII prefix char (spinner like ✶✻✽✢·), strip it
   if (result === title) {
-    result = result.replace(/^[^\x20-\x7E]\s*/, "");     // strip one non-ASCII char + space
+    result = result.replace(/^[^\x20-\x7E]\s*/, ""); // strip one non-ASCII char + space
   }
   return result.trim();
 }

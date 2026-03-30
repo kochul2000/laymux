@@ -10,7 +10,6 @@ import { GridEditToolbar } from "./GridEditToolbar";
 import { useGridStore } from "@/stores/grid-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
-import { persistSession } from "@/lib/persist-session";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {

@@ -125,7 +125,9 @@ describe("AppLayout", () => {
     const { rerender } = render(<AppLayout />);
     const dockBefore = screen.getByTestId("dock-left");
 
-    act(() => { useDockStore.getState().toggleLayoutMode(); });
+    act(() => {
+      useDockStore.getState().toggleLayoutMode();
+    });
     rerender(<AppLayout />);
 
     const dockAfter = screen.getByTestId("dock-left");
@@ -137,7 +139,9 @@ describe("AppLayout", () => {
     const paneIdBefore = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
 
     render(<AppLayout />);
-    act(() => { useDockStore.getState().toggleLayoutMode(); });
+    act(() => {
+      useDockStore.getState().toggleLayoutMode();
+    });
 
     const paneIdAfter = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
     expect(paneIdAfter).toBe(paneIdBefore);

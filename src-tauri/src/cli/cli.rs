@@ -44,9 +44,7 @@ pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
         }
         "notify" => {
             let level_pos = args.iter().position(|a| a == "--level");
-            let level = level_pos
-                .and_then(|i| args.get(i + 1))
-                .cloned();
+            let level = level_pos.and_then(|i| args.get(i + 1)).cloned();
             // Collect message parts, skipping --level and its value
             let message_parts: Vec<&str> = args[1..]
                 .iter()
@@ -70,10 +68,7 @@ pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
         }
         "set-tab-title" => {
             let title = args[1..].join(" ");
-            Ok(LxMessage::SetTabTitle {
-                title,
-                terminal_id,
-            })
+            Ok(LxMessage::SetTabTitle { title, terminal_id })
         }
         "get-cwd" => Ok(LxMessage::GetCwd { terminal_id }),
         "get-branch" => Ok(LxMessage::GetBranch { terminal_id }),
@@ -95,16 +90,11 @@ pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
         }
         "open-file" => {
             let path = args.get(1).cloned().unwrap_or_default();
-            Ok(LxMessage::OpenFile {
-                path,
-                terminal_id,
-            })
+            Ok(LxMessage::OpenFile { path, terminal_id })
         }
         "set-command-status" => {
             let command_pos = args.iter().position(|a| a == "--command");
-            let command = command_pos
-                .and_then(|i| args.get(i + 1))
-                .cloned();
+            let command = command_pos.and_then(|i| args.get(i + 1)).cloned();
 
             let exit_code_pos = args.iter().position(|a| a == "--exit-code");
             let exit_code = exit_code_pos
@@ -136,8 +126,7 @@ pub fn send_message<R: BufRead, W: Write>(
         .read_line(&mut response_line)
         .map_err(|e| format!("Read error: {e}"))?;
 
-    serde_json::from_str(response_line.trim())
-        .map_err(|e| format!("Response parse error: {e}"))
+    serde_json::from_str(response_line.trim()).map_err(|e| format!("Response parse error: {e}"))
 }
 
 #[cfg(test)]
@@ -317,7 +306,9 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            LxMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus {
+                command, exit_code, ..
+            } => {
                 assert_eq!(command, Some("npm test".into()));
                 assert_eq!(exit_code, None);
             }
@@ -334,7 +325,9 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            LxMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus {
+                command, exit_code, ..
+            } => {
                 assert_eq!(command, None);
                 assert_eq!(exit_code, Some(0));
             }
@@ -353,7 +346,9 @@ mod tests {
         ];
         let msg = parse_args(&args).unwrap();
         match msg {
-            LxMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus {
+                command, exit_code, ..
+            } => {
                 assert_eq!(command, Some("npm build".into()));
                 assert_eq!(exit_code, Some(1));
             }

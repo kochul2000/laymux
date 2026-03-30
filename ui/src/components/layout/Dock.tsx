@@ -57,12 +57,17 @@ export function Dock({
     setSingleHovered(true);
     if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current);
     if (hoverIdleSeconds > 0) {
-      singleHoverTimerRef.current = setTimeout(() => setSingleHovered(false), hoverIdleSeconds * 1000);
+      singleHoverTimerRef.current = setTimeout(
+        () => setSingleHovered(false),
+        hoverIdleSeconds * 1000,
+      );
     }
   }, [hoverIdleSeconds]);
 
   useEffect(() => {
-    return () => { if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current); };
+    return () => {
+      if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current);
+    };
   }, []);
 
   // Split panes rendering — 2D absolute positioned grid (same as WorkspaceArea)
@@ -122,10 +127,7 @@ export function Dock({
       )}
       <div className="relative min-w-0 flex-1">
         {hasIframe && !isFocused && (
-          <div
-            data-testid={`dock-focus-overlay-${position}`}
-            className="absolute inset-0 z-10"
-          />
+          <div data-testid={`dock-focus-overlay-${position}`} className="absolute inset-0 z-10" />
         )}
         <PaneControlBar
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
@@ -133,17 +135,30 @@ export function Dock({
           actions={{
             onSplitH: onSplitPane ? () => onSplitPane("horizontal", singlePaneId) : undefined,
             onSplitV: onSplitPane ? () => onSplitPane("vertical", singlePaneId) : undefined,
-            onClear: activeView && activeView !== "EmptyView"
-              ? singlePaneId && onSetPaneView
-                ? () => onSetPaneView(singlePaneId, { type: "EmptyView" })
-                : onSwitchView ? () => onSwitchView("EmptyView") : undefined
-              : undefined,
-            onToggleCwdSend: singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
-              ? () => onSetPaneView(singlePaneId, { ...panes[0].view, cwdSend: !((panes[0].view.cwdSend as boolean) ?? true) })
-              : undefined,
-            onToggleCwdReceive: singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
-              ? () => onSetPaneView(singlePaneId, { ...panes[0].view, cwdReceive: !((panes[0].view.cwdReceive as boolean) ?? true) })
-              : undefined,
+            onClear:
+              activeView && activeView !== "EmptyView"
+                ? singlePaneId && onSetPaneView
+                  ? () => onSetPaneView(singlePaneId, { type: "EmptyView" })
+                  : onSwitchView
+                    ? () => onSwitchView("EmptyView")
+                    : undefined
+                : undefined,
+            onToggleCwdSend:
+              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+                ? () =>
+                    onSetPaneView(singlePaneId, {
+                      ...panes[0].view,
+                      cwdSend: !((panes[0].view.cwdSend as boolean) ?? true),
+                    })
+                : undefined,
+            onToggleCwdReceive:
+              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+                ? () =>
+                    onSetPaneView(singlePaneId, {
+                      ...panes[0].view,
+                      cwdReceive: !((panes[0].view.cwdReceive as boolean) ?? true),
+                    })
+                : undefined,
           }}
         >
           <ViewRenderer
@@ -154,7 +169,9 @@ export function Dock({
             onSelectView={
               singlePaneId
                 ? (config) => onSetPaneView?.(singlePaneId, config)
-                : onSwitchView ? (config) => onSwitchView(config.type, config) : undefined
+                : onSwitchView
+                  ? (config) => onSwitchView(config.type, config)
+                  : undefined
             }
             emptyViewContext="dock"
           />
@@ -190,13 +207,16 @@ function DockGrid({
     return ws?.name ?? "";
   });
 
-  const handlePaneHoverActivity = useCallback((paneId: string) => {
-    setHoveredPane(paneId);
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    if (hoverIdleSeconds > 0) {
-      hoverTimerRef.current = setTimeout(() => setHoveredPane(null), hoverIdleSeconds * 1000);
-    }
-  }, [hoverIdleSeconds]);
+  const handlePaneHoverActivity = useCallback(
+    (paneId: string) => {
+      setHoveredPane(paneId);
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (hoverIdleSeconds > 0) {
+        hoverTimerRef.current = setTimeout(() => setHoveredPane(null), hoverIdleSeconds * 1000);
+      }
+    },
+    [hoverIdleSeconds],
+  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -210,7 +230,9 @@ function DockGrid({
   }, []);
 
   useEffect(() => {
-    return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); };
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    };
   }, []);
 
   return (
@@ -249,13 +271,24 @@ function DockGrid({
                 onSplitH: onSplitPane ? () => onSplitPane("horizontal", pane.id) : undefined,
                 onSplitV: onSplitPane ? () => onSplitPane("vertical", pane.id) : undefined,
                 onClear: () => onSetPaneView?.(pane.id, { type: "EmptyView" }),
-                onDelete: panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
-                onToggleCwdSend: onSetPaneView && pane.view.type === "TerminalView"
-                  ? () => onSetPaneView(pane.id, { ...pane.view, cwdSend: !((pane.view.cwdSend as boolean) ?? true) })
-                  : undefined,
-                onToggleCwdReceive: onSetPaneView && pane.view.type === "TerminalView"
-                  ? () => onSetPaneView(pane.id, { ...pane.view, cwdReceive: !((pane.view.cwdReceive as boolean) ?? true) })
-                  : undefined,
+                onDelete:
+                  panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
+                onToggleCwdSend:
+                  onSetPaneView && pane.view.type === "TerminalView"
+                    ? () =>
+                        onSetPaneView(pane.id, {
+                          ...pane.view,
+                          cwdSend: !((pane.view.cwdSend as boolean) ?? true),
+                        })
+                    : undefined,
+                onToggleCwdReceive:
+                  onSetPaneView && pane.view.type === "TerminalView"
+                    ? () =>
+                        onSetPaneView(pane.id, {
+                          ...pane.view,
+                          cwdReceive: !((pane.view.cwdReceive as boolean) ?? true),
+                        })
+                    : undefined,
               }}
             >
               <ViewRenderer

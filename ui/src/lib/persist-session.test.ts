@@ -69,7 +69,9 @@ describe("persistSession", () => {
   });
 
   it("includes profileDefaults font in saved settings", async () => {
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "Fira Code", size: 18, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Fira Code", size: 18, weight: "normal" } });
 
     await persistSession();
 
@@ -79,7 +81,9 @@ describe("persistSession", () => {
   });
 
   it("includes per-profile font override in saved settings", async () => {
-    useSettingsStore.getState().updateProfile(0, { font: { face: "JetBrains Mono", size: 16, weight: "bold" } });
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "JetBrains Mono", size: 16, weight: "bold" } });
 
     await persistSession();
 
@@ -228,10 +232,12 @@ describe("persistSession", () => {
 
   it("preserves dock panes with view config through save", async () => {
     // Set up a dock pane with a profile (TerminalView with WSL)
-    useDockStore.getState().setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
-      type: "TerminalView",
-      profile: "WSL",
-    });
+    useDockStore
+      .getState()
+      .setDockPaneView("left", useDockStore.getState().getDock("left")!.panes[0].id, {
+        type: "TerminalView",
+        profile: "WSL",
+      });
 
     await persistSession();
 

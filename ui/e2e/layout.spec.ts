@@ -1,7 +1,9 @@
 import { test, expect } from "./fixtures";
 
 test.describe("AppLayout structure", () => {
-  test("renders full layout hierarchy: toolbar → docks → workspace area", async ({ appPage: page }) => {
+  test("renders full layout hierarchy: toolbar → docks → workspace area", async ({
+    appPage: page,
+  }) => {
     await expect(page.getByTestId("grid-edit-toolbar")).toBeVisible();
     await expect(page.getByTestId("dock-left")).toBeVisible();
     await expect(page.getByTestId("workspace-area")).toBeVisible();

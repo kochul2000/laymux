@@ -101,7 +101,9 @@ test.describe("Pane Split", () => {
     await page.getByTestId("split-vertical-btn").click();
 
     // The new pane (pane 1) should contain an EmptyView
-    await expect(page.locator("[data-testid='workspace-pane-1'] [data-testid='empty-view']")).toBeVisible();
+    await expect(
+      page.locator("[data-testid='workspace-pane-1'] [data-testid='empty-view']"),
+    ).toBeVisible();
   });
 });
 

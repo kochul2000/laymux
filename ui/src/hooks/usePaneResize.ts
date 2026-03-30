@@ -217,10 +217,7 @@ export function calcResizeDelta(
  * Returns the indices of panes to remove (the side at minimum size),
  * or null if no merge should happen.
  */
-export function shouldMergeOnDragEnd(
-  boundary: PaneBoundary,
-  panes: GridRect[],
-): number[] | null {
+export function shouldMergeOnDragEnd(boundary: PaneBoundary, panes: GridRect[]): number[] | null {
   const tolerance = PANE_MIN_RATIO + EPSILON;
 
   // Check if right/bottom panes are at minimum size

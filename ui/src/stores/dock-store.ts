@@ -26,24 +26,32 @@ interface DockStoreState {
   focusedDock: DockPosition | null;
 
   getDock: (position: DockPosition) => DockState | undefined;
-  setDockActiveView: (position: DockPosition, view: ViewType, viewConfig?: ViewInstanceConfig) => void;
+  setDockActiveView: (
+    position: DockPosition,
+    view: ViewType,
+    viewConfig?: ViewInstanceConfig,
+  ) => void;
   toggleDockVisible: (position: DockPosition) => void;
   toggleLayoutMode: () => void;
   setDockSize: (position: DockPosition, size: number) => void;
   setFocusedDock: (position: DockPosition | null) => void;
 
   // Pane management (2D grid, same model as workspace)
-  splitDockPane: (position: DockPosition, direction: "horizontal" | "vertical", paneId?: string) => void;
+  splitDockPane: (
+    position: DockPosition,
+    direction: "horizontal" | "vertical",
+    paneId?: string,
+  ) => void;
   removeDockPane: (position: DockPosition, paneId: string) => void;
   setDockPaneView: (position: DockPosition, paneId: string, view: ViewInstanceConfig) => void;
-  resizeDockPane: (position: DockPosition, paneId: string, delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>) => void;
+  resizeDockPane: (
+    position: DockPosition,
+    paneId: string,
+    delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>,
+  ) => void;
 }
 
-function makeDock(
-  position: DockPosition,
-  activeView: ViewType | null,
-  size: number,
-): DockState {
+function makeDock(position: DockPosition, activeView: ViewType | null, size: number): DockState {
   return {
     position,
     activeView,
@@ -92,9 +100,7 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
 
   toggleDockVisible: (position) => {
     set((state) => ({
-      docks: state.docks.map((d) =>
-        d.position === position ? { ...d, visible: !d.visible } : d,
-      ),
+      docks: state.docks.map((d) => (d.position === position ? { ...d, visible: !d.visible } : d)),
     }));
   },
 
@@ -107,9 +113,7 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
   setDockSize: (position, size) => {
     const clamped = Math.max(DOCK_MIN_SIZE, Math.min(DOCK_MAX_SIZE, size));
     set((state) => ({
-      docks: state.docks.map((d) =>
-        d.position === position ? { ...d, size: clamped } : d,
-      ),
+      docks: state.docks.map((d) => (d.position === position ? { ...d, size: clamped } : d)),
     }));
   },
 
@@ -129,7 +133,14 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
             return {
               ...d,
               panes: [
-                { id: generateId("dp"), view: { type: d.activeView ?? "EmptyView" }, x: 0, y: 0, w: 1, h: 0.5 },
+                {
+                  id: generateId("dp"),
+                  view: { type: d.activeView ?? "EmptyView" },
+                  x: 0,
+                  y: 0,
+                  w: 1,
+                  h: 0.5,
+                },
                 { id: generateId("dp"), view: { type: "EmptyView" }, x: 0, y: 0.5, w: 1, h: 0.5 },
               ],
             };
@@ -137,7 +148,14 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
           return {
             ...d,
             panes: [
-              { id: generateId("dp"), view: { type: d.activeView ?? "EmptyView" }, x: 0, y: 0, w: 0.5, h: 1 },
+              {
+                id: generateId("dp"),
+                view: { type: d.activeView ?? "EmptyView" },
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+              },
               { id: generateId("dp"), view: { type: "EmptyView" }, x: 0.5, y: 0, w: 0.5, h: 1 },
             ],
           };
@@ -205,9 +223,7 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
       docks: state.docks.map((d) => {
         if (d.position !== position) return d;
         const panes = d.panes ?? [];
-        const newPanes = panes.map((p) =>
-          p.id === paneId ? { ...p, view } : p,
-        );
+        const newPanes = panes.map((p) => (p.id === paneId ? { ...p, view } : p));
         return {
           ...d,
           panes: newPanes,
@@ -223,9 +239,7 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
         if (d.position !== position) return d;
         return {
           ...d,
-          panes: d.panes.map((p) =>
-            p.id === paneId ? { ...p, ...delta } : p,
-          ),
+          panes: d.panes.map((p) => (p.id === paneId ? { ...p, ...delta } : p)),
         };
       }),
     }));

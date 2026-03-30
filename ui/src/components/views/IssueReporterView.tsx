@@ -24,7 +24,9 @@ export function IssueReporterView() {
       const data = await res.json();
       if (data.path) setScreenshotPath(data.path);
       if (data.dataUrl) setScreenshotDataUrl(data.dataUrl);
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
     setState("idle");
   };
 
@@ -81,7 +83,10 @@ export function IssueReporterView() {
         </svg>
         <div>
           <span className="text-sm font-semibold">Report Issue</span>
-          <span className="ml-2 text-[10px]" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
+          <span
+            className="ml-2 text-[10px]"
+            style={{ color: "var(--text-secondary)", opacity: 0.5 }}
+          >
             via gh CLI
           </span>
         </div>
@@ -90,7 +95,11 @@ export function IssueReporterView() {
       {/* Screenshot status */}
       <div
         className="mb-4 flex items-center gap-2.5 rounded px-3.5 py-2.5"
-        style={{ background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 3 }}
+        style={{
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--border)",
+          borderRadius: 3,
+        }}
       >
         {screenshotPath ? (
           <button
@@ -99,9 +108,23 @@ export function IssueReporterView() {
             style={{ background: "transparent", border: "none" }}
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <rect x="1" y="2" width="12" height="10" rx="1.5" stroke="var(--green)" strokeWidth="1.2" />
+              <rect
+                x="1"
+                y="2"
+                width="12"
+                height="10"
+                rx="1.5"
+                stroke="var(--green)"
+                strokeWidth="1.2"
+              />
               <circle cx="5" cy="6" r="1.5" stroke="var(--green)" strokeWidth="1" />
-              <path d="M3 11l3-3 2 1.5 3-4" stroke="var(--green)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M3 11l3-3 2 1.5 3-4"
+                stroke="var(--green)"
+                strokeWidth="1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
             <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
               Screenshot captured
@@ -124,8 +147,12 @@ export function IssueReporterView() {
             border: "1px solid rgba(137,180,250,0.2)",
             borderRadius: 3,
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(137,180,250,0.08)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "rgba(137,180,250,0.08)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+          }}
         >
           Recapture
         </button>
@@ -133,7 +160,10 @@ export function IssueReporterView() {
 
       {/* Screenshot preview */}
       {showPreview && screenshotDataUrl && (
-        <div className="mb-4 overflow-hidden rounded" style={{ border: "1px solid var(--border)", borderRadius: 3 }}>
+        <div
+          className="mb-4 overflow-hidden rounded"
+          style={{ border: "1px solid var(--border)", borderRadius: 3 }}
+        >
           <img
             src={screenshotDataUrl}
             alt="Screenshot preview"
@@ -168,7 +198,11 @@ export function IssueReporterView() {
       {/* Submit bar */}
       <div
         className="flex items-center gap-3 rounded px-3.5 py-3"
-        style={{ background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 3 }}
+        style={{
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--border)",
+          borderRadius: 3,
+        }}
       >
         <button
           data-testid="issue-submit"
@@ -184,7 +218,11 @@ export function IssueReporterView() {
             transition: "opacity 0.15s",
           }}
         >
-          {state === "submitting" ? "Submitting..." : state === "success" ? "Submitted!" : "Submit Issue"}
+          {state === "submitting"
+            ? "Submitting..."
+            : state === "success"
+              ? "Submitted!"
+              : "Submit Issue"}
         </button>
 
         {(state === "success" || state === "error") && (
@@ -204,7 +242,9 @@ export function IssueReporterView() {
         )}
 
         {state === "success" && resultMsg && (
-          <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>✓</span>
+          <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
+            ✓
+          </span>
         )}
         {state === "error" && (
           <span className="truncate text-[11px]" style={{ color: "var(--red)" }}>

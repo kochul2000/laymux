@@ -1107,7 +1107,9 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       await navigateToProfile(user, "PowerShell");
-      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const input = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       await user.clear(input);
       await user.type(input, "echo hello");
 
@@ -1122,7 +1124,9 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       await navigateToProfile(user, "PowerShell");
-      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const input = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       await user.clear(input);
       await user.type(input, "echo hello");
 
@@ -1138,7 +1142,9 @@ describe("SettingsView", () => {
       const saveBtn = screen.getByTestId("save-settings-btn");
       expect(saveBtn).toBeDisabled();
 
-      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const input = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       await user.clear(input);
       await user.type(input, "echo hello");
 
@@ -1150,7 +1156,9 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       await navigateToProfile(user, "PowerShell");
-      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const input = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       await user.clear(input);
       await user.type(input, "echo hello");
 
@@ -1165,7 +1173,9 @@ describe("SettingsView", () => {
 
       // Change startupCommand in PowerShell profile
       await navigateToProfile(user, "PowerShell");
-      const input = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const input = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       await user.clear(input);
       await user.type(input, "echo hello");
 
@@ -1174,7 +1184,9 @@ describe("SettingsView", () => {
 
       // Navigate back
       await navigateToProfile(user, "PowerShell");
-      const inputAfter = screen.getByPlaceholderText("cd ~/project && conda activate myenv") as HTMLInputElement;
+      const inputAfter = screen.getByPlaceholderText(
+        "cd ~/project && conda activate myenv",
+      ) as HTMLInputElement;
       expect(inputAfter.value).toBe("echo hello");
 
       // Save should still work
@@ -1315,7 +1327,6 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       const select = screen.getByTestId("default-profile-select") as HTMLSelectElement;
-      const initialValue = select.value;
 
       // 외부에서 profiles에 새 프로파일 추가 후 defaultProfile 변경
       act(() => {

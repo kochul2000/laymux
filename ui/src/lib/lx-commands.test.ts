@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  parseLxCommand,
-  expandHookCommand,
-} from "./lx-commands";
+import { parseLxCommand, expandHookCommand } from "./lx-commands";
 
 describe("parseLxCommand", () => {
   it("parses sync-cwd command", () => {
@@ -74,10 +71,9 @@ describe("expandHookCommand", () => {
   });
 
   it("expands $exitCode variable", () => {
-    const result = expandHookCommand(
-      "lx notify 'Command failed (exit $exitCode)'",
-      { exitCode: "1" },
-    );
+    const result = expandHookCommand("lx notify 'Command failed (exit $exitCode)'", {
+      exitCode: "1",
+    });
     expect(result).toBe("lx notify 'Command failed (exit 1)'");
   });
 

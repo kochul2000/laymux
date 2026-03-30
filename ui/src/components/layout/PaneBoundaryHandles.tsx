@@ -44,7 +44,8 @@ export function PaneBoundaryHandles({
 
   const editMode = propEditMode ?? storeEditMode;
   const panes = propPanes ?? activeWorkspace?.panes ?? [];
-  const getLatestPanes = propGetLatestPanes ?? (() => useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? []);
+  const getLatestPanes =
+    propGetLatestPanes ?? (() => useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? []);
   const resizePane = propOnResizePane ?? storeResizePane;
   const removePane = propOnRemovePane ?? storeRemovePane;
 
@@ -56,16 +57,14 @@ export function PaneBoundaryHandles({
   const handleMouseDown = useCallback(
     (boundary: PaneBoundary, e: React.MouseEvent) => {
       e.preventDefault();
-      const startPos =
-        boundary.direction === "vertical" ? e.clientX : e.clientY;
+      const startPos = boundary.direction === "vertical" ? e.clientX : e.clientY;
       dragging.current = { boundary, startPos };
 
       const handleMouseMove = (me: MouseEvent) => {
         if (!dragging.current) return;
         const { boundary: bd, startPos: sp } = dragging.current;
         const currentPos = bd.direction === "vertical" ? me.clientX : me.clientY;
-        const containerSize =
-          bd.direction === "vertical" ? containerWidth : containerHeight;
+        const containerSize = bd.direction === "vertical" ? containerWidth : containerHeight;
         if (containerSize === 0) return;
 
         const rawDelta = (currentPos - sp) / containerSize;
@@ -99,10 +98,7 @@ export function PaneBoundaryHandles({
         if (dragging.current) {
           const currentPanes = getLatestPanes();
           if (currentPanes && currentPanes.length > 0) {
-            const mergeIndices = shouldMergeOnDragEnd(
-              dragging.current.boundary,
-              currentPanes,
-            );
+            const mergeIndices = shouldMergeOnDragEnd(dragging.current.boundary, currentPanes);
             if (mergeIndices) {
               const sorted = [...mergeIndices].sort((a, b) => b - a);
               for (const idx of sorted) {
@@ -137,9 +133,7 @@ export function PaneBoundaryHandles({
       }, 0);
 
       const indicesToRemove =
-        leftSize <= rightSize
-          ? boundary.leftPaneIndices
-          : boundary.rightPaneIndices;
+        leftSize <= rightSize ? boundary.leftPaneIndices : boundary.rightPaneIndices;
 
       const sorted = [...indicesToRemove].sort((a, b) => b - a);
       for (const idx of sorted) {

@@ -23,16 +23,21 @@ export function WorkspaceArea() {
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handlePaneHoverActivity = useCallback((paneId: string) => {
-    setHoveredPane(paneId);
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    if (hoverIdleSeconds > 0) {
-      hoverTimerRef.current = setTimeout(() => setHoveredPane(null), hoverIdleSeconds * 1000);
-    }
-  }, [hoverIdleSeconds]);
+  const handlePaneHoverActivity = useCallback(
+    (paneId: string) => {
+      setHoveredPane(paneId);
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (hoverIdleSeconds > 0) {
+        hoverTimerRef.current = setTimeout(() => setHoveredPane(null), hoverIdleSeconds * 1000);
+      }
+    },
+    [hoverIdleSeconds],
+  );
 
   useEffect(() => {
-    return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); };
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -89,14 +94,9 @@ export function WorkspaceArea() {
                 />
               )}
               {/* Browser iframe click capture overlay */}
-              {isActive &&
-                pane.view.type === "BrowserPreviewView" &&
-                !isFocused && (
-                  <div
-                    data-testid={`pane-focus-overlay-${i}`}
-                    className="absolute inset-0 z-10"
-                  />
-                )}
+              {isActive && pane.view.type === "BrowserPreviewView" && !isFocused && (
+                <div data-testid={`pane-focus-overlay-${i}`} className="absolute inset-0 z-10" />
+              )}
 
               <PaneControlBar
                 currentView={pane.view}
@@ -107,12 +107,22 @@ export function WorkspaceArea() {
                   onSplitV: isActive ? () => splitPane(i, "vertical") : undefined,
                   onClear: isActive ? () => setPaneView(i, { type: "EmptyView" }) : undefined,
                   onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
-                  onToggleCwdSend: isActive && pane.view.type === "TerminalView"
-                    ? () => setPaneView(i, { ...pane.view, cwdSend: !((pane.view.cwdSend as boolean) ?? true) })
-                    : undefined,
-                  onToggleCwdReceive: isActive && pane.view.type === "TerminalView"
-                    ? () => setPaneView(i, { ...pane.view, cwdReceive: !((pane.view.cwdReceive as boolean) ?? true) })
-                    : undefined,
+                  onToggleCwdSend:
+                    isActive && pane.view.type === "TerminalView"
+                      ? () =>
+                          setPaneView(i, {
+                            ...pane.view,
+                            cwdSend: !((pane.view.cwdSend as boolean) ?? true),
+                          })
+                      : undefined,
+                  onToggleCwdReceive:
+                    isActive && pane.view.type === "TerminalView"
+                      ? () =>
+                          setPaneView(i, {
+                            ...pane.view,
+                            cwdReceive: !((pane.view.cwdReceive as boolean) ?? true),
+                          })
+                      : undefined,
                 }}
               >
                 <ViewRenderer
@@ -129,7 +139,6 @@ export function WorkspaceArea() {
                   }}
                 />
               </PaneControlBar>
-
             </div>
           );
         });

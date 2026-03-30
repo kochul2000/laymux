@@ -112,9 +112,7 @@ describe("getLastCommandForWorkspace", () => {
   });
 
   it("returns undefined exitCode for running command", () => {
-    const terminals = [
-      makeTerminal({ id: "t1", lastCommand: "npm test", lastCommandAt: 100 }),
-    ];
+    const terminals = [makeTerminal({ id: "t1", lastCommand: "npm test", lastCommandAt: 100 })];
     const result = getLastCommandForWorkspace(terminals);
     expect(result?.command).toBe("npm test");
     expect(result?.exitCode).toBeUndefined();
@@ -141,10 +139,29 @@ describe("formatCommand", () => {
 describe("computeWorkspaceSummary", () => {
   it("computes full summary", () => {
     const terminals = [
-      makeTerminal({ id: "t1", workspaceId: "ws-1", branch: "main", cwd: "/home/a", lastActivityAt: 200, isFocused: true, lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
-      makeTerminal({ id: "t2", workspaceId: "ws-1", branch: "dev", cwd: "/home/b", lastActivityAt: 100 }),
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        branch: "main",
+        cwd: "/home/a",
+        lastActivityAt: 200,
+        isFocused: true,
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+      }),
+      makeTerminal({
+        id: "t2",
+        workspaceId: "ws-1",
+        branch: "dev",
+        cwd: "/home/b",
+        lastActivityAt: 100,
+      }),
     ];
-    const ports = new Map([["t1", [3000]], ["t2", [8080]]]);
+    const ports = new Map([
+      ["t1", [3000]],
+      ["t2", [8080]],
+    ]);
     const notifications: Notification[] = [
       makeNotification({ id: "n1", workspaceId: "ws-1", message: "Build done", createdAt: 1000 }),
       makeNotification({ id: "n2", workspaceId: "ws-1", message: "Tests passed", createdAt: 2000 }),
@@ -187,8 +204,26 @@ describe("computeWorkspaceSummary", () => {
 describe("computeWorkspaceSummary - terminal summaries", () => {
   it("includes terminalCount and per-terminal summaries", () => {
     const terminals = [
-      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL", cwd: "/home/user/project", branch: "main", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
-      makeTerminal({ id: "t2", workspaceId: "ws-1", profile: "PowerShell", label: "PS", cwd: "/home/user/api", lastCommand: "cargo build", lastCommandAt: 100 }),
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        profile: "WSL",
+        label: "WSL",
+        cwd: "/home/user/project",
+        branch: "main",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+      }),
+      makeTerminal({
+        id: "t2",
+        workspaceId: "ws-1",
+        profile: "PowerShell",
+        label: "PS",
+        cwd: "/home/user/api",
+        lastCommand: "cargo build",
+        lastCommandAt: 100,
+      }),
     ];
     const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), []);
 
@@ -227,8 +262,21 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
 
   it("does not show dock terminal last command in workspace summary", () => {
     const terminals = [
-      makeTerminal({ id: "t1", workspaceId: "ws-1", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 100 }),
-      makeTerminal({ id: "dock-t", workspaceId: "", syncGroup: "MyWS", lastCommand: "cargo build", lastExitCode: 1, lastCommandAt: 200 }),
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 100,
+      }),
+      makeTerminal({
+        id: "dock-t",
+        workspaceId: "",
+        syncGroup: "MyWS",
+        lastCommand: "cargo build",
+        lastExitCode: 1,
+        lastCommandAt: 200,
+      }),
     ];
     const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), [], "MyWS");
     // Should show workspace terminal's command, not dock terminal's more recent command
@@ -266,14 +314,24 @@ describe("getLastCommandForWorkspace — interactive app cleanup", () => {
     // After an interactive app exits, lastCommand should be cleared.
     // This simulates the state AFTER clearCommandState was called.
     const terminals = [
-      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+      makeTerminal({
+        id: "t1",
+        lastCommand: undefined,
+        lastExitCode: undefined,
+        lastCommandAt: undefined,
+      }),
     ];
     expect(getLastCommandForWorkspace(terminals)).toBeNull();
   });
 
   it("returns other terminal command after one terminal's command state was cleared", () => {
     const terminals = [
-      makeTerminal({ id: "t1", lastCommand: undefined, lastExitCode: undefined, lastCommandAt: undefined }),
+      makeTerminal({
+        id: "t1",
+        lastCommand: undefined,
+        lastExitCode: undefined,
+        lastCommandAt: undefined,
+      }),
       makeTerminal({ id: "t2", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
     ];
     const result = getLastCommandForWorkspace(terminals);
@@ -291,7 +349,9 @@ describe("abbreviatePath", () => {
   });
 
   it("shortens WSL path with home directory to ~", () => {
-    expect(abbreviatePath("//wsl.localhost/Ubuntu-22.04/home/kochul/python_projects")).toBe("~/python_projects");
+    expect(abbreviatePath("//wsl.localhost/Ubuntu-22.04/home/kochul/python_projects")).toBe(
+      "~/python_projects",
+    );
   });
 
   it("shortens WSL home root to ~", () => {
@@ -377,7 +437,9 @@ describe("formatPorts", () => {
   });
 
   it("truncates ports over maxDisplay with +N", () => {
-    expect(formatPorts([80, 443, 3000, 5432, 8080, 8443, 9090])).toBe(":80  :443  :3000  :5432  :8080  +2");
+    expect(formatPorts([80, 443, 3000, 5432, 8080, 8443, 9090])).toBe(
+      ":80  :443  :3000  :5432  :8080  +2",
+    );
   });
 
   it("respects custom maxDisplay", () => {

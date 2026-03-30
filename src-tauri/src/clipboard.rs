@@ -30,7 +30,9 @@ pub fn is_image_file(path: &str) -> bool {
 /// Check if a terminal profile uses WSL.
 pub fn is_wsl_profile(profile: &str) -> bool {
     let lower = profile.to_lowercase();
-    lower.contains("wsl") || lower.contains("ubuntu") || lower.contains("debian")
+    lower.contains("wsl")
+        || lower.contains("ubuntu")
+        || lower.contains("debian")
         || lower.contains("linux")
 }
 
@@ -109,8 +111,7 @@ pub fn save_rgba_as_png(
     let filename = format!("paste_{timestamp}.png");
     let path = dir.join(&filename);
 
-    let file =
-        fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+    let file = fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
     let buf_writer = std::io::BufWriter::new(file);
     let mut encoder = png::Encoder::new(buf_writer, width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -286,7 +287,11 @@ fn parse_dib_to_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
             let b = dib[src_px];
             let g = dib[src_px + 1];
             let r = dib[src_px + 2];
-            let a = if bit_count == 32 { dib[src_px + 3] } else { 255 };
+            let a = if bit_count == 32 {
+                dib[src_px + 3]
+            } else {
+                255
+            };
 
             rgba[dst_px] = r;
             rgba[dst_px + 1] = g;
@@ -351,10 +356,7 @@ mod tests {
             "/mnt/c/already/unix"
         );
         // UNC or relative path — just replace backslashes
-        assert_eq!(
-            windows_to_wsl_path(r"relative\path"),
-            "relative/path"
-        );
+        assert_eq!(windows_to_wsl_path(r"relative\path"), "relative/path");
     }
 
     #[test]
@@ -420,16 +422,22 @@ mod tests {
     fn test_parse_dib_to_rgba_32bit() {
         // Construct a minimal 2x1 32-bit BGRA DIB
         let mut dib = vec![0u8; 40 + 8]; // header + 2 pixels
-        // BITMAPINFOHEADER
+                                         // BITMAPINFOHEADER
         dib[0..4].copy_from_slice(&40u32.to_le_bytes()); // biSize
         dib[4..8].copy_from_slice(&2i32.to_le_bytes()); // biWidth
         dib[8..12].copy_from_slice(&1i32.to_le_bytes()); // biHeight (bottom-up)
         dib[12..14].copy_from_slice(&1u16.to_le_bytes()); // biPlanes
         dib[14..16].copy_from_slice(&32u16.to_le_bytes()); // biBitCount
         dib[16..20].copy_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
-        // Pixel data (BGRA): blue pixel, then red pixel
-        dib[40] = 255; dib[41] = 0; dib[42] = 0; dib[43] = 255; // B=255 G=0 R=0 A=255
-        dib[44] = 0; dib[45] = 0; dib[46] = 255; dib[47] = 255; // B=0 G=0 R=255 A=255
+                                                          // Pixel data (BGRA): blue pixel, then red pixel
+        dib[40] = 255;
+        dib[41] = 0;
+        dib[42] = 0;
+        dib[43] = 255; // B=255 G=0 R=0 A=255
+        dib[44] = 0;
+        dib[45] = 0;
+        dib[46] = 255;
+        dib[47] = 255; // B=0 G=0 R=255 A=255
 
         let (w, h, rgba) = parse_dib_to_rgba(&dib).unwrap();
         assert_eq!(w, 2);

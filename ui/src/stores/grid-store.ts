@@ -17,15 +17,11 @@ export const useGridStore = create<GridState>()((set) => ({
   focusedPaneIndex: null,
   automationHoverIndex: null,
 
-  toggleEditMode: () =>
-    set((state) => ({ editMode: !state.editMode })),
+  toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),
 
-  setEditMode: (enabled) =>
-    set({ editMode: enabled }),
+  setEditMode: (enabled) => set({ editMode: enabled }),
 
-  setFocusedPane: (index) =>
-    set({ focusedPaneIndex: index }),
+  setFocusedPane: (index) => set({ focusedPaneIndex: index }),
 
-  setAutomationHover: (index) =>
-    set({ automationHoverIndex: index }),
+  setAutomationHover: (index) => set({ automationHoverIndex: index }),
 }));

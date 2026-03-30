@@ -1,9 +1,9 @@
 #![recursion_limit = "256"]
 pub mod automation_server;
+pub mod cli;
 pub mod clipboard;
 pub mod commands;
 pub mod git_watcher;
-pub mod cli;
 pub mod ipc_server;
 pub mod output_buffer;
 pub mod port_detect;
@@ -26,19 +26,30 @@ pub fn run() {
             let session_id = format!("{}", std::process::id());
             let state_for_ipc = app_state.clone();
             let app_handle_for_ipc = app.handle().clone();
-            match ipc_server::start_ipc_server(session_id, Arc::new(move |msg| {
-                let message_json = match serde_json::to_string(&msg) {
-                    Ok(json) => json,
-                    Err(e) => return cli::LxResponse::err(format!("Serialize error: {e}")),
-                };
-                // Route through the same handler as the Tauri command
-                match commands::handle_lx_message_inner(&message_json, &state_for_ipc, &app_handle_for_ipc) {
-                    Ok(resp) => resp,
-                    Err(e) => cli::LxResponse::err(e),
-                }
-            })) {
+            match ipc_server::start_ipc_server(
+                session_id,
+                Arc::new(move |msg| {
+                    let message_json = match serde_json::to_string(&msg) {
+                        Ok(json) => json,
+                        Err(e) => return cli::LxResponse::err(format!("Serialize error: {e}")),
+                    };
+                    // Route through the same handler as the Tauri command
+                    match commands::handle_lx_message_inner(
+                        &message_json,
+                        &state_for_ipc,
+                        &app_handle_for_ipc,
+                    ) {
+                        Ok(resp) => resp,
+                        Err(e) => cli::LxResponse::err(e),
+                    }
+                }),
+            ) {
                 Ok(socket_path) => {
-                    app_state.ipc_socket_path.lock().unwrap().replace(socket_path);
+                    app_state
+                        .ipc_socket_path
+                        .lock()
+                        .unwrap()
+                        .replace(socket_path);
                 }
                 Err(e) => {
                     eprintln!("Warning: IPC server failed to start: {e}");

@@ -78,7 +78,11 @@ describe("system-fonts", () => {
     it("places curated fonts at the top, then remaining system fonts", async () => {
       // Backend returns monospace fonts (alphabetically sorted)
       mockedInvoke.mockResolvedValue([
-        "Consolas", "D2Coding", "Fira Code", "MyCustomMono", "ZetaMono",
+        "Consolas",
+        "D2Coding",
+        "Fira Code",
+        "MyCustomMono",
+        "ZetaMono",
       ]);
 
       const result = await getSystemMonospaceFonts();

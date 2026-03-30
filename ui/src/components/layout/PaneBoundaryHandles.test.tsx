@@ -23,9 +23,7 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handles = screen.getAllByTestId(/^boundary-handle/);
     expect(handles.length).toBeGreaterThan(0);
   });
@@ -34,9 +32,7 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handle = screen.getByTestId(/^boundary-handle/);
     // Vertical boundary at x=0.5 → left: 50%
     expect(handle.style.left).toBe("50%");
@@ -46,9 +42,7 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "horizontal");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handle = screen.getByTestId(/^boundary-handle/);
     // Horizontal boundary at y=0.5 → top: 50%
     expect(handle.style.top).toBe("50%");
@@ -58,9 +52,7 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handle = screen.getByTestId(/^boundary-handle/);
     expect(handle.style.cursor).toBe("col-resize");
   });
@@ -69,9 +61,7 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "horizontal");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handle = screen.getByTestId(/^boundary-handle/);
     expect(handle.style.cursor).toBe("row-resize");
   });
@@ -80,21 +70,15 @@ describe("PaneBoundaryHandles", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
     useGridStore.getState().toggleEditMode();
 
-    render(
-      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
-    );
+    render(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
     const handle = screen.getByTestId(/^boundary-handle/);
 
     // Before merge: 2 panes
-    expect(
-      useWorkspaceStore.getState().getActiveWorkspace()!.panes,
-    ).toHaveLength(2);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(2);
 
     fireEvent.doubleClick(handle);
 
     // After merge: 1 pane (smaller absorbed by larger)
-    expect(
-      useWorkspaceStore.getState().getActiveWorkspace()!.panes,
-    ).toHaveLength(1);
+    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(1);
   });
 });

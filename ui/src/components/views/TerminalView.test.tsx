@@ -100,20 +100,12 @@ describe("TerminalView", () => {
   });
 
   it("renders terminal container", () => {
-    render(
-      <TerminalView
-        instanceId="t1"
-        profile="PowerShell"
-        syncGroup="default"
-      />,
-    );
+    render(<TerminalView instanceId="t1" profile="PowerShell" syncGroup="default" />);
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
   });
 
   it("registers terminal instance in store on mount", () => {
-    render(
-      <TerminalView instanceId="t2" profile="WSL" syncGroup="project-a" />,
-    );
+    render(<TerminalView instanceId="t2" profile="WSL" syncGroup="project-a" />);
     const instances = useTerminalStore.getState().instances;
     expect(instances).toHaveLength(1);
     expect(instances[0].id).toBe("t2");
@@ -122,9 +114,7 @@ describe("TerminalView", () => {
   });
 
   it("unregisters terminal instance on unmount", () => {
-    const { unmount } = render(
-      <TerminalView instanceId="t3" profile="WSL" syncGroup="" />,
-    );
+    const { unmount } = render(<TerminalView instanceId="t3" profile="WSL" syncGroup="" />);
     expect(useTerminalStore.getState().instances).toHaveLength(1);
 
     unmount();
@@ -132,9 +122,7 @@ describe("TerminalView", () => {
   });
 
   it("calls createTerminalSession on mount", async () => {
-    render(
-      <TerminalView instanceId="t4" profile="PowerShell" syncGroup="grp" />,
-    );
+    render(<TerminalView instanceId="t4" profile="PowerShell" syncGroup="grp" />);
 
     // createTerminalSession is called asynchronously in useEffect
     await vi.waitFor(() => {
@@ -150,31 +138,22 @@ describe("TerminalView", () => {
   });
 
   it("registers onData handler to write to terminal", () => {
-    render(
-      <TerminalView instanceId="t5" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t5" profile="PowerShell" syncGroup="" />);
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
   });
 
   it("listens for terminal output events", async () => {
-    render(
-      <TerminalView instanceId="t6" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t6" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
-      expect(mockOnTerminalOutput).toHaveBeenCalledWith(
-        "t6",
-        expect.any(Function),
-      );
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith("t6", expect.any(Function));
     });
   });
 
   it("calls closeTerminalSession on unmount", async () => {
-    const { unmount } = render(
-      <TerminalView instanceId="t7" profile="PowerShell" syncGroup="" />,
-    );
+    const { unmount } = render(<TerminalView instanceId="t7" profile="PowerShell" syncGroup="" />);
 
     unmount();
 
@@ -194,17 +173,13 @@ describe("TerminalView", () => {
 
     mockFocus.mockClear();
 
-    rerender(
-      <TerminalView instanceId="t8" profile="PowerShell" syncGroup="" isFocused={true} />,
-    );
+    rerender(<TerminalView instanceId="t8" profile="PowerShell" syncGroup="" isFocused={true} />);
 
     expect(mockFocus).toHaveBeenCalled();
   });
 
   it("calls terminal.focus() when mounted with isFocused=true (focus after open)", async () => {
-    render(
-      <TerminalView instanceId="t9" profile="PowerShell" syncGroup="" isFocused={true} />,
-    );
+    render(<TerminalView instanceId="t9" profile="PowerShell" syncGroup="" isFocused={true} />);
 
     // ResizeObserver fires → terminal.open() → should auto-focus
     await vi.waitFor(() => {
@@ -231,9 +206,7 @@ describe("TerminalView", () => {
   });
 
   it("does not call terminal.focus() when isFocused is false", async () => {
-    render(
-      <TerminalView instanceId="t10" profile="PowerShell" syncGroup="" isFocused={false} />,
-    );
+    render(<TerminalView instanceId="t10" profile="PowerShell" syncGroup="" isFocused={false} />);
 
     // Wait for open
     await vi.waitFor(() => {
@@ -262,9 +235,7 @@ describe("TerminalView", () => {
     mockCloseTerminalSession.mockClear();
 
     // Rerender with a new syncGroup (simulates workspace rename)
-    rerender(
-      <TerminalView instanceId="t-sg1" profile="PowerShell" syncGroup="NewName" />,
-    );
+    rerender(<TerminalView instanceId="t-sg1" profile="PowerShell" syncGroup="NewName" />);
 
     // Terminal must NOT be destroyed or recreated
     expect(mockCloseTerminalSession).not.toHaveBeenCalled();
@@ -282,9 +253,7 @@ describe("TerminalView", () => {
 
     expect(useTerminalStore.getState().instances[0].syncGroup).toBe("GroupA");
 
-    rerender(
-      <TerminalView instanceId="t-sg2" profile="PowerShell" syncGroup="GroupB" />,
-    );
+    rerender(<TerminalView instanceId="t-sg2" profile="PowerShell" syncGroup="GroupB" />);
 
     // Store should reflect the new syncGroup
     expect(useTerminalStore.getState().instances[0].syncGroup).toBe("GroupB");
@@ -297,9 +266,7 @@ describe("TerminalView", () => {
   it("intercepts Ctrl+V and calls smartPaste when enabled", async () => {
     mockSmartPaste.mockResolvedValue({ pasteType: "path", content: "C:\\test\\file.png" });
 
-    render(
-      <TerminalView instanceId="t-paste1" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-paste1" profile="PowerShell" syncGroup="" />);
 
     // Wait for terminal to initialize and capture the key handler
     await vi.waitFor(() => {
@@ -327,9 +294,7 @@ describe("TerminalView", () => {
   it("writes text when smartPaste returns text type", async () => {
     mockSmartPaste.mockResolvedValue({ pasteType: "text", content: "hello world" });
 
-    render(
-      <TerminalView instanceId="t-paste2" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-paste2" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
@@ -351,12 +316,16 @@ describe("TerminalView", () => {
   it("does not intercept Ctrl+V when smart paste disabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { smartPaste: false, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: false },
+      convenience: {
+        smartPaste: false,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace" as const,
+        copyOnSelect: false,
+      },
     });
 
-    render(
-      <TerminalView instanceId="t-paste3" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-paste3" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
@@ -371,9 +340,7 @@ describe("TerminalView", () => {
   });
 
   it("lets normal keys pass through when smart paste enabled", async () => {
-    render(
-      <TerminalView instanceId="t-paste4" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-paste4" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
@@ -392,9 +359,7 @@ describe("TerminalView", () => {
     mockSmartPaste.mockResolvedValue({ pasteType: "text", content: "pasted text" });
     mockHasSelection.mockReturnValue(false);
 
-    render(
-      <TerminalView instanceId="t-rc1" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-rc1" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-rc1");
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
@@ -414,9 +379,7 @@ describe("TerminalView", () => {
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("selected text");
 
-    render(
-      <TerminalView instanceId="t-rc2" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-rc2" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-rc2");
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
@@ -436,9 +399,7 @@ describe("TerminalView", () => {
     mockHasSelection.mockReturnValue(false);
     mockSmartPaste.mockResolvedValue({ pasteType: "none", content: "" });
 
-    render(
-      <TerminalView instanceId="t-rc3" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-rc3" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-rc3");
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
@@ -459,9 +420,7 @@ describe("TerminalView", () => {
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("auto-copied text");
 
-    render(
-      <TerminalView instanceId="t-cos1" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-cos1" profile="PowerShell" syncGroup="" />);
 
     // onSelectionChange should have been registered
     expect(mockOnSelectionChange).toHaveBeenCalled();
@@ -484,9 +443,7 @@ describe("TerminalView", () => {
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("some text");
 
-    render(
-      <TerminalView instanceId="t-cos2" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-cos2" profile="PowerShell" syncGroup="" />);
 
     // onSelectionChange should have been registered
     expect(mockOnSelectionChange).toHaveBeenCalled();
@@ -507,9 +464,7 @@ describe("TerminalView", () => {
 
     mockHasSelection.mockReturnValue(false);
 
-    render(
-      <TerminalView instanceId="t-cos3" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-cos3" profile="PowerShell" syncGroup="" />);
 
     const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
     selectionCallback();
@@ -521,12 +476,15 @@ describe("TerminalView", () => {
 
   it("increases font size on Ctrl+Wheel scroll up", async () => {
     // Font is now resolved from profile -> profileDefaults
-    render(
-      <TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom1");
-    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new WheelEvent("wheel", {
+      deltaY: -100,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     container.dispatchEvent(event);
 
     // Ctrl+Wheel sets font override on the profile
@@ -534,21 +492,22 @@ describe("TerminalView", () => {
   });
 
   it("decreases font size on Ctrl+Wheel scroll down", async () => {
-    render(
-      <TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom2");
-    const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new WheelEvent("wheel", {
+      deltaY: 100,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     container.dispatchEvent(event);
 
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(13);
   });
 
   it("does not change font size on wheel without Ctrl", async () => {
-    render(
-      <TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom3");
     const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
@@ -560,14 +519,19 @@ describe("TerminalView", () => {
 
   it("clamps font size to minimum 6", async () => {
     // Set profile font override to minimum
-    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
 
-    render(
-      <TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom4");
-    const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new WheelEvent("wheel", {
+      deltaY: 100,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     container.dispatchEvent(event);
 
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(6);
@@ -576,9 +540,7 @@ describe("TerminalView", () => {
   // -- Scrollbar style --
 
   it("applies scrollbar-overlay class by default", () => {
-    render(
-      <TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-sb1" profile="PowerShell" syncGroup="" />);
     const container = screen.getByTestId("terminal-view-t-sb1");
     expect(container.classList.contains("scrollbar-overlay")).toBe(true);
     expect(container.classList.contains("scrollbar-separate")).toBe(false);
@@ -587,21 +549,20 @@ describe("TerminalView", () => {
   it("applies scrollbar-separate class when setting is separate", () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        scrollbarStyle: "separate" as const,
+      },
     });
 
-    render(
-      <TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-sb2" profile="PowerShell" syncGroup="" />);
     const container = screen.getByTestId("terminal-view-t-sb2");
     expect(container.classList.contains("scrollbar-separate")).toBe(true);
     expect(container.classList.contains("scrollbar-overlay")).toBe(false);
   });
 
   it("updates xterm overviewRuler and re-fits when scrollbarStyle changes dynamically", async () => {
-    render(
-      <TerminalView instanceId="t-sb-dyn" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-sb-dyn" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
@@ -611,7 +572,10 @@ describe("TerminalView", () => {
 
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        scrollbarStyle: "separate" as const,
+      },
     });
 
     await vi.waitFor(() => {
@@ -627,12 +591,13 @@ describe("TerminalView", () => {
   it("updates xterm overviewRuler when scrollbarStyle changes from separate to overlay", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "separate" as const },
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        scrollbarStyle: "separate" as const,
+      },
     });
 
-    render(
-      <TerminalView instanceId="t-sb-rev" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-sb-rev" profile="PowerShell" syncGroup="" />);
 
     await vi.waitFor(() => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
@@ -642,7 +607,10 @@ describe("TerminalView", () => {
 
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, scrollbarStyle: "overlay" as const },
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        scrollbarStyle: "overlay" as const,
+      },
     });
 
     await vi.waitFor(() => {
@@ -656,26 +624,34 @@ describe("TerminalView", () => {
   });
 
   it("clamps font size to maximum 72", async () => {
-    useSettingsStore.getState().updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
 
-    render(
-      <TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom5");
-    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new WheelEvent("wheel", {
+      deltaY: -100,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     container.dispatchEvent(event);
 
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(72);
   });
 
   it("prevents default browser zoom on Ctrl+Wheel", async () => {
-    render(
-      <TerminalView instanceId="t-zoom6" profile="PowerShell" syncGroup="" />,
-    );
+    render(<TerminalView instanceId="t-zoom6" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-zoom6");
-    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new WheelEvent("wheel", {
+      deltaY: -100,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     const preventDefaultSpy = vi.spyOn(event, "preventDefault");
     container.dispatchEvent(event);
 
@@ -686,9 +662,7 @@ describe("TerminalView", () => {
 
   describe("URL link click", () => {
     it("passes a custom handler to WebLinksAddon that calls openExternal", async () => {
-      render(
-        <TerminalView instanceId="t-link1" profile="PowerShell" syncGroup="" />,
-      );
+      render(<TerminalView instanceId="t-link1" profile="PowerShell" syncGroup="" />);
 
       // WebLinksAddon should have been constructed with a handler
       expect(capturedLinkHandler).not.toBeNull();
@@ -705,9 +679,7 @@ describe("TerminalView", () => {
     it("handles openExternal failure gracefully (does not throw)", async () => {
       mockOpenExternal.mockRejectedValueOnce(new Error("shell open failed"));
 
-      render(
-        <TerminalView instanceId="t-link2" profile="PowerShell" syncGroup="" />,
-      );
+      render(<TerminalView instanceId="t-link2" profile="PowerShell" syncGroup="" />);
 
       expect(capturedLinkHandler).not.toBeNull();
 
@@ -737,7 +709,12 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         // cwdReceive is passed directly to createTerminalSession — no separate call needed
         expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "t-cwd1", "PowerShell", 80, 24, "default", false,
+          "t-cwd1",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          false,
         );
       });
     });
@@ -754,7 +731,12 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalledWith(
-          "t-cwd2", "PowerShell", 80, 24, "default", true,
+          "t-cwd2",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
         );
       });
     });
@@ -788,6 +770,5 @@ describe("TerminalView", () => {
         expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd3", false);
       });
     });
-
   });
 });

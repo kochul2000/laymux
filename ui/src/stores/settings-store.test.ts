@@ -26,7 +26,9 @@ describe("settings-store", () => {
   });
 
   it("updates font in profileDefaults", () => {
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "Fira Code", size: 16, weight: "normal" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Fira Code", size: 16, weight: "normal" } });
     const { profileDefaults } = useSettingsStore.getState();
     expect(profileDefaults.font.face).toBe("Fira Code");
     expect(profileDefaults.font.size).toBe(16);
@@ -107,13 +109,26 @@ describe("settings-store", () => {
     useSettingsStore.getState().loadFromSettings({
       profileDefaults: { font: { face: "JetBrains Mono", size: 13, weight: "normal" } } as any,
       defaultProfile: "WSL",
-      profiles: [{
-        name: "WSL", commandLine: "wsl.exe", startupCommand: "", colorScheme: "", startingDirectory: "", hidden: false,
-        cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
-        scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
-        closeOnExit: "automatic", antialiasingMode: "grayscale",
-        suppressApplicationTitle: false, snapOnInput: true,
-      }],
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          startupCommand: "",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+          cursorShape: "bar",
+          padding: { top: 8, right: 8, bottom: 8, left: 8 },
+          scrollbackLines: 9001,
+          opacity: 100,
+          tabTitle: "",
+          bellStyle: "audible",
+          closeOnExit: "automatic",
+          antialiasingMode: "grayscale",
+          suppressApplicationTitle: false,
+          snapOnInput: true,
+        },
+      ],
       colorSchemes: [],
       keybindings: [],
     });
@@ -136,13 +151,15 @@ describe("settings-store", () => {
   it("loadFromSettings fills missing new fields with defaults", () => {
     // Simulate old-format data with only 5 profile fields
     useSettingsStore.getState().loadFromSettings({
-      profiles: [{
-        name: "Old",
-        commandLine: "bash",
-        colorScheme: "",
-        startingDirectory: "",
-        hidden: false,
-      } as any],
+      profiles: [
+        {
+          name: "Old",
+          commandLine: "bash",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        } as any,
+      ],
     });
     const profile = useSettingsStore.getState().profiles[0];
     expect(profile.cursorShape).toBe("bar");
@@ -176,7 +193,9 @@ describe("settings-store", () => {
   });
 
   it("updates font weight in profileDefaults", () => {
-    useSettingsStore.getState().setProfileDefaults({ font: { face: "Cascadia Mono", size: 14, weight: "bold" } });
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Cascadia Mono", size: 14, weight: "bold" } });
     expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("bold");
   });
 
@@ -207,7 +226,9 @@ describe("settings-store", () => {
   });
 
   it("resolveFont returns profile font override when set", () => {
-    useSettingsStore.getState().updateProfile(0, { font: { face: "Fira Code", size: 18, weight: "bold" } });
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "Fira Code", size: 18, weight: "bold" } });
     const font = useSettingsStore.getState().resolveFont("PowerShell");
     expect(font.face).toBe("Fira Code");
     expect(font.size).toBe(18);
@@ -260,14 +281,27 @@ describe("settings-store", () => {
 
   it("profile font override is persisted through loadFromSettings", () => {
     useSettingsStore.getState().loadFromSettings({
-      profiles: [{
-        name: "Custom", commandLine: "bash", startupCommand: "", colorScheme: "", startingDirectory: "", hidden: false,
-        cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
-        scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
-        closeOnExit: "automatic", antialiasingMode: "grayscale",
-        suppressApplicationTitle: false, snapOnInput: true,
-        font: { face: "JetBrains Mono", size: 16, weight: "bold" },
-      }],
+      profiles: [
+        {
+          name: "Custom",
+          commandLine: "bash",
+          startupCommand: "",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+          cursorShape: "bar",
+          padding: { top: 8, right: 8, bottom: 8, left: 8 },
+          scrollbackLines: 9001,
+          opacity: 100,
+          tabTitle: "",
+          bellStyle: "audible",
+          closeOnExit: "automatic",
+          antialiasingMode: "grayscale",
+          suppressApplicationTitle: false,
+          snapOnInput: true,
+          font: { face: "JetBrains Mono", size: 16, weight: "bold" },
+        },
+      ],
     });
     const font = useSettingsStore.getState().resolveFont("Custom");
     expect(font.face).toBe("JetBrains Mono");
@@ -296,7 +330,13 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads convenience settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false, pasteImageDir: "/tmp/images", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: false },
+      convenience: {
+        smartPaste: false,
+        pasteImageDir: "/tmp/images",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace" as const,
+        copyOnSelect: false,
+      },
     });
     const { convenience } = useSettingsStore.getState();
     expect(convenience.smartPaste).toBe(false);
@@ -397,7 +437,14 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads scrollbarStyle", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, scrollbarStyle: "separate" as const },
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace" as const,
+        copyOnSelect: true,
+        scrollbarStyle: "separate" as const,
+      },
     });
     const { convenience } = useSettingsStore.getState();
     expect(convenience.scrollbarStyle).toBe("separate");
@@ -442,7 +489,13 @@ describe("settings-store", () => {
 
   it("loadFromSettings loads workspaceDisplay", () => {
     useSettingsStore.getState().loadFromSettings({
-      workspaceDisplay: { minimap: false, environment: false, activity: true, path: true, result: false },
+      workspaceDisplay: {
+        minimap: false,
+        environment: false,
+        activity: true,
+        path: true,
+        result: false,
+      },
     });
     const { workspaceDisplay } = useSettingsStore.getState();
     expect(workspaceDisplay.minimap).toBe(false);

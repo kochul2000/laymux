@@ -28,8 +28,7 @@ function switchWorkspace(id: string) {
 
 /** Navigate to a pane by notification direction, consuming matched notifications. */
 function navigateByNotification(direction: "recent" | "oldest") {
-  const { notifications, markNotificationsAsRead } =
-    useNotificationStore.getState();
+  const { notifications, markNotificationsAsRead } = useNotificationStore.getState();
   const target = findNotificationNavTarget(notifications, direction);
   if (!target) return;
 
@@ -89,7 +88,11 @@ export function useKeyboardShortcuts() {
             if (dockArrowNav) {
               const targetDock = getDockForDirection(direction);
               const targetState = dockStore.getDock(targetDock);
-              if (targetState?.visible && targetState.panes.length > 0 && targetDock !== focusedDock) {
+              if (
+                targetState?.visible &&
+                targetState.panes.length > 0 &&
+                targetDock !== focusedDock
+              ) {
                 dockStore.setFocusedDock(targetDock);
                 return;
               }
@@ -132,9 +135,7 @@ export function useKeyboardShortcuts() {
         if (shiftKey === "U") {
           e.preventDefault();
           const { notifications } = useNotificationStore.getState();
-          const unread = [...notifications]
-            .reverse()
-            .find((n) => n.readAt === null);
+          const unread = [...notifications].reverse().find((n) => n.readAt === null);
           if (unread) {
             switchWorkspace(unread.workspaceId);
           }
@@ -245,9 +246,7 @@ export function useKeyboardShortcuts() {
         // Ctrl+Alt+ArrowDown: next workspace
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex(
-            (ws) => ws.id === activeWorkspaceId,
-          );
+          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
           const nextIdx = (currentIdx + 1) % workspaces.length;
           switchWorkspace(workspaces[nextIdx].id);
           return;
@@ -256,11 +255,8 @@ export function useKeyboardShortcuts() {
         // Ctrl+Alt+ArrowUp: previous workspace
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex(
-            (ws) => ws.id === activeWorkspaceId,
-          );
-          const prevIdx =
-            (currentIdx - 1 + workspaces.length) % workspaces.length;
+          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+          const prevIdx = (currentIdx - 1 + workspaces.length) % workspaces.length;
           switchWorkspace(workspaces[prevIdx].id);
           return;
         }

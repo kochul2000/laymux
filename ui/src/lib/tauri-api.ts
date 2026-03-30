@@ -31,18 +31,11 @@ export async function createTerminalSession(
   });
 }
 
-export async function writeToTerminal(
-  id: string,
-  data: string,
-): Promise<void> {
+export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
-export async function resizeTerminal(
-  id: string,
-  cols: number,
-  rows: number,
-): Promise<void> {
+export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
   return invoke("resize_terminal", { id, cols, rows });
 }
 
@@ -50,9 +43,7 @@ export async function closeTerminalSession(id: string): Promise<void> {
   return invoke("close_terminal_session", { id });
 }
 
-export async function getSyncGroupTerminals(
-  groupName: string,
-): Promise<string[]> {
+export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
 
@@ -62,9 +53,7 @@ export interface LxResponse {
   error: string | null;
 }
 
-export async function handleLxMessage(
-  messageJson: string,
-): Promise<LxResponse> {
+export async function handleLxMessage(messageJson: string): Promise<LxResponse> {
   return invoke("handle_lx_message", { messageJson });
 }
 
@@ -239,10 +228,7 @@ export interface SmartPasteResult {
 }
 
 /** Perform smart paste: check clipboard for files/images, return path or "none". */
-export async function smartPaste(
-  imageDir: string,
-  profile: string,
-): Promise<SmartPasteResult> {
+export async function smartPaste(imageDir: string, profile: string): Promise<SmartPasteResult> {
   return invoke("smart_paste", { imageDir, profile });
 }
 
@@ -292,29 +278,29 @@ export function onSyncCwd(
   }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-cwd", (event) => {
-    callback(event.payload as {
-      path: string;
-      terminalId: string;
-      groupId: string;
-      targets: string[];
-    });
+    callback(
+      event.payload as {
+        path: string;
+        terminalId: string;
+        groupId: string;
+        targets: string[];
+      },
+    );
   });
 }
 
 /** Listen for sync-branch events from the backend. */
 export function onSyncBranch(
-  callback: (data: {
-    branch: string;
-    terminalId: string;
-    groupId: string;
-  }) => void,
+  callback: (data: { branch: string; terminalId: string; groupId: string }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-branch", (event) => {
-    callback(event.payload as {
-      branch: string;
-      terminalId: string;
-      groupId: string;
-    });
+    callback(
+      event.payload as {
+        branch: string;
+        terminalId: string;
+        groupId: string;
+      },
+    );
   });
 }
 
@@ -338,18 +324,16 @@ export function onSetTabTitle(
 
 /** Listen for command status events (OSC 133 E/D). */
 export function onCommandStatus(
-  callback: (data: {
-    terminalId: string;
-    command?: string;
-    exitCode?: number;
-  }) => void,
+  callback: (data: { terminalId: string; command?: string; exitCode?: number }) => void,
 ): Promise<UnlistenFn> {
   return listen("command-status", (event) => {
-    callback(event.payload as {
-      terminalId: string;
-      command?: string;
-      exitCode?: number;
-    });
+    callback(
+      event.payload as {
+        terminalId: string;
+        command?: string;
+        exitCode?: number;
+      },
+    );
   });
 }
 
@@ -365,9 +349,7 @@ export async function getListeningPorts(): Promise<ListeningPort[]> {
 }
 
 /** Get the current git branch for a working directory. */
-export async function getGitBranch(
-  workingDir: string,
-): Promise<string | null> {
+export async function getGitBranch(workingDir: string): Promise<string | null> {
   return invoke("get_git_branch", { workingDir });
 }
 
@@ -381,10 +363,7 @@ export function onOpenFile(
 }
 
 /** Send an OS-level notification. */
-export async function sendOsNotification(
-  title: string,
-  body: string,
-): Promise<void> {
+export async function sendOsNotification(title: string, body: string): Promise<void> {
   return invoke("send_os_notification", { title, body });
 }
 

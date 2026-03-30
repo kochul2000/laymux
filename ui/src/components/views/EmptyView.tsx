@@ -95,7 +95,12 @@ function EmptyViewCard({
         {/* Drag handle — right edge */}
         <span
           className="shrink-0 pl-2 pr-0.5 text-[10px]"
-          style={{ color: "var(--text-secondary)", opacity: 0.25, cursor: "grab", userSelect: "none" }}
+          style={{
+            color: "var(--text-secondary)",
+            opacity: 0.25,
+            cursor: "grab",
+            userSelect: "none",
+          }}
         >
           ⠿
         </span>

@@ -107,9 +107,7 @@ describe("WorkspaceStore", () => {
     it("removes a pane and expands the adjacent one", () => {
       // First split, then remove
       useWorkspaceStore.getState().splitPane(0, "horizontal");
-      expect(
-        useWorkspaceStore.getState().getActiveWorkspace()!.panes,
-      ).toHaveLength(2);
+      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(2);
 
       useWorkspaceStore.getState().removePane(1);
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
@@ -222,7 +220,9 @@ describe("WorkspaceStore", () => {
       const before = useWorkspaceStore.getState().getActiveWorkspace()!;
       const paneIdsBefore = before.panes.map((p) => p.id);
 
-      useWorkspaceStore.getState().addWorkspace("Second", useWorkspaceStore.getState().layouts[0].id);
+      useWorkspaceStore
+        .getState()
+        .addWorkspace("Second", useWorkspaceStore.getState().layouts[0].id);
 
       const after = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === before.id)!;
       expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
@@ -272,9 +272,15 @@ describe("WorkspaceStore", () => {
     it("new workspace IDs never collide with restored workspace IDs", () => {
       // Simulate session restoration: setState with workspaces that have specific IDs
       useWorkspaceStore.setState({
-        layouts: [{ id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] }],
+        layouts: [
+          { id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] },
+        ],
         workspaces: [
-          { id: "ws-99", name: "Restored", panes: [{ id: "p-1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
+          {
+            id: "ws-99",
+            name: "Restored",
+            panes: [{ id: "p-1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+          },
         ],
         activeWorkspaceId: "ws-99",
       });
@@ -299,9 +305,15 @@ describe("WorkspaceStore", () => {
 
     it("pane IDs never collide with restored pane IDs", () => {
       useWorkspaceStore.setState({
-        layouts: [{ id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] }],
+        layouts: [
+          { id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] },
+        ],
         workspaces: [
-          { id: "ws-restored", name: "Restored", panes: [{ id: "pane-5", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
+          {
+            id: "ws-restored",
+            name: "Restored",
+            panes: [{ id: "pane-5", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+          },
         ],
         activeWorkspaceId: "ws-restored",
       });
@@ -340,6 +352,5 @@ describe("WorkspaceStore", () => {
       const allIds = [...ids1, ...ids2];
       expect(new Set(allIds).size).toBe(allIds.length);
     });
-
   });
 });

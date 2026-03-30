@@ -35,7 +35,9 @@ test.describe("EmptyView", () => {
     await expect(emptyView.getByText("Browser Preview")).toBeVisible();
   });
 
-  test("clicking Terminal button in EmptyView switches to TerminalView", async ({ appPage: page }) => {
+  test("clicking Terminal button in EmptyView switches to TerminalView", async ({
+    appPage: page,
+  }) => {
     await page.getByTestId("edit-mode-toggle").click();
     await page.locator("[data-testid='workspace-pane-0']").click();
     await page.getByTestId("split-vertical-btn").click();
@@ -45,10 +47,14 @@ test.describe("EmptyView", () => {
     await emptyView.getByText("Terminal").click();
 
     // Should now have a terminal view in pane 1
-    await expect(page.locator("[data-testid='workspace-pane-1'] [data-testid='view-terminal']")).toBeVisible();
+    await expect(
+      page.locator("[data-testid='workspace-pane-1'] [data-testid='view-terminal']"),
+    ).toBeVisible();
   });
 
-  test("clicking Browser Preview in EmptyView switches to BrowserPreviewView", async ({ appPage: page }) => {
+  test("clicking Browser Preview in EmptyView switches to BrowserPreviewView", async ({
+    appPage: page,
+  }) => {
     await page.getByTestId("edit-mode-toggle").click();
     await page.locator("[data-testid='workspace-pane-0']").click();
     await page.getByTestId("split-vertical-btn").click();
@@ -56,7 +62,9 @@ test.describe("EmptyView", () => {
     const emptyView = page.locator("[data-testid='workspace-pane-1'] [data-testid='empty-view']");
     await emptyView.getByText("Browser Preview").click();
 
-    await expect(page.locator("[data-testid='workspace-pane-1'] [data-testid='browser-preview']")).toBeVisible();
+    await expect(
+      page.locator("[data-testid='workspace-pane-1'] [data-testid='browser-preview']"),
+    ).toBeVisible();
   });
 });
 

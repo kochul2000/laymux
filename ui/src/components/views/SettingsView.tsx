@@ -40,13 +40,26 @@ const cardStyle: React.CSSProperties = {
 
 // -- Sub-components --
 
-function SettingRow({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
+function SettingRow({
+  label,
+  desc,
+  children,
+}: {
+  label: string;
+  desc?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-start gap-3 py-1.5">
       <div className="w-36 shrink-0 pt-1">
-        <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>{label}</span>
+        <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+          {label}
+        </span>
         {desc && (
-          <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+          <p
+            className="mt-0.5 text-[11px] leading-tight"
+            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+          >
             {desc}
           </p>
         )}
@@ -57,15 +70,23 @@ function SettingRow({ label, desc, children }: { label: string; desc?: string; c
 }
 
 /** Input wrapper that adds focus ring */
-function FocusInput(props: React.InputHTMLAttributes<HTMLInputElement> & { inputStyle?: React.CSSProperties }) {
+function FocusInput(
+  props: React.InputHTMLAttributes<HTMLInputElement> & { inputStyle?: React.CSSProperties },
+) {
   const [focused, setFocused] = useState(false);
   const { inputStyle: customStyle, ...rest } = props;
   return (
     <input
       {...rest}
       style={focused ? { ...inputFocusStyle, ...customStyle } : { ...inputStyle, ...customStyle }}
-      onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
-      onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
+      onFocus={(e) => {
+        setFocused(true);
+        props.onFocus?.(e);
+      }}
+      onBlur={(e) => {
+        setFocused(false);
+        props.onBlur?.(e);
+      }}
     />
   );
 }
@@ -76,8 +97,14 @@ function FocusSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       style={focused ? inputFocusStyle : inputStyle}
-      onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
-      onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
+      onFocus={(e) => {
+        setFocused(true);
+        props.onFocus?.(e);
+      }}
+      onBlur={(e) => {
+        setFocused(false);
+        props.onBlur?.(e);
+      }}
     />
   );
 }
@@ -121,8 +148,17 @@ function ColorSwatch({
 // -- Section: Startup (renamed from General) --
 
 const fontWeightOptions = [
-  "thin", "extra-light", "light", "semi-light", "normal",
-  "medium", "semi-bold", "bold", "extra-bold", "black", "extra-black",
+  "thin",
+  "extra-light",
+  "light",
+  "semi-light",
+  "normal",
+  "medium",
+  "semi-bold",
+  "bold",
+  "extra-bold",
+  "black",
+  "extra-black",
 ];
 
 /** Hook to detect installed monospace fonts via system enumeration + canvas check. */
@@ -133,7 +169,9 @@ function useMonospacedFonts() {
     getSystemMonospaceFonts().then((fonts) => {
       if (!cancelled) setInstalled(fonts);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
   return installed;
 }
@@ -146,8 +184,16 @@ function StartupSection() {
   const setAppTheme = useSettingsStore((s) => s.setAppTheme);
 
   // Draft state — only committed to store on Save
-  const [draftAppTheme, setDraftAppTheme] = useDraft("startup-appTheme", storeAppThemeId, setAppTheme);
-  const [draftDefaultProfile, setDraftDefaultProfile] = useDraft("startup-defaultProfile", storeDefaultProfile, setDefaultProfile);
+  const [draftAppTheme, setDraftAppTheme] = useDraft(
+    "startup-appTheme",
+    storeAppThemeId,
+    setAppTheme,
+  );
+  const [draftDefaultProfile, setDraftDefaultProfile] = useDraft(
+    "startup-defaultProfile",
+    storeDefaultProfile,
+    setDefaultProfile,
+  );
 
   return (
     <div>
@@ -161,7 +207,10 @@ function StartupSection() {
               <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
                 App Theme
               </h4>
-              <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+              <p
+                className="mt-0.5 text-[11px]"
+                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
+              >
                 Application UI appearance
               </p>
             </div>
@@ -172,7 +221,9 @@ function StartupSection() {
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
               {builtinAppThemes.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
               ))}
             </FocusSelect>
           </div>
@@ -187,7 +238,10 @@ function StartupSection() {
               <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
                 Default Profile
               </h4>
-              <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+              <p
+                className="mt-0.5 text-[11px]"
+                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
+              >
                 New terminal sessions will use this profile
               </p>
             </div>
@@ -228,22 +282,30 @@ function FontFields({
   monoFonts: string[];
 }) {
   const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
-  const resetBtn = showReset && defaults && !isDefault ? (
-    <button
-      onClick={() => onChange({ ...defaults })}
-      className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
-      style={{ color: "var(--accent)", background: "rgba(137,180,250,0.1)", border: "none", cursor: "pointer" }}
-      title="Reset to default"
-    >
-      Reset
-    </button>
-  ) : null;
+  const resetBtn =
+    showReset && defaults && !isDefault ? (
+      <button
+        onClick={() => onChange({ ...defaults })}
+        className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
+        style={{
+          color: "var(--accent)",
+          background: "rgba(137,180,250,0.1)",
+          border: "none",
+          cursor: "pointer",
+        }}
+        title="Reset to default"
+      >
+        Reset
+      </button>
+    ) : null;
 
   return (
     <div style={cardStyle} className="mb-3">
       <div className="px-4 py-2">
         <div className="flex items-center gap-2 mb-2">
-          <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Font</h4>
+          <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+            Font
+          </h4>
           {resetBtn}
         </div>
         <SettingRow label="Font Face" desc="Monospaced font for terminals">
@@ -253,11 +315,11 @@ function FontFields({
             onChange={(e) => onChange({ ...font, face: e.target.value })}
             className={inputCls}
           >
-            {!monoFonts.includes(font.face) && (
-              <option value={font.face}>{font.face}</option>
-            )}
+            {!monoFonts.includes(font.face) && <option value={font.face}>{font.face}</option>}
             {monoFonts.map((f) => (
-              <option key={f} value={f}>{f}</option>
+              <option key={f} value={f}>
+                {f}
+              </option>
             ))}
           </FocusSelect>
         </SettingRow>
@@ -312,9 +374,16 @@ function AppearanceFields({
   const resetBtn = (key: keyof ProfileDefaults) =>
     showReset && defaults && !isDefault(key) ? (
       <button
-        onClick={() => onChange({ [key]: key === "padding" ? { ...defaults.padding } : defaults[key] })}
+        onClick={() =>
+          onChange({ [key]: key === "padding" ? { ...defaults.padding } : defaults[key] })
+        }
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
-        style={{ color: "var(--accent)", background: "rgba(137,180,250,0.1)", border: "none", cursor: "pointer" }}
+        style={{
+          color: "var(--accent)",
+          background: "rgba(137,180,250,0.1)",
+          border: "none",
+          cursor: "pointer",
+        }}
         title="Reset to default"
       >
         Reset
@@ -325,7 +394,9 @@ function AppearanceFields({
     <>
       <div style={cardStyle} className="mb-3">
         <div className="px-4 py-2">
-          <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Appearance</h4>
+          <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+            Appearance
+          </h4>
           <SettingRow label="Color Scheme">
             <div className="flex items-center">
               <select
@@ -336,7 +407,9 @@ function AppearanceFields({
               >
                 <option value="">(default)</option>
                 {colorSchemes.map((cs) => (
-                  <option key={cs.name} value={cs.name}>{cs.name}</option>
+                  <option key={cs.name} value={cs.name}>
+                    {cs.name}
+                  </option>
                 ))}
               </select>
               {resetBtn("colorScheme")}
@@ -384,7 +457,9 @@ function AppearanceFields({
       <div style={cardStyle} className="mb-3">
         <div className="px-4 py-2">
           <div className="flex items-center gap-2 mb-2">
-            <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Padding</h4>
+            <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+              Padding
+            </h4>
             {resetBtn("padding")}
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
@@ -421,7 +496,15 @@ function AdvancedFields({
   defaults,
   showReset,
 }: {
-  data: Pick<Profile, "scrollbackLines" | "bellStyle" | "closeOnExit" | "antialiasingMode" | "suppressApplicationTitle" | "snapOnInput">;
+  data: Pick<
+    Profile,
+    | "scrollbackLines"
+    | "bellStyle"
+    | "closeOnExit"
+    | "antialiasingMode"
+    | "suppressApplicationTitle"
+    | "snapOnInput"
+  >;
   onChange: (d: Partial<Profile>) => void;
   defaults?: ProfileDefaults;
   showReset?: boolean;
@@ -433,7 +516,12 @@ function AdvancedFields({
       <button
         onClick={() => onChange({ [key]: defaults[key] })}
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
-        style={{ color: "var(--accent)", background: "rgba(137,180,250,0.1)", border: "none", cursor: "pointer" }}
+        style={{
+          color: "var(--accent)",
+          background: "rgba(137,180,250,0.1)",
+          border: "none",
+          cursor: "pointer",
+        }}
         title="Reset to default"
       >
         Reset
@@ -443,13 +531,17 @@ function AdvancedFields({
   return (
     <div style={cardStyle}>
       <div className="px-4 py-2">
-        <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Advanced</h4>
+        <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+          Advanced
+        </h4>
         <SettingRow label="Scrollback Lines" desc="Number of lines stored in history">
           <div className="flex items-center">
             <input
               type="number"
               value={data.scrollbackLines}
-              onChange={(e) => onChange({ scrollbackLines: Math.max(0, parseInt(e.target.value) || 0) })}
+              onChange={(e) =>
+                onChange({ scrollbackLines: Math.max(0, parseInt(e.target.value) || 0) })
+              }
               className="w-28 rounded px-2 py-1.5 text-xs"
               style={inputStyle}
               min={0}
@@ -563,13 +655,11 @@ function DefaultsSection() {
   const setProfileDefaults = useSettingsStore((s) => s.setProfileDefaults);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
   const monoFonts = useMonospacedFonts();
-  const [draftDefaults, setDraftDefaults] = useDraft(
-    "profileDefaults",
-    storeDefaults,
-    (v) => setProfileDefaults(v as Partial<ProfileDefaults>),
+  const [draftDefaults, setDraftDefaults] = useDraft("profileDefaults", storeDefaults, (v) =>
+    setProfileDefaults(v as Partial<ProfileDefaults>),
   );
   const updateDefaults = (partial: Partial<ProfileDefaults>) =>
-    setDraftDefaults(prev => ({ ...prev, ...partial }));
+    setDraftDefaults((prev) => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -590,10 +680,7 @@ function DefaultsSection() {
         colorSchemes={colorSchemes}
       />
 
-      <AdvancedFields
-        data={draftDefaults}
-        onChange={updateDefaults}
-      />
+      <AdvancedFields data={draftDefaults} onChange={updateDefaults} />
     </div>
   );
 }
@@ -620,15 +707,14 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
   const [activeTab, setActiveTab] = useState<ProfileTab>("general");
   const monoFonts = useMonospacedFonts();
 
-  const [profile, setDraftProfile] = useDraft(
-    `profile-${profileIndex}`,
-    storeProfile,
-    (v) => { if (v) updateProfile(profileIndex, v as Partial<Profile>); },
-  );
+  const [profile, setDraftProfile] = useDraft(`profile-${profileIndex}`, storeProfile, (v) => {
+    if (v) updateProfile(profileIndex, v as Partial<Profile>);
+  });
 
   if (!profile) return null;
 
-  const update = (data: Partial<Profile>) => setDraftProfile(prev => prev ? { ...prev, ...data } : prev);
+  const update = (data: Partial<Profile>) =>
+    setDraftProfile((prev) => (prev ? { ...prev, ...data } : prev));
 
   return (
     <div>
@@ -640,10 +726,12 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
         className="mb-4 flex gap-0"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        {([
-          ["general", "General"],
-          ["additional", "Additional Settings"],
-        ] as const).map(([tab, label]) => (
+        {(
+          [
+            ["general", "General"],
+            ["additional", "Additional Settings"],
+          ] as const
+        ).map(([tab, label]) => (
           <button
             key={tab}
             className="px-4 py-2 text-xs font-medium"
@@ -745,12 +833,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
             defaults={profileDefaults}
             showReset
           />
-          <AdvancedFields
-            data={profile}
-            onChange={update}
-            defaults={profileDefaults}
-            showReset
-          />
+          <AdvancedFields data={profile} onChange={update} defaults={profileDefaults} showReset />
         </>
       )}
     </div>
@@ -787,7 +870,7 @@ function ColorSchemesSection() {
   const updateField = (field: string, value: string) => {
     if (scheme) {
       setDraftColorSchemes((prev) =>
-        prev.map((cs, i) => (i === selectedIdx ? { ...cs, [field]: value } as ColorScheme : cs)),
+        prev.map((cs, i) => (i === selectedIdx ? ({ ...cs, [field]: value } as ColorScheme) : cs)),
       );
     }
   };
@@ -826,7 +909,11 @@ function ColorSchemesSection() {
           className={inputCls + " flex-1"}
           style={inputStyle}
         >
-          {colorSchemes.length === 0 && <option value="" disabled>No schemes</option>}
+          {colorSchemes.length === 0 && (
+            <option value="" disabled>
+              No schemes
+            </option>
+          )}
           {colorSchemes.map((cs, i) => (
             <option key={i} value={i}>
               {cs.name}
@@ -876,13 +963,32 @@ function ColorSchemesSection() {
                 Terminal Colors
               </h4>
               <div className="mb-3 flex gap-2">
-                <ColorSwatch color={scheme.foreground} label="Fg" onChange={(v) => updateField("foreground", v)} />
-                <ColorSwatch color={scheme.background} label="Bg" onChange={(v) => updateField("background", v)} />
-                <ColorSwatch color={scheme.cursorColor} label="Cursor" onChange={(v) => updateField("cursorColor", v)} />
-                <ColorSwatch color={scheme.selectionBackground} label="Select" onChange={(v) => updateField("selectionBackground", v)} />
+                <ColorSwatch
+                  color={scheme.foreground}
+                  label="Fg"
+                  onChange={(v) => updateField("foreground", v)}
+                />
+                <ColorSwatch
+                  color={scheme.background}
+                  label="Bg"
+                  onChange={(v) => updateField("background", v)}
+                />
+                <ColorSwatch
+                  color={scheme.cursorColor}
+                  label="Cursor"
+                  onChange={(v) => updateField("cursorColor", v)}
+                />
+                <ColorSwatch
+                  color={scheme.selectionBackground}
+                  label="Select"
+                  onChange={(v) => updateField("selectionBackground", v)}
+                />
               </div>
 
-              <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+              <h4
+                className="mb-2 mt-4 text-xs font-semibold"
+                style={{ color: "var(--text-primary)" }}
+              >
                 ANSI Colors
               </h4>
               <div className="mb-2 flex gap-2">
@@ -945,8 +1051,11 @@ function ColorSchemesSection() {
 function ConvenienceSection() {
   const storeConvenience = useSettingsStore((s) => s.convenience);
   const setConvenience = useSettingsStore((s) => s.setConvenience);
-  const [convenience, setDraftConvenience] = useDraft("convenience", storeConvenience, (v) => setConvenience(v));
-  const updateConvenience = (partial: Partial<typeof convenience>) => setDraftConvenience(prev => ({ ...prev, ...partial }));
+  const [convenience, setDraftConvenience] = useDraft("convenience", storeConvenience, (v) =>
+    setConvenience(v),
+  );
+  const updateConvenience = (partial: Partial<typeof convenience>) =>
+    setDraftConvenience((prev) => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -956,8 +1065,13 @@ function ConvenienceSection() {
         {/* Smart Paste toggle */}
         <div className="flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Smart Paste</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Smart Paste
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기
             </p>
           </div>
@@ -979,8 +1093,13 @@ function ConvenienceSection() {
         {/* Copy On Select toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Copy On Select</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Copy On Select
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               터미널에서 텍스트 선택 시 자동으로 클립보드에 복사
             </p>
           </div>
@@ -1002,8 +1121,13 @@ function ConvenienceSection() {
         {/* Paste Image Directory */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Image Directory</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Image Directory
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               이미지 저장 경로 (비워두면 기본 디렉터리 사용)
             </p>
           </div>
@@ -1021,8 +1145,13 @@ function ConvenienceSection() {
         {/* Hover idle seconds */}
         <div className="flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Hover Auto-hide</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Hover Auto-hide
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)
             </p>
           </div>
@@ -1036,17 +1165,26 @@ function ConvenienceSection() {
               className={inputCls}
               style={{ width: 70 }}
               value={convenience.hoverIdleSeconds}
-              onChange={(e) => updateConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) =>
+                updateConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
+              }
             />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>초</span>
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              초
+            </span>
           </div>
         </div>
 
         {/* Notification dismiss mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Notification Dismiss</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Notification Dismiss
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               알림을 읽음 처리하는 시점
             </p>
           </div>
@@ -1055,7 +1193,11 @@ function ConvenienceSection() {
               data-testid="notification-dismiss-select"
               className={inputCls}
               value={convenience.notificationDismiss}
-              onChange={(e) => updateConvenience({ notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual" })}
+              onChange={(e) =>
+                updateConvenience({
+                  notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual",
+                })
+              }
             >
               <option value="workspace">워크스페이스 선택 시 자동 해제</option>
               <option value="paneFocus">Pane 포커스 시 자동 해제</option>
@@ -1067,8 +1209,13 @@ function ConvenienceSection() {
         {/* Path ellipsis mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Path Ellipsis</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Path Ellipsis
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               경로가 길 때 생략 방향 (워크스페이스 목록)
             </p>
           </div>
@@ -1088,9 +1235,15 @@ function ConvenienceSection() {
         {/* Scrollbar style */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Scrollbar Style</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
-              터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다.
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Scrollbar Style
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을
+              차지합니다.
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -1098,7 +1251,9 @@ function ConvenienceSection() {
               data-testid="scrollbar-style-select"
               className={inputCls}
               value={convenience.scrollbarStyle}
-              onChange={(e) => setConvenience({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
+              onChange={(e) =>
+                setConvenience({ scrollbarStyle: e.target.value as "overlay" | "separate" })
+              }
             >
               <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
               <option value="separate">Separate (별도 공간 차지)</option>
@@ -1109,8 +1264,13 @@ function ConvenienceSection() {
         {/* Dock Persist State toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Dock Persist State</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Dock Persist State
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)
             </p>
           </div>
@@ -1132,8 +1292,13 @@ function ConvenienceSection() {
         {/* Dock Arrow Nav toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Dock Arrow Nav</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Dock Arrow Nav
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               Alt+Arrow로 Dock 영역 진입/이탈 허용
             </p>
           </div>
@@ -1161,8 +1326,11 @@ function ConvenienceSection() {
 function WorkspacesSection() {
   const storeWsDisplay = useSettingsStore((s) => s.workspaceDisplay);
   const setWsDisplay = useSettingsStore((s) => s.setWorkspaceDisplay);
-  const [wsDisplay, setDraftWsDisplay] = useDraft("workspaceDisplay", storeWsDisplay, (v) => setWsDisplay(v));
-  const updateWsDisplay = (partial: Partial<typeof wsDisplay>) => setDraftWsDisplay(prev => ({ ...prev, ...partial }));
+  const [wsDisplay, setDraftWsDisplay] = useDraft("workspaceDisplay", storeWsDisplay, (v) =>
+    setWsDisplay(v),
+  );
+  const updateWsDisplay = (partial: Partial<typeof wsDisplay>) =>
+    setDraftWsDisplay((prev) => ({ ...prev, ...partial }));
 
   const displayItems: { key: keyof typeof wsDisplay; label: string; desc: string }[] = [
     { key: "minimap", label: "Minimap", desc: "Pane 위치를 나타내는 미니맵" },
@@ -1178,14 +1346,22 @@ function WorkspacesSection() {
 
       {/* Display */}
       <div style={cardStyle} className="p-4">
-        <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
           Display
         </h3>
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>{item.label}</span>
-              <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {item.label}
+              </span>
+              <p
+                className="mt-0.5 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
                 {item.desc}
               </p>
             </div>
@@ -1215,7 +1391,8 @@ function ClaudeSection() {
   const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
   const [claude, setDraftClaude] = useDraft("claude", storeClaude, (v) => setClaude(v));
-  const updateClaude = (partial: Partial<typeof claude>) => setDraftClaude(prev => ({ ...prev, ...partial }));
+  const updateClaude = (partial: Partial<typeof claude>) =>
+    setDraftClaude((prev) => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -1225,8 +1402,13 @@ function ClaudeSection() {
         {/* Sync CWD mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Sync CWD</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Sync CWD
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               Claude Code 실행 중인 터미널에 cd 전파 방식
             </p>
           </div>
@@ -1253,7 +1435,8 @@ function MemoSection() {
   const storeMemo = useSettingsStore((s) => s.memo);
   const setMemo = useSettingsStore((s) => s.setMemo);
   const [memo, setDraftMemo] = useDraft("memo", storeMemo, (v) => setMemo(v));
-  const updateMemo = (partial: Partial<typeof memo>) => setDraftMemo(prev => ({ ...prev, ...partial }));
+  const updateMemo = (partial: Partial<typeof memo>) =>
+    setDraftMemo((prev) => ({ ...prev, ...partial }));
 
   return (
     <div>
@@ -1263,8 +1446,13 @@ function MemoSection() {
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>Padding</span>
-            <p className="mt-0.5 text-[11px] leading-tight" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Padding
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
               메모 영역의 안쪽 여백 (px)
             </p>
           </div>
@@ -1274,7 +1462,9 @@ function MemoSection() {
                 const key = `padding${dir}` as keyof typeof memo;
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
-                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>{dir}</span>
+                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      {dir}
+                    </span>
                     <input
                       data-testid={`memo-padding-${dir.toLowerCase()}`}
                       type="number"
@@ -1283,7 +1473,11 @@ function MemoSection() {
                       className={inputCls}
                       style={{ width: 60 }}
                       value={memo[key]}
-                      onChange={(e) => updateMemo({ [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)) })}
+                      onChange={(e) =>
+                        updateMemo({
+                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                        })
+                      }
                     />
                   </label>
                 );
@@ -1307,31 +1501,76 @@ interface KeybindingDef {
 
 const defaultKeybindings: KeybindingDef[] = [
   // Workspace switch
-  { id: "workspace.1",          label: "워크스페이스 1",            defaultKeys: "Ctrl+Alt+1",     group: "Workspace" },
-  { id: "workspace.2",          label: "워크스페이스 2",            defaultKeys: "Ctrl+Alt+2",     group: "Workspace" },
-  { id: "workspace.3",          label: "워크스페이스 3",            defaultKeys: "Ctrl+Alt+3",     group: "Workspace" },
-  { id: "workspace.4",          label: "워크스페이스 4",            defaultKeys: "Ctrl+Alt+4",     group: "Workspace" },
-  { id: "workspace.5",          label: "워크스페이스 5",            defaultKeys: "Ctrl+Alt+5",     group: "Workspace" },
-  { id: "workspace.6",          label: "워크스페이스 6",            defaultKeys: "Ctrl+Alt+6",     group: "Workspace" },
-  { id: "workspace.7",          label: "워크스페이스 7",            defaultKeys: "Ctrl+Alt+7",     group: "Workspace" },
-  { id: "workspace.8",          label: "워크스페이스 8",            defaultKeys: "Ctrl+Alt+8",     group: "Workspace" },
-  { id: "workspace.last",       label: "마지막 워크스페이스",       defaultKeys: "Ctrl+Alt+9",     group: "Workspace" },
-  { id: "workspace.next",       label: "다음 워크스페이스",         defaultKeys: "Ctrl+Alt+Down",  group: "Workspace" },
-  { id: "workspace.prev",       label: "이전 워크스페이스",         defaultKeys: "Ctrl+Alt+Up",    group: "Workspace" },
-  { id: "workspace.new",        label: "새 워크스페이스",           defaultKeys: "Ctrl+Alt+N",     group: "Workspace" },
-  { id: "workspace.duplicate",   label: "워크스페이스 복제",         defaultKeys: "Ctrl+Alt+D",     group: "Workspace" },
-  { id: "workspace.close",      label: "워크스페이스 닫기",         defaultKeys: "Ctrl+Alt+W",     group: "Workspace" },
-  { id: "workspace.rename",     label: "워크스페이스 이름 변경",     defaultKeys: "Ctrl+Alt+R",     group: "Workspace" },
+  { id: "workspace.1", label: "워크스페이스 1", defaultKeys: "Ctrl+Alt+1", group: "Workspace" },
+  { id: "workspace.2", label: "워크스페이스 2", defaultKeys: "Ctrl+Alt+2", group: "Workspace" },
+  { id: "workspace.3", label: "워크스페이스 3", defaultKeys: "Ctrl+Alt+3", group: "Workspace" },
+  { id: "workspace.4", label: "워크스페이스 4", defaultKeys: "Ctrl+Alt+4", group: "Workspace" },
+  { id: "workspace.5", label: "워크스페이스 5", defaultKeys: "Ctrl+Alt+5", group: "Workspace" },
+  { id: "workspace.6", label: "워크스페이스 6", defaultKeys: "Ctrl+Alt+6", group: "Workspace" },
+  { id: "workspace.7", label: "워크스페이스 7", defaultKeys: "Ctrl+Alt+7", group: "Workspace" },
+  { id: "workspace.8", label: "워크스페이스 8", defaultKeys: "Ctrl+Alt+8", group: "Workspace" },
+  {
+    id: "workspace.last",
+    label: "마지막 워크스페이스",
+    defaultKeys: "Ctrl+Alt+9",
+    group: "Workspace",
+  },
+  {
+    id: "workspace.next",
+    label: "다음 워크스페이스",
+    defaultKeys: "Ctrl+Alt+Down",
+    group: "Workspace",
+  },
+  {
+    id: "workspace.prev",
+    label: "이전 워크스페이스",
+    defaultKeys: "Ctrl+Alt+Up",
+    group: "Workspace",
+  },
+  { id: "workspace.new", label: "새 워크스페이스", defaultKeys: "Ctrl+Alt+N", group: "Workspace" },
+  {
+    id: "workspace.duplicate",
+    label: "워크스페이스 복제",
+    defaultKeys: "Ctrl+Alt+D",
+    group: "Workspace",
+  },
+  {
+    id: "workspace.close",
+    label: "워크스페이스 닫기",
+    defaultKeys: "Ctrl+Alt+W",
+    group: "Workspace",
+  },
+  {
+    id: "workspace.rename",
+    label: "워크스페이스 이름 변경",
+    defaultKeys: "Ctrl+Alt+R",
+    group: "Workspace",
+  },
   // Pane
-  { id: "pane.focus",           label: "Pane 포커스 이동",          defaultKeys: "Alt+Arrow",      group: "Pane" },
-  { id: "pane.delete",          label: "Pane 제거 (편집 모드)",     defaultKeys: "Delete",         group: "Pane" },
+  { id: "pane.focus", label: "Pane 포커스 이동", defaultKeys: "Alt+Arrow", group: "Pane" },
+  { id: "pane.delete", label: "Pane 제거 (편집 모드)", defaultKeys: "Delete", group: "Pane" },
   // UI
-  { id: "sidebar.toggle",       label: "사이드바 토글",             defaultKeys: "Ctrl+Shift+B",   group: "UI" },
-  { id: "notifications.toggle", label: "알림 패널 토글",            defaultKeys: "Ctrl+Shift+I",   group: "UI" },
-  { id: "notifications.unread", label: "읽지 않은 알림으로 이동",    defaultKeys: "Ctrl+Shift+U",   group: "UI" },
-  { id: "notifications.recent", label: "최근 알림 Pane으로 이동",   defaultKeys: "Ctrl+Alt+Left",  group: "UI" },
-  { id: "notifications.oldest", label: "오래된 알림 Pane으로 이동",  defaultKeys: "Ctrl+Alt+Right", group: "UI" },
-  { id: "settings.open",        label: "설정 열기",                 defaultKeys: "Ctrl+,",         group: "UI" },
+  { id: "sidebar.toggle", label: "사이드바 토글", defaultKeys: "Ctrl+Shift+B", group: "UI" },
+  { id: "notifications.toggle", label: "알림 패널 토글", defaultKeys: "Ctrl+Shift+I", group: "UI" },
+  {
+    id: "notifications.unread",
+    label: "읽지 않은 알림으로 이동",
+    defaultKeys: "Ctrl+Shift+U",
+    group: "UI",
+  },
+  {
+    id: "notifications.recent",
+    label: "최근 알림 Pane으로 이동",
+    defaultKeys: "Ctrl+Alt+Left",
+    group: "UI",
+  },
+  {
+    id: "notifications.oldest",
+    label: "오래된 알림 Pane으로 이동",
+    defaultKeys: "Ctrl+Alt+Right",
+    group: "UI",
+  },
+  { id: "settings.open", label: "설정 열기", defaultKeys: "Ctrl+,", group: "UI" },
 ];
 
 const kbdStyle: React.CSSProperties = {
@@ -1360,13 +1599,19 @@ function keyEventToString(e: KeyboardEvent): string {
 
   // Normalize key name
   const normalized =
-    key === " " ? "Space" :
-    key === "ArrowUp" ? "Up" :
-    key === "ArrowDown" ? "Down" :
-    key === "ArrowLeft" ? "Left" :
-    key === "ArrowRight" ? "Right" :
-    key.length === 1 ? key.toUpperCase() :
-    key;
+    key === " "
+      ? "Space"
+      : key === "ArrowUp"
+        ? "Up"
+        : key === "ArrowDown"
+          ? "Down"
+          : key === "ArrowLeft"
+            ? "Left"
+            : key === "ArrowRight"
+              ? "Right"
+              : key.length === 1
+                ? key.toUpperCase()
+                : key;
 
   parts.push(normalized);
   return parts.join("+");
@@ -1444,64 +1689,64 @@ function KeybindingsSection() {
                   {def.label}
                 </span>
 
-              {isEditing ? (
-                <div
-                  tabIndex={0}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const str = keyEventToString(e.nativeEvent);
-                    if (!str) return;
-                    setCapturedKeys(str);
-                    // Update the keybinding in draft
-                    setDraftKeybindings((prev) =>
-                      prev.map((kb) => kb.command === def.id ? { ...kb, keys: str } : kb),
-                    );
-                  }}
-                  onBlur={() => setEditingId(null)}
-                  className="flex items-center gap-2 rounded px-2 py-1 text-xs"
-                  style={{
-                    border: "1px solid var(--accent)",
-                    background: "var(--bg-base)",
-                    color: "var(--accent)",
-                    outline: "none",
-                    minWidth: 120,
-                    fontFamily: "'Consolas', monospace",
-                    fontSize: 11,
-                  }}
-                >
-                  {capturedKeys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
-                </div>
-              ) : (
-                <kbd
-                  style={{ ...kbdStyle, cursor: "pointer" }}
-                  onClick={() => handleStartCapture(def.id, def.defaultKeys)}
-                  title="Click to change shortcut"
-                >
-                  {displayKeys}
-                </kbd>
-              )}
-
-              <div className="w-12 shrink-0 text-right">
-                {isOverridden && !isEditing && (
-                  <button
-                    onClick={() => handleResetDefault(def.id)}
-                    className="rounded px-1.5 py-0.5 text-[10px]"
-                    style={{
-                      color: "var(--text-secondary)",
-                      background: "transparent",
-                      border: "1px solid var(--border)",
-                      cursor: "pointer",
+                {isEditing ? (
+                  <div
+                    tabIndex={0}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const str = keyEventToString(e.nativeEvent);
+                      if (!str) return;
+                      setCapturedKeys(str);
+                      // Update the keybinding in draft
+                      setDraftKeybindings((prev) =>
+                        prev.map((kb) => (kb.command === def.id ? { ...kb, keys: str } : kb)),
+                      );
                     }}
-                    title="Reset to default"
+                    onBlur={() => setEditingId(null)}
+                    className="flex items-center gap-2 rounded px-2 py-1 text-xs"
+                    style={{
+                      border: "1px solid var(--accent)",
+                      background: "var(--bg-base)",
+                      color: "var(--accent)",
+                      outline: "none",
+                      minWidth: 120,
+                      fontFamily: "'Consolas', monospace",
+                      fontSize: 11,
+                    }}
                   >
-                    Reset
-                  </button>
+                    {capturedKeys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
+                  </div>
+                ) : (
+                  <kbd
+                    style={{ ...kbdStyle, cursor: "pointer" }}
+                    onClick={() => handleStartCapture(def.id, def.defaultKeys)}
+                    title="Click to change shortcut"
+                  >
+                    {displayKeys}
+                  </kbd>
                 )}
+
+                <div className="w-12 shrink-0 text-right">
+                  {isOverridden && !isEditing && (
+                    <button
+                      onClick={() => handleResetDefault(def.id)}
+                      className="rounded px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        color: "var(--text-secondary)",
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                      }}
+                      title="Reset to default"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
           );
         })}
 
@@ -1563,7 +1808,12 @@ function KeybindingsSection() {
                 data-testid={`remove-keybinding-${kb.index}`}
                 onClick={() => setDraftKeybindings((prev) => prev.filter((_, i) => i !== kb.index))}
                 className="text-xs"
-                style={{ color: "var(--red)", cursor: "pointer", background: "transparent", border: "none" }}
+                style={{
+                  color: "var(--red)",
+                  cursor: "pointer",
+                  background: "transparent",
+                  border: "none",
+                }}
                 title="Remove"
               >
                 ✕
@@ -1614,17 +1864,24 @@ function useSettingsDraft() {
 
 /** Hook: local draft state that flushes on Save and resets on Discard.
  *  Draft values are persisted in a shared Map so they survive section unmount/remount. */
-function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const { registerFlush, registerReset, markDirty, clearDirtyFor, draftValues } = useSettingsDraft();
+function useDraft<T>(
+  id: string,
+  storeValue: T,
+  storeSetter: (v: T) => void,
+): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const { registerFlush, registerReset, markDirty, clearDirtyFor, draftValues } =
+    useSettingsDraft();
 
   const setterRef = useRef(storeSetter);
-  setterRef.current = storeSetter;
   const storeRef = useRef(storeValue);
-  storeRef.current = storeValue;
+  useEffect(() => {
+    setterRef.current = storeSetter;
+    storeRef.current = storeValue;
+  });
 
   // Restore preserved draft on remount, otherwise use store value
-  const [draft, setDraft] = useState<T>(
-    () => draftValues.current.has(id) ? draftValues.current.get(id) as T : storeValue,
+  const [draft, setDraft] = useState<T>(() =>
+    draftValues.current.has(id) ? (draftValues.current.get(id) as T) : storeValue,
   );
 
   // Keep shared map in sync with local draft
@@ -1639,7 +1896,7 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
     const json = JSON.stringify(storeValue);
     if (json !== prevStoreJson.current) {
       prevStoreJson.current = json;
-      setDraft(storeValue);
+      setDraft(storeValue); // eslint-disable-line react-hooks/set-state-in-effect
       draftValues.current.set(id, storeValue);
       clearDirtyFor(id);
     }
@@ -1648,7 +1905,9 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   // Register flush/reset once — intentionally no cleanup so callbacks survive unmount
@@ -1663,14 +1922,19 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
     });
   }, [id, registerFlush, registerReset, draftValues]);
 
-  const wrappedSetDraft: React.Dispatch<React.SetStateAction<T>> = useCallback((action) => {
-    setDraft((prev) => {
-      const next = typeof action === "function" ? (action as (p: T) => T)(prev) : action;
-      draftValues.current.set(id, next);
-      return next;
-    });
-    markDirty(id);
-  }, [id, markDirty, draftValues]);
+  /* eslint-disable react-hooks/preserve-manual-memoization */
+  const wrappedSetDraft: React.Dispatch<React.SetStateAction<T>> = useCallback(
+    (action) => {
+      setDraft((prev) => {
+        const next = typeof action === "function" ? (action as (p: T) => T)(prev) : action;
+        draftValues.current.set(id, next);
+        return next;
+      });
+      markDirty(id);
+    },
+    [id, markDirty, draftValues],
+  );
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   return [draft, wrappedSetDraft];
 }
@@ -1699,15 +1963,13 @@ export function SettingsView() {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_settings_file");
-    } catch { /* ignore — not available outside Tauri */ }
+    } catch {
+      /* ignore — not available outside Tauri */
+    }
   };
 
   const handleAddProfile = () => {
-    addProfile(makeProfileFromDefaults(
-      `Profile ${profiles.length + 1}`,
-      "",
-      profileDefaults,
-    ));
+    addProfile(makeProfileFromDefaults(`Profile ${profiles.length + 1}`, "", profileDefaults));
   };
 
   const [saveLabel, setSaveLabel] = useState("Save");
@@ -1734,7 +1996,13 @@ export function SettingsView() {
     dirtySetRef.current.delete(id);
     setDirty(dirtySetRef.current.size > 0);
   }, []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, clearDirtyFor, draftValues: draftValuesRef }).current;
+  const draftCtx = useRef<SettingsDraftCtx>({
+    registerFlush,
+    registerReset,
+    markDirty,
+    clearDirtyFor,
+    draftValues: draftValuesRef,
+  }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
@@ -1765,7 +2033,11 @@ export function SettingsView() {
     const isActive = activeNav === id;
     const isHover = navHover === id;
     return {
-      background: isActive ? "var(--bg-overlay)" : isHover ? "rgba(255,255,255,0.03)" : "transparent",
+      background: isActive
+        ? "var(--bg-overlay)"
+        : isHover
+          ? "rgba(255,255,255,0.03)"
+          : "transparent",
       color: isActive ? "var(--accent)" : "var(--text-primary)",
       borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
       cursor: "pointer",
@@ -1775,218 +2047,243 @@ export function SettingsView() {
 
   return (
     <SettingsDraftContext.Provider value={draftCtx}>
-    <div data-testid="settings-view" className="flex h-full" style={{ color: "var(--text-primary)" }}>
-      {/* Sidebar Navigation */}
-      <nav
-        className="flex h-full w-40 shrink-0 flex-col overflow-y-auto py-3"
-        style={{
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border)",
-        }}
+      <div
+        data-testid="settings-view"
+        className="flex h-full"
+        style={{ color: "var(--text-primary)" }}
       >
-        {/* Open JSON — Windows Terminal style top-right link */}
-        <button
-          data-testid="sidebar-open-json"
-          onClick={handleOpenSettingsJson}
-          className="mx-3 mb-2 px-2 py-1 text-left text-[10px]"
+        {/* Sidebar Navigation */}
+        <nav
+          className="flex h-full w-40 shrink-0 flex-col overflow-y-auto py-3"
           style={{
-            color: "var(--text-secondary)",
-            background: "transparent",
-            border: "1px solid var(--border)",
-            borderRadius: 3,
-            cursor: "pointer",
-            opacity: 0.7,
+            background: "var(--bg-surface)",
+            borderRight: "1px solid var(--border)",
           }}
-          title="Open settings.json"
         >
-          settings.json
-        </button>
-
-        {/* General settings */}
-        <button
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("startup")}
-          onClick={() => setActiveNav("startup")}
-          onMouseEnter={() => setNavHover("startup")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Startup
-        </button>
-        <button
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("colorSchemes")}
-          onClick={() => setActiveNav("colorSchemes")}
-          onMouseEnter={() => setNavHover("colorSchemes")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Color Schemes
-        </button>
-        <button
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("keybindings")}
-          onClick={() => setActiveNav("keybindings")}
-          onMouseEnter={() => setNavHover("keybindings")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Keybindings
-        </button>
-        <button
-          data-testid="nav-convenience"
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("convenience")}
-          onClick={() => setActiveNav("convenience")}
-          onMouseEnter={() => setNavHover("convenience")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Convenience
-        </button>
-        <button
-          data-testid="nav-workspaceDisplay"
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("workspaceDisplay")}
-          onClick={() => setActiveNav("workspaceDisplay")}
-          onMouseEnter={() => setNavHover("workspaceDisplay")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Workspaces
-        </button>
-        <button
-          data-testid="nav-claude"
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("claude")}
-          onClick={() => setActiveNav("claude")}
-          onMouseEnter={() => setNavHover("claude")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Claude Code
-        </button>
-        <button
-          data-testid="nav-memo"
-          className="w-full px-4 py-2 text-left text-[13px]"
-          style={navBtnStyle("memo")}
-          onClick={() => setActiveNav("memo")}
-          onMouseEnter={() => setNavHover("memo")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Memo
-        </button>
-
-        {/* Profiles group */}
-        <div className="mt-3 flex items-center justify-between px-3 pb-1">
-          <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
-            Profiles
-          </span>
+          {/* Open JSON — Windows Terminal style top-right link */}
           <button
-            data-testid="add-profile-btn"
-            onClick={handleAddProfile}
-            className="text-xs"
-            style={{ color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer" }}
-          >
-            +
-          </button>
-        </div>
-
-        <button
-          data-testid="nav-profile-defaults"
-          className="w-full px-4 py-2 text-left text-[13px] italic"
-          style={navBtnStyle("defaults")}
-          onClick={() => setActiveNav("defaults")}
-          onMouseEnter={() => setNavHover("defaults")}
-          onMouseLeave={() => setNavHover(null)}
-        >
-          Defaults
-        </button>
-
-        {profiles.map((p, i) => {
-          const id = `profile-${i}`;
-          return (
-            <div key={id} className="group flex items-center">
-              <button
-                className="min-w-0 flex-1 truncate px-4 py-2 text-left text-[13px]"
-                style={navBtnStyle(id)}
-                onClick={() => setActiveNav(id)}
-                onMouseEnter={() => setNavHover(id)}
-                onMouseLeave={() => setNavHover(null)}
-              >
-                {p.name}
-              </button>
-              <button
-                data-testid={`remove-profile-${i}`}
-                onClick={() => {
-                  removeProfile(i);
-                  setActiveNav("startup");
-                }}
-                className="mr-2 hidden text-xs opacity-50 hover:opacity-100 group-hover:inline"
-                style={{ color: "var(--red)", background: "transparent", border: "none", cursor: "pointer" }}
-                title="Delete profile"
-              >
-                ✕
-              </button>
-            </div>
-          );
-        })}
-
-        <div className="mt-auto" />
-      </nav>
-
-      {/* Content Area */}
-      <div className="relative min-w-0 flex-1 overflow-y-auto" style={{ background: "var(--bg-base)" }}>
-        <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
-          {activeNav === "startup" && <StartupSection />}
-          {activeNav === "defaults" && <DefaultsSection />}
-          {activeNav.startsWith("profile-") && (
-            <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
-          )}
-          {activeNav === "colorSchemes" && <ColorSchemesSection />}
-          {activeNav === "keybindings" && <KeybindingsSection />}
-          {activeNav === "convenience" && <ConvenienceSection />}
-          {activeNav === "workspaceDisplay" && <WorkspacesSection />}
-          {activeNav === "claude" && <ClaudeSection />}
-          {activeNav === "memo" && <MemoSection />}
-        </div>
-
-        {/* Sticky save bar — always visible at bottom */}
-        <div
-          className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
-          style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
-        >
-          <button
-            data-testid="discard-settings-btn"
-            onClick={handleDiscard}
-            disabled={!dirty}
-            className="px-5 py-2 text-[13px] font-medium"
+            data-testid="sidebar-open-json"
+            onClick={handleOpenSettingsJson}
+            className="mx-3 mb-2 px-2 py-1 text-left text-[10px]"
             style={{
-              background: "transparent",
               color: "var(--text-secondary)",
+              background: "transparent",
               border: "1px solid var(--border)",
-              cursor: dirty ? "pointer" : "default",
-              transition: "all 0.15s",
-              borderRadius: 4,
-              opacity: dirty ? 1 : 0.4,
+              borderRadius: 3,
+              cursor: "pointer",
+              opacity: 0.7,
             }}
+            title="Open settings.json"
           >
-            Discard changes
+            settings.json
+          </button>
+
+          {/* General settings */}
+          <button
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("startup")}
+            onClick={() => setActiveNav("startup")}
+            onMouseEnter={() => setNavHover("startup")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Startup
           </button>
           <button
-            data-testid="save-settings-btn"
-            onClick={handleSave}
-            disabled={!dirty}
-            className="px-8 py-2 text-[13px] font-medium"
-            style={{
-              background: saveLabel === "Saved!" ? "var(--green)" : saveLabel === "Error!" ? "var(--red)" : "var(--accent)",
-              color: "var(--bg-base)",
-              border: "none",
-              cursor: dirty ? "pointer" : "default",
-              transition: "all 0.15s",
-              borderRadius: 4,
-              opacity: dirty ? 1 : 0.4,
-            }}
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("colorSchemes")}
+            onClick={() => setActiveNav("colorSchemes")}
+            onMouseEnter={() => setNavHover("colorSchemes")}
+            onMouseLeave={() => setNavHover(null)}
           >
-            {saveLabel}
+            Color Schemes
           </button>
+          <button
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("keybindings")}
+            onClick={() => setActiveNav("keybindings")}
+            onMouseEnter={() => setNavHover("keybindings")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Keybindings
+          </button>
+          <button
+            data-testid="nav-convenience"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("convenience")}
+            onClick={() => setActiveNav("convenience")}
+            onMouseEnter={() => setNavHover("convenience")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Convenience
+          </button>
+          <button
+            data-testid="nav-workspaceDisplay"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("workspaceDisplay")}
+            onClick={() => setActiveNav("workspaceDisplay")}
+            onMouseEnter={() => setNavHover("workspaceDisplay")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Workspaces
+          </button>
+          <button
+            data-testid="nav-claude"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("claude")}
+            onClick={() => setActiveNav("claude")}
+            onMouseEnter={() => setNavHover("claude")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Claude Code
+          </button>
+          <button
+            data-testid="nav-memo"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("memo")}
+            onClick={() => setActiveNav("memo")}
+            onMouseEnter={() => setNavHover("memo")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Memo
+          </button>
+
+          {/* Profiles group */}
+          <div className="mt-3 flex items-center justify-between px-3 pb-1">
+            <span
+              className="text-[10px] uppercase tracking-wider"
+              style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+            >
+              Profiles
+            </span>
+            <button
+              data-testid="add-profile-btn"
+              onClick={handleAddProfile}
+              className="text-xs"
+              style={{
+                color: "var(--accent)",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              +
+            </button>
+          </div>
+
+          <button
+            data-testid="nav-profile-defaults"
+            className="w-full px-4 py-2 text-left text-[13px] italic"
+            style={navBtnStyle("defaults")}
+            onClick={() => setActiveNav("defaults")}
+            onMouseEnter={() => setNavHover("defaults")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Defaults
+          </button>
+
+          {profiles.map((p, i) => {
+            const id = `profile-${i}`;
+            return (
+              <div key={id} className="group flex items-center">
+                <button
+                  className="min-w-0 flex-1 truncate px-4 py-2 text-left text-[13px]"
+                  style={navBtnStyle(id)}
+                  onClick={() => setActiveNav(id)}
+                  onMouseEnter={() => setNavHover(id)}
+                  onMouseLeave={() => setNavHover(null)}
+                >
+                  {p.name}
+                </button>
+                <button
+                  data-testid={`remove-profile-${i}`}
+                  onClick={() => {
+                    removeProfile(i);
+                    setActiveNav("startup");
+                  }}
+                  className="mr-2 hidden text-xs opacity-50 hover:opacity-100 group-hover:inline"
+                  style={{
+                    color: "var(--red)",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  title="Delete profile"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+
+          <div className="mt-auto" />
+        </nav>
+
+        {/* Content Area */}
+        <div
+          className="relative min-w-0 flex-1 overflow-y-auto"
+          style={{ background: "var(--bg-base)" }}
+        >
+          <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
+            {activeNav === "startup" && <StartupSection />}
+            {activeNav === "defaults" && <DefaultsSection />}
+            {activeNav.startsWith("profile-") && (
+              <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
+            )}
+            {activeNav === "colorSchemes" && <ColorSchemesSection />}
+            {activeNav === "keybindings" && <KeybindingsSection />}
+            {activeNav === "convenience" && <ConvenienceSection />}
+            {activeNav === "workspaceDisplay" && <WorkspacesSection />}
+            {activeNav === "claude" && <ClaudeSection />}
+            {activeNav === "memo" && <MemoSection />}
+          </div>
+
+          {/* Sticky save bar — always visible at bottom */}
+          <div
+            className="sticky bottom-0 flex items-center justify-end gap-2 px-4 py-3"
+            style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)" }}
+          >
+            <button
+              data-testid="discard-settings-btn"
+              onClick={handleDiscard}
+              disabled={!dirty}
+              className="px-5 py-2 text-[13px] font-medium"
+              style={{
+                background: "transparent",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border)",
+                cursor: dirty ? "pointer" : "default",
+                transition: "all 0.15s",
+                borderRadius: 4,
+                opacity: dirty ? 1 : 0.4,
+              }}
+            >
+              Discard changes
+            </button>
+            <button
+              data-testid="save-settings-btn"
+              onClick={handleSave}
+              disabled={!dirty}
+              className="px-8 py-2 text-[13px] font-medium"
+              style={{
+                background:
+                  saveLabel === "Saved!"
+                    ? "var(--green)"
+                    : saveLabel === "Error!"
+                      ? "var(--red)"
+                      : "var(--accent)",
+                color: "var(--bg-base)",
+                border: "none",
+                cursor: dirty ? "pointer" : "default",
+                transition: "all 0.15s",
+                borderRadius: 4,
+                opacity: dirty ? 1 : 0.4,
+              }}
+            >
+              {saveLabel}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
     </SettingsDraftContext.Provider>
   );
 }

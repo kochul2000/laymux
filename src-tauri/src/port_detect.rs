@@ -58,10 +58,7 @@ pub fn parse_netstat_output(output: &str) -> Vec<ListeningPort> {
 pub fn get_listening_ports() -> Vec<ListeningPort> {
     #[cfg(target_os = "windows")]
     {
-        match Command::new("netstat")
-            .args(["-ano", "-p", "TCP"])
-            .output()
-        {
+        match Command::new("netstat").args(["-ano", "-p", "TCP"]).output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 parse_netstat_output(&stdout)
@@ -145,7 +142,8 @@ Active Connections
 
     #[test]
     fn parse_netstat_output_extracts_pid() {
-        let output = "  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       12345\n";
+        let output =
+            "  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       12345\n";
         let ports = parse_netstat_output(output);
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0].port, 3000);

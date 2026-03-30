@@ -35,10 +35,13 @@ export function findPaneInDirection(
 
     // Filter: candidate must be in the correct direction
     const isInDirection =
-      direction === "left"  ? px < cx :
-      direction === "right" ? px > cx :
-      direction === "up"    ? py < cy :
-      /* down */              py > cy;
+      direction === "left"
+        ? px < cx
+        : direction === "right"
+          ? px > cx
+          : direction === "up"
+            ? py < cy
+            : /* down */ py > cy;
 
     if (!isInDirection) continue;
 

@@ -28,8 +28,7 @@ describe("processOscInOutput", () => {
     {
       osc: 133,
       param: "E",
-      when:
-        "command.startsWith('git switch') || command.startsWith('git checkout')",
+      when: "command.startsWith('git switch') || command.startsWith('git checkout')",
       run: "lx sync-branch $branch",
     },
   ];
@@ -56,8 +55,18 @@ describe("processOscInOutput", () => {
 
   it("passes --level flag in notify message", () => {
     const levelHooks: OscHook[] = [
-      { osc: 133, param: "D", when: "exitCode === '0'", run: "lx notify --level success 'Command completed'" },
-      { osc: 133, param: "D", when: "exitCode !== '0'", run: "lx notify --level error 'Command failed (exit $exitCode)'" },
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode === '0'",
+        run: "lx notify --level success 'Command completed'",
+      },
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode !== '0'",
+        run: "lx notify --level error 'Command failed (exit $exitCode)'",
+      },
     ];
     const output = "\x1b]133;D;0\x07";
     processOscInOutput(output, levelHooks, "t1", "g1");
@@ -96,9 +105,7 @@ describe("processOscInOutput", () => {
   });
 
   it("handles OSC 9 notification sequences", () => {
-    const notifyHooks: OscHook[] = [
-      { osc: 9, run: "lx notify $message" },
-    ];
+    const notifyHooks: OscHook[] = [{ osc: 9, run: "lx notify $message" }];
     const output = "\x1b]9;Build complete\x07";
     processOscInOutput(output, notifyHooks, "t1", "g1");
 
@@ -109,9 +116,7 @@ describe("processOscInOutput", () => {
   });
 
   it("handles OSC 99 notification sequences", () => {
-    const notifyHooks: OscHook[] = [
-      { osc: 99, run: "lx notify $message" },
-    ];
+    const notifyHooks: OscHook[] = [{ osc: 99, run: "lx notify $message" }];
     const output = "\x1b]99;Deploy finished\x07";
     processOscInOutput(output, notifyHooks, "t1", "g1");
 
@@ -122,9 +127,7 @@ describe("processOscInOutput", () => {
   });
 
   it("handles OSC 777 notification sequences", () => {
-    const notifyHooks: OscHook[] = [
-      { osc: 777, run: "lx notify $message" },
-    ];
+    const notifyHooks: OscHook[] = [{ osc: 777, run: "lx notify $message" }];
     const output = "\x1b]777;notify;Title;Body text\x07";
     processOscInOutput(output, notifyHooks, "t1", "g1");
 

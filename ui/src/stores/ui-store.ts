@@ -16,7 +16,9 @@ function loadBarModes(): Record<string, ControlBarMode> {
 function saveBarModes(modes: Record<string, ControlBarMode>) {
   try {
     localStorage.setItem(BAR_MODES_KEY, JSON.stringify(modes));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 interface UiState {

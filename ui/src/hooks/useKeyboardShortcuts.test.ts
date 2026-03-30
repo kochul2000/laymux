@@ -18,9 +18,7 @@ function fireKey(
   key: string,
   mods: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {},
 ) {
-  document.dispatchEvent(
-    new KeyboardEvent("keydown", { key, ...mods, bubbles: true }),
-  );
+  document.dispatchEvent(new KeyboardEvent("keydown", { key, ...mods, bubbles: true }));
 }
 
 describe("useKeyboardShortcuts", () => {
@@ -544,7 +542,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -555,8 +553,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "older", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "older",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "newest",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -574,13 +588,13 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-1",
             name: "WS1",
-  
+
             panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
           {
             id: "ws-2",
             name: "WS2",
-  
+
             panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
         ],
@@ -607,7 +621,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -618,8 +632,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 alert", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 alert", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 alert",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 alert",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -640,7 +670,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -651,9 +681,33 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 old", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 middle", level: "info", createdAt: 200, readAt: null },
-          { id: "n3", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 recent", level: "info", createdAt: 300, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 old",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 middle",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
+          {
+            id: "n3",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 recent",
+            level: "info",
+            createdAt: 300,
+            readAt: null,
+          },
         ],
       });
 
@@ -664,8 +718,8 @@ describe("useKeyboardShortcuts", () => {
       // Sorted desc: n3(p1,300), n2(p2,200), n1(p1,100)
       // Only n3 is consecutive from top (n2 breaks it)
       expect(notifs[2].readAt).not.toBeNull(); // n3 (p1 recent) — read
-      expect(notifs[1].readAt).toBeNull();     // n2 (p2) — still unread
-      expect(notifs[0].readAt).toBeNull();     // n1 (p1 old) — still unread
+      expect(notifs[1].readAt).toBeNull(); // n2 (p2) — still unread
+      expect(notifs[0].readAt).toBeNull(); // n1 (p1 old) — still unread
     });
 
     it("does not navigate to already-read (auto-dismissed) notifications", () => {
@@ -675,7 +729,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -687,8 +741,24 @@ describe("useKeyboardShortcuts", () => {
       // All notifications are already read (auto-dismissed)
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 100, readAt: 105 },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 200, readAt: 205 },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "auto-dismissed",
+            level: "info",
+            createdAt: 100,
+            readAt: 105,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "auto-dismissed",
+            level: "info",
+            createdAt: 200,
+            readAt: 205,
+          },
         ],
       });
 
@@ -717,7 +787,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -728,8 +798,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "oldest", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "oldest",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "newest",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -747,7 +833,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-  
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -758,9 +844,33 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 first", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 second", level: "info", createdAt: 200, readAt: null },
-          { id: "n3", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 third", level: "info", createdAt: 300, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 first",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 second",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
+          {
+            id: "n3",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 third",
+            level: "info",
+            createdAt: 300,
+            readAt: null,
+          },
         ],
       });
 
@@ -772,7 +882,7 @@ describe("useKeyboardShortcuts", () => {
       // n1, n2 consecutive from p1 — both marked as read
       expect(notifs[0].readAt).not.toBeNull(); // n1
       expect(notifs[1].readAt).not.toBeNull(); // n2
-      expect(notifs[2].readAt).toBeNull();     // n3 — still unread
+      expect(notifs[2].readAt).toBeNull(); // n3 — still unread
     });
   });
 

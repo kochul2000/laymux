@@ -51,11 +51,7 @@ export interface XtermTheme {
   brightWhite?: string;
 }
 
-function setIfNonEmpty(
-  obj: Record<string, string | undefined>,
-  key: string,
-  value: string,
-) {
+function setIfNonEmpty(obj: Record<string, string | undefined>, key: string, value: string) {
   if (value) {
     obj[key] = value;
   }
@@ -67,7 +63,11 @@ export function colorSchemeToXtermTheme(scheme: WTColorScheme): XtermTheme {
   setIfNonEmpty(theme as Record<string, string | undefined>, "foreground", scheme.foreground);
   setIfNonEmpty(theme as Record<string, string | undefined>, "background", scheme.background);
   setIfNonEmpty(theme as Record<string, string | undefined>, "cursor", scheme.cursorColor);
-  setIfNonEmpty(theme as Record<string, string | undefined>, "selectionBackground", scheme.selectionBackground);
+  setIfNonEmpty(
+    theme as Record<string, string | undefined>,
+    "selectionBackground",
+    scheme.selectionBackground,
+  );
 
   // ANSI colors — Windows Terminal uses "purple", xterm.js uses "magenta"
   setIfNonEmpty(theme as Record<string, string | undefined>, "black", scheme.black);

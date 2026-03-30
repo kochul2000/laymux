@@ -9,14 +9,25 @@ vi.mock("@/lib/tauri-api", () => ({
   loadSettings: vi.fn().mockResolvedValue({
     font: { face: "Fira Code", size: 16 },
     defaultProfile: "WSL",
-    profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+    profiles: [
+      {
+        name: "WSL",
+        commandLine: "wsl.exe",
+        colorScheme: "",
+        startingDirectory: "",
+        hidden: false,
+      },
+    ],
     colorSchemes: [],
     keybindings: [],
     layouts: [
       {
         id: "layout-1",
         name: "Saved Layout",
-        panes: [{ x: 0, y: 0, w: 1, h: 0.5, viewType: "TerminalView" }, { x: 0, y: 0.5, w: 1, h: 0.5, viewType: "TerminalView" }],
+        panes: [
+          { x: 0, y: 0, w: 1, h: 0.5, viewType: "TerminalView" },
+          { x: 0, y: 0.5, w: 1, h: 0.5, viewType: "TerminalView" },
+        ],
       },
     ],
     workspaces: [
@@ -25,13 +36,30 @@ vi.mock("@/lib/tauri-api", () => ({
         name: "Saved WS",
 
         panes: [
-          { x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },
-          { x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },
+          {
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 0.5,
+            view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" },
+          },
+          {
+            x: 0,
+            y: 0.5,
+            w: 1,
+            h: 0.5,
+            view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" },
+          },
         ],
       },
     ],
     docks: [
-      { position: "left", activeView: "SettingsView", views: ["WorkspaceSelectorView", "SettingsView"], visible: false },
+      {
+        position: "left",
+        activeView: "SettingsView",
+        views: ["WorkspaceSelectorView", "SettingsView"],
+        visible: false,
+      },
       { position: "right", activeView: null, views: [], visible: true },
     ],
   }),
@@ -136,7 +164,15 @@ describe("useSessionPersistence", () => {
     // Override loadSettings to return dock panes without cwdReceive/cwdSend
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",
-      profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        },
+      ],
       colorSchemes: [],
       keybindings: [],
       layouts: [],
@@ -152,17 +188,30 @@ describe("useSessionPersistence", () => {
             {
               id: "dp-test1",
               view: { type: "TerminalView", profile: "WSL" }, // no cwdReceive/cwdSend
-              x: 0, y: 0, w: 1, h: 1,
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
             },
           ],
         },
       ],
-      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace", copyOnSelect: true, pathEllipsis: "start", scrollbarStyle: "overlay" },
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
       claude: { syncCwd: "skip" },
     } as any);
 
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     const bottomDock = useDockStore.getState().getDock("bottom");
     const pane = bottomDock?.panes[0];
@@ -173,7 +222,15 @@ describe("useSessionPersistence", () => {
   it("preserves explicit cwdReceive=false from saved dock panes", async () => {
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",
-      profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        },
+      ],
       colorSchemes: [],
       keybindings: [],
       layouts: [],
@@ -189,17 +246,30 @@ describe("useSessionPersistence", () => {
             {
               id: "dp-test1",
               view: { type: "TerminalView", profile: "WSL", cwdReceive: false, cwdSend: false },
-              x: 0, y: 0, w: 1, h: 1,
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
             },
           ],
         },
       ],
-      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace", copyOnSelect: true, pathEllipsis: "start", scrollbarStyle: "overlay" },
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
       claude: { syncCwd: "skip" },
     } as any);
 
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     const bottomDock = useDockStore.getState().getDock("bottom");
     const pane = bottomDock?.panes[0];
@@ -225,12 +295,22 @@ describe("useSessionPersistence", () => {
       layouts: [],
       workspaces: [],
       docks: [],
-      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace", copyOnSelect: true, pathEllipsis: "start", scrollbarStyle: "overlay" },
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
       claude: { syncCwd: "skip" },
     } as any);
 
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     const profile = useSettingsStore.getState().profiles[0];
     expect(profile.font).toBeDefined();
@@ -241,7 +321,9 @@ describe("useSessionPersistence", () => {
 
   it("loads profile without font override — font stays undefined", async () => {
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     const profile = useSettingsStore.getState().profiles[0];
     expect(profile.font).toBeUndefined();
@@ -250,18 +332,36 @@ describe("useSessionPersistence", () => {
   it("loads convenience settings from backend", async () => {
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",
-      profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        },
+      ],
       colorSchemes: [],
       keybindings: [],
       layouts: [],
       workspaces: [],
       docks: [],
-      convenience: { smartPaste: false, pasteImageDir: "/images", hoverIdleSeconds: 5, notificationDismiss: "manual", copyOnSelect: false, pathEllipsis: "end", scrollbarStyle: "separate" },
+      convenience: {
+        smartPaste: false,
+        pasteImageDir: "/images",
+        hoverIdleSeconds: 5,
+        notificationDismiss: "manual",
+        copyOnSelect: false,
+        pathEllipsis: "end",
+        scrollbarStyle: "separate",
+      },
       claude: { syncCwd: "skip" },
     } as any);
 
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     const { convenience } = useSettingsStore.getState();
     expect(convenience.smartPaste).toBe(false);
@@ -276,18 +376,36 @@ describe("useSessionPersistence", () => {
   it("loads claude settings from backend", async () => {
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",
-      profiles: [{ name: "WSL", commandLine: "wsl.exe", colorScheme: "", startingDirectory: "", hidden: false }],
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        },
+      ],
       colorSchemes: [],
       keybindings: [],
       layouts: [],
       workspaces: [],
       docks: [],
-      convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace", copyOnSelect: true, pathEllipsis: "start", scrollbarStyle: "overlay" },
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
       claude: { syncCwd: "command" },
     } as any);
 
     renderHook(() => useSessionPersistence());
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
   });
