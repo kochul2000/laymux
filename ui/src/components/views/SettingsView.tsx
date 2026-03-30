@@ -12,6 +12,8 @@ import {
   type BellStyle,
   type CloseOnExit,
   type AntialiasingMode,
+  type ColorScheme,
+  type Keybinding,
 } from "@/stores/settings-store";
 import { persistSession } from "@/lib/persist-session";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
@@ -758,10 +760,13 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
 // -- Section: Color Schemes --
 
 function ColorSchemesSection() {
-  const colorSchemes = useSettingsStore((s) => s.colorSchemes);
-  const addColorScheme = useSettingsStore((s) => s.addColorScheme);
-  const removeColorScheme = useSettingsStore((s) => s.removeColorScheme);
-  const updateColorScheme = useSettingsStore((s) => s.updateColorScheme);
+  const storeColorSchemes = useSettingsStore((s) => s.colorSchemes);
+  const setColorSchemes = useSettingsStore((s) => s.setColorSchemes);
+  const [colorSchemes, setDraftColorSchemes] = useDraft<ColorScheme[]>(
+    "colorSchemes",
+    storeColorSchemes,
+    (v) => setColorSchemes(v),
+  );
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   const scheme = colorSchemes[selectedIdx];
@@ -769,18 +774,22 @@ function ColorSchemesSection() {
   const handleAdd = () => {
     const cs = makeDefaultColorScheme();
     cs.name = `Scheme ${colorSchemes.length + 1}`;
-    addColorScheme(cs);
+    setDraftColorSchemes((prev) => [...prev, cs]);
     setSelectedIdx(colorSchemes.length);
   };
 
   const handleRemove = () => {
     if (!scheme) return;
-    removeColorScheme(selectedIdx);
+    setDraftColorSchemes((prev) => prev.filter((_, i) => i !== selectedIdx));
     setSelectedIdx(Math.max(0, selectedIdx - 1));
   };
 
   const updateField = (field: string, value: string) => {
-    if (scheme) updateColorScheme(selectedIdx, { [field]: value });
+    if (scheme) {
+      setDraftColorSchemes((prev) =>
+        prev.map((cs, i) => (i === selectedIdx ? { ...cs, [field]: value } as ColorScheme : cs)),
+      );
+    }
   };
 
   const ansiColors = [
@@ -1364,10 +1373,13 @@ function keyEventToString(e: KeyboardEvent): string {
 }
 
 function KeybindingsSection() {
-  const keybindings = useSettingsStore((s) => s.keybindings);
-  const addKeybinding = useSettingsStore((s) => s.addKeybinding);
-  const removeKeybinding = useSettingsStore((s) => s.removeKeybinding);
-  const updateKeybinding = useSettingsStore((s) => s.updateKeybinding);
+  const storeKeybindings = useSettingsStore((s) => s.keybindings);
+  const setKeybindings = useSettingsStore((s) => s.setKeybindings);
+  const [keybindings, setDraftKeybindings] = useDraft<Keybinding[]>(
+    "keybindings",
+    storeKeybindings,
+    (v) => setKeybindings(v),
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [capturedKeys, setCapturedKeys] = useState<string>("");
 
@@ -1379,7 +1391,7 @@ function KeybindingsSection() {
   const handleStartCapture = (actionId: string, defaultKeys: string) => {
     const existing = overrideMap.get(actionId);
     if (!existing) {
-      addKeybinding({ keys: defaultKeys, command: actionId });
+      setDraftKeybindings((prev) => [...prev, { keys: defaultKeys, command: actionId }]);
     }
     setCapturedKeys("");
     setEditingId(actionId);
@@ -1388,7 +1400,7 @@ function KeybindingsSection() {
   const handleResetDefault = (actionId: string) => {
     const existing = overrideMap.get(actionId);
     if (existing) {
-      removeKeybinding(existing.index);
+      setDraftKeybindings((prev) => prev.filter((_, i) => i !== existing.index));
     }
     setEditingId(null);
   };
@@ -1442,14 +1454,10 @@ function KeybindingsSection() {
                     const str = keyEventToString(e.nativeEvent);
                     if (!str) return;
                     setCapturedKeys(str);
-                    // Update the keybinding immediately
-                    const existing = overrideMap.get(def.id) ?? (() => {
-                      // Re-fetch from store since addKeybinding may have just run
-                      const kbs = useSettingsStore.getState().keybindings;
-                      const idx = kbs.findIndex((kb) => kb.command === def.id);
-                      return idx >= 0 ? { keys: kbs[idx].keys, index: idx } : null;
-                    })();
-                    if (existing) updateKeybinding(existing.index, { keys: str });
+                    // Update the keybinding in draft
+                    setDraftKeybindings((prev) =>
+                      prev.map((kb) => kb.command === def.id ? { ...kb, keys: str } : kb),
+                    );
                   }}
                   onBlur={() => setEditingId(null)}
                   className="flex items-center gap-2 rounded px-2 py-1 text-xs"
@@ -1506,7 +1514,12 @@ function KeybindingsSection() {
             <FocusInput
               type="text"
               value={kb.command}
-              onChange={(e) => updateKeybinding(kb.index, { command: e.target.value })}
+              onChange={(e) => {
+                const val = e.target.value;
+                setDraftKeybindings((prev) =>
+                  prev.map((k, i) => (i === kb.index ? { ...k, command: val } : k)),
+                );
+              }}
               placeholder="action.name"
               className="min-w-0 flex-1 rounded px-2 py-0.5 text-xs"
             />
@@ -1524,7 +1537,11 @@ function KeybindingsSection() {
                   e.preventDefault();
                   e.stopPropagation();
                   const str = keyEventToString(e.nativeEvent);
-                  if (str) updateKeybinding(kb.index, { keys: str });
+                  if (str) {
+                    setDraftKeybindings((prev) =>
+                      prev.map((k, i) => (i === kb.index ? { ...k, keys: str } : k)),
+                    );
+                  }
                 }}
                 onBlur={() => setEditingId(null)}
                 className="flex items-center gap-2 rounded px-2 py-1 text-xs"
@@ -1544,7 +1561,7 @@ function KeybindingsSection() {
             <div className="w-12 shrink-0 text-right">
               <button
                 data-testid={`remove-keybinding-${kb.index}`}
-                onClick={() => removeKeybinding(kb.index)}
+                onClick={() => setDraftKeybindings((prev) => prev.filter((_, i) => i !== kb.index))}
                 className="text-xs"
                 style={{ color: "var(--red)", cursor: "pointer", background: "transparent", border: "none" }}
                 title="Remove"
@@ -1559,7 +1576,7 @@ function KeybindingsSection() {
       <div className="mt-3">
         <button
           data-testid="add-keybinding-btn"
-          onClick={() => addKeybinding({ keys: "", command: "" })}
+          onClick={() => setDraftKeybindings((prev) => [...prev, { keys: "", command: "" }])}
           className="rounded px-4 py-1.5 text-xs"
           style={{ ...inputStyle, cursor: "pointer" }}
         >
