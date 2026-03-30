@@ -291,6 +291,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         w.id === ws.id ? { ...w, panes: newPanes } : w,
       ),
     }));
+    persistSession();
   },
 
   renameLayout: (layoutId, name) => {
