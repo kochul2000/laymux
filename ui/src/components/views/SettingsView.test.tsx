@@ -1117,6 +1117,28 @@ describe("SettingsView", () => {
       expect(saveBtn).toBeDisabled();
     });
 
+    it("사용자가 A 필드 수정 중 + B 필드만 외부 변경 → A의 dirty 상태 유지", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // A 필드 수정: convenience 섹션의 smartPaste 토글
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+      const saveBtn = screen.getByTestId("save-settings-btn");
+      expect(saveBtn).not.toBeDisabled(); // dirty 상태
+
+      // B 필드만 외부 변경: claude.syncCwd
+      act(() => {
+        useSettingsStore.setState({
+          claude: { ...useSettingsStore.getState().claude, syncCwd: "command" },
+        });
+      });
+
+      // A 필드의 사용자 수정이 살아 있으므로 dirty 상태 유지
+      expect(saveBtn).not.toBeDisabled();
+    });
+
     it("Startup 섹션에서 appTheme 외부 변경 시 draft 리셋", async () => {
       render(<SettingsView />);
 
