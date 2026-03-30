@@ -90,7 +90,7 @@ fn settings_round_trip_with_full_config() {
             Workspace {
                 id: "ws-project-a".into(),
                 name: "Project A".into(),
-                layout_id: "triple-split".into(),
+                layout_id: None,
                 panes: vec![
                     WorkspacePane {
                         x: 0.0,
@@ -290,7 +290,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
             Workspace {
                 id: "ws-1".into(),
                 name: "WS1".into(),
-                layout_id: "layout-1".into(),
+                layout_id: None,
                 panes: vec![WorkspacePane {
                     x: 0.0, y: 0.0, w: 1.0, h: 1.0,
                     view: WorkspacePaneView {
@@ -302,13 +302,13 @@ fn settings_multiple_layouts_multiple_workspaces() {
             Workspace {
                 id: "ws-2".into(),
                 name: "WS2".into(),
-                layout_id: "layout-2".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-3".into(),
                 name: "WS3".into(),
-                layout_id: "layout-3".into(),
+                layout_id: None,
                 panes: vec![],
             },
         ],
@@ -320,7 +320,6 @@ fn settings_multiple_layouts_multiple_workspaces() {
     assert_eq!(parsed.layouts.len(), 3);
     assert_eq!(parsed.workspaces.len(), 3);
     assert_eq!(parsed.layouts[2].panes.len(), 4);
-    assert_eq!(parsed.workspaces[0].layout_id, "layout-1");
 }
 
 #[test]
@@ -1249,37 +1248,30 @@ fn e2e_settings_with_layout_workspace_relationship() {
             Workspace {
                 id: "ws-1".into(),
                 name: "WS 1".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-2".into(),
                 name: "WS 2".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-3".into(),
                 name: "WS 3".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
         ],
         ..Settings::default()
     };
 
-    // All 3 workspaces share the same layout
-    let layout_id = &settings.layouts[0].id;
-    for ws in &settings.workspaces {
-        assert_eq!(&ws.layout_id, layout_id);
-    }
-
-    // Round-trip preserves the relationship
+    // Round-trip preserves workspaces
     let json = serde_json::to_string(&settings).unwrap();
     let parsed: Settings = serde_json::from_str(&json).unwrap();
-    for ws in &parsed.workspaces {
-        assert_eq!(&ws.layout_id, layout_id);
-    }
+    assert_eq!(parsed.workspaces.len(), 3);
+    assert_eq!(parsed.layouts.len(), 1);
 }
 
 #[test]

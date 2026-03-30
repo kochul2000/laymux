@@ -60,10 +60,20 @@ export interface ConvenienceSettings {
   pathEllipsis: PathEllipsisMode;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
   scrollbarStyle: ScrollbarStyle;
+  /** Keep dock state in background when hidden. */
+  dockPersistState: boolean;
   /** Allow Alt+Arrow to navigate into/out of dock areas. */
   dockArrowNav: boolean;
 }
 
+/** Which elements to display in WorkspaceSelectorView pane rows. */
+export interface WorkspaceDisplaySettings {
+  minimap: boolean;
+  environment: boolean;
+  activity: boolean;
+  path: boolean;
+  result: boolean;
+}
 
 export type { MemoSettings } from "../lib/tauri-api";
 
@@ -176,6 +186,7 @@ interface SettingsState {
   viewOrder: string[];
   appThemeId: string;
   convenience: ConvenienceSettings;
+  workspaceDisplay: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
 
@@ -183,6 +194,7 @@ interface SettingsState {
   setViewOrder: (order: string[]) => void;
   setAppTheme: (themeId: string) => void;
   setConvenience: (data: Partial<ConvenienceSettings>) => void;
+  setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
@@ -197,7 +209,7 @@ interface SettingsState {
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
   /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
   resolveFont: (profileName: string) => FontSettings;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude" | "memo">> & { font?: FontSettings }) => void;
+  loadFromSettings: (data: Partial<Pick<SettingsState, "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "workspaceDisplay" | "claude" | "memo">> & { font?: FontSettings }) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
@@ -397,7 +409,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockArrowNav: true },
+  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true, dockArrowNav: true },
+  workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
   memo: { ...DEFAULT_MEMO_PADDING },
 
@@ -406,6 +419,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setConvenience: (data) =>
     set((state) => ({
       convenience: { ...state.convenience, ...data },
+    })),
+
+  setWorkspaceDisplay: (data) =>
+    set((state) => ({
+      workspaceDisplay: { ...state.workspaceDisplay, ...data },
     })),
 
   setClaude: (data) =>
@@ -521,7 +539,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     })() : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockArrowNav: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, pathEllipsis: "start" as const, scrollbarStyle: "overlay" as const, dockPersistState: true, dockArrowNav: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      : undefined;
+    // Ensure workspaceDisplay settings have all fields (backwards compat)
+    const workspaceDisplay = data.workspaceDisplay
+      ? { minimap: true, environment: true, activity: true, path: true, result: true, ...(data.workspaceDisplay as Partial<WorkspaceDisplaySettings>) }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude
@@ -541,6 +563,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
+      ...(workspaceDisplay ? { workspaceDisplay } : {}),
       ...(claude ? { claude } : {}),
       ...(memo ? { memo } : {}),
     }));

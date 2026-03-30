@@ -205,7 +205,7 @@ export interface SettingsLayout {
 export interface SettingsWorkspace {
   id: string;
   name: string;
-  layoutId: string;
+  layoutId?: string; // deprecated — kept for backward compat with old settings.json
   panes: {
     x: number;
     y: number;

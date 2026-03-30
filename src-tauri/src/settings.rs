@@ -244,7 +244,7 @@ pub struct LayoutPane {
     pub view_type: String,
 }
 
-/// Layout template.
+/// Layout definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Layout {
     pub id: String,
@@ -279,7 +279,9 @@ pub struct WorkspacePane {
 pub struct Workspace {
     pub id: String,
     pub name: String,
-    pub layout_id: String,
+    /// Deprecated — kept for backward compat with old settings.json files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_id: Option<String>,
     pub panes: Vec<WorkspacePane>,
 }
 
@@ -350,6 +352,9 @@ pub struct ConvenienceSettings {
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
+    /// Keep dock state in background when hidden.
+    #[serde(default = "default_true")]
+    pub dock_persist_state: bool,
     /// Allow Alt+Arrow to navigate into/out of dock areas.
     #[serde(default = "default_true")]
     pub dock_arrow_nav: bool,
@@ -363,6 +368,7 @@ impl Default for ConvenienceSettings {
             copy_on_select: true,
             path_ellipsis: PathEllipsisMode::default(),
             scrollbar_style: "overlay".to_string(),
+            dock_persist_state: true,
             dock_arrow_nav: true,
         }
     }
@@ -522,7 +528,7 @@ impl Default for Settings {
             workspaces: vec![Workspace {
                 id: "ws-default".into(),
                 name: "Default".into(),
-                layout_id: "default-layout".into(),
+                layout_id: None,
                 panes: vec![WorkspacePane {
                     x: 0.0,
                     y: 0.0,
@@ -699,7 +705,7 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.layouts.len(), 1);
         assert_eq!(settings.workspaces.len(), 1);
-        assert_eq!(settings.workspaces[0].layout_id, "default-layout");
+        assert_eq!(settings.workspaces[0].layout_id, None);
     }
 
     #[test]
@@ -1026,7 +1032,7 @@ mod tests {
         settings.workspaces = vec![Workspace {
             id: "ws-1".into(),
             name: "Test".into(),
-            layout_id: "default-layout".into(),
+            layout_id: None,
             panes: vec![WorkspacePane {
                 x: 0.0, y: 0.0, w: 1.0, h: 1.0,
                 view: serde_json::from_value(serde_json::json!({
@@ -1053,9 +1059,9 @@ mod tests {
     fn migrate_deduplicates_workspace_names() {
         let mut settings = Settings::default();
         settings.workspaces = vec![
-            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
-            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
-            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: "l".into(), panes: vec![] },
+            Workspace { id: "ws-1".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
+            Workspace { id: "ws-2".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
+            Workspace { id: "ws-3".into(), name: "Dev".into(), layout_id: None, panes: vec![] },
         ];
         migrate_settings(&mut settings);
         let names: Vec<&str> = settings.workspaces.iter().map(|w| w.name.as_str()).collect();

@@ -118,6 +118,8 @@ export function AppLayout() {
   const left = docks.find((d) => d.position === "left");
   const right = docks.find((d) => d.position === "right");
 
+  const dockPersistState = useSettingsStore((s) => s.convenience.dockPersistState);
+
   const gridStyles = useMemo((): React.CSSProperties => {
     const topSize = top?.visible ? `${top.size}px` : "0px";
     const bottomSize = bottom?.visible ? `${bottom.size}px` : "0px";
@@ -137,7 +139,9 @@ export function AppLayout() {
     left?.visible, left?.size, right?.visible, right?.size]);
 
   const renderDockContent = (dock: typeof top, pos: DockPosition, borderSide: string) => {
-    if (!dock?.visible) return null;
+    if (!dock) return null;
+    // When not visible: unmount if persistState is off, keep in DOM if on
+    if (!dock.visible && !dockPersistState) return null;
     const isFocused = focusedDock === pos;
     return (
       <>

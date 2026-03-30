@@ -149,82 +149,44 @@ describe("WorkspaceStore", () => {
     });
   });
 
-  // Workspace save actions
-  describe("saveWorkspace", () => {
-    it("saves current workspace state", () => {
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-      useWorkspaceStore.getState().saveWorkspace();
-      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.panes).toHaveLength(2);
-    });
-
-    it("triggers persistence to settings.json", () => {
-      useWorkspaceStore.getState().saveWorkspace();
-      expect(persistSession).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("saveAndPropagate", () => {
-    it("propagates changes to workspaces with same layout", () => {
-      const { layouts } = useWorkspaceStore.getState();
-      useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
-
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      const ws2 = useWorkspaceStore.getState().workspaces[1];
-      expect(ws2.panes).toHaveLength(2);
-    });
-
-    it("triggers persistence to settings.json", () => {
-      useWorkspaceStore.getState().saveAndPropagate();
-      expect(persistSession).toHaveBeenCalledTimes(1);
-    });
-
-    it("preserves view config (including profile) when propagating to other workspaces", () => {
-      const { layouts } = useWorkspaceStore.getState();
-      useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
-
-      // Set profile on current workspace's pane
-      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      const ws2 = useWorkspaceStore.getState().workspaces[1];
-      expect(ws2.panes[0].view.type).toBe("TerminalView");
-      expect(ws2.panes[0].view.profile).toBe("WSL");
-    });
-  });
-
-  describe("saveAsNewLayout", () => {
-    it("creates a new layout from current workspace", () => {
+  // Layout actions
+  describe("exportAsNewLayout", () => {
+    it("creates a new layout from current workspace panes", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().saveAsNewLayout("My Layout");
+      useWorkspaceStore.getState().exportAsNewLayout("My Layout");
 
       const { layouts } = useWorkspaceStore.getState();
       expect(layouts).toHaveLength(2);
       expect(layouts[1].name).toBe("My Layout");
       expect(layouts[1].panes).toHaveLength(2);
+    });
 
+    it("does not link workspace to the new layout", () => {
+      useWorkspaceStore.getState().exportAsNewLayout("New");
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.layoutId).toBe(layouts[1].id);
+      expect(active).not.toHaveProperty("layoutId");
     });
 
     it("triggers persistence to settings.json", () => {
-      useWorkspaceStore.getState().saveAsNewLayout("New");
+      useWorkspaceStore.getState().exportAsNewLayout("New");
       expect(persistSession).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("revertWorkspace", () => {
-    it("reverts to layout template panes", () => {
+  describe("exportToLayout", () => {
+    it("overwrites existing layout with current workspace panes", () => {
       useWorkspaceStore.getState().splitPane(0, "vertical");
-      expect(
-        useWorkspaceStore.getState().getActiveWorkspace()!.panes,
-      ).toHaveLength(2);
+      const layoutId = useWorkspaceStore.getState().layouts[0].id;
+      useWorkspaceStore.getState().exportToLayout(layoutId);
 
-      useWorkspaceStore.getState().revertWorkspace();
-      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.panes).toHaveLength(1); // Back to layout default
+      const layout = useWorkspaceStore.getState().layouts[0];
+      expect(layout.panes).toHaveLength(2);
+    });
+
+    it("triggers persistence to settings.json", () => {
+      const layoutId = useWorkspaceStore.getState().layouts[0].id;
+      useWorkspaceStore.getState().exportToLayout(layoutId);
+      expect(persistSession).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -312,7 +274,7 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.setState({
         layouts: [{ id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] }],
         workspaces: [
-          { id: "ws-99", name: "Restored", layoutId: "layout-1", panes: [{ id: "p-1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
+          { id: "ws-99", name: "Restored", panes: [{ id: "p-1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
         ],
         activeWorkspaceId: "ws-99",
       });
@@ -339,7 +301,7 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.setState({
         layouts: [{ id: "layout-1", name: "L", panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }] }],
         workspaces: [
-          { id: "ws-restored", name: "Restored", layoutId: "layout-1", panes: [{ id: "pane-5", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
+          { id: "ws-restored", name: "Restored", panes: [{ id: "pane-5", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }] },
         ],
         activeWorkspaceId: "ws-restored",
       });
@@ -379,12 +341,5 @@ describe("WorkspaceStore", () => {
       expect(new Set(allIds).size).toBe(allIds.length);
     });
 
-    it("revert creates new pane ids (different from before)", () => {
-      const originalId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().revertWorkspace();
-      const revertedId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
-      expect(revertedId).not.toBe(originalId);
-    });
   });
 });

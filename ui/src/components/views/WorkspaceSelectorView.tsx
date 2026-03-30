@@ -60,6 +60,7 @@ function WorkspaceItem({
   onRename: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
 
   const cmdInfo = summary.lastCommand;
   const cmdIcon = cmdInfo
@@ -190,39 +191,43 @@ function WorkspaceItem({
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
-                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
-                    {showMinimap && (
+                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
+                    {showMinimap && wsDisplay.minimap && (
                       <span className="shrink-0" data-testid={`pane-minimap-${termId}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                         <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
                       </span>
                     )}
                     <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
-                        {shortLabel(ts.label)}
-                      </span>
-                      <span
-                        data-testid={`terminal-activity-${ts.id}`}
-                        className="shrink-0 rounded px-1 text-[9px]"
-                        style={{
-                          color: actInfo.color,
-                          background: ts.activity?.type === "interactiveApp"
-                            ? (ts.activity?.name === "Claude" ? "rgba(217,119,87,0.15)" : "rgba(137,180,250,0.12)")
-                            : "rgba(255,255,255,0.04)",
-                          minWidth: 52,
-                          textAlign: "center",
-                          display: "inline-block",
-                          opacity: isActive ? 1 : 0.7,
-                        }}
-                      >
-                        {actInfo.label}{ts.outputActive ? "" : ""}
-                      </span>
-                      {ts.branch && (
+                      {wsDisplay.environment && (
+                        <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
+                          {shortLabel(ts.label)}
+                        </span>
+                      )}
+                      {wsDisplay.activity && (
+                        <span
+                          data-testid={`terminal-activity-${ts.id}`}
+                          className="shrink-0 rounded px-1 text-[9px]"
+                          style={{
+                            color: actInfo.color,
+                            background: ts.activity?.type === "interactiveApp"
+                              ? (ts.activity?.name === "Claude" ? "rgba(217,119,87,0.15)" : "rgba(137,180,250,0.12)")
+                              : "rgba(255,255,255,0.04)",
+                            minWidth: 52,
+                            textAlign: "center",
+                            display: "inline-block",
+                            opacity: isActive ? 1 : 0.7,
+                          }}
+                        >
+                          {actInfo.label}{ts.outputActive ? "" : ""}
+                        </span>
+                      )}
+                      {wsDisplay.path && ts.branch && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span className="shrink-0" style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}>{ts.branch}</span>
                         </>
                       )}
-                      {ts.cwd && (
+                      {wsDisplay.path && ts.cwd && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span className="truncate" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", opacity: isActive ? 0.7 : 0.5, ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}) }}>
@@ -230,7 +235,7 @@ function WorkspaceItem({
                           </span>
                         </>
                       )}
-                      {tCmdIcon ? (
+                      {wsDisplay.result && tCmdIcon ? (
                         <span
                           data-testid={`pane-cmd-badge-${ts.id}`}
                           className="shrink-0"
@@ -244,7 +249,7 @@ function WorkspaceItem({
                         >
                           {tCmdIcon}
                         </span>
-                      ) : ts.hasUnreadNotification ? (
+                      ) : wsDisplay.result && ts.hasUnreadNotification ? (
                         <span
                           data-testid={`pane-notif-dot-${ts.id}`}
                           className="shrink-0"
@@ -265,30 +270,34 @@ function WorkspaceItem({
                 const url = (pane.view.url as string) ?? "";
                 const shortUrl = url.replace(/^https?:\/\//, "");
                 return (
-                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
-                    {showMinimap && (
+                  <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
+                    {showMinimap && wsDisplay.minimap && (
                       <span className="shrink-0" data-testid={`pane-minimap-browser-${pane.id}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                         <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
                       </span>
                     )}
                     <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
-                        {shortLabel("Browser")}
-                      </span>
-                      <span
-                        className="shrink-0 rounded px-1 text-[9px]"
-                        style={{
-                          color: "var(--cyan, #94e2d5)",
-                          background: "rgba(255,255,255,0.04)",
-                          minWidth: 52,
-                          textAlign: "center",
-                          display: "inline-block",
-                          opacity: isActive ? 1 : 0.7,
-                        }}
-                      >
-                        preview
-                      </span>
-                      {shortUrl && (
+                      {wsDisplay.environment && (
+                        <span className="shrink-0 font-medium" style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}>
+                          {shortLabel("Browser")}
+                        </span>
+                      )}
+                      {wsDisplay.activity && (
+                        <span
+                          className="shrink-0 rounded px-1 text-[9px]"
+                          style={{
+                            color: "var(--cyan, #94e2d5)",
+                            background: "rgba(255,255,255,0.04)",
+                            minWidth: 52,
+                            textAlign: "center",
+                            display: "inline-block",
+                            opacity: isActive ? 1 : 0.7,
+                          }}
+                        >
+                          preview
+                        </span>
+                      )}
+                      {wsDisplay.path && shortUrl && (
                         <>
                           <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span className="truncate" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", opacity: isActive ? 0.7 : 0.5 }}>
@@ -302,8 +311,8 @@ function WorkspaceItem({
               }
               // EmptyView or other view types
               return (
-                <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: showMinimap ? 2 : 18 }}>
-                  {showMinimap && (
+                <div key={pane.id} className="flex items-center gap-1.5 truncate text-[11px]" style={{ paddingLeft: (showMinimap && wsDisplay.minimap) ? 2 : 18 }}>
+                  {showMinimap && wsDisplay.minimap && (
                     <span className="shrink-0" data-testid={`pane-minimap-empty-${pane.id}`} style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}>
                       <PaneMinimap panes={minimapPanes} highlightIndex={paneIndex} width={18} height={12} />
                     </span>

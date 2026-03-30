@@ -62,26 +62,28 @@ describe("ViewRenderer", () => {
     expect(terminalViewProps.at(-1)?.syncGroup).toBe("MyGroup");
   });
 
-  it("defaults syncGroup to workspaceName when syncGroup is empty", () => {
+  it("defaults syncGroup to workspaceId when syncGroup is empty", () => {
     render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView", syncGroup: "" }}
         workspaceName="ProjectA"
+        workspaceId="ws-abc123"
       />,
     );
-    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ProjectA");
+    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ws-abc123");
   });
 
-  it("defaults syncGroup to workspaceName when syncGroup is not specified", () => {
+  it("defaults syncGroup to workspaceId when syncGroup is not specified", () => {
     render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView" }}
         workspaceName="ProjectB"
+        workspaceId="ws-def456"
       />,
     );
-    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ProjectB");
+    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ws-def456");
   });
 
   it("passes profile from viewConfig to TerminalView", () => {

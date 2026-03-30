@@ -72,7 +72,7 @@ export function useSyncEvents() {
         const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
         let targetWsId = activeWorkspaceId;
         if (instance?.syncGroup) {
-          const ownerWs = workspaces.find((ws) => ws.name === instance.syncGroup);
+          const ownerWs = workspaces.find((ws) => ws.id === instance.syncGroup);
           if (ownerWs) {
             targetWsId = ownerWs.id;
           }
