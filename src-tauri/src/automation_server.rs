@@ -355,7 +355,7 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/workspaces",
                 "description": "Create a new workspace from a layout.",
-                "body": { "name": "string", "layoutId": "string" }
+                "body": { "name": "string", "layoutId": "string (optional) — layout to use as template" }
             },
             {
                 "method": "PUT", "path": "/api/v1/workspaces/{id}",

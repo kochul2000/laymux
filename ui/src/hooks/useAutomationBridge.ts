@@ -226,7 +226,9 @@ const handlers: HandlerMap = {
       return ok({ exported: true });
     },
     exportTo: (p) => {
-      useWorkspaceStore.getState().exportToLayout(p.layoutId as string);
+      const layoutId = p.layoutId as string;
+      const success = useWorkspaceStore.getState().exportToLayout(layoutId);
+      if (!success) return err(`layout '${layoutId}' not found`);
       return ok({ exported: true });
     },
   },

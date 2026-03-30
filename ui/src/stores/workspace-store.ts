@@ -57,7 +57,7 @@ interface WorkspaceState {
 
   // Layout actions
   exportAsNewLayout: (name: string) => void;
-  exportToLayout: (layoutId: string) => void;
+  exportToLayout: (layoutId: string) => boolean;
 
   // Layout management
   renameLayout: (layoutId: string, name: string) => void;
@@ -258,7 +258,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
   exportToLayout: (layoutId) => {
     const ws = get().getActiveWorkspace();
-    if (!ws) return;
+    if (!ws) return false;
+
+    const { layouts } = get();
+    if (!layouts.some((l) => l.id === layoutId)) return false;
 
     const updatedPanes = ws.panes.map((p) => ({
       x: p.x, y: p.y, w: p.w, h: p.h, viewType: p.view.type,
@@ -270,6 +273,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       ),
     }));
     persistSession();
+    return true;
   },
 
   renameLayout: (layoutId, name) => {
