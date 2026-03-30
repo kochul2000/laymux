@@ -9,11 +9,12 @@ import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
 
-interface ViewRendererProps {
+export interface ViewRendererProps {
   viewType: ViewType | null;
   viewConfig?: ViewInstanceConfig;
   onSelectView?: (config: ViewInstanceConfig) => void;
   workspaceId?: string;
+  workspaceName?: string;
   paneId?: string;
   emptyViewContext?: EmptyViewContext;
   isFocused?: boolean;

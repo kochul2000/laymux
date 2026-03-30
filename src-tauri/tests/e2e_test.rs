@@ -1,7 +1,7 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
     ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FontSettings, Keybinding,
-    Layout, LayoutPane, Profile, ProfileDefaults, Settings, Workspace, WorkspacePane,
+    Layout, LayoutPane, MemoSettings, Profile, ProfileDefaults, Settings, Workspace, WorkspacePane,
     WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
@@ -158,6 +158,7 @@ fn settings_round_trip_with_full_config() {
         ],
         convenience: ConvenienceSettings::default(),
         claude: ClaudeSettings::default(),
+        memo: MemoSettings::default(),
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();

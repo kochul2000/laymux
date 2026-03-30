@@ -6,6 +6,19 @@ vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/tauri-api", () => ({
+  createTerminalSession: vi.fn().mockResolvedValue("t-mock"),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  resizeTerminal: vi.fn().mockResolvedValue(undefined),
+  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+  onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
+  smartPaste: vi.fn().mockResolvedValue({ pasteType: "none", content: "" }),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
+  updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
+  openExternal: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { AppLayout } from "./AppLayout";
 import { useDockStore } from "@/stores/dock-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";

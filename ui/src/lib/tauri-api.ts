@@ -91,6 +91,14 @@ export interface MemoSettings {
   paddingLeft: number;
 }
 
+export interface WorkspaceDisplaySettings {
+  minimap: boolean;
+  environment: boolean;
+  activity: boolean;
+  path: boolean;
+  result: boolean;
+}
+
 export interface ProfileDefaults {
   colorScheme?: string;
   cursorShape?: string;
@@ -118,6 +126,7 @@ export interface Settings {
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
   convenience: ConvenienceSettings;
+  workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
 }
