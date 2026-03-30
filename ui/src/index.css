@@ -54,6 +54,7 @@ body {
  */
 .scrollbar-overlay .xterm-viewport {
   overflow-y: auto !important;
+  right: 0; /* overlap screen area so scrollbar doesn't eat space */
 }
 .scrollbar-overlay .xterm-viewport::-webkit-scrollbar {
   width: 8px;
@@ -69,11 +70,7 @@ body {
 .scrollbar-overlay .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.35);
 }
-/* Position viewport to overlap screen area so scrollbar doesn't eat space */
-.scrollbar-overlay .xterm .xterm-viewport {
-  right: 0;
-}
-.scrollbar-overlay .xterm .xterm-screen {
+.scrollbar-overlay .xterm-screen {
   width: 100% !important;
 }
 
