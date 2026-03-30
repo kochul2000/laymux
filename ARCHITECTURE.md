@@ -175,16 +175,16 @@ v1은 Built-in only. 플러그인 시스템은 추후 고려.
 
 ### 규칙
 
-- SyncGroup은 **이름 문자열** 하나로 식별
-- 기본값: 소속 Workspace의 이름 (자동 설정)
+- SyncGroup은 **문자열** 하나로 식별
+- 기본값: 소속 Workspace의 **ID** (자동 설정, rename에 안정적)
 - 같은 syncGroup 값을 가진 모든 TerminalView가 동기화 대상
-- Workspace를 넘나드는 그룹도 가능 (같은 이름이면 자동 연결)
+- 크로스 워크스페이스 동기화: 명시적 커스텀 syncGroup 문자열을 지정하면 Workspace를 넘나드는 동기화 가능
 - 독립 터미널: 빈 문자열로 설정
 
 ```jsonc
-{ "syncGroup": "프로젝트A" }  // Workspace 이름 = 기본값 (자동)
-{ "syncGroup": "prod-db"   }  // 커스텀 그룹 (Workspace 무관)
-{ "syncGroup": ""          }  // 독립 — 동기화 받지 않음
+{ "syncGroup": ""            }  // 기본값 = Workspace ID (자동)
+{ "syncGroup": "shared-dev"  }  // 커스텀 그룹 (Workspace 무관, 크로스 WS 동기화)
+{ "syncGroup": ""            }  // 독립 — 동기화 받지 않음
 ```
 
 ### 무한루프 방지

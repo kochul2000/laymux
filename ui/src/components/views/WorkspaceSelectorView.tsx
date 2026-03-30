@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useWorkspaceStore, isWorkspaceDirty } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
@@ -42,6 +42,8 @@ function WorkspaceItem({
   panes,
   canClose,
   pathEllipsis,
+  layoutName,
+  isDirty,
   onSelect,
   onClose,
   onDuplicate,
@@ -54,6 +56,8 @@ function WorkspaceItem({
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
+  layoutName: string;
+  isDirty: boolean;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
@@ -108,6 +112,23 @@ function WorkspaceItem({
             onDoubleClick={(e) => { e.stopPropagation(); onRename(); }}
           >
             {ws.name}
+          </span>
+          {isDirty && (
+            <span
+              data-testid={`workspace-dirty-${ws.id}`}
+              className="shrink-0"
+              style={{ color: "var(--yellow)", fontSize: 9, lineHeight: 1 }}
+              title="Layout has unsaved changes"
+            >
+              *
+            </span>
+          )}
+          <span
+            data-testid={`workspace-layout-${ws.id}`}
+            className="shrink-0 truncate text-[9px]"
+            style={{ color: "var(--text-secondary)", opacity: 0.4 }}
+          >
+            {layoutName}
           </span>
           {summary.terminalCount > 0 && (
             <span
@@ -586,6 +607,7 @@ export function WorkspaceSelectorView() {
         {workspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
           const summary = computeWorkspaceSummary(ws.id, terminalInstances, terminalPorts, notifications, ws.name);
+          const wsLayout = layouts.find((l) => l.id === ws.layoutId);
           return (
             <WorkspaceItem
               key={ws.id}
@@ -596,6 +618,8 @@ export function WorkspaceSelectorView() {
               panes={ws.panes}
               canClose={workspaces.length > 1}
               pathEllipsis={pathEllipsis}
+              layoutName={wsLayout?.name ?? "Unknown"}
+              isDirty={wsLayout ? isWorkspaceDirty(ws, wsLayout) : false}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {

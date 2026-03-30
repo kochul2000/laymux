@@ -352,6 +352,73 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  describe("isWorkspaceDirty", () => {
+    it("returns false for freshly created workspace", () => {
+      const { isActiveWorkspaceDirty } = useWorkspaceStore.getState();
+      expect(isActiveWorkspaceDirty()).toBe(false);
+    });
+
+    it("returns true after splitPane", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+    });
+
+    it("returns true after removePane (split then remove one)", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().saveWorkspace(); // save so layout has 2 panes
+      useWorkspaceStore.getState().removePane(1);
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+    });
+
+    it("returns true after resizePane", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().saveWorkspace();
+      useWorkspaceStore.getState().resizePane(0, { w: 0.7 });
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+    });
+
+    it("returns true after setPaneView changes viewType", () => {
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+    });
+
+    it("returns false after setPaneView changes only profile (same viewType)", () => {
+      // Default layout has EmptyView. Set to EmptyView with extra config.
+      useWorkspaceStore.getState().setPaneView(0, { type: "EmptyView", someConfig: "x" });
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(false);
+    });
+
+    it("returns false after saveWorkspace", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+      useWorkspaceStore.getState().saveWorkspace();
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(false);
+    });
+
+    it("returns false after revertWorkspace", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+      useWorkspaceStore.getState().revertWorkspace();
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(false);
+    });
+
+    it("handles floating point comparison with epsilon", () => {
+      // Split creates panes with exact 0.5 values. Tiny float drift shouldn't be dirty.
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().saveWorkspace();
+      // Simulate tiny float drift
+      useWorkspaceStore.getState().resizePane(0, { w: 0.5 + 0.0005 });
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(false);
+    });
+
+    it("detects dirty when float difference exceeds epsilon", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().saveWorkspace();
+      useWorkspaceStore.getState().resizePane(0, { w: 0.502 });
+      expect(useWorkspaceStore.getState().isActiveWorkspaceDirty()).toBe(true);
+    });
+  });
+
   describe("Pane ID stability", () => {
     it("default workspace panes have an id", () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;

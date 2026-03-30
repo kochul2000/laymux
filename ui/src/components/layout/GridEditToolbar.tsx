@@ -26,6 +26,19 @@ export function GridEditToolbar() {
   const toggleLayoutMode = useDockStore((s) => s.toggleLayoutMode);
 
   const [maximized, setMaximized] = useState(false);
+  const [saveFlash, setSaveFlash] = useState<string | null>(null);
+
+  const flash = (key: string) => {
+    setSaveFlash(key);
+    setTimeout(() => setSaveFlash(null), 1500);
+  };
+
+  const handleSave = () => { saveWorkspace(); flash("save"); };
+  const handleSaveAll = () => { saveAndPropagate(); flash("save-all"); };
+  const handleSaveAs = () => {
+    const name = window.prompt("New layout name:");
+    if (name?.trim()) { saveAsNewLayout(name.trim()); flash("save-as"); }
+  };
 
   useEffect(() => {
     getWindow().then((w) => w.isMaximized().then(setMaximized)).catch(() => {});
@@ -130,36 +143,33 @@ export function GridEditToolbar() {
 
             <button
               data-testid="save-btn"
-              onClick={saveWorkspace}
+              onClick={handleSave}
               className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
+              style={saveFlash === "save" ? { ...btnH, border: "1px solid var(--green)", color: "var(--bg-base)", background: "var(--green)", borderRadius: 2 } : btnStyle}
+              onMouseEnter={saveFlash === "save" ? undefined : hoverIn}
+              onMouseLeave={saveFlash === "save" ? undefined : hoverOut}
             >
-              Save
+              {saveFlash === "save" ? "Saved!" : "Save"}
             </button>
             <button
               data-testid="save-propagate-btn"
-              onClick={saveAndPropagate}
+              onClick={handleSaveAll}
               className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
+              style={saveFlash === "save-all" ? { ...btnH, border: "1px solid var(--green)", color: "var(--bg-base)", background: "var(--green)", borderRadius: 2 } : btnStyle}
+              onMouseEnter={saveFlash === "save-all" ? undefined : hoverIn}
+              onMouseLeave={saveFlash === "save-all" ? undefined : hoverOut}
             >
-              Save All
+              {saveFlash === "save-all" ? "Saved!" : "Save All"}
             </button>
             <button
               data-testid="save-as-btn"
-              onClick={() => {
-                const name = window.prompt("New layout name:");
-                if (name?.trim()) saveAsNewLayout(name.trim());
-              }}
+              onClick={handleSaveAs}
               className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
+              style={saveFlash === "save-as" ? { ...btnH, border: "1px solid var(--green)", color: "var(--bg-base)", background: "var(--green)", borderRadius: 2 } : btnStyle}
+              onMouseEnter={saveFlash === "save-as" ? undefined : hoverIn}
+              onMouseLeave={saveFlash === "save-as" ? undefined : hoverOut}
             >
-              Save As
+              {saveFlash === "save-as" ? "Saved!" : "Save As"}
             </button>
             <button
               data-testid="revert-btn"

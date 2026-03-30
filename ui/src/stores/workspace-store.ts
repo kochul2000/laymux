@@ -16,6 +16,27 @@ function ensureUniqueName(name: string, existing: { name: string }[]): string {
   return `${name} (${n})`;
 }
 
+const EPSILON = 0.001;
+
+/** Compare workspace panes against its layout template to detect divergence. */
+export function isWorkspaceDirty(workspace: Workspace, layout: Layout): boolean {
+  if (workspace.panes.length !== layout.panes.length) return true;
+  for (let i = 0; i < workspace.panes.length; i++) {
+    const wp = workspace.panes[i];
+    const lp = layout.panes[i];
+    if (
+      Math.abs(wp.x - lp.x) > EPSILON ||
+      Math.abs(wp.y - lp.y) > EPSILON ||
+      Math.abs(wp.w - lp.w) > EPSILON ||
+      Math.abs(wp.h - lp.h) > EPSILON ||
+      wp.view.type !== lp.viewType
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const defaultLayout: Layout = {
   id: "default-layout",
   name: "Default",
@@ -44,6 +65,7 @@ interface WorkspaceState {
   activeWorkspaceId: string;
 
   getActiveWorkspace: () => Workspace | undefined;
+  isActiveWorkspaceDirty: () => boolean;
   setActiveWorkspace: (id: string) => void;
   addWorkspace: (name: string, layoutId: string) => void;
   duplicateWorkspace: (id: string) => void;
@@ -77,6 +99,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   getActiveWorkspace: () => {
     const { workspaces, activeWorkspaceId } = get();
     return workspaces.find((ws) => ws.id === activeWorkspaceId);
+  },
+
+  isActiveWorkspaceDirty: () => {
+    const { workspaces, activeWorkspaceId, layouts } = get();
+    const ws = workspaces.find((w) => w.id === activeWorkspaceId);
+    if (!ws) return false;
+    const layout = layouts.find((l) => l.id === ws.layoutId);
+    if (!layout) return false;
+    return isWorkspaceDirty(ws, layout);
   },
 
   setActiveWorkspace: (id) => {
