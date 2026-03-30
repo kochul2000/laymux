@@ -73,6 +73,14 @@ pub struct RenameWorkspaceBody {
 }
 
 #[derive(Deserialize)]
+pub struct ExportLayoutBody {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, rename = "layoutId")]
+    pub layout_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct EditModeBody {
     pub enabled: bool,
 }
@@ -764,10 +772,10 @@ async fn workspaces_delete(
 
 async fn layouts_export(
     AxumState(state): AxumState<ServerState>,
-    Json(body): Json<serde_json::Value>,
+    Json(body): Json<ExportLayoutBody>,
 ) -> impl IntoResponse {
-    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let layout_id = body.get("layoutId").and_then(|v| v.as_str()).unwrap_or("");
+    let name = body.name.as_deref().unwrap_or("");
+    let layout_id = body.layout_id.as_deref().unwrap_or("");
     if layout_id.is_empty() && name.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

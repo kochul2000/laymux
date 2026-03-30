@@ -202,7 +202,8 @@ describe("WorkspaceSelectorView", () => {
 
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
     const newWs = useWorkspaceStore.getState().workspaces[1];
-
+    const exportedLayout = useWorkspaceStore.getState().layouts[1];
+    expect(newWs.panes).toHaveLength(exportedLayout.panes.length);
   });
 
   it("auto-switches to newly created workspace", async () => {
@@ -323,7 +324,6 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Default",
-       
         panes: [
           { id: "pane-left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
           { id: "pane-right", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -367,7 +367,6 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Default",
-       
         panes: [
           { id: "pane-top", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView", profile: "WSL" } },
           { id: "pane-bl", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -703,7 +702,6 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Test",
-       
         panes: [
           { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
           { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
@@ -728,7 +726,6 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Test",
-       
         panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
       }],
       activeWorkspaceId: "ws-default",

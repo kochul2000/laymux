@@ -832,7 +832,8 @@ describe("useKeyboardShortcuts", () => {
     fireKey("N", { ctrlKey: true, altKey: true });
 
     const newWs = useWorkspaceStore.getState().workspaces[1];
-
+    expect(newWs.panes).toHaveLength(1);
+    expect(newWs.panes[0].view.type).toBe("EmptyView");
   });
 
   // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---
