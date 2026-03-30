@@ -40,7 +40,6 @@ export interface WorkspacePane {
 export interface Workspace {
   id: string;
   name: string;
-  layoutId: string;
   panes: WorkspacePane[];
 }
 

@@ -202,7 +202,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -226,7 +226,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -250,7 +250,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -275,7 +275,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -299,7 +299,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -323,7 +323,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView" } },
             { id: "p2", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView" } },
@@ -411,7 +411,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -438,7 +438,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -511,7 +511,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.33, y: 0, w: 0.34, h: 1, view: { type: "TerminalView" } },
@@ -544,7 +544,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -574,13 +574,13 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-1",
             name: "WS1",
-            layoutId: "default-layout",
+  
             panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
           {
             id: "ws-2",
             name: "WS2",
-            layoutId: "default-layout",
+  
             panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
         ],
@@ -607,7 +607,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -640,7 +640,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -675,7 +675,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -717,7 +717,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -747,7 +747,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+  
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -832,7 +832,7 @@ describe("useKeyboardShortcuts", () => {
     fireKey("N", { ctrlKey: true, altKey: true });
 
     const newWs = useWorkspaceStore.getState().workspaces[1];
-    expect(newWs.layoutId).toBe("default-layout");
+
   });
 
   // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---

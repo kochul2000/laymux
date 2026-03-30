@@ -15,10 +15,9 @@ async function getWindow() {
 export function GridEditToolbar() {
   const editMode = useGridStore((s) => s.editMode);
   const toggleEditMode = useGridStore((s) => s.toggleEditMode);
-  const saveWorkspace = useWorkspaceStore((s) => s.saveWorkspace);
-  const saveAndPropagate = useWorkspaceStore((s) => s.saveAndPropagate);
-  const saveAsNewLayout = useWorkspaceStore((s) => s.saveAsNewLayout);
-  const revertWorkspace = useWorkspaceStore((s) => s.revertWorkspace);
+  const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
+  const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
+  const layouts = useWorkspaceStore((s) => s.layouts);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
@@ -129,48 +128,34 @@ export function GridEditToolbar() {
             <div className="mx-1" style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
 
             <button
-              data-testid="save-btn"
-              onClick={saveWorkspace}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Save
-            </button>
-            <button
-              data-testid="save-propagate-btn"
-              onClick={saveAndPropagate}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Save All
-            </button>
-            <button
-              data-testid="save-as-btn"
+              data-testid="export-new-btn"
               onClick={() => {
-                const name = window.prompt("New layout name:");
-                if (name?.trim()) saveAsNewLayout(name.trim());
+                const name = window.prompt("New layout template name:");
+                if (name?.trim()) exportAsNewLayout(name.trim());
               }}
               className={btnBase}
               style={btnStyle}
               onMouseEnter={hoverIn}
               onMouseLeave={hoverOut}
             >
-              Save As
+              Export New
             </button>
-            <button
-              data-testid="revert-btn"
-              onClick={revertWorkspace}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Revert
-            </button>
+            {layouts.length > 0 && (
+              <select
+                data-testid="export-overwrite-select"
+                className={btnBase}
+                style={{ ...btnStyle, cursor: "pointer", minWidth: 90 }}
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) exportToLayout(e.target.value);
+                }}
+              >
+                <option value="" disabled>Overwrite...</option>
+                {layouts.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            )}
           </>
         )}
       </div>

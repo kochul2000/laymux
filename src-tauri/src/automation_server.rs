@@ -63,8 +63,8 @@ pub struct SwitchWorkspaceBody {
 #[derive(Deserialize)]
 pub struct CreateWorkspaceBody {
     pub name: String,
-    #[serde(rename = "layoutId")]
-    pub layout_id: String,
+    #[serde(default, rename = "layoutId")]
+    pub layout_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -237,8 +237,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST",   "/api/v1/workspaces/active"),
     ("PUT",    "/api/v1/workspaces/{id}"),
     ("DELETE", "/api/v1/workspaces/{id}"),
-    ("POST",   "/api/v1/workspaces/save"),
-    ("POST",   "/api/v1/workspaces/revert"),
+    ("POST",   "/api/v1/workspaces/apply-template"),
+    ("POST",   "/api/v1/layouts/export"),
     ("GET",    "/api/v1/grid"),
     ("POST",   "/api/v1/grid/edit-mode"),
     ("POST",   "/api/v1/grid/focus"),
@@ -283,8 +283,8 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
-        .route("/api/v1/workspaces/save", post(workspaces_save))
-        .route("/api/v1/workspaces/revert", post(workspaces_revert))
+        .route("/api/v1/workspaces/apply-template", post(workspaces_apply_template))
+        .route("/api/v1/layouts/export", post(layouts_export))
         .route("/api/v1/grid", get(grid_get_state))
         .route("/api/v1/grid/edit-mode", post(grid_set_edit_mode))
         .route("/api/v1/grid/focus", post(grid_focus_pane))
@@ -347,7 +347,7 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "GET", "path": "/api/v1/workspaces/active",
                 "description": "Get the currently active workspace with full pane details.",
-                "response": "{ workspace: { id, name, layoutId, panes: [...] } }"
+                "response": "{ workspace: { id, name, panes: [...] } }"
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces/active",
@@ -369,12 +369,14 @@ async fn api_docs() -> impl IntoResponse {
                 "description": "Delete a workspace. Cannot delete the last one."
             },
             {
-                "method": "POST", "path": "/api/v1/workspaces/save",
-                "description": "Persist current state to settings.json."
+                "method": "POST", "path": "/api/v1/workspaces/apply-template",
+                "description": "Apply a layout template to the active workspace (resets pane structure).",
+                "body": { "layoutId": "string — layout template ID to apply" }
             },
             {
-                "method": "POST", "path": "/api/v1/workspaces/revert",
-                "description": "Revert active workspace to its layout template."
+                "method": "POST", "path": "/api/v1/layouts/export",
+                "description": "Export active workspace pane structure as a layout template.",
+                "body": { "name": "string (optional) — create new template with this name", "layoutId": "string (optional) — overwrite existing template" }
             },
             {
                 "method": "GET", "path": "/api/v1/grid",
@@ -767,23 +769,37 @@ async fn workspaces_delete(
     }
 }
 
-async fn workspaces_save(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "action", "workspaces", "save", serde_json::json!({})).await {
+async fn workspaces_apply_template(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let layout_id = body.get("layoutId").and_then(|v| v.as_str()).unwrap_or("");
+    match bridge_request(
+        &state,
+        "action",
+        "workspaces",
+        "applyTemplate",
+        serde_json::json!({ "layoutId": layout_id }),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
 }
 
-async fn workspaces_revert(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "workspaces",
-        "revert",
-        serde_json::json!({}),
-    )
-    .await
-    {
+async fn layouts_export(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let layout_id = body.get("layoutId").and_then(|v| v.as_str()).unwrap_or("");
+    let (action, params) = if !layout_id.is_empty() {
+        ("exportTo", serde_json::json!({ "layoutId": layout_id }))
+    } else {
+        ("exportNew", serde_json::json!({ "name": name }))
+    };
+    match bridge_request(&state, "action", "layouts", action, params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }

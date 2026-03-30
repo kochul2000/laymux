@@ -113,7 +113,7 @@ describe("WorkspaceSelectorView", () => {
   it("displays git branch from terminal store (most recent activity)", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
       }],
       activeWorkspaceId: "ws-default",
@@ -135,7 +135,7 @@ describe("WorkspaceSelectorView", () => {
   it("displays working directory from focused terminal", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
       }],
       activeWorkspaceId: "ws-default",
@@ -185,7 +185,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("shows multiple layout cards when multiple layouts exist", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("Dev Split");
+    useWorkspaceStore.getState().exportAsNewLayout("Dev Split");
     render(<WorkspaceSelectorView />);
 
     const cards = screen.getAllByTestId(/^layout-card-/);
@@ -194,7 +194,7 @@ describe("WorkspaceSelectorView", () => {
 
   it("creates workspace with correct layout when layout card clicked", async () => {
     const user = userEvent.setup();
-    useWorkspaceStore.getState().saveAsNewLayout("Dev Split");
+    useWorkspaceStore.getState().exportAsNewLayout("Dev Split");
     render(<WorkspaceSelectorView />);
 
     const createBtns = screen.getAllByTestId(/^layout-create-/);
@@ -202,7 +202,7 @@ describe("WorkspaceSelectorView", () => {
 
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
     const newWs = useWorkspaceStore.getState().workspaces[1];
-    expect(newWs.layoutId).toBe(useWorkspaceStore.getState().layouts[1].id);
+
   });
 
   it("auto-switches to newly created workspace", async () => {
@@ -293,7 +293,7 @@ describe("WorkspaceSelectorView", () => {
   it("shows per-terminal summaries for active workspace with 2+ terminals", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [
           { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
           { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -323,7 +323,7 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Default",
-        layoutId: "default-layout",
+       
         panes: [
           { id: "pane-left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
           { id: "pane-right", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -367,7 +367,7 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Default",
-        layoutId: "default-layout",
+       
         panes: [
           { id: "pane-top", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView", profile: "WSL" } },
           { id: "pane-bl", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -451,7 +451,7 @@ describe("WorkspaceSelectorView", () => {
   it("does not show dock terminal last command in active workspace summary", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
       }],
       activeWorkspaceId: "ws-default",
@@ -571,7 +571,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("removeLayout removes layout and reassigns workspaces", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("Extra");
+    useWorkspaceStore.getState().exportAsNewLayout("Extra");
     expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
 
     const extraId = useWorkspaceStore.getState().layouts[1].id;
@@ -580,7 +580,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("setDefaultLayout moves layout to first position", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("NewDefault");
+    useWorkspaceStore.getState().exportAsNewLayout("NewDefault");
     const newId = useWorkspaceStore.getState().layouts[1].id;
 
     useWorkspaceStore.getState().setDefaultLayout(newId);
@@ -592,7 +592,7 @@ describe("WorkspaceSelectorView", () => {
   it("shows notification border on pane command icon when pane has unread notifications", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [
           { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
           { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
@@ -638,7 +638,7 @@ describe("WorkspaceSelectorView", () => {
   it("shows notification border on hourglass icon for running command with notification", () => {
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [
           { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
         ],
@@ -670,7 +670,7 @@ describe("WorkspaceSelectorView", () => {
     // When there's no command icon, the notification badge should still appear
     useWorkspaceStore.setState({
       workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
+        id: "ws-default", name: "Default",
         panes: [
           { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
         ],
@@ -703,7 +703,7 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Test",
-        layoutId: "l1",
+       
         panes: [
           { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
           { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
@@ -728,7 +728,7 @@ describe("WorkspaceSelectorView", () => {
       workspaces: [{
         id: "ws-default",
         name: "Test",
-        layoutId: "l1",
+       
         panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
       }],
       activeWorkspaceId: "ws-default",

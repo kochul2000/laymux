@@ -25,7 +25,6 @@ const defaultLayout: Layout = {
 const defaultWorkspace: Workspace = {
   id: "ws-default",
   name: "Default",
-  layoutId: "default-layout",
   panes: [
     {
       id: generateId("pane"),
@@ -56,11 +55,10 @@ interface WorkspaceState {
   resizePane: (paneIndex: number, delta: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>) => void;
   setPaneView: (paneIndex: number, view: ViewInstanceConfig) => void;
 
-  // Save actions
-  saveWorkspace: () => void;
-  saveAndPropagate: () => void;
-  saveAsNewLayout: (name: string) => void;
-  revertWorkspace: () => void;
+  // Layout template actions
+  exportAsNewLayout: (name: string) => void;
+  exportToLayout: (layoutId: string) => void;
+  applyLayout: (layoutId: string) => void;
 
   // Layout management
   renameLayout: (layoutId: string, name: string) => void;
@@ -96,7 +94,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const ws: Workspace = {
       id: generateId("ws"),
       name: uniqueName,
-      layoutId,
       panes: layout.panes.map((p) => ({
         id: generateId("pane"),
         x: p.x,
@@ -118,7 +115,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const duplicate: Workspace = {
       id: generateId("ws"),
       name: `${source.name} Copy`,
-      layoutId: source.layoutId,
       panes: source.panes.map((p) => ({
         id: generateId("pane"),
         x: p.x,
@@ -244,111 +240,55 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
   },
 
-  // Save actions per ARCHITECTURE.md section 4.1
-  saveWorkspace: () => {
-    const ws = get().getActiveWorkspace();
-    if (ws) {
-      // Also update the layout template so new workspaces get the saved structure
-      const updatedLayoutPanes = ws.panes.map((p) => ({
-        x: p.x, y: p.y, w: p.w, h: p.h, viewType: p.view.type,
-      }));
-      set((state) => ({
-        layouts: state.layouts.map((l) =>
-          l.id === ws.layoutId ? { ...l, panes: updatedLayoutPanes } : l,
-        ),
-      }));
-    }
-    persistSession();
-  },
-
-  saveAndPropagate: () => {
+  // Layout template actions per ARCHITECTURE.md section 4.1
+  exportAsNewLayout: (name) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;
 
-    // Update the layout template from the current workspace panes
-    const updatedLayoutPanes = ws.panes.map((p) => ({
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
-      viewType: p.view.type,
+    const newLayout: Layout = {
+      id: generateId("layout"),
+      name,
+      panes: ws.panes.map((p) => ({
+        x: p.x, y: p.y, w: p.w, h: p.h, viewType: p.view.type,
+      })),
+    };
+
+    set((state) => ({ layouts: [...state.layouts, newLayout] }));
+    persistSession();
+  },
+
+  exportToLayout: (layoutId) => {
+    const ws = get().getActiveWorkspace();
+    if (!ws) return;
+
+    const updatedPanes = ws.panes.map((p) => ({
+      x: p.x, y: p.y, w: p.w, h: p.h, viewType: p.view.type,
     }));
 
     set((state) => ({
       layouts: state.layouts.map((l) =>
-        l.id === ws.layoutId
-          ? { ...l, panes: updatedLayoutPanes }
-          : l,
+        l.id === layoutId ? { ...l, panes: updatedPanes } : l,
       ),
-      // Update all workspaces with the same layoutId
-      workspaces: state.workspaces.map((w) => {
-        if (w.layoutId !== ws.layoutId) return w;
-        // Current workspace keeps its pane IDs; others get new ones
-        if (w.id === ws.id) return w;
-        return {
-          ...w,
-          panes: ws.panes.map((p) => ({
-            id: generateId("pane"),
-            x: p.x,
-            y: p.y,
-            w: p.w,
-            h: p.h,
-            view: { ...p.view },
-          })),
-        };
-      }),
     }));
-
     persistSession();
   },
 
-  saveAsNewLayout: (name) => {
+  applyLayout: (layoutId) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;
 
-    const newLayoutId = generateId("layout");
-    const newLayout: Layout = {
-      id: newLayoutId,
-      name,
-      panes: ws.panes.map((p) => ({
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-        viewType: p.view.type,
-      })),
-    };
-
-    set((state) => ({
-      layouts: [...state.layouts, newLayout],
-      workspaces: state.workspaces.map((w) =>
-        w.id === ws.id ? { ...w, layoutId: newLayoutId } : w,
-      ),
-    }));
-
-    persistSession();
-  },
-
-  revertWorkspace: () => {
-    const ws = get().getActiveWorkspace();
-    if (!ws) return;
-
-    const { layouts } = get();
-    const layout = layouts.find((l) => l.id === ws.layoutId);
+    const layout = get().layouts.find((l) => l.id === layoutId);
     if (!layout) return;
 
-    const revertedPanes = layout.panes.map((p) => ({
+    const newPanes = layout.panes.map((p) => ({
       id: generateId("pane"),
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
+      x: p.x, y: p.y, w: p.w, h: p.h,
       view: { type: p.viewType },
     }));
 
     set((state) => ({
       workspaces: state.workspaces.map((w) =>
-        w.id === ws.id ? { ...w, panes: revertedPanes } : w,
+        w.id === ws.id ? { ...w, panes: newPanes } : w,
       ),
     }));
   },
@@ -362,19 +302,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   removeLayout: (layoutId) => {
-    const { layouts, workspaces } = get();
+    const { layouts } = get();
     if (layouts.length <= 1) return; // Can't remove last layout
 
-    // Reassign workspaces using this layout to the first remaining layout
-    const remaining = layouts.filter((l) => l.id !== layoutId);
-    const fallbackId = remaining[0].id;
-
-    set({
-      layouts: remaining,
-      workspaces: workspaces.map((ws) =>
-        ws.layoutId === layoutId ? { ...ws, layoutId: fallbackId } : ws,
-      ),
-    });
+    set({ layouts: layouts.filter((l) => l.id !== layoutId) });
   },
 
   duplicateLayout: (layoutId, newName) => {

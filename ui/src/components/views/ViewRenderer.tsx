@@ -39,7 +39,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
       );
     case "TerminalView": {
       const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
-      const effectiveSyncGroup = configSyncGroup || workspaceName || "";
+      const effectiveSyncGroup = configSyncGroup || workspaceId || "";
       const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackIdRef.current}`;
       return (
         <div data-testid="view-terminal" className="h-full">

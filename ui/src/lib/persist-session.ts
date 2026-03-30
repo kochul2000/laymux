@@ -81,7 +81,6 @@ export async function persistSession(): Promise<void> {
     workspaces: wsState.workspaces.map((ws) => ({
       id: ws.id,
       name: ws.name,
-      layoutId: ws.layoutId,
       panes: ws.panes.map((p) => ({
         x: p.x,
         y: p.y,
