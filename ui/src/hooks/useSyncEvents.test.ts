@@ -189,7 +189,7 @@ describe("useSyncEvents", () => {
     // Create workspace with matching name for syncGroup lookup
     const { workspaces } = useWorkspaceStore.getState();
     useWorkspaceStore.setState({
-      workspaces: [...workspaces, { id: "ws-other", name: "ws-other", layoutId: "default", panes: [] }],
+      workspaces: [...workspaces, { id: "ws-other", name: "ws-other", panes: [] }],
     });
 
     renderHook(() => useSyncEvents());

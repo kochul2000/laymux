@@ -33,7 +33,7 @@ describe("Workspace Store E2E", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
         },
       ],
@@ -154,7 +154,7 @@ describe("Workspace Store E2E", () => {
       const { workspaces } = useWorkspaceStore.getState();
       expect(workspaces.length).toBe(2);
       expect(workspaces[1].name).toBe("New WS");
-      expect(workspaces[1].layoutId).toBe("default-layout");
+
       expect(workspaces[1].panes.length).toBe(1);
       expect(workspaces[1].panes[0].view.type).toBe("EmptyView");
     });
@@ -199,75 +199,34 @@ describe("Workspace Store E2E", () => {
     });
   });
 
-  describe("Save Actions", () => {
-    it("saveAndPropagate should update all workspaces with same layout", () => {
-      // Add two more workspaces sharing the same layout
-      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
-      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
-
-      // Modify active workspace's pane
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-
-      // Propagate
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      const { workspaces, layouts } = useWorkspaceStore.getState();
-      // Layout should now have 2 panes
-      const layout = layouts.find((l) => l.id === "default-layout")!;
-      expect(layout.panes.length).toBe(2);
-
-      // All 3 workspaces should have 2 panes
-      for (const ws of workspaces) {
-        expect(ws.panes.length).toBe(2);
-      }
-    });
-
-    it("saveAsNewLayout should create new layout and reassign current workspace", () => {
+  describe("Layout Actions", () => {
+    it("exportAsNewLayout should create new layout from workspace", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().saveAsNewLayout("Custom Layout");
+      useWorkspaceStore.getState().exportAsNewLayout("Custom Layout");
 
-      const { layouts, workspaces } = useWorkspaceStore.getState();
+      const { layouts } = useWorkspaceStore.getState();
       expect(layouts.length).toBe(2);
       expect(layouts[1].name).toBe("Custom Layout");
-
-      // Current workspace should now reference the new layout
-      const activeWs = workspaces.find((ws) => ws.id === "ws-default")!;
-      expect(activeWs.layoutId).toBe(layouts[1].id);
+      expect(layouts[1].panes.length).toBe(2);
     });
 
-    it("saveAsNewLayout should not affect other workspaces", () => {
+    it("exportToLayout should overwrite existing layout", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().exportToLayout("default-layout");
+
+      const layout = useWorkspaceStore.getState().layouts[0];
+      expect(layout.panes.length).toBe(2);
+    });
+
+    it("exportAsNewLayout should not affect other workspaces", () => {
       useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
       useWorkspaceStore.getState().splitPane(0, "vertical");
-      useWorkspaceStore.getState().saveAsNewLayout("My Layout");
+      useWorkspaceStore.getState().exportAsNewLayout("My Layout");
 
       const { workspaces } = useWorkspaceStore.getState();
       const ws2 = workspaces.find((ws) => ws.name === "WS2")!;
-      expect(ws2.layoutId).toBe("default-layout"); // Still references original layout
-    });
-
-    it("revertWorkspace should restore panes from layout template", () => {
-      // Split pane then revert
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(2);
-
-      useWorkspaceStore.getState().revertWorkspace();
-      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(ws.panes.length).toBe(1);
-      expect(ws.panes[0].w).toBe(1);
-      expect(ws.panes[0].h).toBe(1);
-    });
-
-    it("revertWorkspace after saveAndPropagate should revert to propagated state", () => {
-      // Split, propagate, split again, then revert
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(3);
-
-      useWorkspaceStore.getState().revertWorkspace();
-      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(ws.panes.length).toBe(2); // Reverted to the propagated state (2 panes)
+      // WS2 keeps its original single pane — no propagation
+      expect(ws2.panes.length).toBe(1);
     });
   });
 
@@ -1064,7 +1023,7 @@ describe("Cross-Store Integration E2E", () => {
         {
           id: "ws-1",
           name: "Project A",
-          layoutId: "default-layout",
+
           panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
         },
       ],
@@ -1286,7 +1245,7 @@ describe("Complex Workspace Layout Scenarios", () => {
         {
           id: "ws-a",
           name: "Project A",
-          layoutId: "dev-split",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView" } },
             { id: "p2", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
@@ -1296,20 +1255,6 @@ describe("Complex Workspace Layout Scenarios", () => {
       ],
       activeWorkspaceId: "ws-a",
     });
-  });
-
-  it("should revert complex layout back to template", () => {
-    // Modify: split the first pane
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
-
-    // Revert
-    useWorkspaceStore.getState().revertWorkspace();
-    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-    expect(ws.panes.length).toBe(3);
-    expect(ws.panes[0].h).toBeCloseTo(0.6);
-    expect(ws.panes[1].w).toBeCloseTo(0.5);
-    expect(ws.panes[2].x).toBeCloseTo(0.5);
   });
 
   it("should create multiple workspaces sharing the same layout", () => {
@@ -1322,29 +1267,27 @@ describe("Complex Workspace Layout Scenarios", () => {
     // All have 3 panes from the dev-split layout
     for (const ws of workspaces) {
       expect(ws.panes.length).toBe(3);
-      expect(ws.layoutId).toBe("dev-split");
+
     }
   });
 
-  it("saveAndPropagate should update all workspaces from modified template", () => {
+  it("exportToLayout should update layout without affecting other workspaces", () => {
     useWorkspaceStore.getState().addWorkspace("Project B", "dev-split");
 
     // Split a pane in Project A
     useWorkspaceStore.getState().splitPane(0, "horizontal");
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
 
-    // Propagate changes
-    useWorkspaceStore.getState().saveAndPropagate();
+    // Export to existing layout
+    useWorkspaceStore.getState().exportToLayout("dev-split");
 
-    // Both workspaces should now have 4 panes
-    const { workspaces } = useWorkspaceStore.getState();
-    for (const ws of workspaces) {
-      expect(ws.panes.length).toBe(4);
-    }
-
-    // Layout template should also be updated
+    // Layout should be updated
     const layout = useWorkspaceStore.getState().layouts.find((l) => l.id === "dev-split")!;
     expect(layout.panes.length).toBe(4);
+
+    // Project B should NOT be affected (independent workspace)
+    const wsB = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "Project B")!;
+    expect(wsB.panes.length).toBe(3); // Still original 3 panes
   });
 
   it("should handle removing a pane from a multi-pane layout", () => {

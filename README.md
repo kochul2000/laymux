@@ -12,7 +12,7 @@ Laymux is a desktop IDE designed around terminal workflows. It provides a flexib
 
 - **Free-layout Grid** — Arrange panes in any ratio-based grid configuration. Split, resize, and merge panes freely.
 - **4-Dock System** — Top, Bottom, Left, Right dock areas that persist across workspace switches.
-- **Workspaces** — Save and switch between different layout + view configurations. Layouts are reusable templates shared across workspaces.
+- **Workspaces** — Save and switch between different layout + view configurations. Layouts define pane structure and are used at workspace creation time.
 - **Terminal-first** — Full PTY terminals (xterm.js + portable-pty) with WSL and PowerShell profile support.
 - **SyncGroup** — Synchronize CWD, git branch, and other state across terminals in the same group.
 - **OSC Hooks** — React to terminal escape sequences (OSC 7, OSC 133) to trigger IDE actions like directory sync and failure notifications.

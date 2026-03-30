@@ -23,7 +23,7 @@ vi.mock("@/lib/tauri-api", () => ({
       {
         id: "ws-1",
         name: "Saved WS",
-        layoutId: "layout-1",
+
         panes: [
           { x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },
           { x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView", profile: "WSL", syncGroup: "Saved WS" } },

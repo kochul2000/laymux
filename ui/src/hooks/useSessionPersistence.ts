@@ -80,7 +80,6 @@ export function useSessionPersistence() {
           const workspaces: Workspace[] = rawSettings.workspaces.map((ws) => ({
             id: ws.id,
             name: ws.name,
-            layoutId: ws.layoutId,
             panes: ws.panes.map((p) => ({
               id: `loaded-pane-${++paneCounter}`,
               x: p.x,

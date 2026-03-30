@@ -58,14 +58,6 @@ const handlers: HandlerMap = {
       useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
       return ok({ renamed: p.id });
     },
-    save: () => {
-      useWorkspaceStore.getState().saveWorkspace();
-      return ok({ saved: true });
-    },
-    revert: () => {
-      useWorkspaceStore.getState().revertWorkspace();
-      return ok({ reverted: true });
-    },
     getSummary: (p) => {
       const wsId = p.id as string;
       const { instances } = useTerminalStore.getState();
@@ -228,6 +220,16 @@ const handlers: HandlerMap = {
     list: () => {
       const { layouts } = useWorkspaceStore.getState();
       return ok({ layouts });
+    },
+    exportNew: (p) => {
+      useWorkspaceStore.getState().exportAsNewLayout(p.name as string);
+      return ok({ exported: true });
+    },
+    exportTo: (p) => {
+      const layoutId = p.layoutId as string;
+      const success = useWorkspaceStore.getState().exportToLayout(layoutId);
+      if (!success) return err(`layout '${layoutId}' not found`);
+      return ok({ exported: true });
     },
   },
 
