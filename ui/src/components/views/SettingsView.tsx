@@ -1577,7 +1577,8 @@ type FlushFn = () => void;
 interface SettingsDraftCtx {
   registerFlush: (id: string, fn: FlushFn) => void;
   registerReset: (id: string, fn: FlushFn) => void;
-  markDirty: () => void;
+  markDirty: (id: string) => void;
+  clearDirtyFor: (id: string) => void;
   draftValues: React.MutableRefObject<Map<string, unknown>>;
 }
 const defaultDraftValues = { current: new Map<string, unknown>() };
@@ -1585,6 +1586,7 @@ const SettingsDraftContext = createContext<SettingsDraftCtx>({
   registerFlush: () => {},
   registerReset: () => {},
   markDirty: () => {},
+  clearDirtyFor: () => {},
   draftValues: defaultDraftValues,
 });
 
@@ -1596,7 +1598,7 @@ function useSettingsDraft() {
 /** Hook: local draft state that flushes on Save and resets on Discard.
  *  Draft values are persisted in a shared Map so they survive section unmount/remount. */
 function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const { registerFlush, registerReset, markDirty, draftValues } = useSettingsDraft();
+  const { registerFlush, registerReset, markDirty, clearDirtyFor, draftValues } = useSettingsDraft();
 
   const setterRef = useRef(storeSetter);
   setterRef.current = storeSetter;
@@ -1612,6 +1614,19 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
   useEffect(() => {
     draftValues.current.set(id, draft);
   }, [id, draft, draftValues]);
+
+  // #51: Sync draft when store value changes externally (e.g. settings.json hot-reload)
+  // Uses JSON serialization to detect deep changes — Windows Terminal approach: full reset.
+  const prevStoreJson = useRef(JSON.stringify(storeValue));
+  useEffect(() => {
+    const json = JSON.stringify(storeValue);
+    if (json !== prevStoreJson.current) {
+      prevStoreJson.current = json;
+      setDraft(storeValue);
+      draftValues.current.set(id, storeValue);
+      clearDirtyFor(id);
+    }
+  }, [storeValue, id, draftValues, clearDirtyFor]);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -1637,7 +1652,7 @@ function useDraft<T>(id: string, storeValue: T, storeSetter: (v: T) => void): [T
       draftValues.current.set(id, next);
       return next;
     });
-    markDirty();
+    markDirty(id);
   }, [id, markDirty, draftValues]);
 
   return [draft, wrappedSetDraft];
@@ -1686,6 +1701,7 @@ export function SettingsView() {
   const flushMapRef = useRef<Map<string, FlushFn>>(new Map());
   const resetMapRef = useRef<Map<string, FlushFn>>(new Map());
   const draftValuesRef = useRef<Map<string, unknown>>(new Map());
+  const dirtySetRef = useRef<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
   const registerFlush = useCallback((id: string, fn: FlushFn) => {
     flushMapRef.current.set(id, fn);
@@ -1693,13 +1709,21 @@ export function SettingsView() {
   const registerReset = useCallback((id: string, fn: FlushFn) => {
     resetMapRef.current.set(id, fn);
   }, []);
-  const markDirty = useCallback(() => setDirty(true), []);
-  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, draftValues: draftValuesRef }).current;
+  const markDirty = useCallback((id: string) => {
+    dirtySetRef.current.add(id);
+    setDirty(true);
+  }, []);
+  const clearDirtyFor = useCallback((id: string) => {
+    dirtySetRef.current.delete(id);
+    setDirty(dirtySetRef.current.size > 0);
+  }, []);
+  const draftCtx = useRef<SettingsDraftCtx>({ registerFlush, registerReset, markDirty, clearDirtyFor, draftValues: draftValuesRef }).current;
 
   const handleSave = () => {
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
     draftValuesRef.current.clear();
+    dirtySetRef.current.clear();
     setDirty(false);
     clearTimeout(saveTimerRef.current);
     persistSession()
@@ -1716,6 +1740,7 @@ export function SettingsView() {
   const handleDiscard = () => {
     for (const fn of resetMapRef.current.values()) fn();
     draftValuesRef.current.clear();
+    dirtySetRef.current.clear();
     setDirty(false);
   };
 

@@ -1025,6 +1025,153 @@ describe("SettingsView", () => {
     });
   });
 
+  // -- #51: 외부 store 변경 시 draft 자동 리셋 --
+  describe("외부 store 변경 시 draft 자동 리셋 (#51)", () => {
+    it("Settings UI 열림 + draft 미수정 상태에서 store 변경 → draft가 새 store 값으로 리셋", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // Convenience 섹션으로 이동
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      expect(toggle.checked).toBe(true); // 기본값
+
+      // 외부에서 store 변경 (settings.json 핫 리로드 시뮬레이션)
+      act(() => {
+        useSettingsStore.setState({
+          convenience: { ...useSettingsStore.getState().convenience, smartPaste: false },
+        });
+      });
+
+      // draft가 새 store 값으로 자동 리셋되어야 함
+      expect(toggle.checked).toBe(false);
+    });
+
+    it("Settings UI 열림 + draft 수정 중 상태에서 store 변경 → draft가 store 값으로 리셋 (Windows Terminal 방식)", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-profile-defaults"));
+      const fontInput = screen.getByTestId("font-face-input") as HTMLSelectElement;
+      // draft를 수정
+      await user.selectOptions(fontInput, "Fira Code");
+      expect(fontInput.value).toBe("Fira Code");
+
+      // 외부에서 store의 font.face 변경
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          profileDefaults: {
+            ...state.profileDefaults,
+            font: { ...state.profileDefaults.font, face: "Consolas" },
+          },
+        });
+      });
+
+      // Windows Terminal 방식: 외부 변경이 draft를 덮어씀
+      expect(fontInput.value).toBe("Consolas");
+    });
+
+    it("외부 store 변경 후 Save 시 외부 변경 값이 유지됨 (stale draft가 덮어쓰지 않음)", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-claude"));
+      const select = screen.getByTestId("claude-sync-cwd-select") as HTMLSelectElement;
+      expect(select.value).toBe("skip");
+
+      // 외부에서 store 변경
+      act(() => {
+        useSettingsStore.setState({
+          claude: { ...useSettingsStore.getState().claude, syncCwd: "command" },
+        });
+      });
+
+      // draft가 리셋되어야 함
+      expect(select.value).toBe("command");
+
+      // Save 시 외부 변경 값이 그대로 유지됨
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+    });
+
+    it("외부 store 변경 후 dirty 플래그가 클리어됨", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // draft 수정 → dirty 상태
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+      const saveBtn = screen.getByTestId("save-settings-btn");
+      expect(saveBtn).not.toBeDisabled(); // dirty 상태
+
+      // 외부에서 store 변경 → draft 리셋 → dirty 클리어
+      act(() => {
+        useSettingsStore.setState({
+          convenience: { ...useSettingsStore.getState().convenience, smartPaste: false },
+        });
+      });
+
+      // Save 버튼이 비활성화되어야 함 (dirty 클리어)
+      expect(saveBtn).toBeDisabled();
+    });
+
+    it("사용자가 A 필드 수정 중 + B 필드만 외부 변경 → A의 dirty 상태 유지", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      // A 필드 수정: convenience 섹션의 smartPaste 토글
+      await user.click(screen.getByTestId("nav-convenience"));
+      const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
+      await user.click(toggle);
+      const saveBtn = screen.getByTestId("save-settings-btn");
+      expect(saveBtn).not.toBeDisabled(); // dirty 상태
+
+      // B 필드만 외부 변경: claude.syncCwd
+      act(() => {
+        useSettingsStore.setState({
+          claude: { ...useSettingsStore.getState().claude, syncCwd: "command" },
+        });
+      });
+
+      // A 필드의 사용자 수정이 살아 있으므로 dirty 상태 유지
+      expect(saveBtn).not.toBeDisabled();
+    });
+
+    it("Startup 섹션에서 appTheme 외부 변경 시 draft 리셋", async () => {
+      render(<SettingsView />);
+
+      const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
+      expect(select.value).toBe("catppuccin-mocha");
+
+      // 외부에서 store 변경
+      act(() => {
+        useSettingsStore.setState({ appThemeId: "dracula" });
+      });
+
+      expect(select.value).toBe("dracula");
+    });
+
+    it("Startup 섹션에서 defaultProfile 외부 변경 시 draft 리셋", async () => {
+      render(<SettingsView />);
+
+      const select = screen.getByTestId("default-profile-select") as HTMLSelectElement;
+      const initialValue = select.value;
+
+      // 외부에서 profiles에 새 프로파일 추가 후 defaultProfile 변경
+      act(() => {
+        const state = useSettingsStore.getState();
+        useSettingsStore.setState({
+          profiles: [...state.profiles, { name: "TestProfile", commandLine: "test.exe" }],
+          defaultProfile: "TestProfile",
+        });
+      });
+
+      expect(select.value).toBe("TestProfile");
+    });
+  });
+
   describe("WorkspaceDisplaySection", () => {
     it("renders all workspace display toggles", async () => {
       const user = userEvent.setup();
