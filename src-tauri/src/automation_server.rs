@@ -237,7 +237,6 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST",   "/api/v1/workspaces/active"),
     ("PUT",    "/api/v1/workspaces/{id}"),
     ("DELETE", "/api/v1/workspaces/{id}"),
-    ("POST",   "/api/v1/workspaces/apply-template"),
     ("POST",   "/api/v1/layouts/export"),
     ("GET",    "/api/v1/grid"),
     ("POST",   "/api/v1/grid/edit-mode"),
@@ -283,7 +282,6 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
-        .route("/api/v1/workspaces/apply-template", post(workspaces_apply_template))
         .route("/api/v1/layouts/export", post(layouts_export))
         .route("/api/v1/grid", get(grid_get_state))
         .route("/api/v1/grid/edit-mode", post(grid_set_edit_mode))
@@ -356,7 +354,7 @@ async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces",
-                "description": "Create a new workspace from a layout template.",
+                "description": "Create a new workspace from a layout.",
                 "body": { "name": "string", "layoutId": "string" }
             },
             {
@@ -369,14 +367,9 @@ async fn api_docs() -> impl IntoResponse {
                 "description": "Delete a workspace. Cannot delete the last one."
             },
             {
-                "method": "POST", "path": "/api/v1/workspaces/apply-template",
-                "description": "Apply a layout template to the active workspace (resets pane structure).",
-                "body": { "layoutId": "string — layout template ID to apply" }
-            },
-            {
                 "method": "POST", "path": "/api/v1/layouts/export",
-                "description": "Export active workspace pane structure as a layout template.",
-                "body": { "name": "string (optional) — create new template with this name", "layoutId": "string (optional) — overwrite existing template" }
+                "description": "Export active workspace pane structure as a layout.",
+                "body": { "name": "string (optional) — create new layout with this name", "layoutId": "string (optional) — overwrite existing layout" }
             },
             {
                 "method": "GET", "path": "/api/v1/grid",
@@ -481,7 +474,7 @@ async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/layouts",
-                "description": "List available layout templates."
+                "description": "List available layouts."
             },
             {
                 "method": "POST", "path": "/api/v1/screenshot",
@@ -769,31 +762,18 @@ async fn workspaces_delete(
     }
 }
 
-async fn workspaces_apply_template(
-    AxumState(state): AxumState<ServerState>,
-    Json(body): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let layout_id = body.get("layoutId").and_then(|v| v.as_str()).unwrap_or("");
-    match bridge_request(
-        &state,
-        "action",
-        "workspaces",
-        "applyTemplate",
-        serde_json::json!({ "layoutId": layout_id }),
-    )
-    .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)),
-        Err(e) => e,
-    }
-}
-
 async fn layouts_export(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let layout_id = body.get("layoutId").and_then(|v| v.as_str()).unwrap_or("");
+    if layout_id.is_empty() && name.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "either 'name' (to create new) or 'layoutId' (to overwrite) is required"})),
+        );
+    }
     let (action, params) = if !layout_id.is_empty() {
         ("exportTo", serde_json::json!({ "layoutId": layout_id }))
     } else {

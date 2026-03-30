@@ -199,7 +199,7 @@ describe("Workspace Store E2E", () => {
     });
   });
 
-  describe("Layout Template Actions", () => {
+  describe("Layout Actions", () => {
     it("exportAsNewLayout should create new layout from workspace", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
       useWorkspaceStore.getState().exportAsNewLayout("Custom Layout");
@@ -216,17 +216,6 @@ describe("Workspace Store E2E", () => {
 
       const layout = useWorkspaceStore.getState().layouts[0];
       expect(layout.panes.length).toBe(2);
-    });
-
-    it("applyLayout should reset workspace to template", () => {
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(2);
-
-      useWorkspaceStore.getState().applyLayout("default-layout");
-      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(ws.panes.length).toBe(1);
-      expect(ws.panes[0].w).toBe(1);
-      expect(ws.panes[0].h).toBe(1);
     });
 
     it("exportAsNewLayout should not affect other workspaces", () => {
@@ -1268,20 +1257,6 @@ describe("Complex Workspace Layout Scenarios", () => {
     });
   });
 
-  it("should apply template to reset complex layout", () => {
-    // Modify: split the first pane
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
-
-    // Apply template to reset
-    useWorkspaceStore.getState().applyLayout("dev-split");
-    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-    expect(ws.panes.length).toBe(3);
-    expect(ws.panes[0].h).toBeCloseTo(0.6);
-    expect(ws.panes[1].w).toBeCloseTo(0.5);
-    expect(ws.panes[2].x).toBeCloseTo(0.5);
-  });
-
   it("should create multiple workspaces sharing the same layout", () => {
     useWorkspaceStore.getState().addWorkspace("Project B", "dev-split");
     useWorkspaceStore.getState().addWorkspace("Project C", "dev-split");
@@ -1296,17 +1271,17 @@ describe("Complex Workspace Layout Scenarios", () => {
     }
   });
 
-  it("exportToLayout should update template without affecting other workspaces", () => {
+  it("exportToLayout should update layout without affecting other workspaces", () => {
     useWorkspaceStore.getState().addWorkspace("Project B", "dev-split");
 
     // Split a pane in Project A
     useWorkspaceStore.getState().splitPane(0, "horizontal");
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
 
-    // Export to existing layout template
+    // Export to existing layout
     useWorkspaceStore.getState().exportToLayout("dev-split");
 
-    // Layout template should be updated
+    // Layout should be updated
     const layout = useWorkspaceStore.getState().layouts.find((l) => l.id === "dev-split")!;
     expect(layout.panes.length).toBe(4);
 

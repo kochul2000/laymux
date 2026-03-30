@@ -55,10 +55,9 @@ interface WorkspaceState {
   resizePane: (paneIndex: number, delta: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>) => void;
   setPaneView: (paneIndex: number, view: ViewInstanceConfig) => void;
 
-  // Layout template actions
+  // Layout actions
   exportAsNewLayout: (name: string) => void;
   exportToLayout: (layoutId: string) => void;
-  applyLayout: (layoutId: string) => void;
 
   // Layout management
   renameLayout: (layoutId: string, name: string) => void;
@@ -240,7 +239,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
   },
 
-  // Layout template actions per ARCHITECTURE.md section 4.1
+  // Layout actions per ARCHITECTURE.md section 4.1
   exportAsNewLayout: (name) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;
@@ -268,27 +267,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((state) => ({
       layouts: state.layouts.map((l) =>
         l.id === layoutId ? { ...l, panes: updatedPanes } : l,
-      ),
-    }));
-    persistSession();
-  },
-
-  applyLayout: (layoutId) => {
-    const ws = get().getActiveWorkspace();
-    if (!ws) return;
-
-    const layout = get().layouts.find((l) => l.id === layoutId);
-    if (!layout) return;
-
-    const newPanes = layout.panes.map((p) => ({
-      id: generateId("pane"),
-      x: p.x, y: p.y, w: p.w, h: p.h,
-      view: { type: p.viewType },
-    }));
-
-    set((state) => ({
-      workspaces: state.workspaces.map((w) =>
-        w.id === ws.id ? { ...w, panes: newPanes } : w,
       ),
     }));
     persistSession();

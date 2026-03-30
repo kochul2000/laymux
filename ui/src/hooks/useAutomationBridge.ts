@@ -58,10 +58,6 @@ const handlers: HandlerMap = {
       useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
       return ok({ renamed: p.id });
     },
-    applyTemplate: (p) => {
-      useWorkspaceStore.getState().applyLayout(p.layoutId as string);
-      return ok({ applied: true });
-    },
     getSummary: (p) => {
       const wsId = p.id as string;
       const { instances } = useTerminalStore.getState();

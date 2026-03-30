@@ -149,7 +149,7 @@ describe("WorkspaceStore", () => {
     });
   });
 
-  // Layout template actions
+  // Layout actions
   describe("exportAsNewLayout", () => {
     it("creates a new layout from current workspace panes", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
@@ -187,25 +187,6 @@ describe("WorkspaceStore", () => {
       const layoutId = useWorkspaceStore.getState().layouts[0].id;
       useWorkspaceStore.getState().exportToLayout(layoutId);
       expect(persistSession).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("applyLayout", () => {
-    it("resets workspace panes to layout template", () => {
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(2);
-
-      const layoutId = useWorkspaceStore.getState().layouts[0].id;
-      useWorkspaceStore.getState().applyLayout(layoutId);
-
-      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(active.panes).toHaveLength(1); // Reset to template
-    });
-
-    it("does nothing for invalid layoutId", () => {
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().applyLayout("nonexistent");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(2);
     });
   });
 
@@ -360,12 +341,5 @@ describe("WorkspaceStore", () => {
       expect(new Set(allIds).size).toBe(allIds.length);
     });
 
-    it("applyLayout creates new pane ids (different from before)", () => {
-      const originalId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().applyLayout("default-layout");
-      const newId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
-      expect(newId).not.toBe(originalId);
-    });
   });
 });

@@ -244,7 +244,7 @@ pub struct LayoutPane {
     pub view_type: String,
 }
 
-/// Layout template.
+/// Layout definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Layout {
     pub id: String,

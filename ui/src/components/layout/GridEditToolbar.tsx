@@ -130,7 +130,7 @@ export function GridEditToolbar() {
             <button
               data-testid="export-new-btn"
               onClick={() => {
-                const name = window.prompt("New layout template name:");
+                const name = window.prompt("New layout name:");
                 if (name?.trim()) exportAsNewLayout(name.trim());
               }}
               className={btnBase}
