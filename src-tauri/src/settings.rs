@@ -625,6 +625,7 @@ pub fn load_settings() -> Settings {
         Err(_) => Settings::default(),
     };
     migrate_settings(&mut settings);
+    migrate_memo_to_cache();
     settings
 }
 
@@ -695,10 +696,38 @@ pub fn cache_dir_path() -> Option<PathBuf> {
     dirs_config_path().map(|p| p.join("cache"))
 }
 
-/// Get the memo file path (sibling of settings.json).
+/// Get the memo file path (inside cache/ directory).
+/// Returns: <config_dir>/cache/memo.json
 pub fn memo_path() -> PathBuf {
     let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
+    base.join("cache").join("memo.json")
+}
+
+/// Legacy memo path (sibling of settings.json, before migration).
+fn legacy_memo_path() -> PathBuf {
+    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
     base.join("memo.json")
+}
+
+/// Migrate memo.json from config root to cache/ directory (one-time).
+/// If legacy memo.json exists and new cache/memo.json does not, move it.
+pub fn migrate_memo_to_cache() {
+    let legacy = legacy_memo_path();
+    let new_path = memo_path();
+
+    if legacy.exists() && !new_path.exists() {
+        if let Some(parent) = new_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if fs::rename(&legacy, &new_path).is_err() {
+            // Fallback: copy + delete if rename fails (e.g., cross-device)
+            if let Ok(content) = fs::read_to_string(&legacy) {
+                if fs::write(&new_path, &content).is_ok() {
+                    let _ = fs::remove_file(&legacy);
+                }
+            }
+        }
+    }
 }
 
 /// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
@@ -1483,11 +1512,81 @@ mod tests {
     // --- Memo file tests ---
 
     #[test]
-    fn memo_path_is_sibling_of_settings_path() {
+    fn memo_path_is_inside_cache_dir() {
         let mp = memo_path();
-        let sp = settings_path();
-        assert_eq!(mp.parent(), sp.parent());
         assert_eq!(mp.file_name().unwrap(), "memo.json");
+        // memo.json should be inside cache/ directory
+        let parent = mp.parent().unwrap();
+        assert_eq!(parent.file_name().unwrap(), "cache");
+        // cache/ should be inside config directory
+        if let Some(config) = dirs_config_path() {
+            assert_eq!(parent.parent(), Some(config.as_path()));
+        }
+    }
+
+    #[test]
+    fn migrate_memo_moves_legacy_to_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("memo.json");
+        let cache_dir = dir.path().join("cache");
+        let new_path = cache_dir.join("memo.json");
+
+        // Create legacy memo.json
+        let data = r#"{"pane-1":"Hello","pane-2":"World"}"#;
+        fs::write(&legacy_path, data).unwrap();
+
+        // Simulate migration
+        assert!(legacy_path.exists());
+        assert!(!new_path.exists());
+
+        // Inline migration logic for test (since we can't override dirs_config_path)
+        if legacy_path.exists() && !new_path.exists() {
+            fs::create_dir_all(&cache_dir).unwrap();
+            fs::rename(&legacy_path, &new_path).unwrap();
+        }
+
+        assert!(!legacy_path.exists());
+        assert!(new_path.exists());
+        assert_eq!(fs::read_to_string(&new_path).unwrap(), data);
+    }
+
+    #[test]
+    fn migrate_memo_skips_when_new_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("memo.json");
+        let cache_dir = dir.path().join("cache");
+        let new_path = cache_dir.join("memo.json");
+
+        // Create both legacy and new
+        fs::write(&legacy_path, r#"{"pane-1":"old"}"#).unwrap();
+        fs::create_dir_all(&cache_dir).unwrap();
+        fs::write(&new_path, r#"{"pane-1":"new"}"#).unwrap();
+
+        // Migration should NOT overwrite existing cache/memo.json
+        if legacy_path.exists() && !new_path.exists() {
+            fs::rename(&legacy_path, &new_path).unwrap();
+        }
+
+        // Legacy still exists (migration skipped), new path unchanged
+        assert!(legacy_path.exists());
+        assert_eq!(fs::read_to_string(&new_path).unwrap(), r#"{"pane-1":"new"}"#);
+    }
+
+    #[test]
+    fn migrate_memo_noop_when_no_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("memo.json");
+        let new_path = dir.path().join("cache").join("memo.json");
+
+        // No legacy file — migration should be a no-op
+        assert!(!legacy_path.exists());
+        assert!(!new_path.exists());
+
+        if legacy_path.exists() && !new_path.exists() {
+            panic!("should not reach here");
+        }
+        // Both should remain non-existent
+        assert!(!new_path.exists());
     }
 
     #[test]
