@@ -469,4 +469,17 @@ describe("saveBeforeClose", () => {
     expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-ok", "good-data");
     expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
+
+  it("filters empty pane IDs from activePaneIds before cleaning cache", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    // Set up workspace with a pane that has an empty ID
+    const wsState = useWorkspaceStore.getState();
+    wsState.workspaces[0].panes[0].id = "";
+
+    await saveBeforeClose();
+
+    const cleanArgs = (cleanTerminalOutputCache as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(cleanArgs.every((id: string) => id !== "")).toBe(true);
+  });
 });

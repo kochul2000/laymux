@@ -173,10 +173,10 @@ export async function saveBeforeClose(): Promise<void> {
   // 3. Clean orphaned cache files (safe now that saves have completed)
   const activePaneIds: string[] = [];
   for (const ws of wsState.workspaces) {
-    for (const p of ws.panes) activePaneIds.push(p.id);
+    for (const p of ws.panes) if (p.id) activePaneIds.push(p.id);
   }
   for (const d of dockState.docks) {
-    for (const p of d.panes) activePaneIds.push(p.id);
+    for (const p of d.panes) if (p.id) activePaneIds.push(p.id);
   }
   await cleanTerminalOutputCache(activePaneIds);
 }

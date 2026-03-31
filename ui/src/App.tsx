@@ -19,11 +19,15 @@ export function App() {
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
       if (cancelled) return;
       const appWindow = getCurrentWindow();
+      const CLOSE_TIMEOUT_MS = 5000;
       appWindow
         .onCloseRequested(async (event) => {
           event.preventDefault();
           try {
-            await saveBeforeClose();
+            await Promise.race([
+              saveBeforeClose(),
+              new Promise<void>((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS)),
+            ]);
           } catch {
             // Save failed — close anyway
           }

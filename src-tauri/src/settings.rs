@@ -660,6 +660,15 @@ fn migrate_settings(settings: &mut Settings) {
         }
     }
 
+    // Assign stable IDs to dock panes that don't have one
+    for dock in &mut settings.docks {
+        for pane in &mut dock.panes {
+            if pane.id.is_empty() {
+                pane.id = format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            }
+        }
+    }
+
     // Deduplicate workspace names
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for ws in &mut settings.workspaces {
@@ -1360,6 +1369,40 @@ mod tests {
         assert_eq!(settings.workspaces[0].panes[0].id.len(), 13); // "pane-" + 8 chars
                                                                   // Existing ID is preserved
         assert_eq!(settings.workspaces[0].panes[1].id, "existing-id");
+    }
+
+    #[test]
+    fn migrate_assigns_pane_ids_to_dock_panes() {
+        let mut settings = Settings::default();
+        settings.docks = vec![DockSetting {
+            position: "left".into(),
+            active_view: None,
+            views: vec![],
+            visible: true,
+            size: 240.0,
+            panes: vec![
+                DockPaneSetting {
+                    id: "".into(),
+                    view: serde_json::json!({"type": "TerminalView"}),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                },
+                DockPaneSetting {
+                    id: "dock-existing".into(),
+                    view: serde_json::json!({"type": "EmptyView"}),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                },
+            ],
+        }];
+        migrate_settings(&mut settings);
+        assert!(settings.docks[0].panes[0].id.starts_with("pane-"));
+        assert_eq!(settings.docks[0].panes[0].id.len(), 13);
+        assert_eq!(settings.docks[0].panes[1].id, "dock-existing");
     }
 
     // --- Phase 1: restore_cwd / restore_output tests ---

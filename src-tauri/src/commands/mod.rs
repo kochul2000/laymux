@@ -1745,43 +1745,42 @@ fn sanitize_filename(s: &str) -> String {
         .collect()
 }
 
-/// Save terminal output to the cache directory.
-/// Accepts a string (xterm.js SerializeAddon output) and writes as UTF-8 bytes.
-#[tauri::command]
-pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), String> {
+/// Inner implementation for saving terminal output cache, testable with arbitrary path.
+fn save_terminal_output_cache_to(
+    cache_dir: &std::path::Path,
+    pane_id: &str,
+    data: &str,
+) -> Result<(), String> {
     if pane_id.is_empty() {
         return Err("Empty pane ID".into());
     }
-    let cache_dir = crate::settings::cache_dir_path()
-        .ok_or("Cannot determine cache directory")?
-        .join("terminal-output");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
-    let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
+    let dir = cache_dir.join("terminal-output");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+    let path = dir.join(format!("{}.dat", sanitize_filename(pane_id)));
     std::fs::write(&path, data.as_bytes()).map_err(|e| format!("Failed to write cache: {e}"))
 }
 
-/// Load terminal output from the cache directory.
-/// Returns a string (to be written back via terminal.write()).
-#[tauri::command]
-pub fn load_terminal_output_cache(pane_id: String) -> Result<String, String> {
+/// Inner implementation for loading terminal output cache, testable with arbitrary path.
+fn load_terminal_output_cache_from(
+    cache_dir: &std::path::Path,
+    pane_id: &str,
+) -> Result<String, String> {
     if pane_id.is_empty() {
         return Err("Empty pane ID".into());
     }
-    let cache_dir = crate::settings::cache_dir_path()
-        .ok_or("Cannot determine cache directory")?
-        .join("terminal-output");
-    let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
+    let dir = cache_dir.join("terminal-output");
+    let path = dir.join(format!("{}.dat", sanitize_filename(pane_id)));
     let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read cache: {e}"))?;
     String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in cache: {e}"))
 }
 
-/// Remove orphaned cache files that don't correspond to any active pane.
-#[tauri::command]
-pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, String> {
-    let cache_dir = crate::settings::cache_dir_path()
-        .ok_or("Cannot determine cache directory")?
-        .join("terminal-output");
-    if !cache_dir.exists() {
+/// Inner implementation for cleaning orphaned cache files, testable with arbitrary path.
+fn clean_terminal_output_cache_in(
+    cache_dir: &std::path::Path,
+    active_pane_ids: &[String],
+) -> Result<u32, String> {
+    let dir = cache_dir.join("terminal-output");
+    if !dir.exists() {
         return Ok(0);
     }
     let active_set: std::collections::HashSet<String> = active_pane_ids
@@ -1790,7 +1789,7 @@ pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, 
         .map(|id| format!("{}.dat", sanitize_filename(id)))
         .collect();
     let mut removed = 0u32;
-    for entry in std::fs::read_dir(&cache_dir).map_err(|e| format!("Read dir: {e}"))? {
+    for entry in std::fs::read_dir(&dir).map_err(|e| format!("Read dir: {e}"))? {
         let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
         if !active_set.contains(&name) {
@@ -1799,6 +1798,29 @@ pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, 
         }
     }
     Ok(removed)
+}
+
+/// Save terminal output to the cache directory.
+/// Accepts a string (xterm.js SerializeAddon output) and writes as UTF-8 bytes.
+#[tauri::command]
+pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), String> {
+    let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
+    save_terminal_output_cache_to(&cache_dir, &pane_id, &data)
+}
+
+/// Load terminal output from the cache directory.
+/// Returns a string (to be written back via terminal.write()).
+#[tauri::command]
+pub fn load_terminal_output_cache(pane_id: String) -> Result<String, String> {
+    let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
+    load_terminal_output_cache_from(&cache_dir, &pane_id)
+}
+
+/// Remove orphaned cache files that don't correspond to any active pane.
+#[tauri::command]
+pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, String> {
+    let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
+    clean_terminal_output_cache_in(&cache_dir, &active_pane_ids)
 }
 
 #[cfg(test)]
@@ -1826,44 +1848,48 @@ mod tests {
     #[test]
     fn terminal_output_cache_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_dir = dir.path().join("cache").join("terminal-output");
-        std::fs::create_dir_all(&cache_dir).unwrap();
-
         let data = "Hello terminal output \x1b[32mgreen\x1b[0m";
-        let pane_id = "pane-test123";
-        let path = cache_dir.join(format!("{}.dat", sanitize_filename(pane_id)));
-        std::fs::write(&path, data.as_bytes()).unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-test123", data).unwrap();
+        let loaded = load_terminal_output_cache_from(dir.path(), "pane-test123").unwrap();
+        assert_eq!(loaded, data);
+    }
 
-        let loaded = std::fs::read(&path).unwrap();
-        assert_eq!(String::from_utf8(loaded).unwrap(), data);
+    #[test]
+    fn save_cache_rejects_empty_pane_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = save_terminal_output_cache_to(dir.path(), "", "data");
+        assert_eq!(result.unwrap_err(), "Empty pane ID");
+    }
+
+    #[test]
+    fn load_cache_rejects_empty_pane_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = load_terminal_output_cache_from(dir.path(), "");
+        assert_eq!(result.unwrap_err(), "Empty pane ID");
     }
 
     #[test]
     fn clean_terminal_output_cache_removes_orphans() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_dir = dir.path().join("terminal-output");
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-keep", "data").unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-orphan", "data").unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-also-orphan", "data").unwrap();
 
-        // Create some cache files
-        std::fs::write(cache_dir.join("pane-keep.dat"), b"data").unwrap();
-        std::fs::write(cache_dir.join("pane-orphan.dat"), b"data").unwrap();
-        std::fs::write(cache_dir.join("pane-also-orphan.dat"), b"data").unwrap();
-
-        let active_set: std::collections::HashSet<String> =
-            vec!["pane-keep.dat".to_string()].into_iter().collect();
-
-        let mut removed = 0u32;
-        for entry in std::fs::read_dir(&cache_dir).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !active_set.contains(&name) {
-                let _ = std::fs::remove_file(entry.path());
-                removed += 1;
-            }
-        }
+        let removed = clean_terminal_output_cache_in(dir.path(), &["pane-keep".into()]).unwrap();
         assert_eq!(removed, 2);
-        assert!(cache_dir.join("pane-keep.dat").exists());
-        assert!(!cache_dir.join("pane-orphan.dat").exists());
+        // Verify via load
+        assert!(load_terminal_output_cache_from(dir.path(), "pane-keep").is_ok());
+        assert!(load_terminal_output_cache_from(dir.path(), "pane-orphan").is_err());
+    }
+
+    #[test]
+    fn clean_cache_filters_empty_pane_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-a", "data").unwrap();
+        // Empty string in active list should not match everything
+        let removed =
+            clean_terminal_output_cache_in(dir.path(), &["".into(), "pane-a".into()]).unwrap();
+        assert_eq!(removed, 0);
     }
 
     #[test]
