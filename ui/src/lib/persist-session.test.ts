@@ -17,19 +17,36 @@ vi.mock("@/lib/tauri-api", () => ({
   getListeningPorts: vi.fn().mockResolvedValue([]),
   getGitBranch: vi.fn().mockResolvedValue(null),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
+  saveTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
+  cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
 }));
 
-import { persistSession } from "./persist-session";
-import { saveSettings } from "@/lib/tauri-api";
+vi.mock("@/lib/terminal-serialize-registry", () => ({
+  getTerminalSerializeMap: vi.fn().mockReturnValue(new Map()),
+  registerTerminalSerializer: vi.fn(),
+  unregisterTerminalSerializer: vi.fn(),
+}));
+
+import {
+  persistSession,
+  saveBeforeClose,
+  _resetClosingDown,
+  truncateFromEnd,
+} from "./persist-session";
+import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
+import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 describe("persistSession", () => {
   beforeEach(() => {
+    _resetClosingDown();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
   });
 
@@ -252,5 +269,316 @@ describe("persistSession", () => {
     expect(leftDock.panes[0].y).toBe(0);
     expect(leftDock.panes[0].w).toBe(1);
     expect(leftDock.panes[0].h).toBe(1);
+  });
+
+  // -- restoreCwd / restoreOutput profile field tests --
+
+  it("preserves restoreCwd and restoreOutput in profiles", async () => {
+    useSettingsStore.getState().updateProfile(0, {
+      restoreCwd: false,
+      restoreOutput: false,
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].restoreCwd).toBe(false);
+    expect(savedArg.profiles[0].restoreOutput).toBe(false);
+  });
+
+  it("includes default restoreCwd/restoreOutput values (true) from profile defaults", async () => {
+    // makeProfile spreads defaultProfileDefaults, so restoreCwd/restoreOutput
+    // are true by default (not undefined).
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].restoreCwd).toBe(true);
+    expect(savedArg.profiles[0].restoreOutput).toBe(true);
+  });
+
+  it("preserves restoreCwd/restoreOutput in profileDefaults", async () => {
+    useSettingsStore.getState().setProfileDefaults({
+      restoreCwd: false,
+      restoreOutput: false,
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profileDefaults.restoreCwd).toBe(false);
+    expect(savedArg.profileDefaults.restoreOutput).toBe(false);
+  });
+
+  it("restoreCwd/restoreOutput profile fields survive round-trip", async () => {
+    useSettingsStore.getState().updateProfile(0, {
+      restoreCwd: false,
+      restoreOutput: true,
+    });
+
+    await persistSession();
+
+    const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.getState().loadFromSettings(saved);
+
+    const profile = useSettingsStore.getState().profiles[0];
+    expect(profile.restoreCwd).toBe(false);
+    expect(profile.restoreOutput).toBe(true);
+  });
+
+  // -- lastCwd injection tests --
+
+  it("injects lastCwd into workspace TerminalView panes from terminal store", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+    // Register a terminal instance with CWD
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${paneId}`,
+      profile: "WSL",
+      syncGroup: "default",
+      workspaceId: wsState.workspaces[0].id,
+    });
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+      cwd: "/home/user/project",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBe("/home/user/project");
+  });
+
+  it("injects lastCwd into dock TerminalView panes from terminal store", async () => {
+    const dockState = useDockStore.getState();
+    const dockPaneId = dockState.getDock("left")!.panes[0].id;
+    dockState.setDockPaneView("left", dockPaneId, {
+      type: "TerminalView",
+      profile: "WSL",
+    });
+
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${dockPaneId}`,
+      profile: "WSL",
+      syncGroup: "default",
+      workspaceId: "",
+    });
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${dockPaneId}`, {
+      cwd: "/tmp/dock-cwd",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock.panes[0].view.lastCwd).toBe("/tmp/dock-cwd");
+  });
+
+  it("does not inject lastCwd for non-TerminalView panes", async () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBeUndefined();
+  });
+
+  it("is no-op after saveBeforeClose sets closingDown flag", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+    await saveBeforeClose();
+    vi.mocked(saveSettings).mockClear();
+
+    await persistSession();
+
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("includes stable pane id in saved workspace panes", async () => {
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].id).toBeDefined();
+    expect(savedArg.workspaces[0].panes[0].id).not.toBe("");
+  });
+});
+
+// -- saveBeforeClose tests --
+
+describe("saveBeforeClose", () => {
+  beforeEach(() => {
+    _resetClosingDown();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
+    vi.clearAllMocks();
+  });
+
+  it("serializes terminal outputs and saves to cache", async () => {
+    const mockSerialize = vi.fn().mockReturnValue("serialized-output");
+    const mockMap = new Map([["pane-abc", mockSerialize]]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(mockSerialize).toHaveBeenCalledTimes(1);
+    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-abc", "serialized-output");
+  });
+
+  it("skips empty serializations", async () => {
+    const mockMap = new Map([["pane-abc", () => ""]]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).not.toHaveBeenCalled();
+  });
+
+  it("calls persistSession (saveSettings) during close", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans orphaned cache files after save completes", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    expect(cleanTerminalOutputCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("awaits saves before cleaning orphans (ordering)", async () => {
+    const callOrder: string[] = [];
+    vi.mocked(saveSettings).mockImplementation(async () => {
+      callOrder.push("saveSettings");
+    });
+    vi.mocked(cleanTerminalOutputCache).mockImplementation(async () => {
+      callOrder.push("cleanCache");
+      return 0;
+    });
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    const saveIdx = callOrder.indexOf("saveSettings");
+    const cleanIdx = callOrder.indexOf("cleanCache");
+    expect(saveIdx).toBeLessThan(cleanIdx);
+  });
+
+  it("handles serialization errors gracefully", async () => {
+    const mockMap = new Map<string, () => string>([
+      [
+        "pane-err",
+        () => {
+          throw new Error("serialize failed");
+        },
+      ],
+      ["pane-ok", () => "good-data"],
+    ]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-ok", "good-data");
+    expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes other saves when one saveTerminalOutputCache rejects (allSettled)", async () => {
+    let callCount = 0;
+    vi.mocked(saveTerminalOutputCache).mockImplementation(async (paneId: string) => {
+      callCount++;
+      if (paneId === "pane-fail") throw new Error("disk full");
+    });
+    const mockMap = new Map([
+      ["pane-fail", () => "data-fail"],
+      ["pane-ok", () => "data-ok"],
+    ]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    // Both saves were attempted despite one failing
+    expect(callCount).toBe(2);
+    // persistSession (saveSettings) was still called
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    // cleanup was still called
+    expect(cleanTerminalOutputCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("still completes when cleanTerminalOutputCache rejects", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+    vi.mocked(cleanTerminalOutputCache).mockRejectedValueOnce(new Error("permission denied"));
+
+    // Should not throw
+    await saveBeforeClose();
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("truncates serializations exceeding 2MB keeping recent lines", async () => {
+    // Build data: many lines, total > 2MB
+    const line = "x".repeat(1000) + "\n";
+    const lineCount = Math.ceil((2 * 1024 * 1024 + 100) / line.length);
+    const largeData = line.repeat(lineCount);
+    const mockMap = new Map([["pane-large", () => largeData]]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
+    const savedData = vi.mocked(saveTerminalOutputCache).mock.calls[0][1];
+    expect(savedData.length).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(savedData.length).toBeGreaterThan(0);
+  });
+
+  it("filters empty pane IDs from activePaneIds before cleaning cache", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    // Set up workspace with a pane that has an empty ID
+    const wsState = useWorkspaceStore.getState();
+    wsState.workspaces[0].panes[0].id = "";
+
+    await saveBeforeClose();
+
+    const cleanArgs = (cleanTerminalOutputCache as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(cleanArgs.every((id: string) => id !== "")).toBe(true);
+  });
+});
+
+// -- truncateFromEnd tests --
+
+describe("truncateFromEnd", () => {
+  it("returns data unchanged when under limit", () => {
+    const data = "line1\nline2\nline3";
+    expect(truncateFromEnd(data, 1000)).toBe(data);
+  });
+
+  it("keeps most recent lines when over limit", () => {
+    const data = "oldest\nmiddle\nnewest";
+    // limit to 13 chars — "middle\nnewest" = 13
+    expect(truncateFromEnd(data, 13)).toBe("middle\nnewest");
+  });
+
+  it("returns empty string when single line exceeds limit", () => {
+    const data = "x".repeat(100);
+    expect(truncateFromEnd(data, 50)).toBe("");
+  });
+
+  it("handles exact boundary correctly", () => {
+    const data = "aaa\nbbb\nccc";
+    // "aaa\nbbb\nccc" = 11 chars
+    expect(truncateFromEnd(data, 11)).toBe(data);
+  });
+
+  it("preserves escape sequences in kept lines", () => {
+    const lines = ["\x1b[31mold-red\x1b[0m", "\x1b[32mnew-green\x1b[0m"];
+    const data = lines.join("\n");
+    // Limit to only fit the last line
+    const lastLine = lines[1];
+    expect(truncateFromEnd(data, lastLine.length)).toBe(lastLine);
   });
 });

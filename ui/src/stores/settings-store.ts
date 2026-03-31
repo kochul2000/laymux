@@ -101,6 +101,8 @@ export interface ProfileDefaults {
   suppressApplicationTitle: boolean;
   snapOnInput: boolean;
   font: FontSettings;
+  restoreCwd: boolean;
+  restoreOutput: boolean;
 }
 
 export interface Profile {
@@ -122,6 +124,10 @@ export interface Profile {
   snapOnInput: boolean;
   /** Per-profile font override. When undefined, inherits from profileDefaults. */
   font?: FontSettings;
+  /** Whether to restore CWD on restart. When undefined, inherits from profileDefaults. */
+  restoreCwd?: boolean;
+  /** Whether to restore terminal output on restart. When undefined, inherits from profileDefaults. */
+  restoreOutput?: boolean;
 }
 
 export interface Keybinding {
@@ -142,6 +148,8 @@ export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
   "suppressApplicationTitle",
   "snapOnInput",
   "font",
+  "restoreCwd",
+  "restoreOutput",
 ];
 
 /** App UI theme — separate from terminal color schemes. */
@@ -296,6 +304,8 @@ const defaultProfileDefaults: ProfileDefaults = {
   suppressApplicationTitle: false,
   snapOnInput: true,
   font: { ...DEFAULT_FONT },
+  restoreCwd: true,
+  restoreOutput: true,
 };
 
 function makeProfile(name: string, commandLine: string, overrides?: Partial<Profile>): Profile {

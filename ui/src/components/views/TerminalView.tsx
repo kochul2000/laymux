@@ -35,6 +35,12 @@ import {
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { loadTerminalOutputCache } from "@/lib/tauri-api";
+import {
+  registerTerminalSerializer,
+  unregisterTerminalSerializer,
+} from "@/lib/terminal-serialize-registry";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -54,6 +60,7 @@ function resolveWorkspaceId(terminalId: string): string {
 
 interface TerminalViewProps {
   instanceId: string;
+  paneId?: string;
   profile: string;
   syncGroup: string;
   cwdSend?: boolean;
@@ -62,10 +69,13 @@ interface TerminalViewProps {
   isFocused?: boolean;
   /** Called when user starts typing — parent can hide control bar / hover state. */
   onKeyboardActivity?: () => void;
+  /** Last CWD from previous session, used for restore on startup. */
+  lastCwd?: string;
 }
 
 export function TerminalView({
   instanceId,
+  paneId,
   profile,
   syncGroup,
   cwdSend = true,
@@ -73,6 +83,7 @@ export function TerminalView({
   workspaceId = "",
   isFocused = false,
   onKeyboardActivity,
+  lastCwd,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -470,19 +481,62 @@ export function TerminalView({
         } catch {
           // WebGL not available — fall back to default renderer
         }
+        // Load SerializeAddon for session persistence
+        const serializeAddon = new SerializeAddon();
+        terminal.loadAddon(serializeAddon);
+
+        // Register serializer for shutdown save
+        if (paneId) {
+          registerTerminalSerializer(paneId, () => serializeAddon.serialize());
+        }
+
         fitAddon.fit();
         openedRef.current = true;
         if (isFocusedRef.current) {
           terminal.focus();
         }
-        createTerminalSession(
-          instanceId,
-          profile,
-          terminal.cols,
-          terminal.rows,
-          syncGroup,
-          cwdReceiveRef.current,
-        ).catch(() => {});
+
+        // Resolve profile restore settings and create session (async)
+        const profileConfig = settingsState.profiles.find((p) => p.name === profile);
+        const shouldRestoreCwd =
+          profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
+        const shouldRestoreOutput =
+          profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
+
+        (async () => {
+          if (cancelled) return;
+          // Restore cached terminal output from previous session
+          if (shouldRestoreOutput && paneId) {
+            try {
+              const cached = await loadTerminalOutputCache(paneId);
+              if (cancelled) return;
+              if (cached && cached.length > 0) {
+                terminal.write(cached);
+                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+              }
+            } catch (err) {
+              // "Cache not found" is expected for new panes — log anything else
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.startsWith("Cache not found:")) {
+                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
+              }
+            }
+          }
+
+          if (cancelled) return;
+          createTerminalSession(
+            instanceId,
+            profile,
+            terminal.cols,
+            terminal.rows,
+            syncGroup,
+            cwdReceiveRef.current,
+            shouldRestoreCwd ? lastCwd : undefined,
+          ).catch((err) => {
+            console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
+            terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
+          });
+        })();
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
@@ -504,6 +558,9 @@ export function TerminalView({
         disposeImeHandler(imeContainerRef.current);
         imeContainerRef.current = null;
       }
+      if (paneId) {
+        unregisterTerminalSerializer(paneId);
+      }
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
@@ -511,6 +568,7 @@ export function TerminalView({
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
     // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
+    // paneId, lastCwd: mount-time only for session restore, must NOT trigger re-creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, registerInstance, unregisterInstance]);
 

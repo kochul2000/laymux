@@ -20,6 +20,7 @@ export async function createTerminalSession(
   rows: number,
   syncGroup: string,
   cwdReceive: boolean = true,
+  cwd?: string,
 ): Promise<TerminalSessionResult> {
   return invoke("create_terminal_session", {
     id,
@@ -28,6 +29,7 @@ export async function createTerminalSession(
     rows,
     syncGroup,
     cwdReceive,
+    cwd: cwd ?? null,
   });
 }
 
@@ -73,6 +75,18 @@ export async function saveMemo(key: string, content: string): Promise<void> {
   return invoke("save_memo", { key, content });
 }
 
+export async function saveTerminalOutputCache(paneId: string, data: string): Promise<void> {
+  return invoke("save_terminal_output_cache", { paneId, data });
+}
+
+export async function loadTerminalOutputCache(paneId: string): Promise<string> {
+  return invoke("load_terminal_output_cache", { paneId });
+}
+
+export async function cleanTerminalOutputCache(activePaneIds: string[]): Promise<number> {
+  return invoke("clean_terminal_output_cache", { activePaneIds });
+}
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
@@ -111,6 +125,8 @@ export interface ProfileDefaults {
   suppressApplicationTitle?: boolean;
   snapOnInput?: boolean;
   font?: FontSettings;
+  restoreCwd?: boolean;
+  restoreOutput?: boolean;
 }
 
 export interface Settings {
@@ -181,6 +197,8 @@ export interface Profile {
   suppressApplicationTitle?: boolean;
   snapOnInput?: boolean;
   font?: FontSettings;
+  restoreCwd?: boolean;
+  restoreOutput?: boolean;
 }
 
 export interface Keybinding {
@@ -205,6 +223,7 @@ export interface SettingsWorkspace {
   name: string;
   layoutId?: string; // deprecated — kept for backward compat with old settings.json
   panes: {
+    id?: string;
     x: number;
     y: number;
     w: number;
