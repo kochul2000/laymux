@@ -1,7 +1,14 @@
-import { saveSettings, type Settings } from "@/lib/tauri-api";
+import {
+  saveSettings,
+  saveTerminalOutputCache,
+  cleanTerminalOutputCache,
+  type Settings,
+} from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useTerminalStore } from "@/stores/terminal-store";
+import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
 /**
  * Gathers state from all stores and persists to settings.json via Tauri backend.
@@ -11,11 +18,14 @@ export async function persistSession(): Promise<void> {
   const settingsState = useSettingsStore.getState();
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
+  const terminalInstances = useTerminalStore.getState().instances;
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
     defaultProfile: settingsState.defaultProfile,
-    profileDefaults: { ...settingsState.profileDefaults },
+    profileDefaults: {
+      ...settingsState.profileDefaults,
+    },
     viewOrder: settingsState.viewOrder ?? [],
     appThemeId: settingsState.appThemeId ?? "catppuccin-mocha",
     // WARNING: Profile 필드를 추가할 때 여기에도 반드시 포함할 것.
@@ -39,6 +49,8 @@ export async function persistSession(): Promise<void> {
       suppressApplicationTitle: p.suppressApplicationTitle,
       snapOnInput: p.snapOnInput,
       ...(p.font ? { font: p.font } : {}),
+      ...(p.restoreCwd !== undefined ? { restoreCwd: p.restoreCwd } : {}),
+      ...(p.restoreOutput !== undefined ? { restoreOutput: p.restoreOutput } : {}),
     })),
     colorSchemes: settingsState.colorSchemes.map((cs) => ({
       name: cs.name,
@@ -81,13 +93,22 @@ export async function persistSession(): Promise<void> {
     workspaces: wsState.workspaces.map((ws) => ({
       id: ws.id,
       name: ws.name,
-      panes: ws.panes.map((p) => ({
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-        view: p.view as { type: string; [key: string]: unknown },
-      })),
+      panes: ws.panes.map((p) => {
+        const viewExtra: Record<string, unknown> = {};
+        if (p.view.type === "TerminalView") {
+          const termId = `terminal-${p.id}`;
+          const inst = terminalInstances.find((i) => i.id === termId);
+          if (inst?.cwd) viewExtra.lastCwd = inst.cwd;
+        }
+        return {
+          id: p.id,
+          x: p.x,
+          y: p.y,
+          w: p.w,
+          h: p.h,
+          view: { ...p.view, ...viewExtra } as { type: string; [key: string]: unknown },
+        };
+      }),
     })),
     convenience: { ...settingsState.convenience },
     workspaceDisplay: { ...settingsState.workspaceDisplay },
@@ -99,16 +120,61 @@ export async function persistSession(): Promise<void> {
       views: d.views,
       visible: d.visible,
       size: d.size,
-      panes: d.panes.map((p) => ({
-        id: p.id,
-        view: p.view,
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-      })),
+      panes: d.panes.map((p) => {
+        const dockViewExtra: Record<string, unknown> = {};
+        if (p.view.type === "TerminalView") {
+          const termId = `terminal-${p.id}`;
+          const inst = terminalInstances.find((i) => i.id === termId);
+          if (inst?.cwd) dockViewExtra.lastCwd = inst.cwd;
+        }
+        return {
+          id: p.id,
+          view: Object.keys(dockViewExtra).length > 0 ? { ...p.view, ...dockViewExtra } : p.view,
+          x: p.x,
+          y: p.y,
+          w: p.w,
+          h: p.h,
+        };
+      }),
     })),
   };
 
   await saveSettings(base);
+}
+
+/**
+ * Serialize all terminal outputs and persist session state before window close.
+ */
+export async function saveBeforeClose(): Promise<void> {
+  const wsState = useWorkspaceStore.getState();
+  const dockState = useDockStore.getState();
+
+  // 1. Serialize and cache terminal outputs
+  const serializeMap = getTerminalSerializeMap();
+  const cachePromises: Promise<void>[] = [];
+  for (const [paneId, serializeFn] of serializeMap.entries()) {
+    try {
+      const data = serializeFn();
+      if (data && data.length > 0) {
+        cachePromises.push(saveTerminalOutputCache(paneId, Array.from(data)));
+      }
+    } catch {
+      // skip failed serializations
+    }
+  }
+
+  // 2. Persist session (includes lastCwd in view configs)
+  cachePromises.push(persistSession());
+
+  // 3. Clean orphaned cache files
+  const activePaneIds: string[] = [];
+  for (const ws of wsState.workspaces) {
+    for (const p of ws.panes) activePaneIds.push(p.id);
+  }
+  for (const d of dockState.docks) {
+    for (const p of d.panes) activePaneIds.push(p.id);
+  }
+  cachePromises.push(cleanTerminalOutputCache(activePaneIds).then(() => {}));
+
+  await Promise.all(cachePromises);
 }

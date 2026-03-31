@@ -119,6 +119,12 @@ pub struct Profile {
     /// Per-profile font override. When None, inherits from profileDefaults / global default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<FontSettings>,
+    /// Whether to restore the last CWD on restart. When None, inherits from profileDefaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_cwd: Option<bool>,
+    /// Whether to restore terminal output on restart. When None, inherits from profileDefaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_output: Option<bool>,
 }
 
 impl Default for Profile {
@@ -141,6 +147,8 @@ impl Default for Profile {
             suppress_application_title: false,
             snap_on_input: true,
             font: None,
+            restore_cwd: None,
+            restore_output: None,
         }
     }
 }
@@ -230,6 +238,12 @@ pub struct ProfileDefaults {
     pub snap_on_input: bool,
     #[serde(default)]
     pub font: FontSettings,
+    /// Whether to restore the last CWD on restart.
+    #[serde(default = "default_true")]
+    pub restore_cwd: bool,
+    /// Whether to restore terminal output on restart.
+    #[serde(default = "default_true")]
+    pub restore_output: bool,
 }
 
 impl Default for ProfileDefaults {
@@ -246,6 +260,8 @@ impl Default for ProfileDefaults {
             suppress_application_title: false,
             snap_on_input: true,
             font: FontSettings::default(),
+            restore_cwd: true,
+            restore_output: true,
         }
     }
 }
@@ -281,6 +297,9 @@ pub struct WorkspacePaneView {
 /// Workspace pane definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspacePane {
+    /// Stable pane identifier, persisted across restarts. Empty string means unassigned (migrated).
+    #[serde(default)]
+    pub id: String,
     pub x: f64,
     pub y: f64,
     #[serde(default)]
@@ -547,6 +566,7 @@ impl Default for Settings {
                 name: "Default".into(),
                 layout_id: None,
                 panes: vec![WorkspacePane {
+                    id: format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
                     x: 0.0,
                     y: 0.0,
                     w: 1.0,
@@ -631,6 +651,15 @@ fn migrate_settings(settings: &mut Settings) {
         .profiles
         .retain(|p| !p.name.eq_ignore_ascii_case("cmd"));
 
+    // Assign stable IDs to workspace panes that don't have one
+    for ws in &mut settings.workspaces {
+        for pane in &mut ws.panes {
+            if pane.id.is_empty() {
+                pane.id = format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            }
+        }
+    }
+
     // Deduplicate workspace names
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for ws in &mut settings.workspaces {
@@ -648,6 +677,13 @@ fn migrate_settings(settings: &mut Settings) {
             }
         }
     }
+}
+
+/// Get the cache directory path.
+/// Windows: %APPDATA%/laymux/cache/
+/// Linux: ~/.config/laymux/cache/
+pub fn cache_dir_path() -> Option<PathBuf> {
+    dirs_config_path().map(|p| p.join("cache"))
 }
 
 /// Get the memo file path (sibling of settings.json).
@@ -1066,6 +1102,7 @@ mod tests {
             name: "Test".into(),
             layout_id: None,
             panes: vec![WorkspacePane {
+                id: "pane-test1".into(),
                 x: 0.0,
                 y: 0.0,
                 w: 1.0,
@@ -1264,6 +1301,140 @@ mod tests {
         let font = parsed.font.unwrap();
         assert_eq!(font.face, "Mono");
         assert_eq!(font.size, 12);
+    }
+
+    // --- Phase 0: Workspace Pane ID tests ---
+
+    #[test]
+    fn workspace_pane_id_round_trip() {
+        let pane = WorkspacePane {
+            id: "pane-abc12345".into(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+            view: serde_json::from_value(serde_json::json!({"type": "TerminalView"})).unwrap(),
+        };
+        let json = serde_json::to_string(&pane).unwrap();
+        let parsed: WorkspacePane = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, "pane-abc12345");
+    }
+
+    #[test]
+    fn workspace_pane_id_defaults_empty_when_missing() {
+        let json = r#"{"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": {"type": "EmptyView"}}"#;
+        let pane: WorkspacePane = serde_json::from_str(json).unwrap();
+        assert_eq!(pane.id, "");
+    }
+
+    #[test]
+    fn migrate_assigns_pane_ids_to_empty() {
+        let mut settings = Settings::default();
+        settings.workspaces = vec![Workspace {
+            id: "ws-1".into(),
+            name: "Test".into(),
+            layout_id: None,
+            panes: vec![
+                WorkspacePane {
+                    id: "".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view: serde_json::from_value(serde_json::json!({"type": "TerminalView"}))
+                        .unwrap(),
+                },
+                WorkspacePane {
+                    id: "existing-id".into(),
+                    x: 0.5,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view: serde_json::from_value(serde_json::json!({"type": "EmptyView"})).unwrap(),
+                },
+            ],
+        }];
+        migrate_settings(&mut settings);
+        // Empty ID gets assigned a pane-{uuid} format
+        assert!(settings.workspaces[0].panes[0].id.starts_with("pane-"));
+        assert_eq!(settings.workspaces[0].panes[0].id.len(), 13); // "pane-" + 8 chars
+                                                                  // Existing ID is preserved
+        assert_eq!(settings.workspaces[0].panes[1].id, "existing-id");
+    }
+
+    // --- Phase 1: restore_cwd / restore_output tests ---
+
+    #[test]
+    fn profile_defaults_restore_fields_default_true() {
+        let defaults = ProfileDefaults::default();
+        assert!(defaults.restore_cwd);
+        assert!(defaults.restore_output);
+    }
+
+    #[test]
+    fn profile_defaults_restore_fields_round_trip() {
+        let json = r#"{
+            "profileDefaults": {
+                "restoreCwd": false,
+                "restoreOutput": false
+            }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.profile_defaults.restore_cwd);
+        assert!(!settings.profile_defaults.restore_output);
+
+        let serialized = serde_json::to_string_pretty(&settings).unwrap();
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert!(!reparsed.profile_defaults.restore_cwd);
+        assert!(!reparsed.profile_defaults.restore_output);
+    }
+
+    #[test]
+    fn profile_defaults_restore_fields_default_when_missing() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.profile_defaults.restore_cwd);
+        assert!(settings.profile_defaults.restore_output);
+    }
+
+    #[test]
+    fn profile_restore_fields_optional() {
+        let profile = Profile::default();
+        assert!(profile.restore_cwd.is_none());
+        assert!(profile.restore_output.is_none());
+    }
+
+    #[test]
+    fn profile_restore_fields_round_trip() {
+        let json = r#"{"name": "Test", "commandLine": "bash", "restoreCwd": false, "restoreOutput": true}"#;
+        let profile: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.restore_cwd, Some(false));
+        assert_eq!(profile.restore_output, Some(true));
+
+        let serialized = serde_json::to_string(&profile).unwrap();
+        let reparsed: Profile = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.restore_cwd, Some(false));
+        assert_eq!(reparsed.restore_output, Some(true));
+    }
+
+    #[test]
+    fn profile_restore_fields_not_serialized_when_none() {
+        let profile = Profile::default();
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("restoreCwd"));
+        assert!(!json.contains("restoreOutput"));
+    }
+
+    // --- Phase 2: cache_dir_path tests ---
+
+    #[test]
+    fn cache_dir_path_is_under_config() {
+        if let Some(cache) = cache_dir_path() {
+            if let Some(config) = dirs_config_path() {
+                assert_eq!(cache.parent(), Some(config.as_path()));
+                assert_eq!(cache.file_name().unwrap(), "cache");
+            }
+        }
     }
 
     // --- Memo file tests ---

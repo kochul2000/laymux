@@ -35,6 +35,12 @@ import {
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { loadTerminalOutputCache } from "@/lib/tauri-api";
+import {
+  registerTerminalSerializer,
+  unregisterTerminalSerializer,
+} from "@/lib/terminal-serialize-registry";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -54,6 +60,7 @@ function resolveWorkspaceId(terminalId: string): string {
 
 interface TerminalViewProps {
   instanceId: string;
+  paneId?: string;
   profile: string;
   syncGroup: string;
   cwdSend?: boolean;
@@ -62,10 +69,13 @@ interface TerminalViewProps {
   isFocused?: boolean;
   /** Called when user starts typing — parent can hide control bar / hover state. */
   onKeyboardActivity?: () => void;
+  /** Last CWD from previous session, used for restore on startup. */
+  lastCwd?: string;
 }
 
 export function TerminalView({
   instanceId,
+  paneId,
   profile,
   syncGroup,
   cwdSend = true,
@@ -73,6 +83,7 @@ export function TerminalView({
   workspaceId = "",
   isFocused = false,
   onKeyboardActivity,
+  lastCwd,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -470,19 +481,59 @@ export function TerminalView({
         } catch {
           // WebGL not available — fall back to default renderer
         }
+        // Load SerializeAddon for session persistence
+        const serializeAddon = new SerializeAddon();
+        terminal.loadAddon(serializeAddon);
+
+        // Register serializer for shutdown save
+        if (paneId) {
+          registerTerminalSerializer(paneId, () => {
+            const serialized = serializeAddon.serialize();
+            return new TextEncoder().encode(serialized);
+          });
+        }
+
         fitAddon.fit();
         openedRef.current = true;
         if (isFocusedRef.current) {
           terminal.focus();
         }
-        createTerminalSession(
-          instanceId,
-          profile,
-          terminal.cols,
-          terminal.rows,
-          syncGroup,
-          cwdReceiveRef.current,
-        ).catch(() => {});
+
+        // Resolve profile restore settings and create session (async)
+        const profileConfig = settingsState.profiles.find((p) => p.name === profile);
+        const shouldRestoreCwd =
+          profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
+        const shouldRestoreOutput =
+          profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
+
+        (async () => {
+          if (cancelled) return;
+          // Restore cached terminal output from previous session
+          if (shouldRestoreOutput && lastCwd && paneId) {
+            try {
+              const cached = await loadTerminalOutputCache(paneId);
+              if (cached && cached.length > 0) {
+                const bytes = new Uint8Array(cached);
+                const text = new TextDecoder().decode(bytes);
+                terminal.write(text);
+                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+              }
+            } catch {
+              // No cache — fresh start
+            }
+          }
+
+          if (cancelled) return;
+          createTerminalSession(
+            instanceId,
+            profile,
+            terminal.cols,
+            terminal.rows,
+            syncGroup,
+            cwdReceiveRef.current,
+            shouldRestoreCwd ? lastCwd : undefined,
+          ).catch(() => {});
+        })();
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
@@ -503,6 +554,9 @@ export function TerminalView({
       if (imeContainerRef.current) {
         disposeImeHandler(imeContainerRef.current);
         imeContainerRef.current = null;
+      }
+      if (paneId) {
+        unregisterTerminalSerializer(paneId);
       }
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});

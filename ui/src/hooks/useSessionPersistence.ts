@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadSettings } from "@/lib/tauri-api";
+import { loadSettings, cleanTerminalOutputCache } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore, makeDefaultColorScheme } from "@/stores/settings-store";
@@ -65,6 +65,8 @@ export function useSessionPersistence() {
                     },
                   }
                 : {}),
+              ...(p.restoreCwd !== undefined ? { restoreCwd: p.restoreCwd } : {}),
+              ...(p.restoreOutput !== undefined ? { restoreOutput: p.restoreOutput } : {}),
             })) ?? [],
           colorSchemes:
             sColorSchemes?.map((cs) => {
@@ -109,7 +111,7 @@ export function useSessionPersistence() {
             id: ws.id,
             name: ws.name,
             panes: ws.panes.map((p) => ({
-              id: `loaded-pane-${++paneCounter}`,
+              id: p.id || `loaded-pane-${++paneCounter}`,
               x: p.x,
               y: p.y,
               w: p.w || 1,
@@ -178,6 +180,21 @@ export function useSessionPersistence() {
             };
           });
           useDockStore.setState({ docks: updatedDocks });
+        }
+
+        // Clean orphaned terminal output cache files
+        const allPaneIds: string[] = [
+          ...(rawSettings.workspaces?.flatMap((ws) => ws.panes.map((p) => p.id).filter(Boolean)) ??
+            []),
+          ...(rawSettings.docks?.flatMap(
+            (d) =>
+              (d as unknown as { panes?: { id: string }[] }).panes
+                ?.map((p) => p.id)
+                .filter(Boolean) ?? [],
+          ) ?? []),
+        ];
+        if (allPaneIds.length > 0) {
+          cleanTerminalOutputCache(allPaneIds).catch(() => {});
         }
 
         setLoaded(true);

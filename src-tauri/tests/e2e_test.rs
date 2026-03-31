@@ -107,6 +107,7 @@ fn settings_round_trip_with_full_config() {
             layout_id: None,
             panes: vec![
                 WorkspacePane {
+                    id: "pane-e2e-1".into(),
                     x: 0.0,
                     y: 0.0,
                     w: 1.0,
@@ -117,6 +118,7 @@ fn settings_round_trip_with_full_config() {
                     },
                 },
                 WorkspacePane {
+                    id: "pane-e2e-2".into(),
                     x: 0.0,
                     y: 0.5,
                     w: 0.5,
@@ -127,6 +129,7 @@ fn settings_round_trip_with_full_config() {
                     },
                 },
                 WorkspacePane {
+                    id: "pane-e2e-3".into(),
                     x: 0.5,
                     y: 0.5,
                     w: 0.5,
@@ -348,6 +351,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                 name: "WS1".into(),
                 layout_id: None,
                 panes: vec![WorkspacePane {
+                    id: "pane-ws1".into(),
                     x: 0.0,
                     y: 0.0,
                     w: 1.0,
@@ -420,6 +424,7 @@ fn settings_pane_boundary_values() {
 #[test]
 fn settings_workspace_pane_view_extra_data_preserved() {
     let pane = WorkspacePane {
+        id: "pane-extra-test".into(),
         x: 0.0,
         y: 0.0,
         w: 1.0,

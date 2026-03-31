@@ -575,3 +575,84 @@ Claude Code가 터미널에서 실행 중일 때 sync-cwd 전파를 제어한다
 - `127.0.0.1` only 바인딩 (외부 접근 불가)
 - v1: 인증 없음 (로컬 전용)
 - 추후: 디스커버리 파일에 bearer token 포함 가능
+
+---
+
+## 13. Session Persistence & Cache
+
+### 13.1 개요
+
+앱 재시작 시 터미널의 이전 출력과 CWD를 복원한다. 프로파일 단위로 제어한다.
+
+### 13.2 캐시 디렉터리
+
+```
+~/.config/laymux/          (Linux)
+%APPDATA%/laymux/          (Windows)
+├── settings.json
+├── memo.json
+└── cache/
+    └── terminal-output/
+        ├── pane-abc12345.dat    ← xterm.js SerializeAddon 출력
+        └── pane-def67890.dat
+```
+
+`cache/` 디렉터리는 향후 다른 캐시 데이터(메모 등)도 수용할 수 있도록 확장 가능한 구조.
+
+### 13.3 프로파일 설정
+
+```jsonc
+{
+  "profileDefaults": {
+    "restoreCwd": true,       // 기본값: 마지막 CWD 복원
+    "restoreOutput": true     // 기본값: 이전 출력 복원
+  },
+  "profiles": [
+    {
+      "name": "PowerShell",
+      "restoreOutput": false   // 프로파일별 오버라이드 (Option — 없으면 defaults 상속)
+    }
+  ]
+}
+```
+
+### 13.4 종료 시퀀스
+
+```
+[Window close-requested event]
+    │  App.tsx onCloseRequested 핸들러
+    ▼
+[saveBeforeClose()]
+    ├─ 1. 모든 TerminalView의 SerializeAddon.serialize()
+    │     → cache/terminal-output/{paneId}.dat 저장
+    ├─ 2. persistSession()
+    │     → settings.json (lastCwd 포함)
+    └─ 3. cleanTerminalOutputCache(activePaneIds)
+          → 고아 캐시 파일 정리
+    ▼
+[appWindow.destroy()]
+```
+
+### 13.5 시작 시퀀스
+
+```
+[useSessionPersistence 로드]
+    │  settings.json → stores 적용
+    │  workspace pane ID 복원 (안정 ID)
+    │  orphan 캐시 정리
+    ▼
+[TerminalView 마운트]
+    │  profile restoreOutput 확인
+    │  lastCwd 존재 = 복원 대상 pane
+    ├─ loadTerminalOutputCache(paneId)
+    │     → terminal.write(cached)
+    │     → "--- session restored ---" 구분선
+    └─ createTerminalSession(cwd: lastCwd)
+          → PTY가 마지막 CWD에서 시작
+```
+
+### 13.6 Workspace Pane ID
+
+- Pane ID는 `pane-{uuid8}` 형식으로 생성되며 settings.json에 저장
+- 세션 간 안정적 — 캐시 파일 키로 사용
+- 기존 ID 없는 설정은 마이그레이션 시 자동 생성

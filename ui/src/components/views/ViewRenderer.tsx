@@ -50,10 +50,12 @@ export function ViewRenderer({
       const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
       const effectiveSyncGroup = configSyncGroup || workspaceId || "";
       const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
+      const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
       return (
         <div data-testid="view-terminal" className="h-full">
           <TerminalView
             instanceId={instanceId}
+            paneId={paneId}
             profile={(viewConfig?.profile as string) || defaultProfile || "PowerShell"}
             syncGroup={effectiveSyncGroup}
             cwdSend={(viewConfig?.cwdSend as boolean) ?? true}
@@ -61,6 +63,7 @@ export function ViewRenderer({
             workspaceId={workspaceId}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
+            lastCwd={lastCwd}
           />
         </div>
       );

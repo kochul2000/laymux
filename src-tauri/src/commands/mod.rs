@@ -30,6 +30,7 @@ pub fn create_terminal_session(
     rows: u16,
     sync_group: String,
     cwd_receive: Option<bool>,
+    cwd: Option<String>,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -55,9 +56,11 @@ pub fn create_terminal_session(
     let startup_command = matched_profile
         .map(|p| p.startup_command.clone())
         .unwrap_or_default();
-    let starting_directory = matched_profile
-        .map(|p| p.starting_directory.clone())
-        .unwrap_or_default();
+    let starting_directory = cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| {
+        matched_profile
+            .map(|p| p.starting_directory.clone())
+            .unwrap_or_default()
+    });
 
     let config = TerminalConfig {
         profile,
@@ -1730,6 +1733,64 @@ fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
     Err("Clipboard write not implemented on this platform".into())
 }
 
+fn sanitize_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Save terminal output to the cache directory.
+#[tauri::command]
+pub fn save_terminal_output_cache(pane_id: String, data: Vec<u8>) -> Result<(), String> {
+    let cache_dir = crate::settings::cache_dir_path()
+        .ok_or("Cannot determine cache directory")?
+        .join("terminal-output");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+    let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
+    std::fs::write(&path, &data).map_err(|e| format!("Failed to write cache: {e}"))
+}
+
+/// Load terminal output from the cache directory.
+#[tauri::command]
+pub fn load_terminal_output_cache(pane_id: String) -> Result<Vec<u8>, String> {
+    let cache_dir = crate::settings::cache_dir_path()
+        .ok_or("Cannot determine cache directory")?
+        .join("terminal-output");
+    let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
+    std::fs::read(&path).map_err(|e| format!("Failed to read cache: {e}"))
+}
+
+/// Remove orphaned cache files that don't correspond to any active pane.
+#[tauri::command]
+pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, String> {
+    let cache_dir = crate::settings::cache_dir_path()
+        .ok_or("Cannot determine cache directory")?
+        .join("terminal-output");
+    if !cache_dir.exists() {
+        return Ok(0);
+    }
+    let active_set: std::collections::HashSet<String> = active_pane_ids
+        .iter()
+        .map(|id| format!("{}.dat", sanitize_filename(id)))
+        .collect();
+    let mut removed = 0u32;
+    for entry in std::fs::read_dir(&cache_dir).map_err(|e| format!("Read dir: {e}"))? {
+        let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !active_set.contains(&name) {
+            let _ = std::fs::remove_file(entry.path());
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1738,6 +1799,61 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn sanitize_filename_alphanumeric_preserved() {
+        assert_eq!(sanitize_filename("pane-abc123"), "pane-abc123");
+        assert_eq!(sanitize_filename("dp_test_1"), "dp_test_1");
+    }
+
+    #[test]
+    fn sanitize_filename_special_chars_replaced() {
+        assert_eq!(sanitize_filename("pane/../../etc"), "pane_______etc");
+        assert_eq!(sanitize_filename("a b.c"), "a_b_c");
+    }
+
+    #[test]
+    fn terminal_output_cache_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("cache").join("terminal-output");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        let data = b"Hello terminal output \x1b[32mgreen\x1b[0m".to_vec();
+        let pane_id = "pane-test123";
+        let path = cache_dir.join(format!("{}.dat", sanitize_filename(pane_id)));
+        std::fs::write(&path, &data).unwrap();
+
+        let loaded = std::fs::read(&path).unwrap();
+        assert_eq!(loaded, data);
+    }
+
+    #[test]
+    fn clean_terminal_output_cache_removes_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = dir.path().join("terminal-output");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // Create some cache files
+        std::fs::write(cache_dir.join("pane-keep.dat"), b"data").unwrap();
+        std::fs::write(cache_dir.join("pane-orphan.dat"), b"data").unwrap();
+        std::fs::write(cache_dir.join("pane-also-orphan.dat"), b"data").unwrap();
+
+        let active_set: std::collections::HashSet<String> =
+            vec!["pane-keep.dat".to_string()].into_iter().collect();
+
+        let mut removed = 0u32;
+        for entry in std::fs::read_dir(&cache_dir).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !active_set.contains(&name) {
+                let _ = std::fs::remove_file(entry.path());
+                removed += 1;
+            }
+        }
+        assert_eq!(removed, 2);
+        assert!(cache_dir.join("pane-keep.dat").exists());
+        assert!(!cache_dir.join("pane-orphan.dat").exists());
     }
 
     #[test]

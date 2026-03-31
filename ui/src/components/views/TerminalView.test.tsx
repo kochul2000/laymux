@@ -141,6 +141,7 @@ describe("TerminalView", () => {
         24,
         "grp",
         true,
+        undefined,
       );
     });
   });
@@ -723,6 +724,7 @@ describe("TerminalView", () => {
           24,
           "default",
           false,
+          undefined,
         );
       });
     });
@@ -745,6 +747,7 @@ describe("TerminalView", () => {
           24,
           "default",
           true,
+          undefined,
         );
       });
     });
