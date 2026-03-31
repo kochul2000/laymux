@@ -13,15 +13,15 @@ import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 /** Maximum serialized terminal output size to cache (2M chars). Outputs exceeding this are truncated from the front, keeping recent lines. */
 const MAX_CACHE_CHARS = 2 * 1024 * 1024;
 
-/** Truncate serialized output by dropping oldest lines until it fits within maxBytes. */
-export function truncateFromEnd(data: string, maxBytes: number): string {
-  if (data.length <= maxBytes) return data;
+/** Truncate serialized output by dropping oldest lines until it fits within maxChars. */
+export function truncateFromEnd(data: string, maxChars: number): string {
+  if (data.length <= maxChars) return data;
   const lines = data.split("\n");
   let total = 0;
   let startIdx = lines.length;
   for (let i = lines.length - 1; i >= 0; i--) {
     const lineLen = lines[i].length + (i < lines.length - 1 ? 1 : 0);
-    if (total + lineLen > maxBytes) break;
+    if (total + lineLen > maxChars) break;
     total += lineLen;
     startIdx = i;
   }

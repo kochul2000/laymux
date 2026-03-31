@@ -1744,8 +1744,8 @@ fn sanitize_filename(s: &str) -> String {
             }
         })
         .collect();
-    // Prevent path traversal via ".." components
-    sanitized.replace("..", "_")
+    // Prevent path traversal via ".." components (use "__" to preserve length and avoid collisions)
+    sanitized.replace("..", "__")
 }
 
 /// Inner implementation for saving terminal output cache, testable with arbitrary path.
@@ -1845,14 +1845,14 @@ mod tests {
 
     #[test]
     fn sanitize_filename_special_chars_replaced() {
-        assert_eq!(sanitize_filename("pane/../../etc"), "pane_____etc");
+        assert_eq!(sanitize_filename("pane/../../etc"), "pane_______etc");
         assert_eq!(sanitize_filename("a b.c"), "a_b.c");
     }
 
     #[test]
     fn sanitize_filename_rejects_dot_dot_traversal() {
-        assert_eq!(sanitize_filename(".."), "_");
-        assert_eq!(sanitize_filename("foo..bar"), "foo_bar");
+        assert_eq!(sanitize_filename(".."), "__");
+        assert_eq!(sanitize_filename("foo..bar"), "foo__bar");
     }
 
     #[test]
