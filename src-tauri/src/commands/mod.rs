@@ -2887,10 +2887,19 @@ mod tests {
     #[test]
     fn list_system_monospace_fonts_returns_known_fonts() {
         let result = list_system_monospace_fonts().expect("should enumerate fonts");
-        // Should contain at least Consolas (always present on Windows)
+        // Should contain at least one well-known monospace font per platform
+        #[cfg(windows)]
         assert!(
             result.iter().any(|f| f == "Consolas"),
             "System monospace fonts should include Consolas, got: {:?}",
+            &result[..result.len().min(10)]
+        );
+        #[cfg(not(windows))]
+        assert!(
+            result
+                .iter()
+                .any(|f| f.contains("Mono") || f.contains("mono")),
+            "System monospace fonts should include at least one *Mono* font, got: {:?}",
             &result[..result.len().min(10)]
         );
         // Should NOT contain proportional fonts
@@ -2898,7 +2907,8 @@ mod tests {
             !result.iter().any(|f| f == "Arial"),
             "System monospace fonts should not include Arial"
         );
-        // Should contain CJK-aware monospace fonts
+        // JetBrainsMonoBigHangul may not be installed on all systems
+        #[cfg(windows)]
         assert!(
             result.iter().any(|f| f == "JetBrainsMonoBigHangul"),
             "System monospace fonts should include JetBrainsMonoBigHangul"

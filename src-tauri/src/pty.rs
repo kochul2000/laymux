@@ -212,6 +212,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn spawn_pty_with_powershell_profile() {
         let session = make_test_session("PowerShell");
         let (tx, rx) = mpsc::channel();
@@ -243,6 +244,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn spawn_pty_resize() {
         let session = make_test_session("PowerShell");
         let handle = spawn_pty(&session, |_| {}).unwrap();
@@ -254,6 +256,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn spawn_pty_with_starting_directory() {
         // Use TEMP dir which always exists on Windows
         let temp_dir = std::env::temp_dir();
@@ -297,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn spawn_pty_sets_env_vars() {
         let session = make_test_session("PowerShell");
         let (tx, rx) = mpsc::channel();
@@ -327,6 +331,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn expand_env_expands_percent_vars() {
         // %TEMP% should exist on Windows
         let result = expand_env_in_path("%TEMP%");
