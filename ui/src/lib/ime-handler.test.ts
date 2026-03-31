@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { setupImeHandler, disposeImeHandler } from "./ime-handler";
+import { setupImeHandler, disposeImeHandler, updateImeHandlerOptions } from "./ime-handler";
 
 describe("ime-handler", () => {
   let container: HTMLDivElement;
@@ -260,5 +260,73 @@ describe("ime-handler", () => {
     disposeImeHandler(container);
     // Second dispose should be a no-op (no error)
     disposeImeHandler(container);
+  });
+
+  // --- Issue #2: updateImeHandlerOptions for hot font reload ---
+
+  it("updates font options without re-setup via updateImeHandlerOptions", () => {
+    setupImeHandler(container, { fontSize: 14, fontFamily: "'Consolas', monospace" });
+
+    // Update font options
+    updateImeHandlerOptions(container, { fontSize: 20, fontFamily: "'JetBrains Mono', monospace" });
+
+    // Trigger composition to verify new font is applied
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    expect(textarea.style.fontSize).toBe("20px");
+    expect(textarea.style.fontFamily).toContain("JetBrains Mono");
+  });
+
+  it("updateImeHandlerOptions is a no-op if handler was not set up", () => {
+    // Should not throw
+    updateImeHandlerOptions(container, { fontSize: 20 });
+  });
+
+  // --- Issue #4: compositionupdate repositions textarea ---
+
+  it("repositions textarea on compositionupdate when cursor moves", () => {
+    const mockTerminal = {
+      buffer: {
+        active: { cursorX: 10, cursorY: 5 },
+      },
+      cols: 80,
+      rows: 24,
+      _core: {
+        _renderService: {
+          dimensions: {
+            css: {
+              cell: { width: 8.5, height: 17 },
+            },
+          },
+        },
+      },
+    };
+
+    setupImeHandler(container, {
+      fontSize: 14,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      terminal: mockTerminal as any,
+    });
+
+    textarea.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+
+    // Cursor moved during composition
+    mockTerminal.buffer.active.cursorX = 15;
+    mockTerminal.buffer.active.cursorY = 6;
+
+    textarea.dispatchEvent(new Event("compositionupdate", { bubbles: true }));
+
+    // Expected: 15 * 8.5 = 127.5, 6 * 17 = 102
+    expect(textarea.style.left).toBe("127.5px");
+    expect(textarea.style.top).toBe("102px");
+  });
+
+  it("cleans up compositionupdate listener on dispose", () => {
+    setupImeHandler(container);
+
+    const removeListenerSpy = vi.spyOn(textarea, "removeEventListener");
+    disposeImeHandler(container);
+
+    expect(removeListenerSpy).toHaveBeenCalledWith("compositionupdate", expect.any(Function));
   });
 });

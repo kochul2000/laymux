@@ -26,7 +26,9 @@ export interface ImeHandlerOptions {
 /** Internal state stored per container for cleanup */
 interface ImeState {
   textarea: HTMLTextAreaElement;
+  options: ImeHandlerOptions;
   onCompositionStart: () => void;
+  onCompositionUpdate: () => void;
   onCompositionEnd: () => void;
 }
 
@@ -125,8 +127,12 @@ export function setupImeHandler(
     compositionView.style.display = "none";
   }
 
-  const onCompositionStart = () => {
-    const pos = getCursorPixelPosition(container, options?.terminal);
+  // Store options in a mutable object so updateImeHandlerOptions can swap values
+  // without re-registering event listeners.
+  const storedOptions: ImeHandlerOptions = { ...options };
+
+  const applyPosition = () => {
+    const pos = getCursorPixelPosition(container, storedOptions.terminal);
 
     // Move textarea into visible area for IME positioning
     textarea.style.left = `${Math.max(0, pos.left)}px`;
@@ -136,13 +142,16 @@ export function setupImeHandler(
     textarea.style.height = "1em";
 
     // Apply font settings so IME popup matches terminal text
-    if (options?.fontSize) {
-      textarea.style.fontSize = `${options.fontSize}px`;
+    if (storedOptions.fontSize) {
+      textarea.style.fontSize = `${storedOptions.fontSize}px`;
     }
-    if (options?.fontFamily) {
-      textarea.style.fontFamily = options.fontFamily;
+    if (storedOptions.fontFamily) {
+      textarea.style.fontFamily = storedOptions.fontFamily;
     }
   };
+
+  const onCompositionStart = applyPosition;
+  const onCompositionUpdate = applyPosition;
 
   const onCompositionEnd = () => {
     // Restore textarea to offscreen position
@@ -156,11 +165,33 @@ export function setupImeHandler(
   };
 
   textarea.addEventListener("compositionstart", onCompositionStart);
+  textarea.addEventListener("compositionupdate", onCompositionUpdate);
   textarea.addEventListener("compositionend", onCompositionEnd);
 
-  handlerMap.set(container, { textarea, onCompositionStart, onCompositionEnd });
+  handlerMap.set(container, { textarea, options: storedOptions, onCompositionStart, onCompositionUpdate, onCompositionEnd });
 
   return true;
+}
+
+/**
+ * Update IME handler options (e.g., font size/family) without re-registering listeners.
+ *
+ * Call this when terminal font settings change at runtime so the next
+ * compositionstart uses the updated values.
+ *
+ * @param container - The xterm.js container element
+ * @param options - New option values to merge
+ */
+export function updateImeHandlerOptions(
+  container: HTMLElement,
+  options: Partial<ImeHandlerOptions>,
+): void {
+  const state = handlerMap.get(container);
+  if (!state) return;
+
+  if (options.fontSize !== undefined) state.options.fontSize = options.fontSize;
+  if (options.fontFamily !== undefined) state.options.fontFamily = options.fontFamily;
+  if (options.terminal !== undefined) state.options.terminal = options.terminal;
 }
 
 /**
@@ -175,6 +206,7 @@ export function disposeImeHandler(container: HTMLElement): void {
   if (!state) return;
 
   state.textarea.removeEventListener("compositionstart", state.onCompositionStart);
+  state.textarea.removeEventListener("compositionupdate", state.onCompositionUpdate);
   state.textarea.removeEventListener("compositionend", state.onCompositionEnd);
 
   handlerMap.delete(container);

@@ -25,7 +25,7 @@ import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
-import { setupImeHandler, disposeImeHandler } from "@/lib/ime-handler";
+import { setupImeHandler, disposeImeHandler, updateImeHandlerOptions } from "@/lib/ime-handler";
 
 import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, getClaudeCompletionMessage } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -72,6 +72,7 @@ export function TerminalView({
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const imeContainerRef = useRef<HTMLElement | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
@@ -420,9 +421,10 @@ export function TerminalView({
           // Fix IME composition position for CJK input (Korean, Chinese, Japanese).
           // Must be called after terminal.open() so the xterm DOM structure exists.
           // Passing the Terminal instance enables precise cursor-cell positioning.
-          const xtermEl = containerRef.current.querySelector(".xterm");
+          const xtermEl = containerRef.current.querySelector(".xterm") as HTMLElement | null;
           if (xtermEl) {
-            setupImeHandler(xtermEl as HTMLElement, {
+            imeContainerRef.current = xtermEl;
+            setupImeHandler(xtermEl, {
               fontSize: settingsState.font.size,
               fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
               terminal,
@@ -468,10 +470,10 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
-      // Clean up IME handler
-      const xtermEl = containerRef.current?.querySelector(".xterm");
-      if (xtermEl) {
-        disposeImeHandler(xtermEl as HTMLElement);
+      // Clean up IME handler (use captured ref — containerRef may be null at cleanup time)
+      if (imeContainerRef.current) {
+        disposeImeHandler(imeContainerRef.current);
+        imeContainerRef.current = null;
       }
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
@@ -528,13 +530,22 @@ export function TerminalView({
       selectionBackground: "#232042",
     };
 
+    const fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
     try {
       term.options.theme = scheme
         ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
         : defaultTheme;
       term.options.fontSize = font.size;
-      term.options.fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
+      term.options.fontFamily = fontFamily;
     } catch { /* xterm mock may not support options setter */ }
+
+    // Keep IME handler in sync with current font settings
+    if (imeContainerRef.current) {
+      updateImeHandlerOptions(imeContainerRef.current, {
+        fontSize: font.size,
+        fontFamily,
+      });
+    }
   }, [currentSchemeName, colorSchemes, font]);
 
   // Resolve terminal background for padding area
