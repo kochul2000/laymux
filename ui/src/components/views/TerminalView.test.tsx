@@ -62,6 +62,14 @@ vi.mock("@xterm/addon-web-links", () => ({
   },
 }));
 
+// Mock IME handler
+const mockSetupImeHandler = vi.fn().mockReturnValue(true);
+const mockDisposeImeHandler = vi.fn();
+vi.mock("@/lib/ime-handler", () => ({
+  setupImeHandler: (...args: unknown[]) => mockSetupImeHandler(...args),
+  disposeImeHandler: (...args: unknown[]) => mockDisposeImeHandler(...args),
+}));
+
 // Mock tauri API
 const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   id: "t1",

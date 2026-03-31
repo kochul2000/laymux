@@ -465,9 +465,9 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByText("Color Schemes"));
     // The name input is a text input, not the select dropdown
-    const nameInput = screen.getAllByDisplayValue(originalName).find(
-      (el) => el.tagName === "INPUT",
-    ) as HTMLInputElement;
+    const nameInput = screen
+      .getAllByDisplayValue(originalName)
+      .find((el) => el.tagName === "INPUT") as HTMLInputElement;
     expect(nameInput).toBeTruthy();
     await user.clear(nameInput);
     await user.type(nameInput, "New Name");

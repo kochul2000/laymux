@@ -23,6 +23,7 @@ import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { setupImeHandler, disposeImeHandler, updateImeHandlerOptions } from "@/lib/ime-handler";
 
 import {
   detectActivityFromTitle,
@@ -75,6 +76,7 @@ export function TerminalView({
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const imeContainerRef = useRef<HTMLElement | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
@@ -445,6 +447,19 @@ export function TerminalView({
         // Open terminal now that container has real dimensions
         if (containerRef.current) {
           terminal.open(containerRef.current);
+
+          // Fix IME composition position for CJK input (Korean, Chinese, Japanese).
+          // Must be called after terminal.open() so the xterm DOM structure exists.
+          // Passing the Terminal instance enables precise cursor-cell positioning.
+          const xtermEl = containerRef.current.querySelector(".xterm") as HTMLElement | null;
+          if (xtermEl) {
+            imeContainerRef.current = xtermEl;
+            setupImeHandler(xtermEl, {
+              fontSize: settingsState.font.size,
+              fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+              terminal,
+            });
+          }
         }
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
@@ -484,6 +499,11 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      // Clean up IME handler (use captured ref — containerRef may be null at cleanup time)
+      if (imeContainerRef.current) {
+        disposeImeHandler(imeContainerRef.current);
+        imeContainerRef.current = null;
+      }
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
@@ -539,14 +559,23 @@ export function TerminalView({
       selectionBackground: "#232042",
     };
 
+    const fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
     try {
       term.options.theme = scheme
         ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
         : defaultTheme;
       term.options.fontSize = font.size;
-      term.options.fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
+      term.options.fontFamily = fontFamily;
     } catch {
       /* xterm mock may not support options setter */
+    }
+
+    // Keep IME handler in sync with current font settings
+    if (imeContainerRef.current) {
+      updateImeHandlerOptions(imeContainerRef.current, {
+        fontSize: font.size,
+        fontFamily,
+      });
     }
   }, [currentSchemeName, colorSchemes, font]);
 
