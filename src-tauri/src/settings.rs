@@ -698,8 +698,9 @@ pub fn cache_dir_path() -> Option<PathBuf> {
 /// Get the memo file path (inside cache/ directory).
 /// Returns: <config_dir>/cache/memo.json
 pub fn memo_path() -> PathBuf {
-    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
-    base.join("cache").join("memo.json")
+    cache_dir_path()
+        .unwrap_or_else(|| PathBuf::from("cache"))
+        .join("memo.json")
 }
 
 /// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
