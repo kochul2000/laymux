@@ -487,6 +487,38 @@ describe("saveBeforeClose", () => {
     expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
 
+  it("completes other saves when one saveTerminalOutputCache rejects (allSettled)", async () => {
+    let callCount = 0;
+    vi.mocked(saveTerminalOutputCache).mockImplementation(async (paneId: string) => {
+      callCount++;
+      if (paneId === "pane-fail") throw new Error("disk full");
+    });
+    const mockMap = new Map([
+      ["pane-fail", () => "data-fail"],
+      ["pane-ok", () => "data-ok"],
+    ]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    // Both saves were attempted despite one failing
+    expect(callCount).toBe(2);
+    // persistSession (saveSettings) was still called
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    // cleanup was still called
+    expect(cleanTerminalOutputCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("still completes when cleanTerminalOutputCache rejects", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+    vi.mocked(cleanTerminalOutputCache).mockRejectedValueOnce(new Error("permission denied"));
+
+    // Should not throw
+    await saveBeforeClose();
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("truncates serializations exceeding 2MB keeping recent lines", async () => {
     // Build data: many lines, total > 2MB
     const line = "x".repeat(1000) + "\n";

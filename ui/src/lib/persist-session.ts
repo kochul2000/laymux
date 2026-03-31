@@ -201,8 +201,8 @@ export async function saveBeforeClose(): Promise<void> {
       if (data.length > 0) {
         cachePromises.push(saveTerminalOutputCache(paneId, data));
       }
-    } catch {
-      // skip failed serializations
+    } catch (err) {
+      console.warn(`[saveBeforeClose] Failed to serialize pane ${paneId}:`, err);
     }
   }
 
@@ -221,5 +221,9 @@ export async function saveBeforeClose(): Promise<void> {
   for (const d of dockState.docks) {
     for (const p of d.panes) if (p.id) activePaneIds.push(p.id);
   }
-  await cleanTerminalOutputCache(activePaneIds);
+  try {
+    await cleanTerminalOutputCache(activePaneIds);
+  } catch (err) {
+    console.warn("[saveBeforeClose] Failed to clean orphaned cache:", err);
+  }
 }

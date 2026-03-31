@@ -190,7 +190,9 @@ export function useSessionPersistence() {
             []),
         ];
         if (allPaneIds.length > 0) {
-          cleanTerminalOutputCache(allPaneIds).catch(() => {});
+          cleanTerminalOutputCache(allPaneIds).catch((err) => {
+            console.warn("[useSessionPersistence] Failed to clean orphaned cache:", err);
+          });
         }
 
         setLoaded(true);

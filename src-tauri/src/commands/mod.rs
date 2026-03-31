@@ -1795,7 +1795,7 @@ fn clean_terminal_output_cache_in(
     for entry in std::fs::read_dir(&dir).map_err(|e| format!("Read dir: {e}"))? {
         let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if !active_set.contains(&name) {
+        if name.ends_with(".dat") && !active_set.contains(&name) {
             if std::fs::remove_file(entry.path()).is_ok() {
                 removed += 1;
             }
@@ -1890,6 +1890,20 @@ mod tests {
         // Verify via load
         assert!(load_terminal_output_cache_from(dir.path(), "pane-keep").is_ok());
         assert!(load_terminal_output_cache_from(dir.path(), "pane-orphan").is_err());
+    }
+
+    #[test]
+    fn clean_cache_skips_non_dat_files() {
+        let dir = tempfile::tempdir().unwrap();
+        save_terminal_output_cache_to(dir.path(), "pane-keep", "data").unwrap();
+        // Create a non-.dat file in the terminal-output directory
+        let non_dat = dir.path().join("terminal-output").join("readme.txt");
+        std::fs::write(&non_dat, "do not delete").unwrap();
+
+        let removed = clean_terminal_output_cache_in(dir.path(), &["pane-keep".into()]).unwrap();
+        assert_eq!(removed, 0);
+        // Non-.dat file should still exist
+        assert!(non_dat.exists());
     }
 
     #[test]

@@ -62,6 +62,21 @@ vi.mock("@xterm/addon-web-links", () => ({
   },
 }));
 
+const mockSerialize = vi.fn().mockReturnValue("serialized-data");
+vi.mock("@xterm/addon-serialize", () => ({
+  SerializeAddon: class MockSerializeAddon {
+    serialize = mockSerialize;
+    dispose = vi.fn();
+  },
+}));
+
+const mockRegisterTerminalSerializer = vi.fn();
+const mockUnregisterTerminalSerializer = vi.fn();
+vi.mock("@/lib/terminal-serialize-registry", () => ({
+  registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
+  unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
+}));
+
 // Mock IME handler
 const mockSetupImeHandler = vi.fn().mockReturnValue(true);
 const mockDisposeImeHandler = vi.fn();
@@ -84,6 +99,9 @@ const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "
 const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
+const mockLoadTerminalOutputCache = vi
+  .fn()
+  .mockRejectedValue(new Error("Failed to read cache: not found"));
 
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
@@ -96,6 +114,7 @@ vi.mock("@/lib/tauri-api", () => ({
   setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
+  loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
 }));
 
 describe("TerminalView", () => {
@@ -699,6 +718,150 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
       });
+    });
+  });
+
+  // -- session restore --
+
+  describe("session restore", () => {
+    it("restores cached output when paneId is provided and restoreOutput is true", async () => {
+      mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
+
+      render(
+        <TerminalView
+          instanceId="t-restore1"
+          paneId="pane-abc"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-abc");
+      });
+    });
+
+    it("does not load cache when paneId is not provided", async () => {
+      render(<TerminalView instanceId="t-restore2" profile="PowerShell" syncGroup="default" />);
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      expect(mockLoadTerminalOutputCache).not.toHaveBeenCalled();
+    });
+
+    it("does not load cache when restoreOutput is false in profile", async () => {
+      useSettingsStore.getState().updateProfile(0, { restoreOutput: false });
+
+      render(
+        <TerminalView
+          instanceId="t-restore3"
+          paneId="pane-noout"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      expect(mockLoadTerminalOutputCache).not.toHaveBeenCalled();
+    });
+
+    it("passes lastCwd to createTerminalSession when restoreCwd is true", async () => {
+      render(
+        <TerminalView
+          instanceId="t-restore4"
+          paneId="pane-cwd"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-restore4",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          "/home/user/project",
+        );
+      });
+    });
+
+    it("does not pass lastCwd when restoreCwd is false in profile", async () => {
+      useSettingsStore.getState().updateProfile(0, { restoreCwd: false });
+
+      render(
+        <TerminalView
+          instanceId="t-restore5"
+          paneId="pane-nocwd"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-restore5",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          undefined,
+        );
+      });
+    });
+
+    it("still creates session when cache load fails", async () => {
+      mockLoadTerminalOutputCache.mockRejectedValueOnce(new Error("Failed to read cache: missing"));
+
+      render(
+        <TerminalView
+          instanceId="t-restore6"
+          paneId="pane-fail"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-restore6",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          undefined,
+        );
+      });
+    });
+
+    it("registers serializer on mount and unregisters on unmount", async () => {
+      const { unmount } = render(
+        <TerminalView
+          instanceId="t-ser1"
+          paneId="pane-ser"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockRegisterTerminalSerializer).toHaveBeenCalledWith(
+          "pane-ser",
+          expect.any(Function),
+        );
+      });
+
+      unmount();
+      expect(mockUnregisterTerminalSerializer).toHaveBeenCalledWith("pane-ser");
     });
   });
 

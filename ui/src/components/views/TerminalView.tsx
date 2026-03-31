@@ -514,8 +514,12 @@ export function TerminalView({
                 terminal.write(cached);
                 terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
               }
-            } catch {
-              // No cache — fresh start
+            } catch (err) {
+              // File-not-found is expected for new panes — log anything else
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.includes("Failed to read cache")) {
+                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
+              }
             }
           }
 
@@ -528,7 +532,10 @@ export function TerminalView({
             syncGroup,
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
-          ).catch(() => {});
+          ).catch((err) => {
+            console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
+            terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
+          });
         })();
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
@@ -561,6 +568,7 @@ export function TerminalView({
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
     // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
+    // paneId, lastCwd: mount-time only for session restore, must NOT trigger re-creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, registerInstance, unregisterInstance]);
 
