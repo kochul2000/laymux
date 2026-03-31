@@ -27,7 +27,7 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
   unregisterTerminalSerializer: vi.fn(),
 }));
 
-import { persistSession, saveBeforeClose } from "./persist-session";
+import { persistSession, saveBeforeClose, _resetClosingDown } from "./persist-session";
 import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -37,6 +37,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 describe("persistSession", () => {
   beforeEach(() => {
+    _resetClosingDown();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
@@ -378,6 +379,16 @@ describe("persistSession", () => {
     expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBeUndefined();
   });
 
+  it("is no-op after saveBeforeClose sets closingDown flag", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+    await saveBeforeClose();
+    vi.mocked(saveSettings).mockClear();
+
+    await persistSession();
+
+    expect(saveSettings).not.toHaveBeenCalled();
+  });
+
   it("includes stable pane id in saved workspace panes", async () => {
     await persistSession();
 
@@ -391,6 +402,7 @@ describe("persistSession", () => {
 
 describe("saveBeforeClose", () => {
   beforeEach(() => {
+    _resetClosingDown();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());

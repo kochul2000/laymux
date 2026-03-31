@@ -10,11 +10,18 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
+/** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
+let closingDown = false;
+
+/** Reset closingDown flag (for tests only). */
+export function _resetClosingDown(): void {
+  closingDown = false;
+}
+
 /**
- * Gathers state from all stores and persists to settings.json via Tauri backend.
- * Called by workspace store save actions and other persistence triggers.
+ * Core implementation: gathers state from all stores and saves to settings.json.
  */
-export async function persistSession(): Promise<void> {
+async function persistSessionCore(): Promise<void> {
   const settingsState = useSettingsStore.getState();
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
@@ -143,9 +150,22 @@ export async function persistSession(): Promise<void> {
 }
 
 /**
+ * Gathers state from all stores and persists to settings.json via Tauri backend.
+ * Called by workspace store save actions and other persistence triggers.
+ * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
+ */
+export async function persistSession(): Promise<void> {
+  if (closingDown) return;
+  await persistSessionCore();
+}
+
+/**
  * Serialize all terminal outputs and persist session state before window close.
+ * Sets closingDown flag to suppress any concurrent persistSession() calls
+ * that store actions might trigger during teardown.
  */
 export async function saveBeforeClose(): Promise<void> {
+  closingDown = true;
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
 
@@ -163,8 +183,8 @@ export async function saveBeforeClose(): Promise<void> {
     }
   }
 
-  // 2. Persist session (includes lastCwd in view configs)
-  cachePromises.push(persistSession());
+  // 2. Persist session directly (bypasses closingDown guard)
+  cachePromises.push(persistSessionCore());
 
   // Wait for save + persist before cleaning — otherwise clean may race and
   // delete files that are still being written.
