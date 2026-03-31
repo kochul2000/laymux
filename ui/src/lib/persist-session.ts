@@ -151,14 +151,12 @@ export async function saveBeforeClose(): Promise<void> {
 
   // 1. Serialize and cache terminal outputs
   const serializeMap = getTerminalSerializeMap();
-  // TODO: Array.from(Uint8Array) → JSON number[] is 3-4x larger than raw bytes.
-  // Consider base64 encoding or Tauri binary IPC to reduce overhead.
   const cachePromises: Promise<void>[] = [];
   for (const [paneId, serializeFn] of serializeMap.entries()) {
     try {
       const data = serializeFn();
       if (data && data.length > 0) {
-        cachePromises.push(saveTerminalOutputCache(paneId, Array.from(data)));
+        cachePromises.push(saveTerminalOutputCache(paneId, data));
       }
     } catch {
       // skip failed serializations

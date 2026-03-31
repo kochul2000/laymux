@@ -487,10 +487,7 @@ export function TerminalView({
 
         // Register serializer for shutdown save
         if (paneId) {
-          registerTerminalSerializer(paneId, () => {
-            const serialized = serializeAddon.serialize();
-            return new TextEncoder().encode(serialized);
-          });
+          registerTerminalSerializer(paneId, () => serializeAddon.serialize());
         }
 
         fitAddon.fit();
@@ -512,10 +509,9 @@ export function TerminalView({
           if (shouldRestoreOutput && paneId) {
             try {
               const cached = await loadTerminalOutputCache(paneId);
+              if (cancelled) return;
               if (cached && cached.length > 0) {
-                const bytes = new Uint8Array(cached);
-                const text = new TextDecoder().decode(bytes);
-                terminal.write(text);
+                terminal.write(cached);
                 terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
               }
             } catch {

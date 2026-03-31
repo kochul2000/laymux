@@ -1,4 +1,4 @@
-type SerializeFn = () => Uint8Array;
+type SerializeFn = () => string;
 
 const registry = new Map<string, SerializeFn>();
 
@@ -10,6 +10,6 @@ export function unregisterTerminalSerializer(paneId: string): void {
   registry.delete(paneId);
 }
 
-export function getTerminalSerializeMap(): Map<string, SerializeFn> {
-  return registry;
+export function getTerminalSerializeMap(): ReadonlyMap<string, SerializeFn> {
+  return new Map(registry);
 }

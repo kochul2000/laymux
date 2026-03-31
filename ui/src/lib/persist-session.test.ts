@@ -17,19 +17,30 @@ vi.mock("@/lib/tauri-api", () => ({
   getListeningPorts: vi.fn().mockResolvedValue([]),
   getGitBranch: vi.fn().mockResolvedValue(null),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
+  saveTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
+  cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
 }));
 
-import { persistSession } from "./persist-session";
-import { saveSettings } from "@/lib/tauri-api";
+vi.mock("@/lib/terminal-serialize-registry", () => ({
+  getTerminalSerializeMap: vi.fn().mockReturnValue(new Map()),
+  registerTerminalSerializer: vi.fn(),
+  unregisterTerminalSerializer: vi.fn(),
+}));
+
+import { persistSession, saveBeforeClose } from "./persist-session";
+import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
+import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 describe("persistSession", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
   });
 
@@ -252,5 +263,210 @@ describe("persistSession", () => {
     expect(leftDock.panes[0].y).toBe(0);
     expect(leftDock.panes[0].w).toBe(1);
     expect(leftDock.panes[0].h).toBe(1);
+  });
+
+  // -- restoreCwd / restoreOutput profile field tests --
+
+  it("preserves restoreCwd and restoreOutput in profiles", async () => {
+    useSettingsStore.getState().updateProfile(0, {
+      restoreCwd: false,
+      restoreOutput: false,
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].restoreCwd).toBe(false);
+    expect(savedArg.profiles[0].restoreOutput).toBe(false);
+  });
+
+  it("includes default restoreCwd/restoreOutput values (true) from profile defaults", async () => {
+    // makeProfile spreads defaultProfileDefaults, so restoreCwd/restoreOutput
+    // are true by default (not undefined).
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].restoreCwd).toBe(true);
+    expect(savedArg.profiles[0].restoreOutput).toBe(true);
+  });
+
+  it("preserves restoreCwd/restoreOutput in profileDefaults", async () => {
+    useSettingsStore.getState().setProfileDefaults({
+      restoreCwd: false,
+      restoreOutput: false,
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profileDefaults.restoreCwd).toBe(false);
+    expect(savedArg.profileDefaults.restoreOutput).toBe(false);
+  });
+
+  it("restoreCwd/restoreOutput profile fields survive round-trip", async () => {
+    useSettingsStore.getState().updateProfile(0, {
+      restoreCwd: false,
+      restoreOutput: true,
+    });
+
+    await persistSession();
+
+    const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.getState().loadFromSettings(saved);
+
+    const profile = useSettingsStore.getState().profiles[0];
+    expect(profile.restoreCwd).toBe(false);
+    expect(profile.restoreOutput).toBe(true);
+  });
+
+  // -- lastCwd injection tests --
+
+  it("injects lastCwd into workspace TerminalView panes from terminal store", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+    // Register a terminal instance with CWD
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${paneId}`,
+      profile: "WSL",
+      syncGroup: "default",
+      workspaceId: wsState.workspaces[0].id,
+    });
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+      cwd: "/home/user/project",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBe("/home/user/project");
+  });
+
+  it("injects lastCwd into dock TerminalView panes from terminal store", async () => {
+    const dockState = useDockStore.getState();
+    const dockPaneId = dockState.getDock("left")!.panes[0].id;
+    dockState.setDockPaneView("left", dockPaneId, {
+      type: "TerminalView",
+      profile: "WSL",
+    });
+
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${dockPaneId}`,
+      profile: "WSL",
+      syncGroup: "default",
+      workspaceId: "",
+    });
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${dockPaneId}`, {
+      cwd: "/tmp/dock-cwd",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock.panes[0].view.lastCwd).toBe("/tmp/dock-cwd");
+  });
+
+  it("does not inject lastCwd for non-TerminalView panes", async () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBeUndefined();
+  });
+
+  it("includes stable pane id in saved workspace panes", async () => {
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].id).toBeDefined();
+    expect(savedArg.workspaces[0].panes[0].id).not.toBe("");
+  });
+});
+
+// -- saveBeforeClose tests --
+
+describe("saveBeforeClose", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
+    vi.clearAllMocks();
+  });
+
+  it("serializes terminal outputs and saves to cache", async () => {
+    const mockSerialize = vi.fn().mockReturnValue("serialized-output");
+    const mockMap = new Map([["pane-abc", mockSerialize]]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(mockSerialize).toHaveBeenCalledTimes(1);
+    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-abc", "serialized-output");
+  });
+
+  it("skips empty serializations", async () => {
+    const mockMap = new Map([["pane-abc", () => ""]]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).not.toHaveBeenCalled();
+  });
+
+  it("calls persistSession (saveSettings) during close", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans orphaned cache files after save completes", async () => {
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    expect(cleanTerminalOutputCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("awaits saves before cleaning orphans (ordering)", async () => {
+    const callOrder: string[] = [];
+    vi.mocked(saveSettings).mockImplementation(async () => {
+      callOrder.push("saveSettings");
+    });
+    vi.mocked(cleanTerminalOutputCache).mockImplementation(async () => {
+      callOrder.push("cleanCache");
+      return 0;
+    });
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
+
+    await saveBeforeClose();
+
+    const saveIdx = callOrder.indexOf("saveSettings");
+    const cleanIdx = callOrder.indexOf("cleanCache");
+    expect(saveIdx).toBeLessThan(cleanIdx);
+  });
+
+  it("handles serialization errors gracefully", async () => {
+    const mockMap = new Map<string, () => string>([
+      [
+        "pane-err",
+        () => {
+          throw new Error("serialize failed");
+        },
+      ],
+      ["pane-ok", () => "good-data"],
+    ]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-ok", "good-data");
+    expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
 });

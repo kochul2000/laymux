@@ -1746,8 +1746,9 @@ fn sanitize_filename(s: &str) -> String {
 }
 
 /// Save terminal output to the cache directory.
+/// Accepts a string (xterm.js SerializeAddon output) and writes as UTF-8 bytes.
 #[tauri::command]
-pub fn save_terminal_output_cache(pane_id: String, data: Vec<u8>) -> Result<(), String> {
+pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), String> {
     if pane_id.is_empty() {
         return Err("Empty pane ID".into());
     }
@@ -1756,12 +1757,13 @@ pub fn save_terminal_output_cache(pane_id: String, data: Vec<u8>) -> Result<(), 
         .join("terminal-output");
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
     let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
-    std::fs::write(&path, &data).map_err(|e| format!("Failed to write cache: {e}"))
+    std::fs::write(&path, data.as_bytes()).map_err(|e| format!("Failed to write cache: {e}"))
 }
 
 /// Load terminal output from the cache directory.
+/// Returns a string (to be written back via terminal.write()).
 #[tauri::command]
-pub fn load_terminal_output_cache(pane_id: String) -> Result<Vec<u8>, String> {
+pub fn load_terminal_output_cache(pane_id: String) -> Result<String, String> {
     if pane_id.is_empty() {
         return Err("Empty pane ID".into());
     }
@@ -1769,7 +1771,8 @@ pub fn load_terminal_output_cache(pane_id: String) -> Result<Vec<u8>, String> {
         .ok_or("Cannot determine cache directory")?
         .join("terminal-output");
     let path = cache_dir.join(format!("{}.dat", sanitize_filename(&pane_id)));
-    std::fs::read(&path).map_err(|e| format!("Failed to read cache: {e}"))
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read cache: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in cache: {e}"))
 }
 
 /// Remove orphaned cache files that don't correspond to any active pane.
@@ -1783,6 +1786,7 @@ pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, 
     }
     let active_set: std::collections::HashSet<String> = active_pane_ids
         .iter()
+        .filter(|id| !id.is_empty())
         .map(|id| format!("{}.dat", sanitize_filename(id)))
         .collect();
     let mut removed = 0u32;
@@ -1825,13 +1829,13 @@ mod tests {
         let cache_dir = dir.path().join("cache").join("terminal-output");
         std::fs::create_dir_all(&cache_dir).unwrap();
 
-        let data = b"Hello terminal output \x1b[32mgreen\x1b[0m".to_vec();
+        let data = "Hello terminal output \x1b[32mgreen\x1b[0m";
         let pane_id = "pane-test123";
         let path = cache_dir.join(format!("{}.dat", sanitize_filename(pane_id)));
-        std::fs::write(&path, &data).unwrap();
+        std::fs::write(&path, data.as_bytes()).unwrap();
 
         let loaded = std::fs::read(&path).unwrap();
-        assert_eq!(loaded, data);
+        assert_eq!(String::from_utf8(loaded).unwrap(), data);
     }
 
     #[test]
