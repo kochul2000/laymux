@@ -482,6 +482,21 @@ describe("saveBeforeClose", () => {
     expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
 
+  it("skips serializations exceeding 2MB size limit", async () => {
+    const largeData = "x".repeat(2 * 1024 * 1024 + 1); // Just over 2MB
+    const smallData = "small-output";
+    const mockMap = new Map([
+      ["pane-large", () => largeData],
+      ["pane-small", () => smallData],
+    ]);
+    vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
+
+    await saveBeforeClose();
+
+    expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
+    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-small", smallData);
+  });
+
   it("filters empty pane IDs from activePaneIds before cleaning cache", async () => {
     vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
 

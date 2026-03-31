@@ -10,6 +10,9 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
+/** Maximum serialized terminal output size to cache (2MB). Larger outputs are skipped. */
+const MAX_CACHE_BYTES = 2 * 1024 * 1024;
+
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
 
@@ -136,7 +139,7 @@ async function persistSessionCore(): Promise<void> {
         }
         return {
           id: p.id,
-          view: Object.keys(dockViewExtra).length > 0 ? { ...p.view, ...dockViewExtra } : p.view,
+          view: { ...p.view, ...dockViewExtra },
           x: p.x,
           y: p.y,
           w: p.w,
@@ -175,7 +178,7 @@ export async function saveBeforeClose(): Promise<void> {
   for (const [paneId, serializeFn] of serializeMap.entries()) {
     try {
       const data = serializeFn();
-      if (data && data.length > 0) {
+      if (data && data.length > 0 && data.length <= MAX_CACHE_BYTES) {
         cachePromises.push(saveTerminalOutputCache(paneId, data));
       }
     } catch {

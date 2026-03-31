@@ -1736,7 +1736,7 @@ fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
 fn sanitize_filename(s: &str) -> String {
     s.chars()
         .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
                 c
             } else {
                 '_'
@@ -1793,8 +1793,9 @@ fn clean_terminal_output_cache_in(
         let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
         if !active_set.contains(&name) {
-            let _ = std::fs::remove_file(entry.path());
-            removed += 1;
+            if std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
         }
     }
     Ok(removed)
@@ -1841,8 +1842,8 @@ mod tests {
 
     #[test]
     fn sanitize_filename_special_chars_replaced() {
-        assert_eq!(sanitize_filename("pane/../../etc"), "pane_______etc");
-        assert_eq!(sanitize_filename("a b.c"), "a_b_c");
+        assert_eq!(sanitize_filename("pane/../../etc"), "pane_.._.._etc");
+        assert_eq!(sanitize_filename("a b.c"), "a_b.c");
     }
 
     #[test]
