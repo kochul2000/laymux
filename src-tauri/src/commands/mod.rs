@@ -1773,7 +1773,10 @@ fn load_terminal_output_cache_from(
     }
     let dir = cache_dir.join("terminal-output");
     let path = dir.join(format!("{}.dat", sanitize_filename(pane_id)));
-    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read cache: {e}"))?;
+    let bytes = std::fs::read(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => format!("Cache not found: {}", path.display()),
+        _ => format!("Failed to read cache: {e}"),
+    })?;
     String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in cache: {e}"))
 }
 

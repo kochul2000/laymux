@@ -101,7 +101,7 @@ const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
 const mockLoadTerminalOutputCache = vi
   .fn()
-  .mockRejectedValue(new Error("Failed to read cache: not found"));
+  .mockRejectedValue(new Error("Cache not found: /fake/path.dat"));
 
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
@@ -819,7 +819,9 @@ describe("TerminalView", () => {
     });
 
     it("still creates session when cache load fails", async () => {
-      mockLoadTerminalOutputCache.mockRejectedValueOnce(new Error("Failed to read cache: missing"));
+      mockLoadTerminalOutputCache.mockRejectedValueOnce(
+        new Error("Cache not found: /fake/path.dat"),
+      );
 
       render(
         <TerminalView

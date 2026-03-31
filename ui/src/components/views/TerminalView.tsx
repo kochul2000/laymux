@@ -515,9 +515,9 @@ export function TerminalView({
                 terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
               }
             } catch (err) {
-              // File-not-found is expected for new panes — log anything else
+              // "Cache not found" is expected for new panes — log anything else
               const msg = err instanceof Error ? err.message : String(err);
-              if (!msg.includes("Failed to read cache")) {
+              if (!msg.startsWith("Cache not found:")) {
                 console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
               }
             }
