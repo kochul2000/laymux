@@ -152,7 +152,7 @@ Workspace (Independent)
 | `SettingsView` | Dock only (또는 모달) | 설정 화면 |
 | `TerminalView` | 자유 | WSL / PowerShell 실행 |
 | `BrowserPreviewView` | 자유 | 브라우저 미리보기 (WebView) |
-| `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `memo.json`에 pane별로 저장 |
+| `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장 |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |
 
 ### 6.2 EmptyView
@@ -590,8 +590,8 @@ Claude Code가 터미널에서 실행 중일 때 sync-cwd 전파를 제어한다
 ~/.config/laymux/          (Linux)
 %APPDATA%/laymux/          (Windows)
 ├── settings.json
-├── memo.json
 └── cache/
+    ├── memo.json
     └── terminal-output/
         ├── pane-abc12345.dat    ← xterm.js SerializeAddon 출력
         └── pane-def67890.dat

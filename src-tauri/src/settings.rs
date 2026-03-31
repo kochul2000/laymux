@@ -695,10 +695,12 @@ pub fn cache_dir_path() -> Option<PathBuf> {
     dirs_config_path().map(|p| p.join("cache"))
 }
 
-/// Get the memo file path (sibling of settings.json).
+/// Get the memo file path (inside cache/ directory).
+/// Returns: <config_dir>/cache/memo.json
 pub fn memo_path() -> PathBuf {
-    let base = dirs_config_path().unwrap_or_else(|| PathBuf::from("."));
-    base.join("memo.json")
+    cache_dir_path()
+        .unwrap_or_else(|| PathBuf::from("cache"))
+        .join("memo.json")
 }
 
 /// Load memo content for a specific key. Returns empty string if key or file doesn't exist.
@@ -1483,11 +1485,16 @@ mod tests {
     // --- Memo file tests ---
 
     #[test]
-    fn memo_path_is_sibling_of_settings_path() {
+    fn memo_path_is_inside_cache_dir() {
         let mp = memo_path();
-        let sp = settings_path();
-        assert_eq!(mp.parent(), sp.parent());
         assert_eq!(mp.file_name().unwrap(), "memo.json");
+        // memo.json should be inside cache/ directory
+        let parent = mp.parent().unwrap();
+        assert_eq!(parent.file_name().unwrap(), "cache");
+        // cache/ should be inside config directory
+        if let Some(config) = dirs_config_path() {
+            assert_eq!(parent.parent(), Some(config.as_path()));
+        }
     }
 
     #[test]
