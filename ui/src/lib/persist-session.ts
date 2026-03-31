@@ -10,8 +10,24 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
-/** Maximum serialized terminal output size to cache (2MB). Larger outputs are skipped. */
+/** Maximum serialized terminal output size to cache (2MB). Outputs exceeding this are truncated from the front, keeping recent lines. */
 const MAX_CACHE_BYTES = 2 * 1024 * 1024;
+
+/** Truncate serialized output by dropping oldest lines until it fits within maxBytes. */
+export function truncateFromEnd(data: string, maxBytes: number): string {
+  if (data.length <= maxBytes) return data;
+  const lines = data.split("\n");
+  let total = 0;
+  let startIdx = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const lineLen = lines[i].length + (i < lines.length - 1 ? 1 : 0);
+    if (total + lineLen > maxBytes) break;
+    total += lineLen;
+    startIdx = i;
+  }
+  if (startIdx >= lines.length) return "";
+  return lines.slice(startIdx).join("\n");
+}
 
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
@@ -177,8 +193,12 @@ export async function saveBeforeClose(): Promise<void> {
   const cachePromises: Promise<void>[] = [];
   for (const [paneId, serializeFn] of serializeMap.entries()) {
     try {
-      const data = serializeFn();
-      if (data && data.length > 0 && data.length <= MAX_CACHE_BYTES) {
+      let data = serializeFn();
+      if (!data || data.length === 0) continue;
+      if (data.length > MAX_CACHE_BYTES) {
+        data = truncateFromEnd(data, MAX_CACHE_BYTES);
+      }
+      if (data.length > 0) {
         cachePromises.push(saveTerminalOutputCache(paneId, data));
       }
     } catch {

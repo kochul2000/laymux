@@ -27,7 +27,12 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
   unregisterTerminalSerializer: vi.fn(),
 }));
 
-import { persistSession, saveBeforeClose, _resetClosingDown } from "./persist-session";
+import {
+  persistSession,
+  saveBeforeClose,
+  _resetClosingDown,
+  truncateFromEnd,
+} from "./persist-session";
 import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -482,19 +487,20 @@ describe("saveBeforeClose", () => {
     expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
   });
 
-  it("skips serializations exceeding 2MB size limit", async () => {
-    const largeData = "x".repeat(2 * 1024 * 1024 + 1); // Just over 2MB
-    const smallData = "small-output";
-    const mockMap = new Map([
-      ["pane-large", () => largeData],
-      ["pane-small", () => smallData],
-    ]);
+  it("truncates serializations exceeding 2MB keeping recent lines", async () => {
+    // Build data: many lines, total > 2MB
+    const line = "x".repeat(1000) + "\n";
+    const lineCount = Math.ceil((2 * 1024 * 1024 + 100) / line.length);
+    const largeData = line.repeat(lineCount);
+    const mockMap = new Map([["pane-large", () => largeData]]);
     vi.mocked(getTerminalSerializeMap).mockReturnValue(mockMap);
 
     await saveBeforeClose();
 
     expect(saveTerminalOutputCache).toHaveBeenCalledTimes(1);
-    expect(saveTerminalOutputCache).toHaveBeenCalledWith("pane-small", smallData);
+    const savedData = vi.mocked(saveTerminalOutputCache).mock.calls[0][1];
+    expect(savedData.length).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(savedData.length).toBeGreaterThan(0);
   });
 
   it("filters empty pane IDs from activePaneIds before cleaning cache", async () => {
@@ -508,5 +514,39 @@ describe("saveBeforeClose", () => {
 
     const cleanArgs = (cleanTerminalOutputCache as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(cleanArgs.every((id: string) => id !== "")).toBe(true);
+  });
+});
+
+// -- truncateFromEnd tests --
+
+describe("truncateFromEnd", () => {
+  it("returns data unchanged when under limit", () => {
+    const data = "line1\nline2\nline3";
+    expect(truncateFromEnd(data, 1000)).toBe(data);
+  });
+
+  it("keeps most recent lines when over limit", () => {
+    const data = "oldest\nmiddle\nnewest";
+    // limit to 13 chars — "middle\nnewest" = 13
+    expect(truncateFromEnd(data, 13)).toBe("middle\nnewest");
+  });
+
+  it("returns empty string when single line exceeds limit", () => {
+    const data = "x".repeat(100);
+    expect(truncateFromEnd(data, 50)).toBe("");
+  });
+
+  it("handles exact boundary correctly", () => {
+    const data = "aaa\nbbb\nccc";
+    // "aaa\nbbb\nccc" = 11 chars
+    expect(truncateFromEnd(data, 11)).toBe(data);
+  });
+
+  it("preserves escape sequences in kept lines", () => {
+    const lines = ["\x1b[31mold-red\x1b[0m", "\x1b[32mnew-green\x1b[0m"];
+    const data = lines.join("\n");
+    // Limit to only fit the last line
+    const lastLine = lines[1];
+    expect(truncateFromEnd(data, lastLine.length)).toBe(lastLine);
   });
 });
