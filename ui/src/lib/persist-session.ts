@@ -10,8 +10,8 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
-/** Maximum serialized terminal output size to cache (2MB). Outputs exceeding this are truncated from the front, keeping recent lines. */
-const MAX_CACHE_BYTES = 2 * 1024 * 1024;
+/** Maximum serialized terminal output size to cache (2M chars). Outputs exceeding this are truncated from the front, keeping recent lines. */
+const MAX_CACHE_CHARS = 2 * 1024 * 1024;
 
 /** Truncate serialized output by dropping oldest lines until it fits within maxBytes. */
 export function truncateFromEnd(data: string, maxBytes: number): string {
@@ -195,8 +195,8 @@ export async function saveBeforeClose(): Promise<void> {
     try {
       let data = serializeFn();
       if (!data || data.length === 0) continue;
-      if (data.length > MAX_CACHE_BYTES) {
-        data = truncateFromEnd(data, MAX_CACHE_BYTES);
+      if (data.length > MAX_CACHE_CHARS) {
+        data = truncateFromEnd(data, MAX_CACHE_CHARS);
       }
       if (data.length > 0) {
         cachePromises.push(saveTerminalOutputCache(paneId, data));
@@ -211,7 +211,7 @@ export async function saveBeforeClose(): Promise<void> {
 
   // Wait for save + persist before cleaning — otherwise clean may race and
   // delete files that are still being written.
-  await Promise.all(cachePromises);
+  await Promise.allSettled(cachePromises);
 
   // 3. Clean orphaned cache files (safe now that saves have completed)
   const activePaneIds: string[] = [];

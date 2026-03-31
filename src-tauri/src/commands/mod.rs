@@ -1734,7 +1734,8 @@ fn clipboard_write_text_platform(_text: &str) -> Result<(), String> {
 }
 
 fn sanitize_filename(s: &str) -> String {
-    s.chars()
+    let sanitized: String = s
+        .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
                 c
@@ -1742,7 +1743,9 @@ fn sanitize_filename(s: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    // Prevent path traversal via ".." components
+    sanitized.replace("..", "_")
 }
 
 /// Inner implementation for saving terminal output cache, testable with arbitrary path.
@@ -1842,8 +1845,14 @@ mod tests {
 
     #[test]
     fn sanitize_filename_special_chars_replaced() {
-        assert_eq!(sanitize_filename("pane/../../etc"), "pane_.._.._etc");
+        assert_eq!(sanitize_filename("pane/../../etc"), "pane_____etc");
         assert_eq!(sanitize_filename("a b.c"), "a_b.c");
+    }
+
+    #[test]
+    fn sanitize_filename_rejects_dot_dot_traversal() {
+        assert_eq!(sanitize_filename(".."), "_");
+        assert_eq!(sanitize_filename("foo..bar"), "foo_bar");
     }
 
     #[test]
