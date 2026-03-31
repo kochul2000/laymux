@@ -1748,6 +1748,9 @@ fn sanitize_filename(s: &str) -> String {
 /// Save terminal output to the cache directory.
 #[tauri::command]
 pub fn save_terminal_output_cache(pane_id: String, data: Vec<u8>) -> Result<(), String> {
+    if pane_id.is_empty() {
+        return Err("Empty pane ID".into());
+    }
     let cache_dir = crate::settings::cache_dir_path()
         .ok_or("Cannot determine cache directory")?
         .join("terminal-output");
@@ -1759,6 +1762,9 @@ pub fn save_terminal_output_cache(pane_id: String, data: Vec<u8>) -> Result<(), 
 /// Load terminal output from the cache directory.
 #[tauri::command]
 pub fn load_terminal_output_cache(pane_id: String) -> Result<Vec<u8>, String> {
+    if pane_id.is_empty() {
+        return Err("Empty pane ID".into());
+    }
     let cache_dir = crate::settings::cache_dir_path()
         .ok_or("Cannot determine cache directory")?
         .join("terminal-output");

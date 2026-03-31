@@ -509,7 +509,7 @@ export function TerminalView({
         (async () => {
           if (cancelled) return;
           // Restore cached terminal output from previous session
-          if (shouldRestoreOutput && lastCwd && paneId) {
+          if (shouldRestoreOutput && paneId) {
             try {
               const cached = await loadTerminalOutputCache(paneId);
               if (cached && cached.length > 0) {

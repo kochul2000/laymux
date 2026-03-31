@@ -186,12 +186,8 @@ export function useSessionPersistence() {
         const allPaneIds: string[] = [
           ...(rawSettings.workspaces?.flatMap((ws) => ws.panes.map((p) => p.id).filter(Boolean)) ??
             []),
-          ...(rawSettings.docks?.flatMap(
-            (d) =>
-              (d as unknown as { panes?: { id: string }[] }).panes
-                ?.map((p) => p.id)
-                .filter(Boolean) ?? [],
-          ) ?? []),
+          ...(rawSettings.docks?.flatMap((d) => d.panes?.map((p) => p.id).filter(Boolean) ?? []) ??
+            []),
         ];
         if (allPaneIds.length > 0) {
           cleanTerminalOutputCache(allPaneIds).catch(() => {});

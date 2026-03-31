@@ -151,6 +151,8 @@ export async function saveBeforeClose(): Promise<void> {
 
   // 1. Serialize and cache terminal outputs
   const serializeMap = getTerminalSerializeMap();
+  // TODO: Array.from(Uint8Array) → JSON number[] is 3-4x larger than raw bytes.
+  // Consider base64 encoding or Tauri binary IPC to reduce overhead.
   const cachePromises: Promise<void>[] = [];
   for (const [paneId, serializeFn] of serializeMap.entries()) {
     try {
@@ -166,7 +168,11 @@ export async function saveBeforeClose(): Promise<void> {
   // 2. Persist session (includes lastCwd in view configs)
   cachePromises.push(persistSession());
 
-  // 3. Clean orphaned cache files
+  // Wait for save + persist before cleaning — otherwise clean may race and
+  // delete files that are still being written.
+  await Promise.all(cachePromises);
+
+  // 3. Clean orphaned cache files (safe now that saves have completed)
   const activePaneIds: string[] = [];
   for (const ws of wsState.workspaces) {
     for (const p of ws.panes) activePaneIds.push(p.id);
@@ -174,7 +180,5 @@ export async function saveBeforeClose(): Promise<void> {
   for (const d of dockState.docks) {
     for (const p of d.panes) activePaneIds.push(p.id);
   }
-  cachePromises.push(cleanTerminalOutputCache(activePaneIds).then(() => {}));
-
-  await Promise.all(cachePromises);
+  await cleanTerminalOutputCache(activePaneIds);
 }
