@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -6,11 +6,25 @@ vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/tauri-api", () => ({
+  createTerminalSession: vi.fn().mockResolvedValue("t-mock"),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
+  resizeTerminal: vi.fn().mockResolvedValue(undefined),
+  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+  onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
+  smartPaste: vi.fn().mockResolvedValue({ pasteType: "none", content: "" }),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
+  updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
+  openExternal: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { AppLayout } from "./AppLayout";
 import { useDockStore } from "@/stores/dock-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -18,6 +32,7 @@ describe("AppLayout", () => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   it("renders left dock and workspace area by default", () => {
@@ -40,7 +55,20 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("dock-right")).toBeInTheDocument();
   });
 
-  it("hides dock when toggled invisible", () => {
+  it("keeps dock in DOM when toggled invisible with dockPersistState on", () => {
+    useSettingsStore.setState({
+      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: true },
+    });
+    useDockStore.getState().toggleDockVisible("left");
+    render(<AppLayout />);
+    // Dock content remains in DOM (inside 0px grid cell with overflow:hidden)
+    expect(screen.getByTestId("dock-left")).toBeInTheDocument();
+  });
+
+  it("removes dock from DOM when toggled invisible with dockPersistState off", () => {
+    useSettingsStore.setState({
+      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: false },
+    });
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
     expect(screen.queryByTestId("dock-left")).not.toBeInTheDocument();
@@ -102,6 +130,34 @@ describe("AppLayout", () => {
     await user.click(screen.getByTestId("notification-panel-close"));
 
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  // --- Layout Mode Toggle (Issue #6) ---
+
+  it("layout mode toggle does not remount dock components", () => {
+    const { rerender } = render(<AppLayout />);
+    const dockBefore = screen.getByTestId("dock-left");
+
+    act(() => {
+      useDockStore.getState().toggleLayoutMode();
+    });
+    rerender(<AppLayout />);
+
+    const dockAfter = screen.getByTestId("dock-left");
+    expect(dockAfter).toBe(dockBefore); // Same DOM node, not recreated
+  });
+
+  it("dock pane IDs remain stable after toggleLayoutMode", () => {
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView");
+    const paneIdBefore = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+
+    render(<AppLayout />);
+    act(() => {
+      useDockStore.getState().toggleLayoutMode();
+    });
+
+    const paneIdAfter = useDockStore.getState().getDock("bottom")?.panes[0]?.id;
+    expect(paneIdAfter).toBe(paneIdBefore);
   });
 
   it("notification panel overlay shows only active workspace notifications", () => {

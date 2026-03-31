@@ -16,49 +16,78 @@ export function useSessionPersistence() {
   useEffect(() => {
     loadSettings()
       .then((rawSettings) => {
-        // Treat as loose record — disk data may have extra/missing fields
-        const settings = rawSettings as unknown as Record<string, unknown>;
         const sFont = rawSettings.font;
         const sProfiles = rawSettings.profiles;
         const sColorSchemes = rawSettings.colorSchemes;
         const sKeybindings = rawSettings.keybindings;
-        const sProfileDefaults = settings.profileDefaults as Record<string, unknown> | undefined;
-        const sViewOrder = settings.viewOrder;
-        const sAppThemeId = settings.appThemeId;
+        const sProfileDefaults = rawSettings.profileDefaults;
+        const sViewOrder = rawSettings.viewOrder;
+        const sAppThemeId = rawSettings.appThemeId;
 
         // Apply to settings store
         useSettingsStore.getState().loadFromSettings({
-          font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" },
+          ...(sFont
+            ? { font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" } }
+            : {}),
           defaultProfile: rawSettings.defaultProfile,
-          profileDefaults: sProfileDefaults as Parameters<ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]>[0]["profileDefaults"],
-          viewOrder: Array.isArray(sViewOrder) ? sViewOrder : undefined,
+          profileDefaults: sProfileDefaults as Parameters<
+            ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]
+          >[0]["profileDefaults"],
+          viewOrder: Array.isArray(sViewOrder) ? (sViewOrder as string[]) : undefined,
           appThemeId: typeof sAppThemeId === "string" ? sAppThemeId : undefined,
-          profiles: sProfiles?.map((p) => ({
-            name: p.name,
-            commandLine: p.commandLine,
-            startupCommand: p.startupCommand ?? "",
-            colorScheme: p.colorScheme ?? "",
-            startingDirectory: p.startingDirectory ?? "",
-            hidden: p.hidden ?? false,
-            cursorShape: (p.cursorShape ?? "bar") as import("@/stores/settings-store").CursorShape,
-            padding: p.padding ?? { top: 8, right: 8, bottom: 8, left: 8 },
-            scrollbackLines: p.scrollbackLines ?? 9001,
-            opacity: p.opacity ?? 100,
-            tabTitle: p.tabTitle ?? "",
-            bellStyle: (p.bellStyle ?? "audible") as import("@/stores/settings-store").BellStyle,
-            closeOnExit: (p.closeOnExit ?? "automatic") as import("@/stores/settings-store").CloseOnExit,
-            antialiasingMode: (p.antialiasingMode ?? "grayscale") as import("@/stores/settings-store").AntialiasingMode,
-            suppressApplicationTitle: p.suppressApplicationTitle ?? false,
-            snapOnInput: p.snapOnInput ?? true,
-          })) ?? [],
-          colorSchemes: sColorSchemes?.map((cs) => {
-            const base = makeDefaultColorScheme();
-            return { ...base, ...Object.fromEntries(Object.entries(cs).filter(([, v]) => v !== undefined)) } as import("@/stores/settings-store").ColorScheme;
-          }) ?? [],
-          keybindings: sKeybindings?.map((kb) => ({
-            keys: kb.keys,
-            command: kb.command,
-          })) ?? [],
+          profiles:
+            sProfiles?.map((p) => ({
+              name: p.name,
+              commandLine: p.commandLine,
+              startupCommand: p.startupCommand ?? "",
+              colorScheme: p.colorScheme ?? "",
+              startingDirectory: p.startingDirectory ?? "",
+              hidden: p.hidden ?? false,
+              cursorShape: (p.cursorShape ??
+                "bar") as import("@/stores/settings-store").CursorShape,
+              padding: p.padding ?? { top: 8, right: 8, bottom: 8, left: 8 },
+              scrollbackLines: p.scrollbackLines ?? 9001,
+              opacity: p.opacity ?? 100,
+              tabTitle: p.tabTitle ?? "",
+              bellStyle: (p.bellStyle ?? "audible") as import("@/stores/settings-store").BellStyle,
+              closeOnExit: (p.closeOnExit ??
+                "automatic") as import("@/stores/settings-store").CloseOnExit,
+              antialiasingMode: (p.antialiasingMode ??
+                "grayscale") as import("@/stores/settings-store").AntialiasingMode,
+              suppressApplicationTitle: p.suppressApplicationTitle ?? false,
+              snapOnInput: p.snapOnInput ?? true,
+              ...(p.font
+                ? {
+                    font: {
+                      face: p.font.face,
+                      size: p.font.size,
+                      weight: p.font.weight ?? "normal",
+                    },
+                  }
+                : {}),
+            })) ?? [],
+          colorSchemes:
+            sColorSchemes?.map((cs) => {
+              const base = makeDefaultColorScheme();
+              return {
+                ...base,
+                ...Object.fromEntries(Object.entries(cs).filter(([, v]) => v !== undefined)),
+              } as import("@/stores/settings-store").ColorScheme;
+            }) ?? [],
+          keybindings:
+            sKeybindings?.map((kb) => ({
+              keys: kb.keys,
+              command: kb.command,
+            })) ?? [],
+          ...(rawSettings.convenience
+            ? {
+                convenience:
+                  rawSettings.convenience as import("@/stores/settings-store").ConvenienceSettings,
+              }
+            : {}),
+          ...(rawSettings.claude
+            ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings }
+            : {}),
         });
 
         // Apply layouts and workspaces to workspace store
@@ -79,7 +108,6 @@ export function useSessionPersistence() {
           const workspaces: Workspace[] = rawSettings.workspaces.map((ws) => ({
             id: ws.id,
             name: ws.name,
-            layoutId: ws.layoutId,
             panes: ws.panes.map((p) => ({
               id: `loaded-pane-${++paneCounter}`,
               x: p.x,
@@ -110,9 +138,29 @@ export function useSessionPersistence() {
             if (!saved || !validPositions.includes(saved.position as DockPosition)) return d;
             const savedAny = saved as unknown as Record<string, unknown>;
             const loadedPanes = Array.isArray(savedAny.panes)
-              ? (savedAny.panes as { id: string; view: { type: string; [k: string]: unknown }; x?: number; y?: number; w?: number; h?: number }[]).map((p) => ({
+              ? (
+                  savedAny.panes as {
+                    id: string;
+                    view: { type: string; [k: string]: unknown };
+                    x?: number;
+                    y?: number;
+                    w?: number;
+                    h?: number;
+                  }[]
+                ).map((p) => ({
                   id: p.id || `dp-${crypto.randomUUID().slice(0, 8)}`,
-                  view: { ...p.view, type: (p.view.type as ViewType) || "EmptyView" },
+                  view: {
+                    ...p.view,
+                    type: (p.view.type as ViewType) || "EmptyView",
+                    // Normalize cwdReceive/cwdSend to explicit booleans for TerminalView
+                    // to prevent UI/backend mismatch (issue #24)
+                    ...(p.view.type === "TerminalView"
+                      ? {
+                          cwdReceive: (p.view.cwdReceive as boolean) ?? true,
+                          cwdSend: (p.view.cwdSend as boolean) ?? true,
+                        }
+                      : {}),
+                  },
                   x: p.x ?? 0,
                   y: p.y ?? 0,
                   w: p.w ?? 1,
@@ -122,9 +170,10 @@ export function useSessionPersistence() {
             return {
               ...d,
               activeView: (saved.activeView as ViewType) ?? d.activeView,
-              views: Array.isArray(savedAny.views) ? savedAny.views as ViewType[] : d.views,
+              views: Array.isArray(savedAny.views) ? (savedAny.views as ViewType[]) : d.views,
               visible: saved.visible ?? d.visible,
-              size: typeof savedAny.size === "number" && savedAny.size >= 50 ? savedAny.size : d.size,
+              size:
+                typeof savedAny.size === "number" && savedAny.size >= 50 ? savedAny.size : d.size,
               ...(loadedPanes ? { panes: loadedPanes } : {}),
             };
           });

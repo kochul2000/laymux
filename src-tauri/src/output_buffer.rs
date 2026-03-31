@@ -105,7 +105,7 @@ mod tests {
     fn push_evicts_oldest_when_full() {
         let mut buf = TerminalOutputBuffer::new(10);
         buf.push(b"abcdefgh"); // 8 bytes
-        buf.push(b"ijklm");    // 5 bytes, total 13 > 10
+        buf.push(b"ijklm"); // 5 bytes, total 13 > 10
         assert_eq!(buf.len(), 10);
         // oldest 3 bytes evicted: "abc" gone, "defghijklm" remains
         assert_eq!(buf.recent_bytes(10), b"defghijklm");

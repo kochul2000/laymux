@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -94,8 +94,10 @@ export function AppLayout() {
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
   const notificationDismiss = useSettingsStore((s) => s.convenience.notificationDismiss);
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
-  const unreadCount = useNotificationStore((s) =>
-    s.notifications.filter((n) => n.workspaceId === activeWorkspaceId && n.readAt === null).length,
+  const unreadCount = useNotificationStore(
+    (s) =>
+      s.notifications.filter((n) => n.workspaceId === activeWorkspaceId && n.readAt === null)
+        .length,
   );
 
   // Auto-dismiss notifications based on setting
@@ -108,7 +110,12 @@ export function AppLayout() {
   }, [notificationDismiss, activeWorkspaceId, unreadCount, markWorkspaceAsRead]);
 
   useEffect(() => {
-    if (notificationDismiss === "paneFocus" && activeWorkspaceId && focusedPaneIndex !== null && unreadCount > 0) {
+    if (
+      notificationDismiss === "paneFocus" &&
+      activeWorkspaceId &&
+      focusedPaneIndex !== null &&
+      unreadCount > 0
+    ) {
       markWorkspaceAsRead(activeWorkspaceId);
     }
   }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markWorkspaceAsRead]);
@@ -118,30 +125,50 @@ export function AppLayout() {
   const left = docks.find((d) => d.position === "left");
   const right = docks.find((d) => d.position === "right");
 
-  const renderDock = (dock: typeof top, borderSide: string) => {
-    if (!dock?.visible) return null;
-    const pos = dock.position;
-    const isLR = pos === "left" || pos === "right";
+  const dockPersistState = useSettingsStore((s) => s.convenience.dockPersistState);
+
+  const gridStyles = useMemo((): React.CSSProperties => {
+    const topSize = top?.visible ? `${top.size}px` : "0px";
+    const bottomSize = bottom?.visible ? `${bottom.size}px` : "0px";
+    const leftSize = left?.visible ? `${left.size}px` : "0px";
+    const rightSize = right?.visible ? `${right.size}px` : "0px";
+
+    return {
+      display: "grid",
+      gridTemplateAreas:
+        layoutMode === "horizontal"
+          ? `"top top top" "left ws right" "bottom bottom bottom"`
+          : `"left top right" "left ws right" "left bottom right"`,
+      gridTemplateColumns: `${leftSize} 1fr ${rightSize}`,
+      gridTemplateRows: `${topSize} 1fr ${bottomSize}`,
+    };
+  }, [
+    layoutMode,
+    top?.visible,
+    top?.size,
+    bottom?.visible,
+    bottom?.size,
+    left?.visible,
+    left?.size,
+    right?.visible,
+    right?.size,
+  ]);
+
+  const renderDockContent = (dock: typeof top, pos: DockPosition, _borderSide: string) => {
+    if (!dock) return null;
+    // When not visible: unmount if persistState is off, keep in DOM if on
+    if (!dock.visible && !dockPersistState) return null;
     const isFocused = focusedDock === pos;
     return (
-      <div
-        className={`relative shrink-0 ${isLR ? "" : "w-full"}`}
-        style={{
-          [isLR ? "width" : "height"]: dock.size,
-          [`border${borderSide}`]: `1px solid var(--border)`,
-          background: "var(--bg-surface)",
-        }}
-        onMouseDown={() => {
-          setFocusedDock(pos);
-          useGridStore.getState().setFocusedPane(null);
-        }}
-      >
+      <>
         <Dock
           position={pos}
           activeView={dock.activeView}
           views={dock.views}
           panes={dock.panes}
-          onSwitchView={(v: ViewType, config?: import("@/stores/types").ViewInstanceConfig) => setDockActiveView(pos, v, config)}
+          onSwitchView={(v: ViewType, config?: import("@/stores/types").ViewInstanceConfig) =>
+            setDockActiveView(pos, v, config)
+          }
           onSplitPane={(dir, paneId) => splitDockPane(pos, dir, paneId)}
           onRemovePane={(paneId) => removeDockPane(pos, paneId)}
           onSetPaneView={(paneId, view) => setDockPaneView(pos, paneId, view)}
@@ -154,150 +181,197 @@ export function AppLayout() {
             style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
           />
         )}
-      </div>
+      </>
     );
   };
 
-  const topDock = renderDock(top, "Bottom");
-  const bottomDock = renderDock(bottom, "Top");
-  const leftDock = renderDock(left, "Right");
-  const rightDock = renderDock(right, "Left");
-
-  const workspace = (
-    <div className="min-w-0 flex-1">
-      <WorkspaceArea />
-    </div>
-  );
-
-  const content =
-    layoutMode === "horizontal" ? (
-      <>
-        {topDock}
-        <div className="flex min-h-0 flex-1">
-          {leftDock}
-          {workspace}
-          {rightDock}
-        </div>
-        {bottomDock}
-      </>
-    ) : (
-      <div className="flex min-h-0 flex-1">
-        {leftDock}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {topDock}
-          {workspace}
-          {bottomDock}
-        </div>
-        {rightDock}
-      </div>
-    );
+  const dockAreaStyle = (
+    pos: DockPosition,
+    borderSide: string,
+    dock: typeof top,
+  ): React.CSSProperties => {
+    const areaMap = { top: "top", bottom: "bottom", left: "left", right: "right" } as const;
+    if (!dock?.visible) return { gridArea: areaMap[pos], overflow: "hidden" };
+    return {
+      gridArea: areaMap[pos],
+      position: "relative",
+      overflow: "hidden",
+      [`border${borderSide}`]: "1px solid var(--border)",
+      background: "var(--bg-surface)",
+    };
+  };
 
   return (
     <div className="flex h-full flex-col">
       <GridEditToolbar />
-      {content}
+      <div className="min-h-0 flex-1" style={gridStyles}>
+        <div
+          key="dock-top"
+          style={dockAreaStyle("top", "Bottom", top)}
+          onMouseDown={
+            top?.visible
+              ? () => {
+                  setFocusedDock("top");
+                  useGridStore.getState().setFocusedPane(null);
+                }
+              : undefined
+          }
+        >
+          {renderDockContent(top, "top", "Bottom")}
+        </div>
+        <div
+          key="dock-left"
+          style={dockAreaStyle("left", "Right", left)}
+          onMouseDown={
+            left?.visible
+              ? () => {
+                  setFocusedDock("left");
+                  useGridStore.getState().setFocusedPane(null);
+                }
+              : undefined
+          }
+        >
+          {renderDockContent(left, "left", "Right")}
+        </div>
+        <div
+          key="dock-ws"
+          style={{ gridArea: "ws", minWidth: 0, minHeight: 0, overflow: "hidden" }}
+        >
+          <WorkspaceArea />
+        </div>
+        <div
+          key="dock-right"
+          style={dockAreaStyle("right", "Left", right)}
+          onMouseDown={
+            right?.visible
+              ? () => {
+                  setFocusedDock("right");
+                  useGridStore.getState().setFocusedPane(null);
+                }
+              : undefined
+          }
+        >
+          {renderDockContent(right, "right", "Left")}
+        </div>
+        <div
+          key="dock-bottom"
+          style={dockAreaStyle("bottom", "Top", bottom)}
+          onMouseDown={
+            bottom?.visible
+              ? () => {
+                  setFocusedDock("bottom");
+                  useGridStore.getState().setFocusedPane(null);
+                }
+              : undefined
+          }
+        >
+          {renderDockContent(bottom, "bottom", "Top")}
+        </div>
+      </div>
 
       {/* Notification Panel Overlay */}
-      {notificationPanelOpen && createPortal(
-        <div
-          data-testid="notification-panel-overlay"
-          className="fixed inset-0 flex items-end justify-center"
-          style={{ zIndex: 9998 }}
-        >
+      {notificationPanelOpen &&
+        createPortal(
           <div
-            data-testid="notification-panel-backdrop"
-            className="absolute inset-0"
-            style={{ background: "rgba(0,0,0,0.3)" }}
-            onClick={closeNotificationPanel}
-          />
-          <div
-            className="relative z-10 mb-8 flex w-[480px] flex-col overflow-hidden rounded-lg shadow-2xl"
-            style={{
-              background: "var(--bg-surface, #181825)",
-              border: "1px solid var(--border, #333)",
-              maxHeight: "60vh",
-            }}
+            data-testid="notification-panel-overlay"
+            className="fixed inset-0 flex items-end justify-center"
+            style={{ zIndex: 9998 }}
           >
             <div
-              className="flex items-center justify-between px-4 py-2"
-              style={{ borderBottom: "1px solid var(--border)" }}
+              data-testid="notification-panel-backdrop"
+              className="absolute inset-0"
+              style={{ background: "rgba(0,0,0,0.3)" }}
+              onClick={closeNotificationPanel}
+            />
+            <div
+              className="relative z-10 mb-8 flex w-[480px] flex-col overflow-hidden rounded-lg shadow-2xl"
+              style={{
+                background: "var(--bg-surface, #181825)",
+                border: "1px solid var(--border, #333)",
+                maxHeight: "60vh",
+              }}
             >
-              <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                Notifications
-              </span>
-              <button
-                data-testid="notification-panel-close"
-                onClick={closeNotificationPanel}
-                className="flex h-6 w-6 items-center justify-center rounded text-sm"
-                style={{
-                  color: "var(--text-secondary)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-                title="Close"
+              <div
+                className="flex items-center justify-between px-4 py-2"
+                style={{ borderBottom: "1px solid var(--border)" }}
               >
-                &#10005;
-              </button>
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Notifications
+                </span>
+                <button
+                  data-testid="notification-panel-close"
+                  onClick={closeNotificationPanel}
+                  className="flex h-6 w-6 items-center justify-center rounded text-sm"
+                  style={{
+                    color: "var(--text-secondary)",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  title="Close"
+                >
+                  &#10005;
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <NotificationPanel workspaceId={activeWorkspaceId} />
+              </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <NotificationPanel workspaceId={activeWorkspaceId} />
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+          </div>,
+          document.body,
+        )}
 
       {/* Settings Modal — portaled to body to escape dock stacking contexts */}
-      {settingsModalOpen && createPortal(
-        <div
-          data-testid="settings-modal"
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: 9999 }}
-        >
+      {settingsModalOpen &&
+        createPortal(
           <div
-            data-testid="settings-modal-backdrop"
-            className="absolute inset-0"
-            style={{ background: "rgba(0,0,0,0.5)" }}
-            onClick={closeSettingsModal}
-          />
-          <div
-            className="relative z-10 flex h-[85vh] w-[780px] flex-col overflow-hidden rounded-lg shadow-2xl"
-            style={{
-              background: "var(--bg-surface, #181825)",
-              border: "1px solid var(--border, #333)",
-            }}
+            data-testid="settings-modal"
+            className="fixed inset-0 flex items-center justify-center"
+            style={{ zIndex: 9999 }}
           >
-            {/* Modal title bar */}
             <div
-              className="flex items-center justify-between px-4 py-2"
-              style={{ borderBottom: "1px solid var(--border)" }}
+              data-testid="settings-modal-backdrop"
+              className="absolute inset-0"
+              style={{ background: "rgba(0,0,0,0.5)" }}
+              onClick={closeSettingsModal}
+            />
+            <div
+              className="relative z-10 flex h-[85vh] w-[780px] flex-col overflow-hidden rounded-lg shadow-2xl"
+              style={{
+                background: "var(--bg-surface, #181825)",
+                border: "1px solid var(--border, #333)",
+              }}
             >
-              <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                Settings
-              </span>
-              <button
-                data-testid="settings-modal-close"
-                onClick={closeSettingsModal}
-                className="flex h-6 w-6 items-center justify-center rounded text-sm"
-                style={{
-                  color: "var(--text-secondary)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-                title="Close"
+              {/* Modal title bar */}
+              <div
+                className="flex items-center justify-between px-4 py-2"
+                style={{ borderBottom: "1px solid var(--border)" }}
               >
-                &#10005;
-              </button>
+                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Settings
+                </span>
+                <button
+                  data-testid="settings-modal-close"
+                  onClick={closeSettingsModal}
+                  className="flex h-6 w-6 items-center justify-center rounded text-sm"
+                  style={{
+                    color: "var(--text-secondary)",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  title="Close"
+                >
+                  &#10005;
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <SettingsView />
+              </div>
             </div>
-            <div className="min-h-0 flex-1">
-              <SettingsView />
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

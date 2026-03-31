@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ClaudeSyncCwdMode, ClaudeSettings } from "../lib/tauri-api";
+import type { ClaudeSyncCwdMode, ClaudeSettings, MemoSettings } from "../lib/tauri-api";
 
 export interface FontSettings {
   face: string;
@@ -41,6 +41,12 @@ export interface ColorScheme {
 
 export type NotificationDismissMode = "workspace" | "paneFocus" | "manual";
 
+/** Path ellipsis direction: "start" truncates the beginning, "end" truncates the end. */
+export type PathEllipsisMode = "start" | "end";
+
+/** Terminal scrollbar rendering mode. */
+export type ScrollbarStyle = "overlay" | "separate";
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
@@ -50,10 +56,34 @@ export interface ConvenienceSettings {
   notificationDismiss: NotificationDismissMode;
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
+  /** Path ellipsis direction in WorkspaceSelectorView. "start" (default) shows the end of the path, "end" shows the beginning. */
+  pathEllipsis: PathEllipsisMode;
+  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
+  scrollbarStyle: ScrollbarStyle;
+  /** Keep dock state in background when hidden. */
+  dockPersistState: boolean;
+  /** Allow Alt+Arrow to navigate into/out of dock areas. */
+  dockArrowNav: boolean;
 }
 
+/** Which elements to display in WorkspaceSelectorView pane rows. */
+export interface WorkspaceDisplaySettings {
+  minimap: boolean;
+  environment: boolean;
+  activity: boolean;
+  path: boolean;
+  result: boolean;
+}
 
-export type CursorShape = "bar" | "underscore" | "filledBox" | "emptyBox" | "doubleUnderscore" | "vintage";
+export type { MemoSettings } from "../lib/tauri-api";
+
+export type CursorShape =
+  | "bar"
+  | "underscore"
+  | "filledBox"
+  | "emptyBox"
+  | "doubleUnderscore"
+  | "vintage";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
 export type CloseOnExit = "automatic" | "graceful" | "always" | "never";
 export type AntialiasingMode = "grayscale" | "cleartype" | "aliased";
@@ -70,6 +100,7 @@ export interface ProfileDefaults {
   antialiasingMode: AntialiasingMode;
   suppressApplicationTitle: boolean;
   snapOnInput: boolean;
+  font: FontSettings;
 }
 
 export interface Profile {
@@ -89,6 +120,8 @@ export interface Profile {
   antialiasingMode: AntialiasingMode;
   suppressApplicationTitle: boolean;
   snapOnInput: boolean;
+  /** Per-profile font override. When undefined, inherits from profileDefaults. */
+  font?: FontSettings;
 }
 
 export interface Keybinding {
@@ -98,8 +131,17 @@ export interface Keybinding {
 
 /** Keys of Profile that are inheritable from defaults (= ProfileDefaults keys). */
 export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
-  "colorScheme", "cursorShape", "padding", "scrollbackLines", "opacity",
-  "bellStyle", "closeOnExit", "antialiasingMode", "suppressApplicationTitle", "snapOnInput",
+  "colorScheme",
+  "cursorShape",
+  "padding",
+  "scrollbackLines",
+  "opacity",
+  "bellStyle",
+  "closeOnExit",
+  "antialiasingMode",
+  "suppressApplicationTitle",
+  "snapOnInput",
+  "font",
 ];
 
 /** App UI theme — separate from terminal color schemes. */
@@ -122,35 +164,62 @@ export const builtinAppThemes: AppTheme[] = [
   {
     id: "catppuccin-mocha",
     name: "Catppuccin Mocha",
-    bgBase: "#1e1e2e", bgSurface: "#181825", bgOverlay: "#313244", border: "#313244",
-    textPrimary: "#cdd6f4", textSecondary: "#a6adc8", accent: "#89b4fa",
-    green: "#a6e3a1", red: "#f38ba8", yellow: "#f9e2af",
+    bgBase: "#1e1e2e",
+    bgSurface: "#181825",
+    bgOverlay: "#313244",
+    border: "#313244",
+    textPrimary: "#cdd6f4",
+    textSecondary: "#a6adc8",
+    accent: "#89b4fa",
+    green: "#a6e3a1",
+    red: "#f38ba8",
+    yellow: "#f9e2af",
   },
   {
     id: "dracula",
     name: "Dracula",
-    bgBase: "#282a36", bgSurface: "#21222c", bgOverlay: "#44475a", border: "#44475a",
-    textPrimary: "#f8f8f2", textSecondary: "#6272a4", accent: "#bd93f9",
-    green: "#50fa7b", red: "#ff5555", yellow: "#f1fa8c",
+    bgBase: "#282a36",
+    bgSurface: "#21222c",
+    bgOverlay: "#44475a",
+    border: "#44475a",
+    textPrimary: "#f8f8f2",
+    textSecondary: "#6272a4",
+    accent: "#bd93f9",
+    green: "#50fa7b",
+    red: "#ff5555",
+    yellow: "#f1fa8c",
   },
   {
     id: "wsl-dark",
     name: "WSL Dark",
-    bgBase: "#0c0c0c", bgSurface: "#1a1a1a", bgOverlay: "#2d2d2d", border: "#333333",
-    textPrimary: "#f0f0f0", textSecondary: "#888888", accent: "#3b78ff",
-    green: "#16c60c", red: "#e74856", yellow: "#f9f1a5",
+    bgBase: "#0c0c0c",
+    bgSurface: "#1a1a1a",
+    bgOverlay: "#2d2d2d",
+    border: "#333333",
+    textPrimary: "#f0f0f0",
+    textSecondary: "#888888",
+    accent: "#3b78ff",
+    green: "#16c60c",
+    red: "#e74856",
+    yellow: "#f9f1a5",
   },
   {
     id: "github-light",
     name: "GitHub Light",
-    bgBase: "#ffffff", bgSurface: "#f6f8fa", bgOverlay: "#e1e4e8", border: "#d0d7de",
-    textPrimary: "#24292f", textSecondary: "#57606a", accent: "#0969da",
-    green: "#1a7f37", red: "#cf222e", yellow: "#9a6700",
+    bgBase: "#ffffff",
+    bgSurface: "#f6f8fa",
+    bgOverlay: "#e1e4e8",
+    border: "#d0d7de",
+    textPrimary: "#24292f",
+    textSecondary: "#57606a",
+    accent: "#0969da",
+    green: "#1a7f37",
+    red: "#cf222e",
+    yellow: "#9a6700",
   },
 ];
 
 interface SettingsState {
-  font: FontSettings;
   defaultProfile: string;
   profileDefaults: ProfileDefaults;
   profiles: Profile[];
@@ -159,28 +228,61 @@ interface SettingsState {
   viewOrder: string[];
   appThemeId: string;
   convenience: ConvenienceSettings;
+  workspaceDisplay: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
+  memo: MemoSettings;
 
-  setFont: (font: FontSettings) => void;
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppTheme: (themeId: string) => void;
   setConvenience: (data: Partial<ConvenienceSettings>) => void;
+  setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
+  setMemo: (data: Partial<MemoSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   addProfile: (profile: Profile) => void;
   removeProfile: (index: number) => void;
   updateProfile: (index: number, data: Partial<Profile>) => void;
+  setColorSchemes: (schemes: ColorScheme[]) => void;
   addColorScheme: (scheme: ColorScheme) => void;
   removeColorScheme: (index: number) => void;
   updateColorScheme: (index: number, data: Partial<ColorScheme>) => void;
+  setKeybindings: (keybindings: Keybinding[]) => void;
   addKeybinding: (keybinding: Keybinding) => void;
   removeKeybinding: (index: number) => void;
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
-  loadFromSettings: (data: Partial<Pick<SettingsState, "font" | "defaultProfile" | "profileDefaults" | "profiles" | "colorSchemes" | "keybindings" | "viewOrder" | "appThemeId" | "convenience" | "claude">>) => void;
+  /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
+  resolveFont: (profileName: string) => FontSettings;
+  loadFromSettings: (
+    data: Partial<
+      Pick<
+        SettingsState,
+        | "defaultProfile"
+        | "profileDefaults"
+        | "profiles"
+        | "colorSchemes"
+        | "keybindings"
+        | "viewOrder"
+        | "appThemeId"
+        | "convenience"
+        | "workspaceDisplay"
+        | "claude"
+        | "memo"
+      >
+    > & { font?: FontSettings },
+  ) => void;
 }
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
+
+const DEFAULT_MEMO_PADDING: MemoSettings = {
+  paddingTop: 12,
+  paddingRight: 12,
+  paddingBottom: 12,
+  paddingLeft: 12,
+};
+
+export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
 
 const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
@@ -193,18 +295,16 @@ const defaultProfileDefaults: ProfileDefaults = {
   antialiasingMode: "grayscale",
   suppressApplicationTitle: false,
   snapOnInput: true,
+  font: { ...DEFAULT_FONT },
 };
 
-function makeProfile(
-  name: string,
-  commandLine: string,
-  overrides?: Partial<Profile>,
-): Profile {
+function makeProfile(name: string, commandLine: string, overrides?: Partial<Profile>): Profile {
+  const { font: _font, ...rest } = defaultProfileDefaults;
   return {
     name,
     commandLine,
     startupCommand: "",
-    ...defaultProfileDefaults,
+    ...rest,
     startingDirectory: "",
     hidden: false,
     tabTitle: "",
@@ -218,11 +318,12 @@ export function makeProfileFromDefaults(
   commandLine: string,
   defaults: ProfileDefaults,
 ): Profile {
+  const { font: _font, ...rest } = defaults;
   return {
     name,
     commandLine,
     startupCommand: "",
-    ...defaults,
+    ...rest,
     startingDirectory: "",
     hidden: false,
     tabTitle: "",
@@ -259,122 +360,258 @@ export function makeDefaultColorScheme(): ColorScheme {
 export const builtinColorSchemes: ColorScheme[] = [
   {
     name: "CampbellClear",
-    background: "#0C0C0C", black: "#0C0C0C", blue: "#0037DA",
-    brightBlack: "#767676", brightBlue: "#3B78FF", brightCyan: "#61D6D6",
-    brightGreen: "#16C60C", brightPurple: "#B4009E", brightRed: "#E74856",
-    brightWhite: "#FFFFFF", brightYellow: "#F9F1A5", cursorColor: "#FFFFFF",
-    cyan: "#3A96DD", foreground: "#F0F0F0", green: "#13A10E",
-    purple: "#881798", red: "#C50F1F", selectionBackground: "#232042",
-    white: "#F0F0F0", yellow: "#C19C00",
+    background: "#0C0C0C",
+    black: "#0C0C0C",
+    blue: "#0037DA",
+    brightBlack: "#767676",
+    brightBlue: "#3B78FF",
+    brightCyan: "#61D6D6",
+    brightGreen: "#16C60C",
+    brightPurple: "#B4009E",
+    brightRed: "#E74856",
+    brightWhite: "#FFFFFF",
+    brightYellow: "#F9F1A5",
+    cursorColor: "#FFFFFF",
+    cyan: "#3A96DD",
+    foreground: "#F0F0F0",
+    green: "#13A10E",
+    purple: "#881798",
+    red: "#C50F1F",
+    selectionBackground: "#232042",
+    white: "#F0F0F0",
+    yellow: "#C19C00",
   },
   {
     name: "Campbell",
-    background: "#0C0C0C", black: "#0C0C0C", blue: "#0037DA",
-    brightBlack: "#767676", brightBlue: "#3B78FF", brightCyan: "#61D6D6",
-    brightGreen: "#16C60C", brightPurple: "#B4009E", brightRed: "#E74856",
-    brightWhite: "#F2F2F2", brightYellow: "#F9F1A5", cursorColor: "#FFFFFF",
-    cyan: "#3A96DD", foreground: "#CCCCCC", green: "#13A10E",
-    purple: "#881798", red: "#C50F1F", selectionBackground: "#264F78",
-    white: "#CCCCCC", yellow: "#C19C00",
+    background: "#0C0C0C",
+    black: "#0C0C0C",
+    blue: "#0037DA",
+    brightBlack: "#767676",
+    brightBlue: "#3B78FF",
+    brightCyan: "#61D6D6",
+    brightGreen: "#16C60C",
+    brightPurple: "#B4009E",
+    brightRed: "#E74856",
+    brightWhite: "#F2F2F2",
+    brightYellow: "#F9F1A5",
+    cursorColor: "#FFFFFF",
+    cyan: "#3A96DD",
+    foreground: "#CCCCCC",
+    green: "#13A10E",
+    purple: "#881798",
+    red: "#C50F1F",
+    selectionBackground: "#264F78",
+    white: "#CCCCCC",
+    yellow: "#C19C00",
   },
   {
     name: "Campbell Powershell",
-    background: "#012456", black: "#0C0C0C", blue: "#0037DA",
-    brightBlack: "#767676", brightBlue: "#3B78FF", brightCyan: "#61D6D6",
-    brightGreen: "#16C60C", brightPurple: "#B4009E", brightRed: "#E74856",
-    brightWhite: "#F2F2F2", brightYellow: "#F9F1A5", cursorColor: "#FFFFFF",
-    cyan: "#3A96DD", foreground: "#CCCCCC", green: "#13A10E",
-    purple: "#881798", red: "#C50F1F", selectionBackground: "#264F78",
-    white: "#CCCCCC", yellow: "#C19C00",
+    background: "#012456",
+    black: "#0C0C0C",
+    blue: "#0037DA",
+    brightBlack: "#767676",
+    brightBlue: "#3B78FF",
+    brightCyan: "#61D6D6",
+    brightGreen: "#16C60C",
+    brightPurple: "#B4009E",
+    brightRed: "#E74856",
+    brightWhite: "#F2F2F2",
+    brightYellow: "#F9F1A5",
+    cursorColor: "#FFFFFF",
+    cyan: "#3A96DD",
+    foreground: "#CCCCCC",
+    green: "#13A10E",
+    purple: "#881798",
+    red: "#C50F1F",
+    selectionBackground: "#264F78",
+    white: "#CCCCCC",
+    yellow: "#C19C00",
   },
   {
     name: "One Half Dark",
-    background: "#282C34", black: "#282C34", blue: "#61AFEF",
-    brightBlack: "#5A6374", brightBlue: "#61AFEF", brightCyan: "#56B6C2",
-    brightGreen: "#98C379", brightPurple: "#C678DD", brightRed: "#E06C75",
-    brightWhite: "#DCDFE4", brightYellow: "#E5C07B", cursorColor: "#FFFFFF",
-    cyan: "#56B6C2", foreground: "#DCDFE4", green: "#98C379",
-    purple: "#C678DD", red: "#E06C75", selectionBackground: "#264F78",
-    white: "#DCDFE4", yellow: "#E5C07B",
+    background: "#282C34",
+    black: "#282C34",
+    blue: "#61AFEF",
+    brightBlack: "#5A6374",
+    brightBlue: "#61AFEF",
+    brightCyan: "#56B6C2",
+    brightGreen: "#98C379",
+    brightPurple: "#C678DD",
+    brightRed: "#E06C75",
+    brightWhite: "#DCDFE4",
+    brightYellow: "#E5C07B",
+    cursorColor: "#FFFFFF",
+    cyan: "#56B6C2",
+    foreground: "#DCDFE4",
+    green: "#98C379",
+    purple: "#C678DD",
+    red: "#E06C75",
+    selectionBackground: "#264F78",
+    white: "#DCDFE4",
+    yellow: "#E5C07B",
   },
   {
     name: "One Half Light",
-    background: "#FAFAFA", black: "#383A42", blue: "#0184BC",
-    brightBlack: "#4F525D", brightBlue: "#61AFEF", brightCyan: "#56B6C2",
-    brightGreen: "#98C379", brightPurple: "#C678DD", brightRed: "#E06C75",
-    brightWhite: "#FFFFFF", brightYellow: "#E5C07B", cursorColor: "#4F525D",
-    cyan: "#0997B3", foreground: "#383A42", green: "#50A14F",
-    purple: "#A626A4", red: "#E45649", selectionBackground: "#264F78",
-    white: "#FAFAFA", yellow: "#C18401",
+    background: "#FAFAFA",
+    black: "#383A42",
+    blue: "#0184BC",
+    brightBlack: "#4F525D",
+    brightBlue: "#61AFEF",
+    brightCyan: "#56B6C2",
+    brightGreen: "#98C379",
+    brightPurple: "#C678DD",
+    brightRed: "#E06C75",
+    brightWhite: "#FFFFFF",
+    brightYellow: "#E5C07B",
+    cursorColor: "#4F525D",
+    cyan: "#0997B3",
+    foreground: "#383A42",
+    green: "#50A14F",
+    purple: "#A626A4",
+    red: "#E45649",
+    selectionBackground: "#264F78",
+    white: "#FAFAFA",
+    yellow: "#C18401",
   },
   {
     name: "Solarized Dark",
-    background: "#002B36", black: "#002B36", blue: "#268BD2",
-    brightBlack: "#073642", brightBlue: "#839496", brightCyan: "#93A1A1",
-    brightGreen: "#586E75", brightPurple: "#6C71C4", brightRed: "#CB4B16",
-    brightWhite: "#FDF6E3", brightYellow: "#657B83", cursorColor: "#FFFFFF",
-    cyan: "#2AA198", foreground: "#839496", green: "#859900",
-    purple: "#D33682", red: "#DC322F", selectionBackground: "#264F78",
-    white: "#EEE8D5", yellow: "#B58900",
+    background: "#002B36",
+    black: "#002B36",
+    blue: "#268BD2",
+    brightBlack: "#073642",
+    brightBlue: "#839496",
+    brightCyan: "#93A1A1",
+    brightGreen: "#586E75",
+    brightPurple: "#6C71C4",
+    brightRed: "#CB4B16",
+    brightWhite: "#FDF6E3",
+    brightYellow: "#657B83",
+    cursorColor: "#FFFFFF",
+    cyan: "#2AA198",
+    foreground: "#839496",
+    green: "#859900",
+    purple: "#D33682",
+    red: "#DC322F",
+    selectionBackground: "#264F78",
+    white: "#EEE8D5",
+    yellow: "#B58900",
   },
   {
     name: "Solarized Light",
-    background: "#FDF6E3", black: "#002B36", blue: "#268BD2",
-    brightBlack: "#073642", brightBlue: "#839496", brightCyan: "#93A1A1",
-    brightGreen: "#586E75", brightPurple: "#6C71C4", brightRed: "#CB4B16",
-    brightWhite: "#FDF6E3", brightYellow: "#657B83", cursorColor: "#002B36",
-    cyan: "#2AA198", foreground: "#657B83", green: "#859900",
-    purple: "#D33682", red: "#DC322F", selectionBackground: "#264F78",
-    white: "#EEE8D5", yellow: "#B58900",
+    background: "#FDF6E3",
+    black: "#002B36",
+    blue: "#268BD2",
+    brightBlack: "#073642",
+    brightBlue: "#839496",
+    brightCyan: "#93A1A1",
+    brightGreen: "#586E75",
+    brightPurple: "#6C71C4",
+    brightRed: "#CB4B16",
+    brightWhite: "#FDF6E3",
+    brightYellow: "#657B83",
+    cursorColor: "#002B36",
+    cyan: "#2AA198",
+    foreground: "#657B83",
+    green: "#859900",
+    purple: "#D33682",
+    red: "#DC322F",
+    selectionBackground: "#264F78",
+    white: "#EEE8D5",
+    yellow: "#B58900",
   },
   {
     name: "Tango Dark",
-    background: "#000000", black: "#000000", blue: "#3465A4",
-    brightBlack: "#555753", brightBlue: "#729FCF", brightCyan: "#34E2E2",
-    brightGreen: "#8AE234", brightPurple: "#AD7FA8", brightRed: "#EF2929",
-    brightWhite: "#EEEEEC", brightYellow: "#FCE94F", cursorColor: "#FFFFFF",
-    cyan: "#06989A", foreground: "#D3D7CF", green: "#4E9A06",
-    purple: "#75507B", red: "#CC0000", selectionBackground: "#264F78",
-    white: "#D3D7CF", yellow: "#C4A000",
+    background: "#000000",
+    black: "#000000",
+    blue: "#3465A4",
+    brightBlack: "#555753",
+    brightBlue: "#729FCF",
+    brightCyan: "#34E2E2",
+    brightGreen: "#8AE234",
+    brightPurple: "#AD7FA8",
+    brightRed: "#EF2929",
+    brightWhite: "#EEEEEC",
+    brightYellow: "#FCE94F",
+    cursorColor: "#FFFFFF",
+    cyan: "#06989A",
+    foreground: "#D3D7CF",
+    green: "#4E9A06",
+    purple: "#75507B",
+    red: "#CC0000",
+    selectionBackground: "#264F78",
+    white: "#D3D7CF",
+    yellow: "#C4A000",
   },
   {
     name: "Tango Light",
-    background: "#FFFFFF", black: "#000000", blue: "#3465A4",
-    brightBlack: "#555753", brightBlue: "#729FCF", brightCyan: "#34E2E2",
-    brightGreen: "#8AE234", brightPurple: "#AD7FA8", brightRed: "#EF2929",
-    brightWhite: "#EEEEEC", brightYellow: "#FCE94F", cursorColor: "#000000",
-    cyan: "#06989A", foreground: "#000000", green: "#4E9A06",
-    purple: "#75507B", red: "#CC0000", selectionBackground: "#264F78",
-    white: "#D3D7CF", yellow: "#C4A000",
+    background: "#FFFFFF",
+    black: "#000000",
+    blue: "#3465A4",
+    brightBlack: "#555753",
+    brightBlue: "#729FCF",
+    brightCyan: "#34E2E2",
+    brightGreen: "#8AE234",
+    brightPurple: "#AD7FA8",
+    brightRed: "#EF2929",
+    brightWhite: "#EEEEEC",
+    brightYellow: "#FCE94F",
+    cursorColor: "#000000",
+    cyan: "#06989A",
+    foreground: "#000000",
+    green: "#4E9A06",
+    purple: "#75507B",
+    red: "#CC0000",
+    selectionBackground: "#264F78",
+    white: "#D3D7CF",
+    yellow: "#C4A000",
   },
   {
     name: "Vintage",
-    background: "#000000", black: "#000000", blue: "#000080",
-    brightBlack: "#808080", brightBlue: "#0000FF", brightCyan: "#00FFFF",
-    brightGreen: "#00FF00", brightPurple: "#FF00FF", brightRed: "#FF0000",
-    brightWhite: "#FFFFFF", brightYellow: "#FFFF00", cursorColor: "#FFFFFF",
-    cyan: "#008080", foreground: "#C0C0C0", green: "#008000",
-    purple: "#800080", red: "#800000", selectionBackground: "#264F78",
-    white: "#C0C0C0", yellow: "#808000",
+    background: "#000000",
+    black: "#000000",
+    blue: "#000080",
+    brightBlack: "#808080",
+    brightBlue: "#0000FF",
+    brightCyan: "#00FFFF",
+    brightGreen: "#00FF00",
+    brightPurple: "#FF00FF",
+    brightRed: "#FF0000",
+    brightWhite: "#FFFFFF",
+    brightYellow: "#FFFF00",
+    cursorColor: "#FFFFFF",
+    cyan: "#008080",
+    foreground: "#C0C0C0",
+    green: "#008000",
+    purple: "#800080",
+    red: "#800000",
+    selectionBackground: "#264F78",
+    white: "#C0C0C0",
+    yellow: "#808000",
   },
 ];
 
-export const useSettingsStore = create<SettingsState>()((set, _get) => ({
-  font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+export const useSettingsStore = create<SettingsState>()((set, get) => ({
   defaultProfile: "PowerShell",
   profileDefaults: { ...defaultProfileDefaults },
-  profiles: [
-    makeProfile("PowerShell", "powershell.exe -NoLogo"),
-    makeProfile("WSL", "wsl.exe"),
-  ],
+  profiles: [makeProfile("PowerShell", "powershell.exe -NoLogo"), makeProfile("WSL", "wsl.exe")],
   colorSchemes: [...builtinColorSchemes],
   keybindings: [],
   viewOrder: [],
   appThemeId: "catppuccin-mocha",
-  convenience: { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true },
+  convenience: {
+    smartPaste: true,
+    pasteImageDir: "",
+    hoverIdleSeconds: 2,
+    notificationDismiss: "workspace" as const,
+    copyOnSelect: true,
+    pathEllipsis: "start" as const,
+    scrollbarStyle: "overlay" as const,
+    dockPersistState: true,
+    dockArrowNav: true,
+  },
+  workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
-
-  setFont: (font) => set({ font }),
+  memo: { ...DEFAULT_MEMO_PADDING },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -383,9 +620,19 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       convenience: { ...state.convenience, ...data },
     })),
 
+  setWorkspaceDisplay: (data) =>
+    set((state) => ({
+      workspaceDisplay: { ...state.workspaceDisplay, ...data },
+    })),
+
   setClaude: (data) =>
     set((state) => ({
       claude: { ...state.claude, ...data },
+    })),
+
+  setMemo: (data) =>
+    set((state) => ({
+      memo: { ...state.memo, ...data },
     })),
 
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
@@ -397,8 +644,7 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       profileDefaults: { ...state.profileDefaults, ...data },
     })),
 
-  addProfile: (profile) =>
-    set((state) => ({ profiles: [...state.profiles, profile] })),
+  addProfile: (profile) => set((state) => ({ profiles: [...state.profiles, profile] })),
 
   removeProfile: (index) =>
     set((state) => ({
@@ -407,13 +653,12 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
 
   updateProfile: (index, data) =>
     set((state) => ({
-      profiles: state.profiles.map((p, i) =>
-        i === index ? { ...p, ...data } : p,
-      ),
+      profiles: state.profiles.map((p, i) => (i === index ? { ...p, ...data } : p)),
     })),
 
-  addColorScheme: (scheme) =>
-    set((state) => ({ colorSchemes: [...state.colorSchemes, scheme] })),
+  setColorSchemes: (schemes) => set({ colorSchemes: schemes }),
+
+  addColorScheme: (scheme) => set((state) => ({ colorSchemes: [...state.colorSchemes, scheme] })),
 
   removeColorScheme: (index) =>
     set((state) => ({
@@ -427,6 +672,8 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
       ),
     })),
 
+  setKeybindings: (keybindings) => set({ keybindings }),
+
   addKeybinding: (keybinding) =>
     set((state) => ({ keybindings: [...state.keybindings, keybinding] })),
 
@@ -437,53 +684,113 @@ export const useSettingsStore = create<SettingsState>()((set, _get) => ({
 
   updateKeybinding: (index, data) =>
     set((state) => ({
-      keybindings: state.keybindings.map((kb, i) =>
-        i === index ? { ...kb, ...data } : kb,
-      ),
+      keybindings: state.keybindings.map((kb, i) => (i === index ? { ...kb, ...data } : kb)),
     })),
 
+  resolveFont: (profileName) => {
+    const state = get();
+    const profile = state.profiles.find((p) => p.name === profileName);
+    if (profile?.font) return profile.font;
+    if (state.profileDefaults?.font) return state.profileDefaults.font;
+    return DEFAULT_FONT;
+  },
+
   loadFromSettings: (data) => {
+    // Legacy migration: root-level font → profileDefaults.font
+    const legacyFont = data.font;
+
     // Ensure profiles have all required fields (backwards compat)
     const profiles = data.profiles?.map((p) => ({
       ...makeProfile(p.name, p.commandLine),
       ...p,
       padding: p.padding ?? { ...defaultPadding },
+      // Ensure profile font weight defaults to "normal" if present but missing weight
+      ...(p.font ? { font: { ...p.font, weight: p.font.weight ?? "normal" } } : {}),
     }));
-    // Ensure font has weight (backwards compat — explicit undefined in spread would override)
-    const font = data.font ? { ...data.font, weight: data.font.weight ?? "normal" } : undefined;
     // Ensure profileDefaults has all fields (backwards compat)
+    // If root-level font exists but profileDefaults.font doesn't, migrate it
+    const resolvedProfileDefaultsFont = data.profileDefaults?.font
+      ? {
+          ...DEFAULT_FONT,
+          ...data.profileDefaults.font,
+          weight: data.profileDefaults.font.weight ?? "normal",
+        }
+      : legacyFont
+        ? { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" }
+        : defaultProfileDefaults.font;
     const profileDefaults = data.profileDefaults
-      ? { ...defaultProfileDefaults, ...data.profileDefaults }
-      : undefined;
+      ? {
+          ...defaultProfileDefaults,
+          ...data.profileDefaults,
+          font: resolvedProfileDefaultsFont,
+        }
+      : legacyFont
+        ? {
+            ...defaultProfileDefaults,
+            font: { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" },
+          }
+        : undefined;
     // Merge loaded color schemes with builtins (builtins first, user schemes appended)
     const loadedSchemes = data.colorSchemes?.map((cs) => ({
       ...makeDefaultColorScheme(),
       ...cs,
     }));
     // Ensure builtins are always present; user schemes with same name override builtins
-    const mergedSchemes = loadedSchemes !== undefined ? (() => {
-      const userNames = new Set(loadedSchemes.map((s) => s.name));
-      const kept = builtinColorSchemes.filter((b) => !userNames.has(b.name));
-      return [...kept, ...loadedSchemes];
-    })() : undefined;
+    const mergedSchemes =
+      loadedSchemes !== undefined
+        ? (() => {
+            const userNames = new Set(loadedSchemes.map((s) => s.name));
+            const kept = builtinColorSchemes.filter((b) => !userNames.has(b.name));
+            return [...kept, ...loadedSchemes];
+          })()
+        : undefined;
     // Ensure convenience settings have all fields (backwards compat)
     const convenience = data.convenience
-      ? { smartPaste: true, pasteImageDir: "", hoverIdleSeconds: 2, notificationDismiss: "workspace" as const, copyOnSelect: true, ...(data.convenience as Partial<ConvenienceSettings>) }
+      ? {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace" as const,
+          copyOnSelect: true,
+          pathEllipsis: "start" as const,
+          scrollbarStyle: "overlay" as const,
+          dockPersistState: true,
+          dockArrowNav: true,
+          ...(data.convenience as Partial<ConvenienceSettings>),
+        }
+      : undefined;
+    // Ensure workspaceDisplay settings have all fields (backwards compat)
+    const workspaceDisplay = data.workspaceDisplay
+      ? {
+          minimap: true,
+          environment: true,
+          activity: true,
+          path: true,
+          result: true,
+          ...(data.workspaceDisplay as Partial<WorkspaceDisplaySettings>),
+        }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
+    // Ensure memo settings have all fields (backwards compat)
+    const memo = data.memo
+      ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
+      : undefined;
 
+    // Strip legacy font field before spreading into state
+    const { font: _legacyFont, ...rest } = data;
     set((state) => ({
       ...state,
-      ...data,
+      ...rest,
       ...(profiles ? { profiles } : {}),
-      ...(font ? { font } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
       ...(convenience ? { convenience } : {}),
+      ...(workspaceDisplay ? { workspaceDisplay } : {}),
       ...(claude ? { claude } : {}),
+      ...(memo ? { memo } : {}),
     }));
   },
 }));

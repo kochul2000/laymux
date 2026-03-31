@@ -12,12 +12,7 @@ interface PaneMinimapProps {
   height?: number;
 }
 
-export function PaneMinimap({
-  panes,
-  highlightIndex,
-  width = 18,
-  height = 12,
-}: PaneMinimapProps) {
+export function PaneMinimap({ panes, highlightIndex, width = 18, height = 12 }: PaneMinimapProps) {
   return (
     <svg
       data-testid="pane-minimap"

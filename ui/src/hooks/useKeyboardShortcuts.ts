@@ -4,8 +4,10 @@ import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
+import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -26,8 +28,7 @@ function switchWorkspace(id: string) {
 
 /** Navigate to a pane by notification direction, consuming matched notifications. */
 function navigateByNotification(direction: "recent" | "oldest") {
-  const { notifications, markNotificationsAsRead } =
-    useNotificationStore.getState();
+  const { notifications, markNotificationsAsRead } = useNotificationStore.getState();
   const target = findNotificationNavTarget(notifications, direction);
   if (!target) return;
 
@@ -62,11 +63,44 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Alt+Arrow: pane navigation
+      // Alt+Arrow: pane navigation (workspace + dock)
       if (e.altKey && !e.ctrlKey && !e.shiftKey) {
         const direction = ARROW_TO_DIRECTION[e.key];
         if (direction) {
           e.preventDefault();
+          const dockStore = useDockStore.getState();
+          const { focusedDock } = dockStore;
+          const dockArrowNav = useSettingsStore.getState().convenience.dockArrowNav;
+
+          // If currently focused on a dock, try to exit it
+          if (focusedDock !== null) {
+            const exitDir = getDockExitDirection(focusedDock);
+            if (direction === exitDir) {
+              // Exit dock → go back to workspace
+              dockStore.setFocusedDock(null);
+              const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
+              if (focusedPaneIndex === null) setFocusedPane(0);
+              return;
+            }
+            // Other directions while in dock: try to navigate to another dock.
+            // Note: pressing the same direction as the dock's own side (e.g., ArrowLeft
+            // in Left Dock) is intentionally a no-op — there's nothing further in that direction.
+            if (dockArrowNav) {
+              const targetDock = getDockForDirection(direction);
+              const targetState = dockStore.getDock(targetDock);
+              if (
+                targetState?.visible &&
+                targetState.panes.length > 0 &&
+                targetDock !== focusedDock
+              ) {
+                dockStore.setFocusedDock(targetDock);
+                return;
+              }
+            }
+            return;
+          }
+
+          // Currently in workspace: try pane navigation first
           const ws = useWorkspaceStore.getState().getActiveWorkspace();
           if (!ws) return;
           const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
@@ -74,7 +108,15 @@ export function useKeyboardShortcuts() {
           const next = findPaneInDirection(ws.panes, current, direction);
           if (next !== null) {
             setFocusedPane(next);
-            useDockStore.getState().setFocusedDock(null);
+            dockStore.setFocusedDock(null);
+          } else if (dockArrowNav) {
+            // No pane in that direction → try to enter a dock
+            const targetDock = getDockForDirection(direction);
+            const targetState = dockStore.getDock(targetDock);
+            if (targetState?.visible && targetState.panes.length > 0) {
+              dockStore.setFocusedDock(targetDock);
+              useGridStore.getState().setFocusedPane(null);
+            }
           }
           return;
         }
@@ -93,9 +135,7 @@ export function useKeyboardShortcuts() {
         if (shiftKey === "U") {
           e.preventDefault();
           const { notifications } = useNotificationStore.getState();
-          const unread = [...notifications]
-            .reverse()
-            .find((n) => n.readAt === null);
+          const unread = [...notifications].reverse().find((n) => n.readAt === null);
           if (unread) {
             switchWorkspace(unread.workspaceId);
           }
@@ -206,9 +246,7 @@ export function useKeyboardShortcuts() {
         // Ctrl+Alt+ArrowDown: next workspace
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex(
-            (ws) => ws.id === activeWorkspaceId,
-          );
+          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
           const nextIdx = (currentIdx + 1) % workspaces.length;
           switchWorkspace(workspaces[nextIdx].id);
           return;
@@ -217,11 +255,8 @@ export function useKeyboardShortcuts() {
         // Ctrl+Alt+ArrowUp: previous workspace
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex(
-            (ws) => ws.id === activeWorkspaceId,
-          );
-          const prevIdx =
-            (currentIdx - 1 + workspaces.length) % workspaces.length;
+          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+          const prevIdx = (currentIdx - 1 + workspaces.length) % workspaces.length;
           switchWorkspace(workspaces[prevIdx].id);
           return;
         }

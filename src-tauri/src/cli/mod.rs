@@ -30,28 +30,15 @@ pub enum LxMessage {
         level: Option<String>,
     },
     #[serde(rename = "set-tab-title")]
-    SetTabTitle {
-        title: String,
-        terminal_id: String,
-    },
+    SetTabTitle { title: String, terminal_id: String },
     #[serde(rename = "get-cwd")]
-    GetCwd {
-        terminal_id: String,
-    },
+    GetCwd { terminal_id: String },
     #[serde(rename = "get-branch")]
-    GetBranch {
-        terminal_id: String,
-    },
+    GetBranch { terminal_id: String },
     #[serde(rename = "send-command")]
-    SendCommand {
-        command: String,
-        group: String,
-    },
+    SendCommand { command: String, group: String },
     #[serde(rename = "open-file")]
-    OpenFile {
-        path: String,
-        terminal_id: String,
-    },
+    OpenFile { path: String, terminal_id: String },
     #[serde(rename = "set-command-status")]
     SetCommandStatus {
         terminal_id: String,
@@ -61,10 +48,7 @@ pub enum LxMessage {
         exit_code: Option<i32>,
     },
     #[serde(rename = "set-wsl-distro")]
-    SetWslDistro {
-        path: String,
-        terminal_id: String,
-    },
+    SetWslDistro { path: String, terminal_id: String },
 }
 
 /// Response from the IDE to the `lx` CLI.
@@ -113,10 +97,17 @@ mod tests {
 
     #[test]
     fn deserialize_sync_cwd_message() {
-        let json = r#"{"action":"sync-cwd","path":"/foo","terminal_id":"t1","group_id":"g1","all":false}"#;
+        let json =
+            r#"{"action":"sync-cwd","path":"/foo","terminal_id":"t1","group_id":"g1","all":false}"#;
         let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            LxMessage::SyncCwd { path, terminal_id, group_id, all, target_group } => {
+            LxMessage::SyncCwd {
+                path,
+                terminal_id,
+                group_id,
+                all,
+                target_group,
+            } => {
                 assert_eq!(path, "/foo");
                 assert_eq!(terminal_id, "t1");
                 assert_eq!(group_id, "g1");
@@ -292,7 +283,9 @@ mod tests {
         let json = r#"{"action":"set-command-status","terminal_id":"t1","command":"npm build"}"#;
         let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            LxMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus {
+                command, exit_code, ..
+            } => {
                 assert_eq!(command, Some("npm build".into()));
                 assert_eq!(exit_code, None);
             }
@@ -305,7 +298,9 @@ mod tests {
         let json = r#"{"action":"set-command-status","terminal_id":"t1","exit_code":1}"#;
         let msg: LxMessage = serde_json::from_str(json).unwrap();
         match msg {
-            LxMessage::SetCommandStatus { command, exit_code, .. } => {
+            LxMessage::SetCommandStatus {
+                command, exit_code, ..
+            } => {
                 assert_eq!(command, None);
                 assert_eq!(exit_code, Some(1));
             }

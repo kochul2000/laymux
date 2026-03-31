@@ -17,9 +17,15 @@ vi.mock("@/lib/tauri-api", () => ({
 // Capture viewConfig passed to ViewRenderer
 const capturedViewConfigs: (Record<string, unknown> | undefined)[] = [];
 vi.mock("@/components/views/ViewRenderer", () => ({
-  ViewRenderer: (props: { viewType: string | null; viewConfig?: Record<string, unknown>; paneId?: string }) => {
+  ViewRenderer: (props: {
+    viewType: string | null;
+    viewConfig?: Record<string, unknown>;
+    paneId?: string;
+  }) => {
     capturedViewConfigs.push(props.viewConfig);
-    return <div data-testid={`view-${props.viewType?.toLowerCase().replace("view", "") ?? "empty"}`} />;
+    return (
+      <div data-testid={`view-${props.viewType?.toLowerCase().replace("view", "") ?? "empty"}`} />
+    );
   },
 }));
 
@@ -126,8 +132,12 @@ describe("Dock", () => {
 
   it("passes stable paneId to ViewRenderer based on dock pane id", () => {
     render(
-      <Dock position="bottom" activeView="TerminalView" views={[]}
-        panes={[{ id: "dp-term", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]} />,
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[{ id: "dp-term", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
+      />,
     );
     expect(screen.getByTestId("view-terminal")).toBeInTheDocument();
   });
@@ -138,7 +148,9 @@ describe("Dock", () => {
         position="bottom"
         activeView="TerminalView"
         views={[]}
-        panes={[{ id: "dp-wsl", view: { type: "TerminalView", profile: "WSL" }, x: 0, y: 0, w: 1, h: 1 }]}
+        panes={[
+          { id: "dp-wsl", view: { type: "TerminalView", profile: "WSL" }, x: 0, y: 0, w: 1, h: 1 },
+        ]}
       />,
     );
     // ViewRenderer must receive the pane's view config (including profile: "WSL")
@@ -282,7 +294,9 @@ describe("Dock", () => {
     fireEvent.mouseEnter(pane);
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
 
-    act(() => { vi.advanceTimersByTime(2000); });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
     vi.useRealTimers();
   });

@@ -16,18 +16,22 @@ import {
   clipboardWriteText,
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
+  openExternal,
 } from "@/lib/tauri-api";
-import {
-  colorSchemeToXtermTheme,
-  type WTColorScheme,
-} from "@/lib/color-scheme";
+import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { processOscInOutput } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { setupImeHandler, disposeImeHandler, updateImeHandlerOptions } from "@/lib/ime-handler";
 
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, getClaudeCompletionMessage } from "@/lib/activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectClaudeTaskTransition,
+  extractClaudeTaskDesc,
+  getClaudeCompletionMessage,
+} from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -40,9 +44,9 @@ function resolveWorkspaceId(terminalId: string): string {
   const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
   const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
   if (inst?.workspaceId) return inst.workspaceId;
-  // Fall back: find workspace by syncGroup name match
+  // Fall back: find workspace by syncGroup ID match
   if (inst?.syncGroup) {
-    const ws = workspaces.find((w) => w.name === inst.syncGroup);
+    const ws = workspaces.find((w) => w.id === inst.syncGroup);
     if (ws) return ws.id;
   }
   return activeWorkspaceId;
@@ -73,6 +77,7 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const imeContainerRef = useRef<HTMLElement | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
@@ -92,12 +97,9 @@ export function TerminalView({
 
     // Resolve theme from settings color scheme (profile → profileDefaults → none)
     const settingsState = useSettingsStore.getState();
-    const profileConfig = settingsState.profiles.find(
-      (p) => p.name === profile,
-    );
-    const schemeName = profileConfig?.colorScheme
-      || settingsState.profileDefaults?.colorScheme
-      || "CampbellClear";
+    const profileConfig = settingsState.profiles.find((p) => p.name === profile);
+    const schemeName =
+      profileConfig?.colorScheme || settingsState.profileDefaults?.colorScheme || "CampbellClear";
     const colorScheme = schemeName
       ? settingsState.colorSchemes.find((cs) => cs.name === schemeName)
       : undefined;
@@ -116,17 +118,27 @@ export function TerminalView({
         }
       : defaultTheme;
 
+    // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
+    // does not reserve space for the scrollbar — it renders on top of content.
+    const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
+    const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
+
+    const resolvedFont = settingsState.resolveFont(profile);
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: settingsState.font.size,
-      fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+      fontSize: resolvedFont.size,
+      fontFamily: `'${resolvedFont.face}', 'Cascadia Mono', 'Consolas', monospace`,
       theme,
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
+      overviewRuler: { width: overviewRulerWidth },
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    fitAddonRef.current = fitAddon;
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      openExternal(uri).catch(() => {});
+    });
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
@@ -229,12 +241,17 @@ export function TerminalView({
         const message = getClaudeCompletionMessage(prevTitle, title);
         const wsId = resolveWorkspaceId(instanceId);
         useNotificationStore.getState().addNotification({
-          terminalId: instanceId, workspaceId: wsId, message, level: "success",
+          terminalId: instanceId,
+          workspaceId: wsId,
+          message,
+          level: "success",
         });
       } else if (transition === "started") {
         const taskDesc = extractClaudeTaskDesc(title);
         updateInstanceInfo(instanceId, {
-          lastCommand: taskDesc || "Claude task", lastExitCode: undefined, lastCommandAt: Date.now(),
+          lastCommand: taskDesc || "Claude task",
+          lastExitCode: undefined,
+          lastCommandAt: Date.now(),
         });
       }
     });
@@ -337,8 +354,10 @@ export function TerminalView({
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
-      const enterAlt = text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
-      const leaveAlt = text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
+      const enterAlt =
+        text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
+      const leaveAlt =
+        text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
       if (enterAlt && !leaveAlt && !inAltScreen) {
         inAltScreen = true;
         // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
@@ -359,6 +378,12 @@ export function TerminalView({
         }
       } else if (leaveAlt && !enterAlt && inAltScreen) {
         inAltScreen = false;
+        // If leaving an interactive app (Claude, vim, etc.), clear stale command state
+        // so WorkspaceSelectorView does not show leftover info after the app exits.
+        const prevInst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+        if (prevInst?.activity?.type === "interactiveApp") {
+          useTerminalStore.getState().clearCommandState(instanceId);
+        }
         useTerminalStore.getState().updateInstanceInfo(instanceId, {
           activity: { type: "shell" },
         });
@@ -397,11 +422,16 @@ export function TerminalView({
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      const { font, setFont } = useSettingsStore.getState();
+      const state = useSettingsStore.getState();
+      const currentFont = state.resolveFont(profile);
       const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, font.size + delta));
-      if (newSize !== font.size) {
-        setFont({ ...font, size: newSize });
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        // Update the profile's font override
+        const idx = state.profiles.findIndex((p) => p.name === profile);
+        if (idx >= 0) {
+          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
+        }
       }
     };
     outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
@@ -451,9 +481,8 @@ export function TerminalView({
           terminal.cols,
           terminal.rows,
           syncGroup,
-        ).then(() => {
-          setTerminalCwdReceive(instanceId, cwdReceiveRef.current).catch(() => {});
-        }).catch(() => {});
+          cwdReceiveRef.current,
+        ).catch(() => {});
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
@@ -480,9 +509,9 @@ export function TerminalView({
       terminal.dispose();
       unregisterInstance(instanceId);
     };
-  // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
-  // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
+    // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, registerInstance, unregisterInstance]);
 
   // Lightweight update when syncGroup changes — no terminal recreation
@@ -513,7 +542,7 @@ export function TerminalView({
     return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
-  const font = useSettingsStore((s) => s.font ?? { face: "Cascadia Mono", size: 14, weight: "normal" });
+  const font = useSettingsStore((s) => s.resolveFont(profile));
 
   useEffect(() => {
     const term = terminalRef.current;
@@ -537,7 +566,9 @@ export function TerminalView({
         : defaultTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
-    } catch { /* xterm mock may not support options setter */ }
+    } catch {
+      /* xterm mock may not support options setter */
+    }
 
     // Keep IME handler in sync with current font settings
     if (imeContainerRef.current) {
@@ -548,6 +579,22 @@ export function TerminalView({
     }
   }, [currentSchemeName, colorSchemes, font]);
 
+  // Reactively update xterm overviewRuler width when scrollbarStyle changes
+  const scrollbarStyleForEffect = useSettingsStore(
+    (s) => s.convenience.scrollbarStyle ?? "overlay",
+  );
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term?.options) return;
+    try {
+      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
+      term.options.overviewRuler = { width: newWidth };
+      fitAddonRef.current?.fit();
+    } catch {
+      /* xterm mock may not support options setter */
+    }
+  }, [scrollbarStyleForEffect]);
+
   // Resolve terminal background for padding area
   const termBg = (() => {
     const scheme = currentSchemeName
@@ -557,18 +604,21 @@ export function TerminalView({
   })();
 
   // Read padding from profile settings
-  const padding = useSettingsStore(
-    (s) => s.profiles.find((p) => p.name === profile)?.padding,
-  );
+  const padding = useSettingsStore((s) => s.profiles.find((p) => p.name === profile)?.padding);
   const pt = padding?.top ?? 8;
   const pr = padding?.right ?? 8;
   const pb = padding?.bottom ?? 8;
   const pl = padding?.left ?? 8;
 
+  // Scrollbar style: overlay (default) renders on top of terminal content,
+  // separate reserves space for the scrollbar.
+  const scrollbarStyle = useSettingsStore((s) => s.convenience.scrollbarStyle ?? "overlay");
+  const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
+
   return (
     <div
       data-testid={`terminal-view-${instanceId}`}
-      className="h-full w-full"
+      className={`h-full w-full ${scrollbarClass}`}
       style={{
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,

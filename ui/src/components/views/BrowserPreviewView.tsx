@@ -4,9 +4,7 @@ interface BrowserPreviewViewProps {
   url?: string;
 }
 
-export function BrowserPreviewView({
-  url: initialUrl = "about:blank",
-}: BrowserPreviewViewProps) {
+export function BrowserPreviewView({ url: initialUrl = "about:blank" }: BrowserPreviewViewProps) {
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [inputUrl, setInputUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
@@ -49,8 +47,7 @@ export function BrowserPreviewView({
     }
   }, [currentUrl]);
 
-  const btnClass =
-    "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-sm";
+  const btnClass = "flex h-7 w-7 cursor-pointer items-center justify-center rounded text-sm";
   const btnStyle = {
     color: "var(--text-secondary)",
     background: "transparent",

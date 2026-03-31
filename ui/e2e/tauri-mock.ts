@@ -78,9 +78,9 @@ export const TAURI_MOCK_SCRIPT = `
               {
                 id: 'ws-default',
                 name: 'Default',
-                layoutId: 'default-layout',
+
                 panes: [
-                  { x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'Default' } },
+                  { x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'ws-default' } },
                 ],
               },
             ],

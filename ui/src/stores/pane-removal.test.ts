@@ -181,11 +181,7 @@ describe("removePaneAndRedistribute", () => {
     //  ├────┤ C  │
     //  │ B  │    │
     //  └────┴────┘
-    const panes = () => [
-      p("A", 0, 0, 0.5, 0.5),
-      p("B", 0, 0.5, 0.5, 0.5),
-      p("C", 0.5, 0, 0.5, 1),
-    ];
+    const panes = () => [p("A", 0, 0, 0.5, 0.5), p("B", 0, 0.5, 0.5, 0.5), p("C", 0.5, 0, 0.5, 1)];
 
     it("remove top-left (A) → bottom-left (B) expands up", () => {
       const result = removePaneAndRedistribute(panes(), 0)!;
@@ -267,11 +263,7 @@ describe("removePaneAndRedistribute", () => {
     //  ├────┴─────┤
     //  │    C     │
     //  └──────────┘
-    const panes = () => [
-      p("A", 0, 0, 0.5, 0.5),
-      p("B", 0.5, 0, 0.5, 0.5),
-      p("C", 0, 0.5, 1, 0.5),
-    ];
+    const panes = () => [p("A", 0, 0, 0.5, 0.5), p("B", 0.5, 0, 0.5, 0.5), p("C", 0, 0.5, 1, 0.5)];
 
     it("remove top-left (A) → top-right (B) expands left", () => {
       const result = removePaneAndRedistribute(panes(), 0)!;
@@ -540,11 +532,7 @@ describe("removePaneAndRedistribute", () => {
     //  ├────┤  C   │  remove C → A and B expand right
     //  │ B  │      │
     //  └────┴──────┘
-    const panes = () => [
-      p("A", 0, 0, 0.4, 0.6),
-      p("B", 0, 0.6, 0.4, 0.4),
-      p("C", 0.4, 0, 0.6, 1),
-    ];
+    const panes = () => [p("A", 0, 0, 0.4, 0.6), p("B", 0, 0.6, 0.4, 0.4), p("C", 0.4, 0, 0.6, 1)];
 
     it("remove C → A and B expand right", () => {
       const result = removePaneAndRedistribute(panes(), 2)!;

@@ -112,9 +112,7 @@ describe("getLastCommandForWorkspace", () => {
   });
 
   it("returns undefined exitCode for running command", () => {
-    const terminals = [
-      makeTerminal({ id: "t1", lastCommand: "npm test", lastCommandAt: 100 }),
-    ];
+    const terminals = [makeTerminal({ id: "t1", lastCommand: "npm test", lastCommandAt: 100 })];
     const result = getLastCommandForWorkspace(terminals);
     expect(result?.command).toBe("npm test");
     expect(result?.exitCode).toBeUndefined();
@@ -141,10 +139,29 @@ describe("formatCommand", () => {
 describe("computeWorkspaceSummary", () => {
   it("computes full summary", () => {
     const terminals = [
-      makeTerminal({ id: "t1", workspaceId: "ws-1", branch: "main", cwd: "/home/a", lastActivityAt: 200, isFocused: true, lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
-      makeTerminal({ id: "t2", workspaceId: "ws-1", branch: "dev", cwd: "/home/b", lastActivityAt: 100 }),
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        branch: "main",
+        cwd: "/home/a",
+        lastActivityAt: 200,
+        isFocused: true,
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+      }),
+      makeTerminal({
+        id: "t2",
+        workspaceId: "ws-1",
+        branch: "dev",
+        cwd: "/home/b",
+        lastActivityAt: 100,
+      }),
     ];
-    const ports = new Map([["t1", [3000]], ["t2", [8080]]]);
+    const ports = new Map([
+      ["t1", [3000]],
+      ["t2", [8080]],
+    ]);
     const notifications: Notification[] = [
       makeNotification({ id: "n1", workspaceId: "ws-1", message: "Build done", createdAt: 1000 }),
       makeNotification({ id: "n2", workspaceId: "ws-1", message: "Tests passed", createdAt: 2000 }),
@@ -187,8 +204,26 @@ describe("computeWorkspaceSummary", () => {
 describe("computeWorkspaceSummary - terminal summaries", () => {
   it("includes terminalCount and per-terminal summaries", () => {
     const terminals = [
-      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL", cwd: "/home/user/project", branch: "main", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
-      makeTerminal({ id: "t2", workspaceId: "ws-1", profile: "PowerShell", label: "PS", cwd: "/home/user/api", lastCommand: "cargo build", lastCommandAt: 100 }),
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        profile: "WSL",
+        label: "WSL",
+        cwd: "/home/user/project",
+        branch: "main",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+      }),
+      makeTerminal({
+        id: "t2",
+        workspaceId: "ws-1",
+        profile: "PowerShell",
+        label: "PS",
+        cwd: "/home/user/api",
+        lastCommand: "cargo build",
+        lastCommandAt: 100,
+      }),
     ];
     const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), []);
 
@@ -213,14 +248,94 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
     expect(summary.terminalSummaries).toHaveLength(0);
   });
 
-  it("includes syncGroup-matched terminals in count", () => {
+  it("excludes dock terminals (empty workspaceId) from summary", () => {
     const terminals = [
       makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
       makeTerminal({ id: "t2", workspaceId: "", syncGroup: "MyWS", profile: "PS", label: "PS" }),
     ];
     const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), [], "MyWS");
-    expect(summary.terminalCount).toBe(2);
-    expect(summary.terminalSummaries).toHaveLength(2);
+    // Dock terminal (workspaceId="") should NOT be included even if syncGroup matches
+    expect(summary.terminalCount).toBe(1);
+    expect(summary.terminalSummaries).toHaveLength(1);
+    expect(summary.terminalSummaries[0].id).toBe("t1");
+  });
+
+  it("does not show dock terminal last command in workspace summary", () => {
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        workspaceId: "ws-1",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 100,
+      }),
+      makeTerminal({
+        id: "dock-t",
+        workspaceId: "",
+        syncGroup: "MyWS",
+        lastCommand: "cargo build",
+        lastExitCode: 1,
+        lastCommandAt: 200,
+      }),
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), [], "MyWS");
+    // Should show workspace terminal's command, not dock terminal's more recent command
+    expect(summary.lastCommand?.command).toBe("npm test");
+    expect(summary.lastCommand?.exitCode).toBe(0);
+  });
+
+  it("includes hasUnreadNotification in terminal summaries", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+      makeTerminal({ id: "t2", workspaceId: "ws-1", profile: "PS", label: "PS" }),
+    ];
+    const notifications: Notification[] = [
+      makeNotification({ id: "n1", workspaceId: "ws-1", terminalId: "t1", readAt: null }),
+      makeNotification({ id: "n2", workspaceId: "ws-1", terminalId: "t2", readAt: Date.now() }), // already read
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), notifications);
+    const t1Summary = summary.terminalSummaries.find((ts) => ts.id === "t1");
+    const t2Summary = summary.terminalSummaries.find((ts) => ts.id === "t2");
+    expect(t1Summary?.hasUnreadNotification).toBe(true);
+    expect(t2Summary?.hasUnreadNotification).toBe(false);
+  });
+
+  it("hasUnreadNotification is false when no notifications exist", () => {
+    const terminals = [
+      makeTerminal({ id: "t1", workspaceId: "ws-1", profile: "WSL", label: "WSL" }),
+    ];
+    const summary = computeWorkspaceSummary("ws-1", terminals, new Map(), []);
+    expect(summary.terminalSummaries[0].hasUnreadNotification).toBe(false);
+  });
+});
+
+describe("getLastCommandForWorkspace — interactive app cleanup", () => {
+  it("returns null when terminal had interactiveApp command that was cleared", () => {
+    // After an interactive app exits, lastCommand should be cleared.
+    // This simulates the state AFTER clearCommandState was called.
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        lastCommand: undefined,
+        lastExitCode: undefined,
+        lastCommandAt: undefined,
+      }),
+    ];
+    expect(getLastCommandForWorkspace(terminals)).toBeNull();
+  });
+
+  it("returns other terminal command after one terminal's command state was cleared", () => {
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        lastCommand: undefined,
+        lastExitCode: undefined,
+        lastCommandAt: undefined,
+      }),
+      makeTerminal({ id: "t2", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result).toEqual({ command: "npm test", exitCode: 0, timestamp: 200 });
   });
 });
 
@@ -234,7 +349,9 @@ describe("abbreviatePath", () => {
   });
 
   it("shortens WSL path with home directory to ~", () => {
-    expect(abbreviatePath("//wsl.localhost/Ubuntu-22.04/home/kochul/python_projects")).toBe("~/python_projects");
+    expect(abbreviatePath("//wsl.localhost/Ubuntu-22.04/home/kochul/python_projects")).toBe(
+      "~/python_projects",
+    );
   });
 
   it("shortens WSL home root to ~", () => {
@@ -261,15 +378,48 @@ describe("abbreviatePath", () => {
     expect(abbreviatePath("file://localhost/C:/Users/kochul/Documents")).toBe("~/Documents");
   });
 
-  it("truncates long paths", () => {
+  it("truncates long paths (default ellipsis=start)", () => {
     const longPath = "/var/lib/really/deeply/nested/directory/structure";
     const result = abbreviatePath(longPath);
     expect(result.startsWith(".../")).toBe(true);
     expect(result.length).toBeLessThan(longPath.length);
   });
 
-  it("returns short paths as-is", () => {
+  it("truncates long paths with ellipsis=end (keeps beginning)", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "end");
+    expect(result.endsWith("/...")).toBe(true);
+    expect(result.length).toBeLessThan(longPath.length);
+  });
+
+  it("ellipsis=start shows last 2 segments", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "start");
+    expect(result).toBe(".../directory/structure");
+  });
+
+  it("ellipsis=end shows first 2 segments", () => {
+    const longPath = "/var/lib/really/deeply/nested/directory/structure";
+    const result = abbreviatePath(longPath, "end");
+    expect(result).toBe("/var/lib/...");
+  });
+
+  it("returns short paths as-is regardless of ellipsis mode", () => {
     expect(abbreviatePath("/tmp/foo")).toBe("/tmp/foo");
+    expect(abbreviatePath("/tmp/foo", "start")).toBe("/tmp/foo");
+    expect(abbreviatePath("/tmp/foo", "end")).toBe("/tmp/foo");
+  });
+
+  it("uses backslash separator for Windows long paths (ellipsis=start)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "start");
+    expect(result).toBe("...\\dir\\sub");
+  });
+
+  it("uses backslash separator for Windows long paths (ellipsis=end)", () => {
+    const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
+    const result = abbreviatePath(winPath, "end");
+    expect(result).toBe("D:\\Projects\\work\\...");
   });
 });
 
@@ -287,7 +437,9 @@ describe("formatPorts", () => {
   });
 
   it("truncates ports over maxDisplay with +N", () => {
-    expect(formatPorts([80, 443, 3000, 5432, 8080, 8443, 9090])).toBe(":80  :443  :3000  :5432  :8080  +2");
+    expect(formatPorts([80, 443, 3000, 5432, 8080, 8443, 9090])).toBe(
+      ":80  :443  :3000  :5432  :8080  +2",
+    );
   });
 
   it("respects custom maxDisplay", () => {
@@ -327,8 +479,28 @@ describe("formatActivity", () => {
 
   it("returns Claude brand color (#D97757) for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
-    expect(result.label).toBe("Claude");
+    expect(result.label).toContain("Claude");
     expect(result.color).toBe("#D97757");
+  });
+
+  it("shows Claude mode from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Plan: approach");
+    expect(result.label).toContain("Plan");
+    expect(result.claudeMode).toBe("plan");
+    expect(result.color).toBe("var(--yellow)");
+  });
+
+  it("shows Claude danger mode from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Danger mode");
+    expect(result.label).toContain("Danger");
+    expect(result.claudeMode).toBe("danger");
+    expect(result.color).toBe("var(--red)");
+  });
+
+  it("shows Ralph indicator from title", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
+    expect(result.ralph).toBe(true);
+    expect(result.label).toContain("®");
   });
 });
 

@@ -52,9 +52,7 @@ export function useSyncEvents() {
       onSyncBranch((data) => {
         if (cancelled) return;
         const { instances, updateInstanceInfo } = useTerminalStore.getState();
-        const groupTerminals = instances.filter(
-          (i) => i.syncGroup === data.groupId,
-        );
+        const groupTerminals = instances.filter((i) => i.syncGroup === data.groupId);
         for (const t of groupTerminals) {
           updateInstanceInfo(t.id, { branch: data.branch });
         }
@@ -66,13 +64,13 @@ export function useSyncEvents() {
       onLxNotify((data) => {
         if (cancelled) return;
         // Find which workspace the terminal belongs to via its syncGroup
-        const instance = useTerminalStore.getState().instances.find(
-          (i) => i.id === data.terminalId,
-        );
+        const instance = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === data.terminalId);
         const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
         let targetWsId = activeWorkspaceId;
         if (instance?.syncGroup) {
-          const ownerWs = workspaces.find((ws) => ws.name === instance.syncGroup);
+          const ownerWs = workspaces.find((ws) => ws.id === instance.syncGroup);
           if (ownerWs) {
             targetWsId = ownerWs.id;
           }
@@ -120,9 +118,9 @@ export function useSyncEvents() {
         } else if (data.command === "__preexec__") {
           // Preexec marker from OSC 133 C — don't overwrite lastCommand
           update.lastCommandAt = Date.now();
-          const instance = useTerminalStore.getState().instances.find(
-            (i) => i.id === data.terminalId,
-          );
+          const instance = useTerminalStore
+            .getState()
+            .instances.find((i) => i.id === data.terminalId);
           if (!instance?.activity || instance.activity.type !== "interactiveApp") {
             update.activity = { type: "running" };
           }
@@ -135,7 +133,12 @@ export function useSyncEvents() {
         }
         useTerminalStore.getState().updateInstanceInfo(
           data.terminalId,
-          update as { lastCommand?: string; lastExitCode?: number; lastCommandAt?: number; activity?: { type: import("@/stores/terminal-store").TerminalActivityType } },
+          update as {
+            lastCommand?: string;
+            lastExitCode?: number;
+            lastCommandAt?: number;
+            activity?: { type: import("@/stores/terminal-store").TerminalActivityType };
+          },
         );
       }),
     );

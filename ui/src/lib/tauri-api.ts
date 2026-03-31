@@ -19,6 +19,7 @@ export async function createTerminalSession(
   cols: number,
   rows: number,
   syncGroup: string,
+  cwdReceive: boolean = true,
 ): Promise<TerminalSessionResult> {
   return invoke("create_terminal_session", {
     id,
@@ -26,21 +27,15 @@ export async function createTerminalSession(
     cols,
     rows,
     syncGroup,
+    cwdReceive,
   });
 }
 
-export async function writeToTerminal(
-  id: string,
-  data: string,
-): Promise<void> {
+export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
-export async function resizeTerminal(
-  id: string,
-  cols: number,
-  rows: number,
-): Promise<void> {
+export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
   return invoke("resize_terminal", { id, cols, rows });
 }
 
@@ -48,9 +43,7 @@ export async function closeTerminalSession(id: string): Promise<void> {
   return invoke("close_terminal_session", { id });
 }
 
-export async function getSyncGroupTerminals(
-  groupName: string,
-): Promise<string[]> {
+export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
 }
 
@@ -60,9 +53,7 @@ export interface LxResponse {
   error: string | null;
 }
 
-export async function handleLxMessage(
-  messageJson: string,
-): Promise<LxResponse> {
+export async function handleLxMessage(messageJson: string): Promise<LxResponse> {
   return invoke("handle_lx_message", { messageJson });
 }
 
@@ -72,6 +63,14 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
+}
+
+export async function loadMemo(key: string): Promise<string> {
+  return invoke("load_memo", { key });
+}
+
+export async function saveMemo(key: string, content: string): Promise<void> {
+  return invoke("save_memo", { key, content });
 }
 
 export interface ConvenienceSettings {
@@ -85,17 +84,51 @@ export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
 }
 
+export interface MemoSettings {
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+}
+
+export interface WorkspaceDisplaySettings {
+  minimap: boolean;
+  environment: boolean;
+  activity: boolean;
+  path: boolean;
+  result: boolean;
+}
+
+export interface ProfileDefaults {
+  colorScheme?: string;
+  cursorShape?: string;
+  padding?: PaddingSettings;
+  scrollbackLines?: number;
+  opacity?: number;
+  bellStyle?: string;
+  closeOnExit?: string;
+  antialiasingMode?: string;
+  suppressApplicationTitle?: boolean;
+  snapOnInput?: boolean;
+  font?: FontSettings;
+}
+
 export interface Settings {
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];
-  font: FontSettings;
+  font?: FontSettings;
   defaultProfile: string;
+  profileDefaults?: ProfileDefaults;
+  viewOrder?: string[];
+  appThemeId?: string;
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
   convenience: ConvenienceSettings;
+  workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
+  memo: MemoSettings;
 }
 
 export interface ColorScheme {
@@ -147,6 +180,7 @@ export interface Profile {
   antialiasingMode?: string;
   suppressApplicationTitle?: boolean;
   snapOnInput?: boolean;
+  font?: FontSettings;
 }
 
 export interface Keybinding {
@@ -169,7 +203,7 @@ export interface SettingsLayout {
 export interface SettingsWorkspace {
   id: string;
   name: string;
-  layoutId: string;
+  layoutId?: string; // deprecated — kept for backward compat with old settings.json
   panes: {
     x: number;
     y: number;
@@ -203,10 +237,7 @@ export interface SmartPasteResult {
 }
 
 /** Perform smart paste: check clipboard for files/images, return path or "none". */
-export async function smartPaste(
-  imageDir: string,
-  profile: string,
-): Promise<SmartPasteResult> {
+export async function smartPaste(imageDir: string, profile: string): Promise<SmartPasteResult> {
   return invoke("smart_paste", { imageDir, profile });
 }
 
@@ -223,6 +254,17 @@ export async function setTerminalCwdReceive(terminalId: string, receive: boolean
 /** Move a terminal to a different sync group in the backend. */
 export async function updateTerminalSyncGroup(terminalId: string, newGroup: string): Promise<void> {
   return invoke("update_terminal_sync_group", { terminalId, newGroup });
+}
+
+/** Open a URL in the user's default browser via Tauri shell plugin. */
+export async function openExternal(url: string): Promise<void> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  } catch (e) {
+    console.warn("shell.open failed, falling back to window.open:", e);
+    window.open(url, "_blank");
+  }
 }
 
 /** Listen for terminal output events from the backend. */
@@ -245,29 +287,29 @@ export function onSyncCwd(
   }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-cwd", (event) => {
-    callback(event.payload as {
-      path: string;
-      terminalId: string;
-      groupId: string;
-      targets: string[];
-    });
+    callback(
+      event.payload as {
+        path: string;
+        terminalId: string;
+        groupId: string;
+        targets: string[];
+      },
+    );
   });
 }
 
 /** Listen for sync-branch events from the backend. */
 export function onSyncBranch(
-  callback: (data: {
-    branch: string;
-    terminalId: string;
-    groupId: string;
-  }) => void,
+  callback: (data: { branch: string; terminalId: string; groupId: string }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-branch", (event) => {
-    callback(event.payload as {
-      branch: string;
-      terminalId: string;
-      groupId: string;
-    });
+    callback(
+      event.payload as {
+        branch: string;
+        terminalId: string;
+        groupId: string;
+      },
+    );
   });
 }
 
@@ -291,18 +333,16 @@ export function onSetTabTitle(
 
 /** Listen for command status events (OSC 133 E/D). */
 export function onCommandStatus(
-  callback: (data: {
-    terminalId: string;
-    command?: string;
-    exitCode?: number;
-  }) => void,
+  callback: (data: { terminalId: string; command?: string; exitCode?: number }) => void,
 ): Promise<UnlistenFn> {
   return listen("command-status", (event) => {
-    callback(event.payload as {
-      terminalId: string;
-      command?: string;
-      exitCode?: number;
-    });
+    callback(
+      event.payload as {
+        terminalId: string;
+        command?: string;
+        exitCode?: number;
+      },
+    );
   });
 }
 
@@ -318,9 +358,7 @@ export async function getListeningPorts(): Promise<ListeningPort[]> {
 }
 
 /** Get the current git branch for a working directory. */
-export async function getGitBranch(
-  workingDir: string,
-): Promise<string | null> {
+export async function getGitBranch(workingDir: string): Promise<string | null> {
   return invoke("get_git_branch", { workingDir });
 }
 
@@ -334,10 +372,7 @@ export function onOpenFile(
 }
 
 /** Send an OS-level notification. */
-export async function sendOsNotification(
-  title: string,
-  body: string,
-): Promise<void> {
+export async function sendOsNotification(title: string, body: string): Promise<void> {
   return invoke("send_os_notification", { title, body });
 }
 

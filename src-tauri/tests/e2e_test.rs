@@ -1,7 +1,8 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
-    ClaudeSettings, ConvenienceSettings, ColorScheme, DockSetting, FontSettings, Keybinding,
-    Layout, LayoutPane, Profile, Settings, Workspace, WorkspacePane, WorkspacePaneView,
+    ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FontSettings, Keybinding,
+    Layout, LayoutPane, MemoSettings, Profile, ProfileDefaults, Settings, Workspace, WorkspacePane,
+    WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -17,31 +18,29 @@ fn settings_round_trip_with_full_config() {
     let path = dir.path().join("settings.json");
 
     let settings = Settings {
-        color_schemes: vec![
-            ColorScheme {
-                name: "Solarized Dark".into(),
-                foreground: "#839496".into(),
-                background: "#002b36".into(),
-                cursor_color: "#93a1a1".into(),
-                selection_background: "#073642".into(),
-                black: "#073642".into(),
-                red: "#dc322f".into(),
-                green: "#859900".into(),
-                yellow: "#b58900".into(),
-                blue: "#268bd2".into(),
-                purple: "#d33682".into(),
-                cyan: "#2aa198".into(),
-                white: "#eee8d5".into(),
-                bright_black: "#002b36".into(),
-                bright_red: "#cb4b16".into(),
-                bright_green: "#586e75".into(),
-                bright_yellow: "#657b83".into(),
-                bright_blue: "#839496".into(),
-                bright_purple: "#6c71c4".into(),
-                bright_cyan: "#93a1a1".into(),
-                bright_white: "#fdf6e3".into(),
-            },
-        ],
+        color_schemes: vec![ColorScheme {
+            name: "Solarized Dark".into(),
+            foreground: "#839496".into(),
+            background: "#002b36".into(),
+            cursor_color: "#93a1a1".into(),
+            selection_background: "#073642".into(),
+            black: "#073642".into(),
+            red: "#dc322f".into(),
+            green: "#859900".into(),
+            yellow: "#b58900".into(),
+            blue: "#268bd2".into(),
+            purple: "#d33682".into(),
+            cyan: "#2aa198".into(),
+            white: "#eee8d5".into(),
+            bright_black: "#002b36".into(),
+            bright_red: "#cb4b16".into(),
+            bright_green: "#586e75".into(),
+            bright_yellow: "#657b83".into(),
+            bright_blue: "#839496".into(),
+            bright_purple: "#6c71c4".into(),
+            bright_cyan: "#93a1a1".into(),
+            bright_white: "#fdf6e3".into(),
+        }],
         profiles: vec![
             Profile {
                 name: "Ubuntu".into(),
@@ -70,62 +69,75 @@ fn settings_round_trip_with_full_config() {
                 command: "closeTab".into(),
             },
         ],
-        font: FontSettings {
-            face: "JetBrains Mono".into(),
-            size: 16,
-            weight: "normal".into(),
-        },
+        font: None,
         default_profile: "Ubuntu".into(),
-        layouts: vec![
-            Layout {
-                id: "triple-split".into(),
-                name: "Triple Split".into(),
-                panes: vec![
-                    LayoutPane { x: 0.0, y: 0.0, w: 1.0, h: 0.5, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.0, y: 0.5, w: 0.5, h: 0.5, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.5, y: 0.5, w: 0.5, h: 0.5, view_type: "BrowserPreviewView".into() },
-                ],
-            },
-        ],
-        workspaces: vec![
-            Workspace {
-                id: "ws-project-a".into(),
-                name: "Project A".into(),
-                layout_id: "triple-split".into(),
-                panes: vec![
-                    WorkspacePane {
-                        x: 0.0,
-                        y: 0.0,
-                        w: 1.0,
-                        h: 0.5,
-                        view: WorkspacePaneView {
-                            view_type: "TerminalView".into(),
-                            extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
-                        },
+        profile_defaults: ProfileDefaults::default(),
+        view_order: vec![],
+        app_theme_id: "catppuccin-mocha".into(),
+        layouts: vec![Layout {
+            id: "triple-split".into(),
+            name: "Triple Split".into(),
+            panes: vec![
+                LayoutPane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 0.5,
+                    view_type: "TerminalView".into(),
+                },
+                LayoutPane {
+                    x: 0.0,
+                    y: 0.5,
+                    w: 0.5,
+                    h: 0.5,
+                    view_type: "TerminalView".into(),
+                },
+                LayoutPane {
+                    x: 0.5,
+                    y: 0.5,
+                    w: 0.5,
+                    h: 0.5,
+                    view_type: "BrowserPreviewView".into(),
+                },
+            ],
+        }],
+        workspaces: vec![Workspace {
+            id: "ws-project-a".into(),
+            name: "Project A".into(),
+            layout_id: None,
+            panes: vec![
+                WorkspacePane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 0.5,
+                    view: WorkspacePaneView {
+                        view_type: "TerminalView".into(),
+                        extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
                     },
-                    WorkspacePane {
-                        x: 0.0,
-                        y: 0.5,
-                        w: 0.5,
-                        h: 0.5,
-                        view: WorkspacePaneView {
-                            view_type: "TerminalView".into(),
-                            extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
-                        },
+                },
+                WorkspacePane {
+                    x: 0.0,
+                    y: 0.5,
+                    w: 0.5,
+                    h: 0.5,
+                    view: WorkspacePaneView {
+                        view_type: "TerminalView".into(),
+                        extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
                     },
-                    WorkspacePane {
-                        x: 0.5,
-                        y: 0.5,
-                        w: 0.5,
-                        h: 0.5,
-                        view: WorkspacePaneView {
-                            view_type: "BrowserPreviewView".into(),
-                            extra: serde_json::json!({"url": "http://localhost:3000"}),
-                        },
+                },
+                WorkspacePane {
+                    x: 0.5,
+                    y: 0.5,
+                    w: 0.5,
+                    h: 0.5,
+                    view: WorkspacePaneView {
+                        view_type: "BrowserPreviewView".into(),
+                        extra: serde_json::json!({"url": "http://localhost:3000"}),
                     },
-                ],
-            },
-        ],
+                },
+            ],
+        }],
         docks: vec![
             DockSetting {
                 position: "left".into(),
@@ -146,6 +158,7 @@ fn settings_round_trip_with_full_config() {
         ],
         convenience: ConvenienceSettings::default(),
         claude: ClaudeSettings::default(),
+        memo: MemoSettings::default(),
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -168,8 +181,8 @@ fn settings_deserialize_empty_json_object() {
     assert!(settings.color_schemes.is_empty());
     assert!(settings.keybindings.is_empty());
     assert!(settings.docks.is_empty());
-    assert_eq!(settings.font.face, "Cascadia Mono");
-    assert_eq!(settings.font.size, 14);
+    // Root font is None after deserialization of empty JSON
+    assert!(settings.font.is_none());
 }
 
 #[test]
@@ -266,24 +279,66 @@ fn settings_multiple_layouts_multiple_workspaces() {
             Layout {
                 id: "layout-1".into(),
                 name: "Single".into(),
-                panes: vec![LayoutPane { x: 0.0, y: 0.0, w: 1.0, h: 1.0, view_type: "TerminalView".into() }],
+                panes: vec![LayoutPane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                }],
             },
             Layout {
                 id: "layout-2".into(),
                 name: "Dual".into(),
                 panes: vec![
-                    LayoutPane { x: 0.0, y: 0.0, w: 0.5, h: 1.0, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.5, y: 0.0, w: 0.5, h: 1.0, view_type: "TerminalView".into() },
+                    LayoutPane {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 0.5,
+                        h: 1.0,
+                        view_type: "TerminalView".into(),
+                    },
+                    LayoutPane {
+                        x: 0.5,
+                        y: 0.0,
+                        w: 0.5,
+                        h: 1.0,
+                        view_type: "TerminalView".into(),
+                    },
                 ],
             },
             Layout {
                 id: "layout-3".into(),
                 name: "Quad".into(),
                 panes: vec![
-                    LayoutPane { x: 0.0, y: 0.0, w: 0.5, h: 0.5, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.5, y: 0.0, w: 0.5, h: 0.5, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.0, y: 0.5, w: 0.5, h: 0.5, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.5, y: 0.5, w: 0.5, h: 0.5, view_type: "BrowserPreviewView".into() },
+                    LayoutPane {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 0.5,
+                        h: 0.5,
+                        view_type: "TerminalView".into(),
+                    },
+                    LayoutPane {
+                        x: 0.5,
+                        y: 0.0,
+                        w: 0.5,
+                        h: 0.5,
+                        view_type: "TerminalView".into(),
+                    },
+                    LayoutPane {
+                        x: 0.0,
+                        y: 0.5,
+                        w: 0.5,
+                        h: 0.5,
+                        view_type: "TerminalView".into(),
+                    },
+                    LayoutPane {
+                        x: 0.5,
+                        y: 0.5,
+                        w: 0.5,
+                        h: 0.5,
+                        view_type: "BrowserPreviewView".into(),
+                    },
                 ],
             },
         ],
@@ -291,9 +346,12 @@ fn settings_multiple_layouts_multiple_workspaces() {
             Workspace {
                 id: "ws-1".into(),
                 name: "WS1".into(),
-                layout_id: "layout-1".into(),
+                layout_id: None,
                 panes: vec![WorkspacePane {
-                    x: 0.0, y: 0.0, w: 1.0, h: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
                     view: WorkspacePaneView {
                         view_type: "TerminalView".into(),
                         extra: serde_json::json!({}),
@@ -303,13 +361,13 @@ fn settings_multiple_layouts_multiple_workspaces() {
             Workspace {
                 id: "ws-2".into(),
                 name: "WS2".into(),
-                layout_id: "layout-2".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-3".into(),
                 name: "WS3".into(),
-                layout_id: "layout-3".into(),
+                layout_id: None,
                 panes: vec![],
             },
         ],
@@ -321,7 +379,6 @@ fn settings_multiple_layouts_multiple_workspaces() {
     assert_eq!(parsed.layouts.len(), 3);
     assert_eq!(parsed.workspaces.len(), 3);
     assert_eq!(parsed.layouts[2].panes.len(), 4);
-    assert_eq!(parsed.workspaces[0].layout_id, "layout-1");
 }
 
 #[test]
@@ -331,9 +388,27 @@ fn settings_pane_boundary_values() {
         id: "boundary".into(),
         name: "Boundary".into(),
         panes: vec![
-            LayoutPane { x: 0.0, y: 0.0, w: 0.0, h: 0.0, view_type: "EmptyView".into() },
-            LayoutPane { x: 1.0, y: 1.0, w: 1.0, h: 1.0, view_type: "TerminalView".into() },
-            LayoutPane { x: 0.333333, y: 0.666666, w: 0.333334, h: 0.333334, view_type: "TerminalView".into() },
+            LayoutPane {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+                view_type: "EmptyView".into(),
+            },
+            LayoutPane {
+                x: 1.0,
+                y: 1.0,
+                w: 1.0,
+                h: 1.0,
+                view_type: "TerminalView".into(),
+            },
+            LayoutPane {
+                x: 0.333333,
+                y: 0.666666,
+                w: 0.333334,
+                h: 0.333334,
+                view_type: "TerminalView".into(),
+            },
         ],
     };
     let json = serde_json::to_string(&layout).unwrap();
@@ -374,10 +449,38 @@ fn settings_workspace_pane_view_extra_data_preserved() {
 fn settings_dock_all_positions() {
     let settings = Settings {
         docks: vec![
-            DockSetting { position: "top".into(), active_view: None, views: vec![], visible: true, size: 240.0, panes: Vec::new() },
-            DockSetting { position: "bottom".into(), active_view: None, views: vec![], visible: true, size: 240.0, panes: Vec::new() },
-            DockSetting { position: "left".into(), active_view: Some("WorkspaceSelectorView".into()), views: vec!["WorkspaceSelectorView".into()], visible: true, size: 240.0, panes: Vec::new() },
-            DockSetting { position: "right".into(), active_view: Some("SettingsView".into()), views: vec!["SettingsView".into()], visible: false, size: 240.0, panes: Vec::new() },
+            DockSetting {
+                position: "top".into(),
+                active_view: None,
+                views: vec![],
+                visible: true,
+                size: 240.0,
+                panes: Vec::new(),
+            },
+            DockSetting {
+                position: "bottom".into(),
+                active_view: None,
+                views: vec![],
+                visible: true,
+                size: 240.0,
+                panes: Vec::new(),
+            },
+            DockSetting {
+                position: "left".into(),
+                active_view: Some("WorkspaceSelectorView".into()),
+                views: vec!["WorkspaceSelectorView".into()],
+                visible: true,
+                size: 240.0,
+                panes: Vec::new(),
+            },
+            DockSetting {
+                position: "right".into(),
+                active_view: Some("SettingsView".into()),
+                views: vec!["SettingsView".into()],
+                visible: false,
+                size: 240.0,
+                panes: Vec::new(),
+            },
         ],
         ..Settings::default()
     };
@@ -417,16 +520,20 @@ fn settings_overwrite_existing_file() {
     let json = serde_json::to_string_pretty(&settings).unwrap();
     fs::write(&path, &json).unwrap();
 
-    // Modify and overwrite
-    settings.font.size = 20;
-    settings.font.face = "Fira Code".into();
+    // Modify and overwrite — set font at profile level
+    settings.profiles[0].font = Some(FontSettings {
+        face: "Fira Code".into(),
+        size: 20,
+        weight: "normal".into(),
+    });
     settings.default_profile = "WSL".into();
     let json2 = serde_json::to_string_pretty(&settings).unwrap();
     fs::write(&path, &json2).unwrap();
 
     let loaded: Settings = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(loaded.font.size, 20);
-    assert_eq!(loaded.font.face, "Fira Code");
+    let ps_font = loaded.profiles[0].font.as_ref().unwrap();
+    assert_eq!(ps_font.size, 20);
+    assert_eq!(ps_font.face, "Fira Code");
     assert_eq!(loaded.default_profile, "WSL");
 }
 
@@ -443,7 +550,7 @@ fn terminal_session_full_lifecycle() {
         ("t1", "WSL", "group-a"),
         ("t2", "PowerShell", "group-a"),
         ("t3", "CMD", "group-b"),
-        ("t4", "WSL", ""),  // independent terminal
+        ("t4", "WSL", ""), // independent terminal
     ];
 
     for (id, profile, group) in &configs {
@@ -455,6 +562,7 @@ fn terminal_session_full_lifecycle() {
             rows: 24,
             sync_group: group.to_string(),
             env: vec![],
+            ..TerminalConfig::default()
         };
         let session = TerminalSession::new(id.to_string(), config);
 
@@ -571,6 +679,7 @@ fn terminal_session_with_custom_env_vars() {
             ("EMPTY_VAR".into(), "".into()),
             ("SPECIAL_CHARS".into(), "hello world!@#$%".into()),
         ],
+        ..TerminalConfig::default()
     };
 
     let session = TerminalSession::new("env-test".into(), config);
@@ -590,8 +699,14 @@ fn terminal_profile_to_command_case_insensitive_variants() {
     // Exact matches
     assert_eq!(TerminalSession::profile_to_command("WSL").0, "wsl.exe");
     assert_eq!(TerminalSession::profile_to_command("wsl").0, "wsl.exe");
-    assert_eq!(TerminalSession::profile_to_command("PowerShell").0, "powershell.exe");
-    assert_eq!(TerminalSession::profile_to_command("powershell").0, "powershell.exe");
+    assert_eq!(
+        TerminalSession::profile_to_command("PowerShell").0,
+        "powershell.exe"
+    );
+    assert_eq!(
+        TerminalSession::profile_to_command("powershell").0,
+        "powershell.exe"
+    );
     // Unknown/other profiles pass through as-is (command_line = profile name)
     assert_eq!(TerminalSession::profile_to_command("CMD").0, "CMD");
     assert_eq!(TerminalSession::profile_to_command("cmd").0, "cmd");
@@ -881,7 +996,9 @@ fn ide_message_deserialization_missing_optional_fields() {
     let json = r#"{"action":"sync-cwd","path":"/foo","terminal_id":"t1","group_id":"g1"}"#;
     let msg: LxMessage = serde_json::from_str(json).unwrap();
     match msg {
-        LxMessage::SyncCwd { all, target_group, .. } => {
+        LxMessage::SyncCwd {
+            all, target_group, ..
+        } => {
             assert!(!all);
             assert!(target_group.is_none());
         }
@@ -953,7 +1070,10 @@ fn state_concurrent_terminal_and_group_operations() {
             sync_group: group_name.clone(),
             ..TerminalConfig::default()
         };
-        terminals.insert(terminal_id.clone(), TerminalSession::new(terminal_id.clone(), config));
+        terminals.insert(
+            terminal_id.clone(),
+            TerminalSession::new(terminal_id.clone(), config),
+        );
     }
 
     // Step 2: Register in sync group
@@ -988,8 +1108,15 @@ fn state_close_terminal_cleans_up_sync_group() {
             sync_group: group_name.clone(),
             ..TerminalConfig::default()
         };
-        state.terminals.lock().unwrap().insert(id.clone(), TerminalSession::new(id.clone(), config));
-        state.sync_groups.lock().unwrap()
+        state
+            .terminals
+            .lock()
+            .unwrap()
+            .insert(id.clone(), TerminalSession::new(id.clone(), config));
+        state
+            .sync_groups
+            .lock()
+            .unwrap()
             .entry(group_name.clone())
             .or_insert_with(|| SyncGroup::new(group_name.clone()))
             .add_terminal(id);
@@ -1027,7 +1154,10 @@ fn state_many_sessions_stress() {
         let mut terminals = state.terminals.lock().unwrap();
         for i in 0..count {
             let id = format!("stress-{i}");
-            terminals.insert(id.clone(), TerminalSession::new(id, TerminalConfig::default()));
+            terminals.insert(
+                id.clone(),
+                TerminalSession::new(id, TerminalConfig::default()),
+            );
         }
     }
 
@@ -1050,11 +1180,14 @@ fn state_resize_config_update() {
         let mut terminals = state.terminals.lock().unwrap();
         terminals.insert(
             "resize-t".into(),
-            TerminalSession::new("resize-t".into(), TerminalConfig {
-                cols: 80,
-                rows: 24,
-                ..TerminalConfig::default()
-            }),
+            TerminalSession::new(
+                "resize-t".into(),
+                TerminalConfig {
+                    cols: 80,
+                    rows: 24,
+                    ..TerminalConfig::default()
+                },
+            ),
         );
     }
 
@@ -1132,9 +1265,15 @@ fn e2e_workspace_with_multiple_terminal_groups() {
             sync_group: "project-a".into(),
             ..TerminalConfig::default()
         };
-        state.terminals.lock().unwrap()
+        state
+            .terminals
+            .lock()
+            .unwrap()
             .insert(id.clone(), TerminalSession::new(id.clone(), config));
-        state.sync_groups.lock().unwrap()
+        state
+            .sync_groups
+            .lock()
+            .unwrap()
             .entry("project-a".into())
             .or_insert_with(|| SyncGroup::new("project-a".into()))
             .add_terminal(id);
@@ -1148,9 +1287,15 @@ fn e2e_workspace_with_multiple_terminal_groups() {
             sync_group: "project-b".into(),
             ..TerminalConfig::default()
         };
-        state.terminals.lock().unwrap()
+        state
+            .terminals
+            .lock()
+            .unwrap()
             .insert(id.clone(), TerminalSession::new(id.clone(), config));
-        state.sync_groups.lock().unwrap()
+        state
+            .sync_groups
+            .lock()
+            .unwrap()
             .entry("project-b".into())
             .or_insert_with(|| SyncGroup::new("project-b".into()))
             .add_terminal(id);
@@ -1230,51 +1375,54 @@ fn e2e_ide_message_set_tab_title_updates_session() {
 fn e2e_settings_with_layout_workspace_relationship() {
     // Test the 1:N relationship between layouts and workspaces
     let settings = Settings {
-        layouts: vec![
-            Layout {
-                id: "shared-layout".into(),
-                name: "Shared".into(),
-                panes: vec![
-                    LayoutPane { x: 0.0, y: 0.0, w: 0.5, h: 1.0, view_type: "TerminalView".into() },
-                    LayoutPane { x: 0.5, y: 0.0, w: 0.5, h: 1.0, view_type: "TerminalView".into() },
-                ],
-            },
-        ],
+        layouts: vec![Layout {
+            id: "shared-layout".into(),
+            name: "Shared".into(),
+            panes: vec![
+                LayoutPane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                },
+                LayoutPane {
+                    x: 0.5,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                },
+            ],
+        }],
         workspaces: vec![
             Workspace {
                 id: "ws-1".into(),
                 name: "WS 1".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-2".into(),
                 name: "WS 2".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
             Workspace {
                 id: "ws-3".into(),
                 name: "WS 3".into(),
-                layout_id: "shared-layout".into(),
+                layout_id: None,
                 panes: vec![],
             },
         ],
         ..Settings::default()
     };
 
-    // All 3 workspaces share the same layout
-    let layout_id = &settings.layouts[0].id;
-    for ws in &settings.workspaces {
-        assert_eq!(&ws.layout_id, layout_id);
-    }
-
-    // Round-trip preserves the relationship
+    // Round-trip preserves workspaces
     let json = serde_json::to_string(&settings).unwrap();
     let parsed: Settings = serde_json::from_str(&json).unwrap();
-    for ws in &parsed.workspaces {
-        assert_eq!(&ws.layout_id, layout_id);
-    }
+    assert_eq!(parsed.workspaces.len(), 3);
+    assert_eq!(parsed.layouts.len(), 1);
 }
 
 #[test]
@@ -1313,9 +1461,15 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
     let settings: Settings = serde_json::from_str(settings_json).unwrap();
     assert_eq!(settings.workspaces[0].name, "프로젝트A");
     assert_eq!(settings.workspaces[0].panes.len(), 3);
-    assert_eq!(settings.workspaces[0].panes[0].view.view_type, "TerminalView");
+    assert_eq!(
+        settings.workspaces[0].panes[0].view.view_type,
+        "TerminalView"
+    );
     assert_eq!(settings.workspaces[0].panes[0].view.extra["profile"], "WSL");
-    assert_eq!(settings.workspaces[0].panes[0].view.extra["syncGroup"], "프로젝트A");
+    assert_eq!(
+        settings.workspaces[0].panes[0].view.extra["syncGroup"],
+        "프로젝트A"
+    );
 
     // Simulate creating sessions from settings
     let state = AppState::new();
@@ -1333,11 +1487,17 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
                 ..TerminalConfig::default()
             };
 
-            state.terminals.lock().unwrap()
+            state
+                .terminals
+                .lock()
+                .unwrap()
                 .insert(id.clone(), TerminalSession::new(id.clone(), config));
 
             if !sync_group.is_empty() {
-                state.sync_groups.lock().unwrap()
+                state
+                    .sync_groups
+                    .lock()
+                    .unwrap()
                     .entry(sync_group.to_string())
                     .or_insert_with(|| SyncGroup::new(sync_group.into()))
                     .add_terminal(id);
@@ -1421,8 +1581,10 @@ fn windows_terminal_settings_compatibility() {
     assert_eq!(settings.color_schemes.len(), 1);
     assert_eq!(settings.color_schemes[0].name, "Campbell");
     assert_eq!(settings.color_schemes[0].bright_white, "#F2F2F2");
-    assert_eq!(settings.font.face, "Cascadia Mono");
-    assert_eq!(settings.font.size, 12);
+    // Root-level font is parsed as legacy backward compat
+    let font = settings.font.as_ref().unwrap();
+    assert_eq!(font.face, "Cascadia Mono");
+    assert_eq!(font.size, 12);
     assert_eq!(settings.keybindings.len(), 2);
     assert_eq!(settings.default_profile, "Windows PowerShell");
 }
@@ -1443,7 +1605,10 @@ fn concurrent_group_add_remove_simulation() {
         let mut terminals = state.terminals.lock().unwrap();
         for i in 0..20 {
             let id = format!("ct-{i}");
-            terminals.insert(id.clone(), TerminalSession::new(id, TerminalConfig::default()));
+            terminals.insert(
+                id.clone(),
+                TerminalSession::new(id, TerminalConfig::default()),
+            );
         }
     }
 
@@ -1492,7 +1657,10 @@ fn concurrent_session_create_and_close() {
             thread::spawn(move || {
                 let id = format!("par-{i}");
                 let mut terminals = state.terminals.lock().unwrap();
-                terminals.insert(id.clone(), TerminalSession::new(id, TerminalConfig::default()));
+                terminals.insert(
+                    id.clone(),
+                    TerminalSession::new(id, TerminalConfig::default()),
+                );
             })
         })
         .collect();
@@ -1527,16 +1695,18 @@ fn concurrent_session_create_and_close() {
 
 #[test]
 fn settings_font_size_zero() {
-    let json = r#"{"font": {"face": "Mono", "size": 0}}"#;
+    // Font at profile level now
+    let json =
+        r#"{"profiles": [{"name": "T", "commandLine": "x", "font": {"face": "Mono", "size": 0}}]}"#;
     let settings: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.font.size, 0);
+    assert_eq!(settings.profiles[0].font.as_ref().unwrap().size, 0);
 }
 
 #[test]
 fn settings_font_size_max() {
-    let json = r#"{"font": {"face": "Mono", "size": 65535}}"#;
+    let json = r#"{"profiles": [{"name": "T", "commandLine": "x", "font": {"face": "Mono", "size": 65535}}]}"#;
     let settings: Settings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.font.size, 65535);
+    assert_eq!(settings.profiles[0].font.as_ref().unwrap().size, 65535);
 }
 
 #[test]
@@ -1588,8 +1758,9 @@ fn settings_json_with_extra_fields_ignored() {
     let result: Result<Settings, _> = serde_json::from_str(json);
     // If it succeeds, verify known fields are correct
     if let Ok(settings) = result {
-        assert_eq!(settings.font.face, "Mono");
-        assert_eq!(settings.font.size, 14);
+        let font = settings.font.as_ref().unwrap();
+        assert_eq!(font.face, "Mono");
+        assert_eq!(font.size, 14);
     }
     // Either way, it shouldn't panic
 }

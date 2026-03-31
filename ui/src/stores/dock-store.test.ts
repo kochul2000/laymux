@@ -9,12 +9,7 @@ describe("DockStore", () => {
   it("initializes with 4 docks", () => {
     const state = useDockStore.getState();
     expect(state.docks).toHaveLength(4);
-    expect(state.docks.map((d) => d.position)).toEqual([
-      "top",
-      "bottom",
-      "left",
-      "right",
-    ]);
+    expect(state.docks.map((d) => d.position)).toEqual(["top", "bottom", "left", "right"]);
   });
 
   it("left dock has WorkspaceSelectorView by default", () => {
@@ -117,7 +112,9 @@ describe("DockStore", () => {
   });
 
   it("setDockActiveView preserves full ViewInstanceConfig when given", () => {
-    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
+    useDockStore
+      .getState()
+      .setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
     const bottom = useDockStore.getState().getDock("bottom")!;
     expect(bottom.activeView).toBe("TerminalView");
     expect(bottom.panes).toHaveLength(1);
@@ -131,7 +128,9 @@ describe("DockStore", () => {
     expect(bottom1.panes[0].view).toEqual({ type: "TerminalView" });
 
     // Now update with a config including profile
-    useDockStore.getState().setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
+    useDockStore
+      .getState()
+      .setDockActiveView("bottom", "TerminalView", { type: "TerminalView", profile: "WSL" });
     const bottom2 = useDockStore.getState().getDock("bottom")!;
     expect(bottom2.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
   });

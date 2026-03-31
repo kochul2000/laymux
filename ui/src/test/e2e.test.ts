@@ -33,7 +33,7 @@ describe("Workspace Store E2E", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
         },
       ],
@@ -78,8 +78,8 @@ describe("Workspace Store E2E", () => {
     it("should handle multiple sequential splits", () => {
       // Split into 4 panes (2x2 grid)
       useWorkspaceStore.getState().splitPane(0, "horizontal"); // 2 panes stacked
-      useWorkspaceStore.getState().splitPane(0, "vertical");   // top-left splits
-      useWorkspaceStore.getState().splitPane(2, "vertical");   // bottom splits
+      useWorkspaceStore.getState().splitPane(0, "vertical"); // top-left splits
+      useWorkspaceStore.getState().splitPane(2, "vertical"); // bottom splits
 
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(ws.panes.length).toBe(4);
@@ -154,7 +154,7 @@ describe("Workspace Store E2E", () => {
       const { workspaces } = useWorkspaceStore.getState();
       expect(workspaces.length).toBe(2);
       expect(workspaces[1].name).toBe("New WS");
-      expect(workspaces[1].layoutId).toBe("default-layout");
+
       expect(workspaces[1].panes.length).toBe(1);
       expect(workspaces[1].panes[0].view.type).toBe("EmptyView");
     });
@@ -199,75 +199,34 @@ describe("Workspace Store E2E", () => {
     });
   });
 
-  describe("Save Actions", () => {
-    it("saveAndPropagate should update all workspaces with same layout", () => {
-      // Add two more workspaces sharing the same layout
-      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
-      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
-
-      // Modify active workspace's pane
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-
-      // Propagate
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      const { workspaces, layouts } = useWorkspaceStore.getState();
-      // Layout should now have 2 panes
-      const layout = layouts.find((l) => l.id === "default-layout")!;
-      expect(layout.panes.length).toBe(2);
-
-      // All 3 workspaces should have 2 panes
-      for (const ws of workspaces) {
-        expect(ws.panes.length).toBe(2);
-      }
-    });
-
-    it("saveAsNewLayout should create new layout and reassign current workspace", () => {
+  describe("Layout Actions", () => {
+    it("exportAsNewLayout should create new layout from workspace", () => {
       useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().saveAsNewLayout("Custom Layout");
+      useWorkspaceStore.getState().exportAsNewLayout("Custom Layout");
 
-      const { layouts, workspaces } = useWorkspaceStore.getState();
+      const { layouts } = useWorkspaceStore.getState();
       expect(layouts.length).toBe(2);
       expect(layouts[1].name).toBe("Custom Layout");
-
-      // Current workspace should now reference the new layout
-      const activeWs = workspaces.find((ws) => ws.id === "ws-default")!;
-      expect(activeWs.layoutId).toBe(layouts[1].id);
+      expect(layouts[1].panes.length).toBe(2);
     });
 
-    it("saveAsNewLayout should not affect other workspaces", () => {
+    it("exportToLayout should overwrite existing layout", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().exportToLayout("default-layout");
+
+      const layout = useWorkspaceStore.getState().layouts[0];
+      expect(layout.panes.length).toBe(2);
+    });
+
+    it("exportAsNewLayout should not affect other workspaces", () => {
       useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
       useWorkspaceStore.getState().splitPane(0, "vertical");
-      useWorkspaceStore.getState().saveAsNewLayout("My Layout");
+      useWorkspaceStore.getState().exportAsNewLayout("My Layout");
 
       const { workspaces } = useWorkspaceStore.getState();
       const ws2 = workspaces.find((ws) => ws.name === "WS2")!;
-      expect(ws2.layoutId).toBe("default-layout"); // Still references original layout
-    });
-
-    it("revertWorkspace should restore panes from layout template", () => {
-      // Split pane then revert
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(2);
-
-      useWorkspaceStore.getState().revertWorkspace();
-      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(ws.panes.length).toBe(1);
-      expect(ws.panes[0].w).toBe(1);
-      expect(ws.panes[0].h).toBe(1);
-    });
-
-    it("revertWorkspace after saveAndPropagate should revert to propagated state", () => {
-      // Split, propagate, split again, then revert
-      useWorkspaceStore.getState().splitPane(0, "horizontal");
-      useWorkspaceStore.getState().saveAndPropagate();
-
-      useWorkspaceStore.getState().splitPane(0, "vertical");
-      expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(3);
-
-      useWorkspaceStore.getState().revertWorkspace();
-      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-      expect(ws.panes.length).toBe(2); // Reverted to the propagated state (2 panes)
+      // WS2 keeps its original single pane — no propagation
+      expect(ws2.panes.length).toBe(1);
     });
   });
 
@@ -310,8 +269,18 @@ describe("Terminal Store E2E", () => {
   it("should register and unregister terminals", () => {
     const store = useTerminalStore.getState();
     store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t2", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g2", workspaceId: "ws-1" });
+    store.registerInstance({
+      id: "t2",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "g2",
+      workspaceId: "ws-1",
+    });
 
     expect(useTerminalStore.getState().instances.length).toBe(3);
 
@@ -322,9 +291,24 @@ describe("Terminal Store E2E", () => {
 
   it("should filter by sync group", () => {
     const store = useTerminalStore.getState();
-    store.registerInstance({ id: "t1", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t2", profile: "WSL", syncGroup: "project-a", workspaceId: "ws-1" });
-    store.registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "project-b", workspaceId: "ws-1" });
+    store.registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "project-a",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t2",
+      profile: "WSL",
+      syncGroup: "project-a",
+      workspaceId: "ws-1",
+    });
+    store.registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "project-b",
+      workspaceId: "ws-1",
+    });
     store.registerInstance({ id: "t4", profile: "WSL", syncGroup: "", workspaceId: "ws-1" }); // independent
 
     const groupA = useTerminalStore.getState().getInstancesBySyncGroup("project-a");
@@ -341,7 +325,9 @@ describe("Terminal Store E2E", () => {
   });
 
   it("should update instance info partially", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
 
     useTerminalStore.getState().updateInstanceInfo("t1", { cwd: "/home/user" });
     expect(useTerminalStore.getState().instances[0].cwd).toBe("/home/user");
@@ -362,7 +348,9 @@ describe("Terminal Store E2E", () => {
   });
 
   it("should handle unregistering nonexistent instance", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
     useTerminalStore.getState().unregisterInstance("nonexistent");
     expect(useTerminalStore.getState().instances.length).toBe(1);
   });
@@ -393,7 +381,14 @@ describe("Dock Store E2E", () => {
       docks: [
         { position: "top", activeView: null, views: [], visible: true, size: 200, panes: [] },
         { position: "bottom", activeView: null, views: [], visible: true, size: 200, panes: [] },
-        { position: "left", activeView: "WorkspaceSelectorView", views: ["WorkspaceSelectorView", "SettingsView"], visible: true, size: 250, panes: [] },
+        {
+          position: "left",
+          activeView: "WorkspaceSelectorView",
+          views: ["WorkspaceSelectorView", "SettingsView"],
+          visible: true,
+          size: 250,
+          panes: [],
+        },
         { position: "right", activeView: null, views: [], visible: true, size: 200, panes: [] },
       ],
     });
@@ -498,8 +493,12 @@ describe("Notification Store E2E", () => {
   });
 
   it("should mark read per workspace without affecting others", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "msg1" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-2", message: "msg2" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "msg1" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-2", message: "msg2" });
 
     useNotificationStore.getState().markWorkspaceAsRead("ws-1");
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(0);
@@ -507,9 +506,15 @@ describe("Notification Store E2E", () => {
   });
 
   it("should get latest notification per workspace", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "first" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "second" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "third" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "first" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "second" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "third" });
 
     const latest = useNotificationStore.getState().getLatestNotification("ws-1");
     expect(latest?.message).toBe("third");
@@ -527,7 +532,9 @@ describe("Notification Store E2E", () => {
 
   it("should handle many notifications", () => {
     for (let i = 0; i < 1000; i++) {
-      useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: `Notification ${i}` });
+      useNotificationStore
+        .getState()
+        .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: `Notification ${i}` });
     }
     expect(useNotificationStore.getState().notifications.length).toBe(1000);
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(1000);
@@ -537,9 +544,13 @@ describe("Notification Store E2E", () => {
   });
 
   it("should add notifications after mark-read and show new unread", () => {
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "old" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "old" });
     useNotificationStore.getState().markWorkspaceAsRead("ws-1");
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "new" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "new" });
 
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(1);
     expect(useNotificationStore.getState().getLatestNotification("ws-1")?.message).toBe("new");
@@ -551,26 +562,58 @@ describe("Notification Store E2E", () => {
 // ============================================================================
 
 /** Helper: build a full Profile with defaults for test mocks. */
-function makeTestProfile(overrides: { name: string; commandLine: string; colorScheme?: string; startingDirectory?: string; hidden?: boolean }): import("@/stores/settings-store").Profile {
+function makeTestProfile(overrides: {
+  name: string;
+  commandLine: string;
+  colorScheme?: string;
+  startingDirectory?: string;
+  hidden?: boolean;
+}): import("@/stores/settings-store").Profile {
   return {
-    colorScheme: "", startingDirectory: "", hidden: false, startupCommand: "",
-    cursorShape: "bar", padding: { top: 8, right: 8, bottom: 8, left: 8 },
-    scrollbackLines: 9001, opacity: 100, tabTitle: "", bellStyle: "audible",
-    closeOnExit: "automatic", antialiasingMode: "grayscale",
-    suppressApplicationTitle: false, snapOnInput: true,
+    colorScheme: "",
+    startingDirectory: "",
+    hidden: false,
+    startupCommand: "",
+    cursorShape: "bar",
+    padding: { top: 8, right: 8, bottom: 8, left: 8 },
+    scrollbackLines: 9001,
+    opacity: 100,
+    tabTitle: "",
+    bellStyle: "audible",
+    closeOnExit: "automatic",
+    antialiasingMode: "grayscale",
+    suppressApplicationTitle: false,
+    snapOnInput: true,
     ...overrides,
   };
 }
 
 /** Helper: build a full ColorScheme with defaults for test mocks. */
-function makeTestColorScheme(overrides: { name: string; foreground?: string; background?: string }): import("@/stores/settings-store").ColorScheme {
+function makeTestColorScheme(overrides: {
+  name: string;
+  foreground?: string;
+  background?: string;
+}): import("@/stores/settings-store").ColorScheme {
   return {
-    foreground: "#CCCCCC", background: "#1E1E1E", cursorColor: "#FFFFFF",
-    selectionBackground: "#264F78", black: "#0C0C0C", red: "#C50F1F",
-    green: "#13A10E", yellow: "#C19C00", blue: "#0037DA", purple: "#881798",
-    cyan: "#3A96DD", white: "#CCCCCC", brightBlack: "#767676",
-    brightRed: "#E74856", brightGreen: "#16C60C", brightYellow: "#F9F1A5",
-    brightBlue: "#3B78FF", brightPurple: "#B4009E", brightCyan: "#61D6D6",
+    foreground: "#CCCCCC",
+    background: "#1E1E1E",
+    cursorColor: "#FFFFFF",
+    selectionBackground: "#264F78",
+    black: "#0C0C0C",
+    red: "#C50F1F",
+    green: "#13A10E",
+    yellow: "#C19C00",
+    blue: "#0037DA",
+    purple: "#881798",
+    cyan: "#3A96DD",
+    white: "#CCCCCC",
+    brightBlack: "#767676",
+    brightRed: "#E74856",
+    brightGreen: "#16C60C",
+    brightYellow: "#F9F1A5",
+    brightBlue: "#3B78FF",
+    brightPurple: "#B4009E",
+    brightCyan: "#61D6D6",
     brightWhite: "#F2F2F2",
     ...overrides,
   };
@@ -579,7 +622,6 @@ function makeTestColorScheme(overrides: { name: string; foreground?: string; bac
 describe("Settings Store E2E", () => {
   beforeEach(() => {
     useSettingsStore.setState({
-      font: { face: "Consolas", size: 14, weight: "normal" },
       defaultProfile: "PowerShell",
       profiles: [
         makeTestProfile({ name: "PowerShell", commandLine: "powershell.exe -NoLogo" }),
@@ -592,16 +634,14 @@ describe("Settings Store E2E", () => {
 
   it("should load bulk settings via loadFromSettings", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
+      profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
       defaultProfile: "WSL",
-      colorSchemes: [
-        makeTestColorScheme({ name: "Dark", foreground: "#fff", background: "#000" }),
-      ],
+      colorSchemes: [makeTestColorScheme({ name: "Dark", foreground: "#fff", background: "#000" })],
     });
 
     const state = useSettingsStore.getState();
-    expect(state.font.face).toBe("Fira Code");
-    expect(state.font.size).toBe(16);
+    expect(state.profileDefaults.font.face).toBe("Fira Code");
+    expect(state.profileDefaults.font.size).toBe(16);
     expect(state.defaultProfile).toBe("WSL");
     // 10 builtins + 1 loaded = 11 (builtins are always merged)
     expect(state.colorSchemes.length).toBe(11);
@@ -610,12 +650,16 @@ describe("Settings Store E2E", () => {
   });
 
   it("should add and remove color schemes", () => {
-    useSettingsStore.getState().addColorScheme(
-      makeTestColorScheme({ name: "Solarized", foreground: "#839496", background: "#002b36" }),
-    );
-    useSettingsStore.getState().addColorScheme(
-      makeTestColorScheme({ name: "Monokai", foreground: "#F8F8F2", background: "#272822" }),
-    );
+    useSettingsStore
+      .getState()
+      .addColorScheme(
+        makeTestColorScheme({ name: "Solarized", foreground: "#839496", background: "#002b36" }),
+      );
+    useSettingsStore
+      .getState()
+      .addColorScheme(
+        makeTestColorScheme({ name: "Monokai", foreground: "#F8F8F2", background: "#272822" }),
+      );
 
     expect(useSettingsStore.getState().colorSchemes.length).toBe(2);
 
@@ -635,23 +679,31 @@ describe("Settings Store E2E", () => {
   });
 
   it("should handle removing at out-of-range index", () => {
-    useSettingsStore.getState().addColorScheme(makeTestColorScheme({ name: "Test", foreground: "", background: "" }));
+    useSettingsStore
+      .getState()
+      .addColorScheme(makeTestColorScheme({ name: "Test", foreground: "", background: "" }));
     useSettingsStore.getState().removeColorScheme(99);
     // Should not remove anything
     expect(useSettingsStore.getState().colorSchemes.length).toBe(1);
   });
 
-  it("should handle font size edge values", () => {
-    useSettingsStore.getState().setFont({ face: "Mono", size: 0, weight: "normal" });
-    expect(useSettingsStore.getState().font.size).toBe(0);
+  it("should handle font size edge values via profileDefaults", () => {
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Mono", size: 0, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(0);
 
-    useSettingsStore.getState().setFont({ face: "Mono", size: 999, weight: "normal" });
-    expect(useSettingsStore.getState().font.size).toBe(999);
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "Mono", size: 999, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.size).toBe(999);
   });
 
-  it("should handle empty font face", () => {
-    useSettingsStore.getState().setFont({ face: "", size: 14, weight: "normal" });
-    expect(useSettingsStore.getState().font.face).toBe("");
+  it("should handle empty font face via profileDefaults", () => {
+    useSettingsStore
+      .getState()
+      .setProfileDefaults({ font: { face: "", size: 14, weight: "normal" } });
+    expect(useSettingsStore.getState().profileDefaults.font.face).toBe("");
   });
 });
 
@@ -806,9 +858,7 @@ describe("OSC Parser E2E", () => {
     });
 
     it("should handle malformed 'when' condition gracefully", () => {
-      const hooks: OscHook[] = [
-        { osc: 7, when: "this.is.invalid(((syntax", run: "cmd" },
-      ];
+      const hooks: OscHook[] = [{ osc: 7, when: "this.is.invalid(((syntax", run: "cmd" }];
       const event: OscEvent = { code: 7, data: "/path" };
       // Should not throw, returns empty
       expect(matchHook(hooks, event).length).toBe(0);
@@ -947,7 +997,7 @@ describe("Lx Command Parser E2E", () => {
     });
 
     it("should parse send-command with quoted string", () => {
-      const result = parseLxCommand("lx send-command \"echo hello world\" --group g1");
+      const result = parseLxCommand('lx send-command "echo hello world" --group g1');
       expect(result!.action).toBe("send-command");
       expect(result!.args).toEqual(["echo hello world"]);
       expect(result!.flags["group"]).toBe("g1");
@@ -1065,7 +1115,7 @@ describe("Cross-Store Integration E2E", () => {
         {
           id: "ws-1",
           name: "Project A",
-          layoutId: "default-layout",
+
           panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
         },
       ],
@@ -1077,7 +1127,14 @@ describe("Cross-Store Integration E2E", () => {
       docks: [
         { position: "top", activeView: null, views: [], visible: true, size: 200, panes: [] },
         { position: "bottom", activeView: null, views: [], visible: true, size: 200, panes: [] },
-        { position: "left", activeView: "WorkspaceSelectorView", views: ["WorkspaceSelectorView"], visible: true, size: 250, panes: [] },
+        {
+          position: "left",
+          activeView: "WorkspaceSelectorView",
+          views: ["WorkspaceSelectorView"],
+          visible: true,
+          size: 250,
+          panes: [],
+        },
         { position: "right", activeView: null, views: [], visible: true, size: 200, panes: [] },
       ],
     });
@@ -1086,8 +1143,15 @@ describe("Cross-Store Integration E2E", () => {
 
   it("should simulate full workspace session with terminals and notifications", () => {
     // 1. Register terminals in a workspace
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "Project A", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "PowerShell", syncGroup: "Project A", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "Project A", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({
+      id: "t2",
+      profile: "PowerShell",
+      syncGroup: "Project A",
+      workspaceId: "ws-1",
+    });
 
     // 2. Receive sync-cwd event (simulate backend event)
     const targets = ["t1", "t2"];
@@ -1097,7 +1161,9 @@ describe("Cross-Store Integration E2E", () => {
 
     // 3. Receive notification
     const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: activeWsId, message: "Build complete" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: activeWsId, message: "Build complete" });
 
     // 4. Verify state
     const instances = useTerminalStore.getState().instances;
@@ -1110,9 +1176,18 @@ describe("Cross-Store Integration E2E", () => {
   });
 
   it("should simulate sync-branch updating all group terminals", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "other", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t2", profile: "WSL", syncGroup: "dev", workspaceId: "ws-1" });
+    useTerminalStore.getState().registerInstance({
+      id: "t3",
+      profile: "PowerShell",
+      syncGroup: "other",
+      workspaceId: "ws-1",
+    });
 
     // Sync branch for "dev" group
     const groupTerminals = useTerminalStore.getState().getInstancesBySyncGroup("dev");
@@ -1160,9 +1235,15 @@ describe("Cross-Store Integration E2E", () => {
     const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
 
     // Notifications arrive for both workspaces
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Build failed" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Tests passed" });
-    useNotificationStore.getState().addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Retry started" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Build failed" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Tests passed" });
+    useNotificationStore
+      .getState()
+      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Retry started" });
 
     expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(2);
     expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(1);
@@ -1174,9 +1255,15 @@ describe("Cross-Store Integration E2E", () => {
   });
 
   it("should simulate terminal close and sync group cleanup", () => {
-    useTerminalStore.getState().registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t2", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
-    useTerminalStore.getState().registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t1", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t2", profile: "WSL", syncGroup: "g1", workspaceId: "ws-1" });
+    useTerminalStore
+      .getState()
+      .registerInstance({ id: "t3", profile: "PowerShell", syncGroup: "g1", workspaceId: "ws-1" });
 
     expect(useTerminalStore.getState().getInstancesBySyncGroup("g1").length).toBe(3);
 
@@ -1287,7 +1374,7 @@ describe("Complex Workspace Layout Scenarios", () => {
         {
           id: "ws-a",
           name: "Project A",
-          layoutId: "dev-split",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView" } },
             { id: "p2", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
@@ -1297,20 +1384,6 @@ describe("Complex Workspace Layout Scenarios", () => {
       ],
       activeWorkspaceId: "ws-a",
     });
-  });
-
-  it("should revert complex layout back to template", () => {
-    // Modify: split the first pane
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
-
-    // Revert
-    useWorkspaceStore.getState().revertWorkspace();
-    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
-    expect(ws.panes.length).toBe(3);
-    expect(ws.panes[0].h).toBeCloseTo(0.6);
-    expect(ws.panes[1].w).toBeCloseTo(0.5);
-    expect(ws.panes[2].x).toBeCloseTo(0.5);
   });
 
   it("should create multiple workspaces sharing the same layout", () => {
@@ -1323,29 +1396,26 @@ describe("Complex Workspace Layout Scenarios", () => {
     // All have 3 panes from the dev-split layout
     for (const ws of workspaces) {
       expect(ws.panes.length).toBe(3);
-      expect(ws.layoutId).toBe("dev-split");
     }
   });
 
-  it("saveAndPropagate should update all workspaces from modified template", () => {
+  it("exportToLayout should update layout without affecting other workspaces", () => {
     useWorkspaceStore.getState().addWorkspace("Project B", "dev-split");
 
     // Split a pane in Project A
     useWorkspaceStore.getState().splitPane(0, "horizontal");
     expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes.length).toBe(4);
 
-    // Propagate changes
-    useWorkspaceStore.getState().saveAndPropagate();
+    // Export to existing layout
+    useWorkspaceStore.getState().exportToLayout("dev-split");
 
-    // Both workspaces should now have 4 panes
-    const { workspaces } = useWorkspaceStore.getState();
-    for (const ws of workspaces) {
-      expect(ws.panes.length).toBe(4);
-    }
-
-    // Layout template should also be updated
+    // Layout should be updated
     const layout = useWorkspaceStore.getState().layouts.find((l) => l.id === "dev-split")!;
     expect(layout.panes.length).toBe(4);
+
+    // Project B should NOT be affected (independent workspace)
+    const wsB = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "Project B")!;
+    expect(wsB.panes.length).toBe(3); // Still original 3 panes
   });
 
   it("should handle removing a pane from a multi-pane layout", () => {

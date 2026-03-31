@@ -18,6 +18,8 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
   loadSettings: vi.fn().mockResolvedValue({}),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  loadMemo: vi.fn().mockResolvedValue(""),
+  saveMemo: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/persist-session", () => ({
@@ -29,7 +31,13 @@ const terminalViewProps: { syncGroup?: string; profile?: string }[] = [];
 vi.mock("./TerminalView", () => ({
   TerminalView: (props: { instanceId: string; profile: string; syncGroup: string }) => {
     terminalViewProps.push({ syncGroup: props.syncGroup, profile: props.profile });
-    return <div data-testid="mock-terminal" data-syncgroup={props.syncGroup} data-profile={props.profile} />;
+    return (
+      <div
+        data-testid="mock-terminal"
+        data-syncgroup={props.syncGroup}
+        data-profile={props.profile}
+      />
+    );
   },
 }));
 
@@ -60,26 +68,28 @@ describe("ViewRenderer", () => {
     expect(terminalViewProps.at(-1)?.syncGroup).toBe("MyGroup");
   });
 
-  it("defaults syncGroup to workspaceName when syncGroup is empty", () => {
+  it("defaults syncGroup to workspaceId when syncGroup is empty", () => {
     render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView", syncGroup: "" }}
         workspaceName="ProjectA"
+        workspaceId="ws-abc123"
       />,
     );
-    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ProjectA");
+    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ws-abc123");
   });
 
-  it("defaults syncGroup to workspaceName when syncGroup is not specified", () => {
+  it("defaults syncGroup to workspaceId when syncGroup is not specified", () => {
     render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView" }}
         workspaceName="ProjectB"
+        workspaceId="ws-def456"
       />,
     );
-    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ProjectB");
+    expect(terminalViewProps.at(-1)?.syncGroup).toBe("ws-def456");
   });
 
   it("passes profile from viewConfig to TerminalView", () => {
@@ -94,34 +104,39 @@ describe("ViewRenderer", () => {
 
   it("defaults profile to settings defaultProfile when viewConfig has no profile", () => {
     useSettingsStore.setState({ defaultProfile: "WSL" });
-    render(
-      <ViewRenderer
-        viewType="TerminalView"
-        viewConfig={{ type: "TerminalView" }}
-      />,
-    );
+    render(<ViewRenderer viewType="TerminalView" viewConfig={{ type: "TerminalView" }} />);
     expect(terminalViewProps.at(-1)?.profile).toBe("WSL");
   });
 
   it("defaults profile to settings defaultProfile when viewConfig is undefined", () => {
     useSettingsStore.setState({ defaultProfile: "WSL" });
-    render(
-      <ViewRenderer
-        viewType="TerminalView"
-      />,
-    );
+    render(<ViewRenderer viewType="TerminalView" />);
     expect(terminalViewProps.at(-1)?.profile).toBe("WSL");
   });
 
   it("falls back to PowerShell when no profile and no defaultProfile set", () => {
     useSettingsStore.setState({ defaultProfile: "" });
+    render(<ViewRenderer viewType="TerminalView" viewConfig={{ type: "TerminalView" }} />);
+    expect(terminalViewProps.at(-1)?.profile).toBe("PowerShell");
+  });
+
+  it("renders MemoView with data-testid", () => {
+    render(<ViewRenderer viewType="MemoView" viewConfig={{ type: "MemoView" }} paneId="pane-99" />);
+    expect(screen.getByTestId("view-memo")).toBeInTheDocument();
+    expect(screen.getByTestId("memo-textarea")).toBeInTheDocument();
+  });
+
+  it("MemoView does not use onSelectView", () => {
+    const onSelectView = vi.fn();
     render(
       <ViewRenderer
-        viewType="TerminalView"
-        viewConfig={{ type: "TerminalView" }}
+        viewType="MemoView"
+        viewConfig={{ type: "MemoView" }}
+        paneId="pane-99"
+        onSelectView={onSelectView}
       />,
     );
-    expect(terminalViewProps.at(-1)?.profile).toBe("PowerShell");
+    expect(onSelectView).not.toHaveBeenCalled();
   });
 
   it("uses paneId for stable terminal instanceId", () => {

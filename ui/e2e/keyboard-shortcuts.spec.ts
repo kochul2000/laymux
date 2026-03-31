@@ -18,31 +18,49 @@ test.describe("Keyboard Shortcuts - Workspace Switching", () => {
   test("Ctrl+1 switches to first workspace", async ({ appPage: page }) => {
     // Switch to second workspace first
     await page.locator("[data-testid^='workspace-item-']").nth(1).click();
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
 
     // Now Ctrl+1 should switch back to first
     await page.keyboard.press("Control+1");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("Ctrl+2 switches to second workspace", async ({ appPage: page }) => {
     await page.keyboard.press("Control+2");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("Ctrl+9 switches to last workspace", async ({ appPage: page }) => {
     await page.keyboard.press("Control+9");
-    await expect(page.locator("[data-testid^='workspace-item-']").last()).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").last()).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("Ctrl+] cycles to next workspace", async ({ appPage: page }) => {
     // Start on workspace 1
     await page.keyboard.press("Control+1");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
 
     // Ctrl+] goes to next
     await page.keyboard.press("Control+]");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(1)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("Ctrl+[ cycles to previous workspace", async ({ appPage: page }) => {
@@ -51,17 +69,26 @@ test.describe("Keyboard Shortcuts - Workspace Switching", () => {
 
     // Ctrl+[ goes to previous
     await page.keyboard.press("Control+[");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   test("Ctrl+] wraps around from last to first", async ({ appPage: page }) => {
     // Go to last workspace
     await page.keyboard.press("Control+9");
-    await expect(page.locator("[data-testid^='workspace-item-']").last()).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").last()).toHaveAttribute(
+      "data-active",
+      "true",
+    );
 
     // Ctrl+] should wrap to first
     await page.keyboard.press("Control+]");
-    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute("data-active", "true");
+    await expect(page.locator("[data-testid^='workspace-item-']").nth(0)).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 });
 

@@ -94,7 +94,10 @@ pub fn handle_tools_list(id: &Value) -> Value {
 /// Execute a tool call via the Automation API.
 pub fn handle_tools_call(id: &Value, params: &Value, base_url: &str) -> Value {
     let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     let result = match tool_name {
         "list_terminals" => call_list_terminals(base_url),
@@ -150,7 +153,11 @@ pub fn handle_request(req: &Value, base_url: &str) -> Option<Value> {
             if id.is_null() {
                 None
             } else {
-                Some(error_response(id, -32601, &format!("Method not found: {method}")))
+                Some(error_response(
+                    id,
+                    -32601,
+                    &format!("Method not found: {method}"),
+                ))
             }
         }
     }
@@ -197,10 +204,7 @@ fn call_read_terminal_output(base_url: &str, args: &Value) -> Result<String, Str
         .get("terminal_id")
         .and_then(|v| v.as_str())
         .ok_or("Missing terminal_id")?;
-    let lines = args
-        .get("lines")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(100);
+    let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(100);
 
     let url = format!(
         "{}/api/v1/terminals/{}/output?lines={}",

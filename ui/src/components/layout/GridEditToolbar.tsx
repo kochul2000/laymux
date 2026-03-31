@@ -15,10 +15,9 @@ async function getWindow() {
 export function GridEditToolbar() {
   const editMode = useGridStore((s) => s.editMode);
   const toggleEditMode = useGridStore((s) => s.toggleEditMode);
-  const saveWorkspace = useWorkspaceStore((s) => s.saveWorkspace);
-  const saveAndPropagate = useWorkspaceStore((s) => s.saveAndPropagate);
-  const saveAsNewLayout = useWorkspaceStore((s) => s.saveAsNewLayout);
-  const revertWorkspace = useWorkspaceStore((s) => s.revertWorkspace);
+  const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
+  const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
+  const layouts = useWorkspaceStore((s) => s.layouts);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
@@ -28,19 +27,27 @@ export function GridEditToolbar() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    getWindow().then((w) => w.isMaximized().then(setMaximized)).catch(() => {});
+    getWindow()
+      .then((w) => w.isMaximized().then(setMaximized))
+      .catch(() => {});
   }, []);
 
   const handleMinimize = useCallback(() => {
-    getWindow().then((w) => w.minimize()).catch(() => {});
+    getWindow()
+      .then((w) => w.minimize())
+      .catch(() => {});
   }, []);
 
   const handleToggleMaximize = useCallback(() => {
-    getWindow().then((w) => w.toggleMaximize().then(() => w.isMaximized().then(setMaximized))).catch(() => {});
+    getWindow()
+      .then((w) => w.toggleMaximize().then(() => w.isMaximized().then(setMaximized)))
+      .catch(() => {});
   }, []);
 
   const handleClose = useCallback(() => {
-    getWindow().then((w) => w.close()).catch(() => {});
+    getWindow()
+      .then((w) => w.close())
+      .catch(() => {});
   }, []);
 
   /** Dock position icons: rectangle with highlighted edge showing dock location */
@@ -84,8 +91,12 @@ export function GridEditToolbar() {
     borderRadius: 2,
   };
 
-  const hoverIn = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; };
-  const hoverOut = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "transparent"; };
+  const hoverIn = (e: React.MouseEvent) => {
+    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)";
+  };
+  const hoverOut = (e: React.MouseEvent) => {
+    (e.currentTarget as HTMLElement).style.background = "transparent";
+  };
 
   return (
     <div
@@ -106,7 +117,10 @@ export function GridEditToolbar() {
           draggable={false}
         />
 
-        <div className="mx-1" style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
+        <div
+          className="mx-1"
+          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
+        />
 
         <button
           data-testid="edit-mode-toggle"
@@ -126,51 +140,44 @@ export function GridEditToolbar() {
 
         {editMode && (
           <>
-            <div className="mx-1" style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
+            <div
+              className="mx-1"
+              style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
+            />
 
             <button
-              data-testid="save-btn"
-              onClick={saveWorkspace}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Save
-            </button>
-            <button
-              data-testid="save-propagate-btn"
-              onClick={saveAndPropagate}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Save All
-            </button>
-            <button
-              data-testid="save-as-btn"
+              data-testid="export-new-btn"
               onClick={() => {
                 const name = window.prompt("New layout name:");
-                if (name?.trim()) saveAsNewLayout(name.trim());
+                if (name?.trim()) exportAsNewLayout(name.trim());
               }}
               className={btnBase}
               style={btnStyle}
               onMouseEnter={hoverIn}
               onMouseLeave={hoverOut}
             >
-              Save As
+              Export New
             </button>
-            <button
-              data-testid="revert-btn"
-              onClick={revertWorkspace}
-              className={btnBase}
-              style={btnStyle}
-              onMouseEnter={hoverIn}
-              onMouseLeave={hoverOut}
-            >
-              Revert
-            </button>
+            {layouts.length > 0 && (
+              <select
+                data-testid="export-overwrite-select"
+                className={btnBase}
+                style={{ ...btnStyle, cursor: "pointer", minWidth: 90 }}
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) exportToLayout(e.target.value);
+                }}
+              >
+                <option value="" disabled>
+                  Overwrite...
+                </option>
+                {layouts.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </>
         )}
       </div>
@@ -196,7 +203,9 @@ export function GridEditToolbar() {
                 onClick={() => toggleDockVisible(pos)}
                 className="flex h-5 w-5 cursor-pointer items-center justify-center text-[11px] leading-none"
                 style={{
-                  color: isVisible ? "var(--text-primary)" : "var(--text-muted, var(--text-secondary))",
+                  color: isVisible
+                    ? "var(--text-primary)"
+                    : "var(--text-muted, var(--text-secondary))",
                   opacity: isVisible ? 0.9 : 0.3,
                   background: "transparent",
                   border: "none",
@@ -218,12 +227,19 @@ export function GridEditToolbar() {
             background: "transparent",
             border: "1px solid var(--border)",
           }}
-          title={layoutMode === "horizontal" ? "Horizontal layout (click to switch)" : "Vertical layout (click to switch)"}
+          title={
+            layoutMode === "horizontal"
+              ? "Horizontal layout (click to switch)"
+              : "Vertical layout (click to switch)"
+          }
         >
           {layoutMode === "horizontal" ? "H" : "V"}
         </button>
 
-        <div className="mx-1" style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
+        <div
+          className="mx-1"
+          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
+        />
 
         <button
           data-testid="settings-gear-btn"
@@ -246,10 +262,20 @@ export function GridEditToolbar() {
           data-testid="window-minimize"
           onClick={handleMinimize}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center"
-          style={{ color: "var(--text-secondary)", background: "transparent", border: "none", fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'", fontSize: 10 }}
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "none",
+            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
+            fontSize: 10,
+          }}
           title="Minimize"
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
         >
           {"\uE921"}
         </button>
@@ -257,10 +283,20 @@ export function GridEditToolbar() {
           data-testid="window-maximize"
           onClick={handleToggleMaximize}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center"
-          style={{ color: "var(--text-secondary)", background: "transparent", border: "none", fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'", fontSize: 10 }}
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "none",
+            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
+            fontSize: 10,
+          }}
           title={maximized ? "Restore" : "Maximize"}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
         >
           {maximized ? "\uE923" : "\uE922"}
         </button>
@@ -268,10 +304,22 @@ export function GridEditToolbar() {
           data-testid="window-close"
           onClick={handleClose}
           className="flex h-full w-[46px] cursor-pointer items-center justify-center"
-          style={{ color: "var(--text-secondary)", background: "transparent", border: "none", fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'", fontSize: 10 }}
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "none",
+            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
+            fontSize: 10,
+          }}
           title="Close"
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#c42b1c"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#c42b1c";
+            e.currentTarget.style.color = "#fff";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.color = "var(--text-secondary)";
+          }}
         >
           {"\uE8BB"}
         </button>

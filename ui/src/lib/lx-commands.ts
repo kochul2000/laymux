@@ -77,10 +77,7 @@ function tokenize(input: string): string[] {
 /**
  * Expand variables in a hook command template.
  */
-export function expandHookCommand(
-  template: string,
-  vars: Record<string, string>,
-): string {
+export function expandHookCommand(template: string, vars: Record<string, string>): string {
   return template.replace(/\$(\w+)/g, (match, name) => {
     return vars[name] ?? match;
   });

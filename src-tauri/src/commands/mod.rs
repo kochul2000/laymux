@@ -29,6 +29,7 @@ pub fn create_terminal_session(
     cols: u16,
     rows: u16,
     sync_group: String,
+    cwd_receive: Option<bool>,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -45,23 +46,32 @@ pub fn create_terminal_session(
         }
     }
 
-    // Look up the profile's command_line and startup_command from settings
+    // Look up the profile's command_line, startup_command, and starting_directory from settings
     let settings = crate::settings::load_settings();
     let matched_profile = settings.profiles.iter().find(|p| p.name == profile);
-    let command_line = matched_profile.map(|p| p.command_line.clone()).unwrap_or_default();
-    let startup_command = matched_profile.map(|p| p.startup_command.clone()).unwrap_or_default();
+    let command_line = matched_profile
+        .map(|p| p.command_line.clone())
+        .unwrap_or_default();
+    let startup_command = matched_profile
+        .map(|p| p.startup_command.clone())
+        .unwrap_or_default();
+    let starting_directory = matched_profile
+        .map(|p| p.starting_directory.clone())
+        .unwrap_or_default();
 
     let config = TerminalConfig {
         profile,
         command_line,
         startup_command,
+        starting_directory,
         cols,
         rows,
         sync_group: sync_group.clone(),
         env,
     };
 
-    let session = TerminalSession::new(id.clone(), config);
+    let mut session = TerminalSession::new(id.clone(), config);
+    session.cwd_receive = cwd_receive.unwrap_or(true);
 
     // Check for duplicate
     {
@@ -95,22 +105,23 @@ pub fn create_terminal_session(
                 buf.push(&data);
             }
         }
-        let _ = app_clone.emit(
-            &format!("terminal-output-{terminal_id}"),
-            data,
-        );
+        let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
 
     // Store session and PTY handle
-    let result = TerminalSession::new(id.clone(), TerminalConfig {
-        profile: session.config.profile.clone(),
-        command_line: session.config.command_line.clone(),
-        startup_command: session.config.startup_command.clone(),
-        cols: session.config.cols,
-        rows: session.config.rows,
-        sync_group: session.config.sync_group.clone(),
-        env: session.config.env.clone(),
-    });
+    let result = TerminalSession::new(
+        id.clone(),
+        TerminalConfig {
+            profile: session.config.profile.clone(),
+            command_line: session.config.command_line.clone(),
+            startup_command: session.config.startup_command.clone(),
+            starting_directory: session.config.starting_directory.clone(),
+            cols: session.config.cols,
+            rows: session.config.rows,
+            sync_group: session.config.sync_group.clone(),
+            env: session.config.env.clone(),
+        },
+    );
 
     {
         let mut terminals = state
@@ -176,7 +187,11 @@ pub fn resize_terminal(
 }
 
 #[tauri::command]
-pub fn write_to_terminal(id: String, data: String, state: State<Arc<AppState>>) -> Result<(), String> {
+pub fn write_to_terminal(
+    id: String,
+    data: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
     let ptys = state
         .pty_handles
         .lock()
@@ -233,6 +248,11 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
     // Clean up propagation flag
     if let Ok(mut propagated) = state.propagated_terminals.lock() {
         propagated.remove(&id);
+    }
+
+    // Clean up Claude terminal tracking
+    if let Ok(mut known) = state.known_claude_terminals.lock() {
+        known.remove(&id);
     }
 
     Ok(())
@@ -370,21 +390,35 @@ fn handle_lx_message_dispatch(
             // Update stored CWD for the source terminal
             update_terminal_cwd(&state, &terminal_id, &normalized_path);
 
-            let all_targets = resolve_target_terminals(&state, &terminal_id, &group_id, all, target_group.as_deref())?;
+            let all_targets = resolve_target_terminals(
+                &state,
+                &terminal_id,
+                &group_id,
+                all,
+                target_group.as_deref(),
+            )?;
 
             // Skip targets that have cwd_receive disabled
             let receiving_targets = filter_targets_cwd_receive(&state, &all_targets);
 
             // Skip targets that have a command running (e.g., interactive apps like Claude Code)
             let settings = crate::settings::load_settings();
-            let (idle_targets, claude_ids) = filter_targets_not_busy(&state, &receiving_targets, &settings.claude.sync_cwd);
+            let (idle_targets, claude_ids) =
+                filter_targets_not_busy(&state, &receiving_targets, &settings.claude.sync_cwd);
 
             // Skip targets that are already at the same CWD
-            let target_terminals = filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
+            let target_terminals =
+                filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
 
             // Write cd command to target terminals (with propagation flag + path conversion)
             if !target_terminals.is_empty() {
-                write_cd_to_group_terminals(&state, &target_terminals, &terminal_id, &normalized_path, &claude_ids)?;
+                write_cd_to_group_terminals(
+                    &state,
+                    &target_terminals,
+                    &terminal_id,
+                    &normalized_path,
+                    &claude_ids,
+                )?;
             }
 
             // Mark targets so their OSC echo won't re-propagate
@@ -398,12 +432,15 @@ fn handle_lx_message_dispatch(
             }
 
             // Emit sync-cwd event to frontend — only receiving targets, not all
-            let _ = app.emit("sync-cwd", serde_json::json!({
-                "path": normalized_path,
-                "terminalId": terminal_id,
-                "groupId": group_id,
-                "targets": receiving_targets,
-            }));
+            let _ = app.emit(
+                "sync-cwd",
+                serde_json::json!({
+                    "path": normalized_path,
+                    "terminalId": terminal_id,
+                    "groupId": group_id,
+                    "targets": receiving_targets,
+                }),
+            );
 
             Ok(LxResponse::ok(Some(format!(
                 "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
@@ -419,11 +456,14 @@ fn handle_lx_message_dispatch(
             group_id,
         } => {
             // Emit sync-branch event to frontend for UI updates
-            let _ = app.emit("sync-branch", serde_json::json!({
-                "branch": branch,
-                "terminalId": terminal_id,
-                "groupId": group_id,
-            }));
+            let _ = app.emit(
+                "sync-branch",
+                serde_json::json!({
+                    "branch": branch,
+                    "terminalId": terminal_id,
+                    "groupId": group_id,
+                }),
+            );
 
             let groups = state
                 .sync_groups
@@ -439,7 +479,11 @@ fn handle_lx_message_dispatch(
                 branch, count
             ))))
         }
-        LxMessage::Notify { message, terminal_id, level } => {
+        LxMessage::Notify {
+            message,
+            terminal_id,
+            level,
+        } => {
             // Emit notification to frontend
             let mut payload = serde_json::json!({
                 "message": message,
@@ -461,10 +505,13 @@ fn handle_lx_message_dispatch(
                 session.title = title.clone();
             }
 
-            let _ = app.emit("set-tab-title", serde_json::json!({
-                "title": title,
-                "terminalId": terminal_id,
-            }));
+            let _ = app.emit(
+                "set-tab-title",
+                serde_json::json!({
+                    "title": title,
+                    "terminalId": terminal_id,
+                }),
+            );
 
             Ok(LxResponse::ok(Some(format!("title set: {}", title))))
         }
@@ -505,19 +552,28 @@ fn handle_lx_message_dispatch(
 
             Ok(LxResponse::ok(Some(format!(
                 "sent '{}' to {} terminals in group '{}'",
-                command, target_ids.len(), group
+                command,
+                target_ids.len(),
+                group
             ))))
         }
         LxMessage::OpenFile { path, terminal_id } => {
             // Emit open-file event to frontend
-            let _ = app.emit("open-file", serde_json::json!({
-                "path": path,
-                "terminalId": terminal_id,
-            }));
+            let _ = app.emit(
+                "open-file",
+                serde_json::json!({
+                    "path": path,
+                    "terminalId": terminal_id,
+                }),
+            );
 
             Ok(LxResponse::ok(Some(format!("open-file: {}", path))))
         }
-        LxMessage::SetCommandStatus { terminal_id, command, exit_code } => {
+        LxMessage::SetCommandStatus {
+            terminal_id,
+            command,
+            exit_code,
+        } => {
             // Update command_running state on the terminal session.
             // command present (no exit_code) → command started → running = true
             // exit_code present → command finished → running = false
@@ -644,7 +700,10 @@ fn write_to_group_terminals(
 
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
-            let profile = terminals.get(id).map(|t| t.config.profile.as_str()).unwrap_or("WSL");
+            let profile = terminals
+                .get(id)
+                .map(|t| t.config.profile.as_str())
+                .unwrap_or("WSL");
             // PowerShell on Windows ConPTY uses CR as Enter; ensure the command ends correctly
             let cmd = if matches!(profile, "PowerShell" | "powershell") {
                 command.trim_end_matches('\n').to_string() + "\r"
@@ -698,14 +757,11 @@ fn write_cd_to_group_terminals(
                 .unwrap_or("WSL");
 
             // Convert path for the target profile; skip if not convertible
-            let converted = match convert_path_for_target_with_distro(
-                path,
-                profile,
-                wsl_distro.as_deref(),
-            ) {
-                Some(p) => p,
-                None => continue,
-            };
+            let converted =
+                match convert_path_for_target_with_distro(path, profile, wsl_distro.as_deref()) {
+                    Some(p) => p,
+                    None => continue,
+                };
 
             let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(id));
             let _ = handle.write(cmd.as_bytes());
@@ -797,6 +853,16 @@ pub fn save_settings(settings: crate::settings::Settings) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn load_memo(key: String) -> Result<String, String> {
+    Ok(crate::settings::load_memo(&key))
+}
+
+#[tauri::command]
+pub fn save_memo(key: String, content: String) -> Result<(), String> {
+    crate::settings::save_memo(&key, &content)
+}
+
+#[tauri::command]
 pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
@@ -844,8 +910,7 @@ fn base64_encode(input: &[u8]) -> String {
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
 fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("Failed to read screenshot: {e}"))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Failed to read screenshot: {e}"))?;
     let b64 = base64_encode(&bytes);
 
     let filename = path
@@ -855,7 +920,14 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
 
     // Get repo name
     let repo_out = std::process::Command::new("gh")
-        .args(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+        .args([
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "-q",
+            ".nameWithOwner",
+        ])
         .output()
         .map_err(|e| format!("gh repo view failed: {e}"))?;
     if !repo_out.status.success() {
@@ -864,26 +936,31 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
     let repo = String::from_utf8_lossy(&repo_out.stdout).trim().to_string();
 
     // Write JSON body to temp file (avoids command-line length limits)
-    let json_body = format!(
-        r#"{{"message":"Upload issue screenshot","content":"{b64}"}}"#
-    );
+    let json_body = format!(r#"{{"message":"Upload issue screenshot","content":"{b64}"}}"#);
     let temp_path = std::env::temp_dir().join("laymux_gh_upload.json");
     std::fs::write(&temp_path, &json_body)
         .map_err(|e| format!("Failed to write temp file: {e}"))?;
 
     // Upload via GitHub contents API
-    let api_path = format!(
-        "repos/{repo}/contents/.github/issue-screenshots/{filename}"
-    );
+    let api_path = format!("repos/{repo}/contents/.github/issue-screenshots/{filename}");
     let upload_out = std::process::Command::new("gh")
-        .args(["api", &api_path, "-X", "PUT", "--input", &temp_path.to_string_lossy()])
+        .args([
+            "api",
+            &api_path,
+            "-X",
+            "PUT",
+            "--input",
+            &temp_path.to_string_lossy(),
+        ])
         .output()
         .map_err(|e| format!("gh api upload failed: {e}"))?;
 
     let _ = std::fs::remove_file(&temp_path);
 
     if !upload_out.status.success() {
-        let stderr = String::from_utf8_lossy(&upload_out.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&upload_out.stderr)
+            .trim()
+            .to_string();
         return Err(format!("GitHub upload failed: {stderr}"));
     }
 
@@ -895,7 +972,11 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
 }
 
 #[tauri::command]
-pub async fn submit_github_issue(title: String, body: String, screenshot_path: Option<String>) -> Result<String, String> {
+pub async fn submit_github_issue(
+    title: String,
+    body: String,
+    screenshot_path: Option<String>,
+) -> Result<String, String> {
     let mut full_body = body;
 
     // Upload screenshot to GitHub and embed the image in the body
@@ -991,9 +1072,7 @@ pub fn automation_response(
 
     if let Some(tx) = tx {
         let value = if response.success {
-            response
-                .data
-                .unwrap_or(serde_json::Value::Null)
+            response.data.unwrap_or(serde_json::Value::Null)
         } else {
             serde_json::json!({
                 "success": false,
@@ -1073,7 +1152,7 @@ fn filter_targets_not_busy(
         let mut result = Vec::new();
         for id in targets {
             let buf = buffers.get(id.as_str());
-            if is_claude_terminal_from_buffer(buf) {
+            if is_claude_terminal_from_buffer(state, id, buf) {
                 // Handle Claude Code terminal based on settings
                 match claude_mode {
                     crate::settings::ClaudeSyncCwdMode::Skip => {
@@ -1098,10 +1177,59 @@ fn filter_targets_not_busy(
     }
 }
 
-/// Check if a terminal is running Claude Code by examining its output buffer title.
+/// Check if ANY terminal title (OSC 0 or OSC 2) in the buffer data contains the given substring.
+/// Scans all title sequences, not just the last one.
+fn any_terminal_title_contains(data: &[u8], substring: &str) -> bool {
+    let needle_0: &[u8] = &[0x1b, b']', b'0', b';'];
+    let needle_2: &[u8] = &[0x1b, b']', b'2', b';'];
+
+    for needle in [needle_0, needle_2] {
+        let mut start = 0;
+        while start + needle.len() <= data.len() {
+            if let Some(found) = data[start..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+            {
+                let abs_pos = start + found;
+                let title_start = abs_pos + needle.len();
+                if title_start < data.len() {
+                    let remaining = &data[title_start..];
+                    if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
+                        let title = String::from_utf8_lossy(&remaining[..end]);
+                        if title.contains(substring) {
+                            return true;
+                        }
+                    }
+                }
+                start = abs_pos + 1;
+            } else {
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a terminal is running Claude Code.
+/// Uses two-pronged detection:
+/// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
+/// 2. Full buffer title scan — checks ALL OSC 0/2 titles, not just the last one
+///
+/// When detected via buffer scan, the terminal ID is added to `known_claude_terminals`
+/// so future calls don't depend on the title still being in the buffer.
 fn is_claude_terminal_from_buffer(
+    state: &AppState,
+    terminal_id: &str,
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
 ) -> bool {
+    // Prong 1: Check persistent tracking
+    if let Ok(known) = state.known_claude_terminals.lock() {
+        if known.contains(terminal_id) {
+            return true;
+        }
+    }
+
+    // Prong 2: Scan ALL titles in buffer for "Claude Code"
     let Some(buf) = buffer else {
         return false;
     };
@@ -1109,18 +1237,21 @@ fn is_claude_terminal_from_buffer(
     if recent.is_empty() {
         return false;
     }
-    if let Some(title) = extract_last_terminal_title(&recent) {
-        title.contains("Claude Code")
-    } else {
-        false
+
+    if any_terminal_title_contains(&recent, "Claude Code") {
+        // Mark persistently for future calls
+        if let Ok(mut known) = state.known_claude_terminals.lock() {
+            known.insert(terminal_id.to_string());
+        }
+        return true;
     }
+
+    false
 }
 
 /// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
 /// Claude Code sets the terminal title with ✳ when idle and spinner chars when working.
-fn is_claude_idle_from_buffer(
-    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> bool {
+fn is_claude_idle_from_buffer(buffer: Option<&crate::output_buffer::TerminalOutputBuffer>) -> bool {
     let Some(buf) = buffer else {
         return false;
     };
@@ -1156,9 +1287,9 @@ fn is_terminal_at_prompt_from_buffer(
 
     match (last_c, last_d) {
         (Some(c_pos), Some(d_pos)) => d_pos > c_pos, // D after C = at prompt
-        (None, Some(_)) => true,                       // Only D = at prompt
-        (Some(_), None) => false,                      // Only C = command running
-        (None, None) => true,                          // No markers = assume at prompt
+        (None, Some(_)) => true,                     // Only D = at prompt
+        (Some(_), None) => false,                    // Only C = command running
+        (None, None) => true,                        // No markers = assume at prompt
     }
 }
 
@@ -1171,7 +1302,10 @@ fn find_last_osc_133(data: &[u8], param: &[u8]) -> Option<usize> {
     let mut pos = None;
     let mut start = 0;
     while start + needle.len() <= data.len() {
-        if let Some(found) = data[start..].windows(needle.len()).position(|w| w == needle.as_slice()) {
+        if let Some(found) = data[start..]
+            .windows(needle.len())
+            .position(|w| w == needle.as_slice())
+        {
             pos = Some(start + found);
             start = start + found + 1;
         } else {
@@ -1255,7 +1389,10 @@ fn extract_last_terminal_title(data: &[u8]) -> Option<String> {
     for needle in [needle_0, needle_2] {
         let mut start = 0;
         while start + needle.len() <= data.len() {
-            if let Some(found) = data[start..].windows(needle.len()).position(|w| w == needle) {
+            if let Some(found) = data[start..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+            {
                 let abs_pos = start + found;
                 if best_pos.map_or(true, |bp| abs_pos > bp) {
                     best_pos = Some(abs_pos);
@@ -1332,7 +1469,11 @@ pub fn get_terminal_states(
 
 /// Filter target terminals to only those whose CWD differs from the sync path.
 /// Terminals already at the target CWD don't need a cd command.
-fn filter_targets_needing_cd(state: &AppState, targets: &[String], normalized_path: &str) -> Vec<String> {
+fn filter_targets_needing_cd(
+    state: &AppState,
+    targets: &[String],
+    normalized_path: &str,
+) -> Vec<String> {
     if let Ok(terminals) = state.terminals.lock() {
         targets
             .iter()
@@ -1488,12 +1629,16 @@ fn build_cd_command(path: &str, profile: &str) -> String {
 /// - `/home/user` → `/home/user` (already canonical)
 fn normalize_wsl_path(path: &str) -> String {
     // Strip PowerShell provider prefix (safety net)
-    let path = if let Some(rest) = path.strip_prefix("file://localhost/Microsoft.PowerShell.Core/FileSystem::") {
+    let path = if let Some(rest) =
+        path.strip_prefix("file://localhost/Microsoft.PowerShell.Core/FileSystem::")
+    {
         rest
     } else {
         path
     };
-    let path = path.strip_prefix("Microsoft.PowerShell.Core/FileSystem::").unwrap_or(path);
+    let path = path
+        .strip_prefix("Microsoft.PowerShell.Core/FileSystem::")
+        .unwrap_or(path);
 
     // file://localhost/<path> (OSC 7 CWD format)
     if let Some(rest) = path.strip_prefix("file://localhost") {
@@ -1522,7 +1667,9 @@ fn normalize_wsl_path(path: &str) -> String {
     }
     // Bare Windows path: C:\... or C:/... → /mnt/c/...
     let pb = path.as_bytes();
-    if pb.len() >= 3 && pb[0].is_ascii_alphabetic() && pb[1] == b':'
+    if pb.len() >= 3
+        && pb[0].is_ascii_alphabetic()
+        && pb[1] == b':'
         && (pb[2] == b'\\' || pb[2] == b'/')
     {
         let drive = (pb[0] as char).to_ascii_lowercase();
@@ -1559,7 +1706,10 @@ fn cleanup_stale_propagations(state: &AppState) {
 
 /// Tauri command: smart paste — resolve clipboard files/images into paths.
 #[tauri::command]
-pub fn smart_paste(image_dir: String, profile: String) -> Result<crate::clipboard::SmartPasteResult, String> {
+pub fn smart_paste(
+    image_dir: String,
+    profile: String,
+) -> Result<crate::clipboard::SmartPasteResult, String> {
     crate::clipboard::smart_paste(&image_dir, &profile)
 }
 
@@ -1611,9 +1761,18 @@ mod tests {
         let state = AppState::new();
         {
             let mut terminals = state.terminals.lock().unwrap();
-            terminals.insert("t1".into(), TerminalSession::new("t1".into(), TerminalConfig::default()));
-            terminals.insert("t2".into(), TerminalSession::new("t2".into(), TerminalConfig::default()));
-            terminals.insert("t3".into(), TerminalSession::new("t3".into(), TerminalConfig::default()));
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+            terminals.insert(
+                "t2".into(),
+                TerminalSession::new("t2".into(), TerminalConfig::default()),
+            );
+            terminals.insert(
+                "t3".into(),
+                TerminalSession::new("t3".into(), TerminalConfig::default()),
+            );
         }
 
         let mut targets = resolve_target_terminals(&state, "t1", "", true, None).unwrap();
@@ -1823,7 +1982,10 @@ mod tests {
             let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
             session.cwd = Some("/home/user/project".into());
             terminals.insert("t1".into(), session);
-            terminals.insert("t2".into(), TerminalSession::new("t2".into(), TerminalConfig::default()));
+            terminals.insert(
+                "t2".into(),
+                TerminalSession::new("t2".into(), TerminalConfig::default()),
+            );
         }
         {
             let mut groups = state.sync_groups.lock().unwrap();
@@ -1843,7 +2005,10 @@ mod tests {
 
     #[test]
     fn normalize_wsl_path_leaves_linux_paths_unchanged() {
-        assert_eq!(normalize_wsl_path("/home/user/project"), "/home/user/project");
+        assert_eq!(
+            normalize_wsl_path("/home/user/project"),
+            "/home/user/project"
+        );
         assert_eq!(normalize_wsl_path("~/dev"), "~/dev");
     }
 
@@ -1859,13 +2024,9 @@ mod tests {
             normalize_wsl_path("file://localhost/home/user/project"),
             "/home/user/project"
         );
-        assert_eq!(
-            normalize_wsl_path("file://localhost/tmp"),
-            "/tmp"
-        );
+        assert_eq!(normalize_wsl_path("file://localhost/tmp"), "/tmp");
     }
 
-    #[test]
     #[test]
     fn normalize_powershell_osc7_windows_path() {
         // PowerShell emits: file://localhost/C:/Users/kochul → /mnt/c/Users/kochul
@@ -1877,10 +2038,7 @@ mod tests {
             normalize_wsl_path("file://localhost/D:/Games/SteamLibrary"),
             "/mnt/d/Games/SteamLibrary"
         );
-        assert_eq!(
-            normalize_wsl_path("file://localhost/C:/"),
-            "/mnt/c/"
-        );
+        assert_eq!(normalize_wsl_path("file://localhost/C:/"), "/mnt/c/");
     }
 
     #[test]
@@ -1917,14 +2075,24 @@ mod tests {
             buf2.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07"); // Last is C → running
             buffers.insert("t2".into(), buf2);
 
-            buffers.insert("t3".into(), crate::output_buffer::TerminalOutputBuffer::default());
+            buffers.insert(
+                "t3".into(),
+                crate::output_buffer::TerminalOutputBuffer::default(),
+            );
         }
 
         let targets = vec!["t1".into(), "t2".into(), "t3".into()];
-        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        let (filtered, claude_ids) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert!(filtered.contains(&"t1".to_string()), "t1 at prompt");
-        assert!(!filtered.contains(&"t2".to_string()), "t2 is busy, should be excluded");
-        assert!(filtered.contains(&"t3".to_string()), "t3 no output, assume at prompt");
+        assert!(
+            !filtered.contains(&"t2".to_string()),
+            "t2 is busy, should be excluded"
+        );
+        assert!(
+            filtered.contains(&"t3".to_string()),
+            "t3 no output, assume at prompt"
+        );
         assert!(claude_ids.is_empty(), "no Claude terminals in this test");
     }
 
@@ -1932,7 +2100,8 @@ mod tests {
     fn filter_targets_not_busy_includes_unknown_terminals() {
         let state = AppState::new();
         let targets = vec!["unknown".into()];
-        let (filtered, _) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         assert_eq!(filtered, vec!["unknown"]);
     }
 
@@ -1940,25 +2109,37 @@ mod tests {
     fn is_terminal_at_prompt_detects_running_command() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
-        assert!(!is_terminal_at_prompt_from_buffer(Some(&buf)), "After C, command is running");
+        assert!(
+            !is_terminal_at_prompt_from_buffer(Some(&buf)),
+            "After C, command is running"
+        );
     }
 
     #[test]
     fn is_terminal_at_prompt_detects_idle() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
-        assert!(is_terminal_at_prompt_from_buffer(Some(&buf)), "After D, terminal is idle");
+        assert!(
+            is_terminal_at_prompt_from_buffer(Some(&buf)),
+            "After D, terminal is idle"
+        );
     }
 
     #[test]
     fn is_terminal_at_prompt_empty_buffer() {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
-        assert!(is_terminal_at_prompt_from_buffer(Some(&buf)), "Empty buffer → assume at prompt");
+        assert!(
+            is_terminal_at_prompt_from_buffer(Some(&buf)),
+            "Empty buffer → assume at prompt"
+        );
     }
 
     #[test]
     fn is_terminal_at_prompt_no_buffer() {
-        assert!(is_terminal_at_prompt_from_buffer(None), "No buffer → assume at prompt");
+        assert!(
+            is_terminal_at_prompt_from_buffer(None),
+            "No buffer → assume at prompt"
+        );
     }
 
     #[test]
@@ -1967,9 +2148,18 @@ mod tests {
         let state = AppState::new();
         {
             let mut terminals = state.terminals.lock().unwrap();
-            terminals.insert("t1".into(), TerminalSession::new("t1".into(), TerminalConfig::default()));
-            terminals.insert("t2".into(), TerminalSession::new("t2".into(), TerminalConfig::default()));
-            terminals.insert("t3".into(), TerminalSession::new("t3".into(), TerminalConfig::default()));
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+            terminals.insert(
+                "t2".into(),
+                TerminalSession::new("t2".into(), TerminalConfig::default()),
+            );
+            terminals.insert(
+                "t3".into(),
+                TerminalSession::new("t3".into(), TerminalConfig::default()),
+            );
         }
         {
             let mut buffers = state.output_buffers.lock().unwrap();
@@ -1994,7 +2184,11 @@ mod tests {
         let all_targets = resolve_target_terminals(&state, "t1", "g1", false, None).unwrap();
         assert_eq!(all_targets, vec!["t2", "t3"]);
 
-        let (idle_targets, _) = filter_targets_not_busy(&state, &all_targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        let (idle_targets, _) = filter_targets_not_busy(
+            &state,
+            &all_targets,
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
         assert_eq!(idle_targets, vec!["t2"]);
     }
 
@@ -2016,14 +2210,20 @@ mod tests {
     fn detect_activity_shell_at_prompt() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
-        assert_eq!(detect_terminal_activity(Some(&buf)), TerminalActivity::Shell);
+        assert_eq!(
+            detect_terminal_activity(Some(&buf)),
+            TerminalActivity::Shell
+        );
     }
 
     #[test]
     fn detect_activity_running_command() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
-        assert_eq!(detect_terminal_activity(Some(&buf)), TerminalActivity::Running);
+        assert_eq!(
+            detect_terminal_activity(Some(&buf)),
+            TerminalActivity::Running
+        );
     }
 
     #[test]
@@ -2033,7 +2233,9 @@ mod tests {
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
         assert_eq!(
             detect_terminal_activity(Some(&buf)),
-            TerminalActivity::InteractiveApp { name: "Claude Code".to_string() }
+            TerminalActivity::InteractiveApp {
+                name: "Claude Code".to_string()
+            }
         );
     }
 
@@ -2043,7 +2245,9 @@ mod tests {
         buf.push(b"\x1b]133;D;0\x07\x1b]133;C\x07\x1b]0;vim main.rs\x07");
         assert_eq!(
             detect_terminal_activity(Some(&buf)),
-            TerminalActivity::InteractiveApp { name: "vim".to_string() }
+            TerminalActivity::InteractiveApp {
+                name: "vim".to_string()
+            }
         );
     }
 
@@ -2055,25 +2259,37 @@ mod tests {
     #[test]
     fn detect_activity_empty_buffer() {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
-        assert_eq!(detect_terminal_activity(Some(&buf)), TerminalActivity::Shell);
+        assert_eq!(
+            detect_terminal_activity(Some(&buf)),
+            TerminalActivity::Shell
+        );
     }
 
     #[test]
     fn extract_title_osc0() {
         let data = b"some output\x1b]0;my title\x07more output";
-        assert_eq!(extract_last_terminal_title(data), Some("my title".to_string()));
+        assert_eq!(
+            extract_last_terminal_title(data),
+            Some("my title".to_string())
+        );
     }
 
     #[test]
     fn extract_title_osc2() {
         let data = b"\x1b]2;window title\x07";
-        assert_eq!(extract_last_terminal_title(data), Some("window title".to_string()));
+        assert_eq!(
+            extract_last_terminal_title(data),
+            Some("window title".to_string())
+        );
     }
 
     #[test]
     fn extract_title_last_wins() {
         let data = b"\x1b]0;first\x07middle\x1b]0;second\x07end";
-        assert_eq!(extract_last_terminal_title(data), Some("second".to_string()));
+        assert_eq!(
+            extract_last_terminal_title(data),
+            Some("second".to_string())
+        );
     }
 
     #[test]
@@ -2088,7 +2304,10 @@ mod tests {
         buf.push(b"\x1b]133;D;0\x07prompt$ "); // push sets last_output_at
         let state_info = detect_terminal_state(Some(&buf));
         assert_eq!(state_info.activity, TerminalActivity::Shell);
-        assert!(state_info.output_active, "Just pushed output should be active");
+        assert!(
+            state_info.output_active,
+            "Just pushed output should be active"
+        );
         assert!(state_info.last_output_ms_ago < 1000);
     }
 
@@ -2099,7 +2318,10 @@ mod tests {
         // Manually set last_output_at to the past
         buf.last_output_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
         let state_info = detect_terminal_state(Some(&buf));
-        assert!(!state_info.output_active, "10s old output should not be active");
+        assert!(
+            !state_info.output_active,
+            "10s old output should not be active"
+        );
         assert!(state_info.last_output_ms_ago >= 9000);
     }
 
@@ -2107,27 +2329,31 @@ mod tests {
 
     #[test]
     fn is_claude_terminal_detects_claude_from_title() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_claude_terminal_false_for_normal_terminal() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;bash\x07");
-        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_claude_terminal_false_for_no_buffer() {
-        assert!(!is_claude_terminal_from_buffer(None));
+        let state = AppState::new();
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", None));
     }
 
     #[test]
     fn is_claude_terminal_false_for_empty_buffer() {
+        let state = AppState::new();
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
-        assert!(!is_claude_terminal_from_buffer(Some(&buf)));
+        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
     }
 
     #[test]
@@ -2161,7 +2387,9 @@ mod tests {
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output here");
         assert_eq!(
             detect_terminal_activity(Some(&buf)),
-            TerminalActivity::InteractiveApp { name: "Claude Code".to_string() }
+            TerminalActivity::InteractiveApp {
+                name: "Claude Code".to_string()
+            }
         );
     }
 
@@ -2183,11 +2411,21 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into()];
-        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        let (filtered, claude_ids) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
         // In skip mode (default), Claude terminal t2 should be excluded
-        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
-        assert!(claude_ids.is_empty(), "skip mode should not collect claude_ids");
-        assert!(!filtered.contains(&"t2".to_string()), "Claude terminal should be skipped");
+        assert!(
+            filtered.contains(&"t1".to_string()),
+            "normal terminal should pass"
+        );
+        assert!(
+            claude_ids.is_empty(),
+            "skip mode should not collect claude_ids"
+        );
+        assert!(
+            !filtered.contains(&"t2".to_string()),
+            "Claude terminal should be skipped"
+        );
     }
 
     #[test]
@@ -2207,11 +2445,27 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into()];
-        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
-        assert!(filtered.contains(&"t1".to_string()), "normal terminal should pass");
-        assert!(filtered.contains(&"t2".to_string()), "idle Claude should be included in command mode");
-        assert!(claude_ids.contains("t2"), "idle Claude should be in claude_ids");
-        assert!(!claude_ids.contains("t1"), "normal terminal should not be in claude_ids");
+        let (filtered, claude_ids) = filter_targets_not_busy(
+            &state,
+            &targets,
+            &crate::settings::ClaudeSyncCwdMode::Command,
+        );
+        assert!(
+            filtered.contains(&"t1".to_string()),
+            "normal terminal should pass"
+        );
+        assert!(
+            filtered.contains(&"t2".to_string()),
+            "idle Claude should be included in command mode"
+        );
+        assert!(
+            claude_ids.contains("t2"),
+            "idle Claude should be in claude_ids"
+        );
+        assert!(
+            !claude_ids.contains("t1"),
+            "normal terminal should not be in claude_ids"
+        );
     }
 
     #[test]
@@ -2227,9 +2481,19 @@ mod tests {
         }
 
         let targets = vec!["t1".into()];
-        let (filtered, claude_ids) = filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Command);
-        assert!(filtered.is_empty(), "working Claude should be excluded even in command mode");
-        assert!(claude_ids.is_empty(), "working Claude should not be in claude_ids");
+        let (filtered, claude_ids) = filter_targets_not_busy(
+            &state,
+            &targets,
+            &crate::settings::ClaudeSyncCwdMode::Command,
+        );
+        assert!(
+            filtered.is_empty(),
+            "working Claude should be excluded even in command mode"
+        );
+        assert!(
+            claude_ids.is_empty(),
+            "working Claude should not be in claude_ids"
+        );
     }
 
     // --- build_sync_cd_command tests ---
@@ -2256,14 +2520,20 @@ mod tests {
     #[test]
     fn build_sync_cd_command_normal_wsl_uses_propagated_cd() {
         let cmd = build_sync_cd_command("/home/user/project", "WSL", false);
-        assert!(cmd.starts_with("LX_PROPAGATED=1 "), "WSL should use LX_PROPAGATED=1 prefix");
+        assert!(
+            cmd.starts_with("LX_PROPAGATED=1 "),
+            "WSL should use LX_PROPAGATED=1 prefix"
+        );
         assert!(cmd.contains("cd "), "should contain cd command");
     }
 
     #[test]
     fn build_sync_cd_command_normal_powershell_uses_env_propagated() {
         let cmd = build_sync_cd_command("C:\\Users\\test", "PowerShell", false);
-        assert!(cmd.starts_with("$env:LX_PROPAGATED='1';"), "PowerShell should use $env: prefix");
+        assert!(
+            cmd.starts_with("$env:LX_PROPAGATED='1';"),
+            "PowerShell should use $env: prefix"
+        );
         assert!(cmd.contains("cd "), "should contain cd command");
     }
 
@@ -2358,7 +2628,10 @@ mod tests {
     fn extract_wsl_distro_from_non_wsl_path_returns_none() {
         assert_eq!(extract_wsl_distro_from_path("PowerShell 7.4"), None);
         assert_eq!(extract_wsl_distro_from_path("C:\\Windows"), None);
-        assert_eq!(extract_wsl_distro_from_path("file://localhost/home/user"), None);
+        assert_eq!(
+            extract_wsl_distro_from_path("file://localhost/home/user"),
+            None
+        );
         assert_eq!(extract_wsl_distro_from_path("/home/user/project"), None);
     }
 
@@ -2435,7 +2708,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn normalize_powershell_provider_path() {
         // PowerShell at UNC path emits provider prefix
         assert_eq!(
@@ -2444,7 +2716,9 @@ mod tests {
         );
         // Raw provider prefix (without file://localhost)
         assert_eq!(
-            normalize_wsl_path("Microsoft.PowerShell.Core/FileSystem:://wsl.localhost/Ubuntu-22.04/tmp"),
+            normalize_wsl_path(
+                "Microsoft.PowerShell.Core/FileSystem:://wsl.localhost/Ubuntu-22.04/tmp"
+            ),
             "/tmp"
         );
         // Provider prefix with Windows path → normalized to /mnt/c/...
@@ -2454,6 +2728,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn extract_distro_from_osc99_path() {
         // OSC 9;9 sends //wsl.localhost/Ubuntu-22.04/home/kochul
         assert_eq!(
@@ -2565,7 +2840,10 @@ mod tests {
         if let Ok(family) = source.select_family_by_name("Consolas") {
             if let Some(handle) = family.fonts().first() {
                 if let Ok(font) = handle.load() {
-                    assert!(is_monospace(&font), "Consolas should be detected as monospace");
+                    assert!(
+                        is_monospace(&font),
+                        "Consolas should be detected as monospace"
+                    );
                 }
             }
         }
@@ -2579,7 +2857,10 @@ mod tests {
         if let Ok(family) = source.select_family_by_name("Arial") {
             if let Some(handle) = family.fonts().first() {
                 if let Ok(font) = handle.load() {
-                    assert!(!is_monospace(&font), "Arial should not be detected as monospace");
+                    assert!(
+                        !is_monospace(&font),
+                        "Arial should not be detected as monospace"
+                    );
                 }
             }
         }
@@ -2606,10 +2887,19 @@ mod tests {
     #[test]
     fn list_system_monospace_fonts_returns_known_fonts() {
         let result = list_system_monospace_fonts().expect("should enumerate fonts");
-        // Should contain at least Consolas (always present on Windows)
+        // Should contain at least one well-known monospace font per platform
+        #[cfg(windows)]
         assert!(
             result.iter().any(|f| f == "Consolas"),
             "System monospace fonts should include Consolas, got: {:?}",
+            &result[..result.len().min(10)]
+        );
+        #[cfg(not(windows))]
+        assert!(
+            result
+                .iter()
+                .any(|f| f.contains("Mono") || f.contains("mono")),
+            "System monospace fonts should include at least one *Mono* font, got: {:?}",
             &result[..result.len().min(10)]
         );
         // Should NOT contain proportional fonts
@@ -2617,10 +2907,210 @@ mod tests {
             !result.iter().any(|f| f == "Arial"),
             "System monospace fonts should not include Arial"
         );
-        // Should contain CJK-aware monospace fonts
+        // JetBrainsMonoBigHangul may not be installed on all systems
+        #[cfg(windows)]
         assert!(
             result.iter().any(|f| f == "JetBrainsMonoBigHangul"),
             "System monospace fonts should include JetBrainsMonoBigHangul"
+        );
+    }
+
+    // --- cwd_receive initialization tests ---
+
+    #[test]
+    fn terminal_session_defaults_cwd_receive_true() {
+        let session = TerminalSession::new("t1".into(), TerminalConfig::default());
+        assert!(
+            session.cwd_receive,
+            "New terminal should default to cwd_receive=true"
+        );
+    }
+
+    #[test]
+    fn filter_targets_cwd_receive_excludes_disabled() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let t1 = TerminalSession::new("t1".into(), TerminalConfig::default());
+            let mut t2 = TerminalSession::new("t2".into(), TerminalConfig::default());
+            t2.cwd_receive = false; // explicitly disabled
+            let t3 = TerminalSession::new("t3".into(), TerminalConfig::default());
+            terminals.insert("t1".into(), t1);
+            terminals.insert("t2".into(), t2);
+            terminals.insert("t3".into(), t3);
+        }
+
+        let targets = vec!["t1".into(), "t2".into(), "t3".into()];
+        let filtered = filter_targets_cwd_receive(&state, &targets);
+        assert!(
+            filtered.contains(&"t1".to_string()),
+            "t1 with cwd_receive=true should pass"
+        );
+        assert!(
+            !filtered.contains(&"t2".to_string()),
+            "t2 with cwd_receive=false should be excluded"
+        );
+        assert!(
+            filtered.contains(&"t3".to_string()),
+            "t3 with cwd_receive=true should pass"
+        );
+    }
+
+    // --- any_terminal_title_contains tests ---
+
+    #[test]
+    fn any_title_contains_finds_claude_in_earlier_title() {
+        // Claude Code set title first, then changed to task description
+        let data =
+            b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_finds_claude_in_last_title() {
+        let data = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_false_when_no_claude() {
+        let data = b"\x1b]0;bash\x07output\x1b]0;vim\x07";
+        assert!(!any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_checks_osc2_titles() {
+        // OSC 2 (window title) should also be scanned
+        let data = b"\x1b]2;\xe2\x9c\xb3 Claude Code\x07\x1b]0;task desc\x07";
+        assert!(any_terminal_title_contains(data, "Claude Code"));
+    }
+
+    #[test]
+    fn any_title_contains_empty_data() {
+        assert!(!any_terminal_title_contains(b"", "Claude Code"));
+    }
+
+    // --- is_claude_terminal_from_buffer with persistent tracking ---
+
+    #[test]
+    fn is_claude_terminal_detected_when_last_title_is_task() {
+        // Core bug scenario: Claude initially sets "✳ Claude Code", then changes to task title
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(
+            b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07",
+        );
+        assert!(
+            is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            "Claude should be detected even when last title is a task description"
+        );
+    }
+
+    #[test]
+    fn is_claude_terminal_persistent_after_titles_scroll_out() {
+        let state = AppState::new();
+        // First call: detect from buffer and mark persistently
+        {
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+        }
+        // Second call: buffer no longer has "Claude Code", but persistent set remembers
+        {
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xbb reading file.rs\x07");
+            assert!(
+                is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+                "Should be detected via persistent tracking even without Claude Code in buffer"
+            );
+        }
+    }
+
+    #[test]
+    fn known_claude_terminal_cleaned_up_on_close() {
+        let state = AppState::new();
+        // Simulate detection
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        assert!(state.known_claude_terminals.lock().unwrap().contains("t1"));
+        // Simulate close_terminal_session cleanup
+        state.known_claude_terminals.lock().unwrap().remove("t1");
+        assert!(!state.known_claude_terminals.lock().unwrap().contains("t1"));
+
+        // After cleanup, buffer without "Claude Code" should not be detected
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;bash\x07");
+        assert!(
+            !is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            "After close, reused terminal ID should not be falsely detected"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_claude_with_task_title_in_skip_mode() {
+        // Core integration test: Claude terminal with task-only title should still be skipped
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal at prompt
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: Claude Code but last title is a task description (the bug scenario!)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07lots of output here\x1b]0;\xe2\x9c\xb6 Exploring code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, claude_ids) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(
+            filtered.contains(&"t1".to_string()),
+            "normal terminal should pass"
+        );
+        assert!(
+            !filtered.contains(&"t2".to_string()),
+            "Claude with task title should still be skipped in skip mode"
+        );
+        assert!(
+            claude_ids.is_empty(),
+            "skip mode should not collect claude_ids"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_persistent_claude_skipped_in_skip_mode() {
+        // Claude detected previously, now buffer has no Claude title at all
+        let state = AppState::new();
+        // Pre-mark as Claude (simulating previous detection)
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t2".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t1: normal terminal
+            let mut buf1 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf1.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t1".into(), buf1);
+            // t2: known Claude but buffer only has task title (no "Claude Code" anywhere)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]0;\xe2\x9c\xb6 Exploring code\x07");
+            buffers.insert("t2".into(), buf2);
+        }
+
+        let targets = vec!["t1".into(), "t2".into()];
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered.contains(&"t1".to_string()));
+        assert!(
+            !filtered.contains(&"t2".to_string()),
+            "Persistently known Claude terminal should be skipped"
         );
     }
 }

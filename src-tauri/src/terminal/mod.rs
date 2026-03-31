@@ -36,6 +36,10 @@ pub struct TerminalConfig {
     /// Appended to the shell init script for WSL/PowerShell profiles.
     #[serde(default)]
     pub startup_command: String,
+    /// Starting directory for the terminal process.
+    /// When non-empty, sets the working directory before spawning the shell.
+    #[serde(default)]
+    pub starting_directory: String,
     pub cols: u16,
     pub rows: u16,
     pub sync_group: String,
@@ -48,6 +52,7 @@ impl Default for TerminalConfig {
             profile: "PowerShell".into(),
             command_line: "powershell.exe -NoLogo".into(),
             startup_command: String::new(),
+            starting_directory: String::new(),
             cols: 80,
             rows: 24,
             sync_group: String::new(),
@@ -102,7 +107,10 @@ impl TerminalSession {
     }
 
     /// Legacy wrapper: resolve by profile name with env injection.
-    pub fn profile_to_command_with_env(profile: &str, env: &[(String, String)]) -> (String, Vec<String>) {
+    pub fn profile_to_command_with_env(
+        profile: &str,
+        env: &[(String, String)],
+    ) -> (String, Vec<String>) {
         let command_line = match profile {
             "WSL" | "wsl" => "wsl.exe",
             "PowerShell" | "powershell" => "powershell.exe -NoLogo",
@@ -117,7 +125,10 @@ impl TerminalSession {
     }
 
     /// Build command with env injection (no startup command).
-    pub fn command_line_to_command_with_env(command_line: &str, env: &[(String, String)]) -> (String, Vec<String>) {
+    pub fn command_line_to_command_with_env(
+        command_line: &str,
+        env: &[(String, String)],
+    ) -> (String, Vec<String>) {
         Self::command_line_to_command_with_startup(command_line, env, "")
     }
 
@@ -172,17 +183,10 @@ impl TerminalSession {
                 }
                 (
                     executable.into(),
-                    vec![
-                        "-NoLogo".into(),
-                        "-NoExit".into(),
-                        "-Command".into(),
-                        init,
-                    ],
+                    vec!["-NoLogo".into(), "-NoExit".into(), "-Command".into(), init],
                 )
             }
-            ShellType::Other => {
-                (executable.into(), extra_args)
-            }
+            ShellType::Other => (executable.into(), extra_args),
         }
     }
 }
@@ -199,10 +203,7 @@ static INIT_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Detect shell type from the executable path/name.
 /// Strips directory and .exe extension, then matches against known shells.
 fn detect_shell_type(executable: &str) -> ShellType {
-    let filename = executable
-        .rsplit(&['/', '\\'])
-        .next()
-        .unwrap_or(executable);
+    let filename = executable.rsplit(&['/', '\\']).next().unwrap_or(executable);
     let name = filename
         .strip_suffix(".exe")
         .unwrap_or(filename)
@@ -330,6 +331,7 @@ mod tests {
             profile: "WSL".into(),
             command_line: "wsl.exe".into(),
             startup_command: String::new(),
+            starting_directory: String::new(),
             cols: 120,
             rows: 40,
             sync_group: "project-a".into(),
@@ -351,6 +353,16 @@ mod tests {
         assert_eq!(config.cols, 80);
         assert_eq!(config.rows, 24);
         assert!(config.sync_group.is_empty());
+        assert!(config.starting_directory.is_empty());
+    }
+
+    #[test]
+    fn config_with_starting_directory() {
+        let config = TerminalConfig {
+            starting_directory: "C:\\Users\\test\\project".into(),
+            ..TerminalConfig::default()
+        };
+        assert_eq!(config.starting_directory, "C:\\Users\\test\\project");
     }
 
     #[test]
@@ -361,7 +373,6 @@ mod tests {
         let (cmd, args) = TerminalSession::profile_to_command("PowerShell");
         assert_eq!(cmd, "powershell.exe");
         assert!(args.contains(&"-NoLogo".to_string()));
-
     }
 
     #[test]
@@ -412,7 +423,8 @@ mod tests {
 
     #[test]
     fn command_line_detects_full_path_wsl() {
-        let (cmd, _args) = TerminalSession::command_line_to_command("C:\\Windows\\System32\\wsl.exe");
+        let (cmd, _args) =
+            TerminalSession::command_line_to_command("C:\\Windows\\System32\\wsl.exe");
         assert_eq!(cmd, "C:\\Windows\\System32\\wsl.exe");
         assert!(_args.contains(&"bash".to_string()));
     }
@@ -427,7 +439,8 @@ mod tests {
     #[test]
     fn command_line_wsl_with_env_injects() {
         let env = vec![("LX_AUTOMATION_PORT".into(), "19280".into())];
-        let (cmd, args) = TerminalSession::command_line_to_command_with_env("wsl.exe -d Ubuntu", &env);
+        let (cmd, args) =
+            TerminalSession::command_line_to_command_with_env("wsl.exe -d Ubuntu", &env);
         assert_eq!(cmd, "wsl.exe");
         assert!(args.contains(&"-d".to_string()));
         assert!(args.contains(&"Ubuntu".to_string()));
@@ -449,7 +462,9 @@ mod tests {
     #[test]
     fn wsl_startup_command_appended_to_init() {
         let (_, args) = TerminalSession::command_line_to_command_with_startup(
-            "wsl.exe", &[], "cd ~/project && conda activate myenv",
+            "wsl.exe",
+            &[],
+            "cd ~/project && conda activate myenv",
         );
         let rcfile_pos = args.iter().position(|a| a == "--rcfile").unwrap();
         let rcfile_wsl_path = &args[rcfile_pos + 1];
@@ -460,17 +475,18 @@ mod tests {
             rcfile_wsl_path.clone()
         };
         let content = std::fs::read_to_string(&win_path).unwrap();
-        assert!(content.contains("cd ~/project && conda activate myenv"),
-            "Startup command should be at end of init script");
+        assert!(
+            content.contains("cd ~/project && conda activate myenv"),
+            "Startup command should be at end of init script"
+        );
         // Shell integration should still be present
         assert!(content.contains("PROMPT_COMMAND"));
     }
 
     #[test]
     fn wsl_empty_startup_command_no_extra_lines() {
-        let (_, args_without) = TerminalSession::command_line_to_command_with_startup(
-            "wsl.exe", &[], "",
-        );
+        let (_, args_without) =
+            TerminalSession::command_line_to_command_with_startup("wsl.exe", &[], "");
         let (_, args_with_env) = TerminalSession::command_line_to_command("wsl.exe");
         // Both should produce rcfile-based args
         assert!(args_without.contains(&"--rcfile".to_string()));
@@ -480,19 +496,25 @@ mod tests {
     #[test]
     fn powershell_startup_command_appended() {
         let (_, args) = TerminalSession::command_line_to_command_with_startup(
-            "powershell.exe", &[], "Set-Location C:\\Projects",
+            "powershell.exe",
+            &[],
+            "Set-Location C:\\Projects",
         );
         let cmd_arg = args.last().unwrap();
-        assert!(cmd_arg.contains("Set-Location C:\\Projects"),
-            "Startup command should be appended to PowerShell init");
-        assert!(cmd_arg.contains("prompt"), "Shell integration should still be present");
+        assert!(
+            cmd_arg.contains("Set-Location C:\\Projects"),
+            "Startup command should be appended to PowerShell init"
+        );
+        assert!(
+            cmd_arg.contains("prompt"),
+            "Shell integration should still be present"
+        );
     }
 
     #[test]
     fn powershell_empty_startup_command_unchanged() {
-        let (_, args_with) = TerminalSession::command_line_to_command_with_startup(
-            "powershell.exe", &[], "",
-        );
+        let (_, args_with) =
+            TerminalSession::command_line_to_command_with_startup("powershell.exe", &[], "");
         let (_, args_without) = TerminalSession::command_line_to_command("powershell.exe");
         // Both should have -Command with the same content
         assert_eq!(args_with.last(), args_without.last());
@@ -501,9 +523,8 @@ mod tests {
     #[test]
     fn other_shell_startup_command_ignored() {
         // For unknown shells, startup_command has no effect (no init script to append to)
-        let (cmd, args) = TerminalSession::command_line_to_command_with_startup(
-            "cmd.exe /K", &[], "echo hello",
-        );
+        let (cmd, args) =
+            TerminalSession::command_line_to_command_with_startup("cmd.exe /K", &[], "echo hello");
         assert_eq!(cmd, "cmd.exe");
         assert_eq!(args, vec!["/K"]);
     }
@@ -516,9 +537,15 @@ mod tests {
         assert!(args.contains(&"-Command".to_string()));
         // The command arg should contain OSC 133 and OSC 7 sequences
         let cmd_arg = args.last().unwrap();
-        assert!(cmd_arg.contains("133"), "Should emit OSC 133;D for exit code");
+        assert!(
+            cmd_arg.contains("133"),
+            "Should emit OSC 133;D for exit code"
+        );
         assert!(cmd_arg.contains("file://"), "Should emit OSC 7 for CWD");
-        assert!(cmd_arg.contains("prompt"), "Should define a prompt function");
+        assert!(
+            cmd_arg.contains("prompt"),
+            "Should define a prompt function"
+        );
     }
 
     #[test]
@@ -526,7 +553,10 @@ mod tests {
         let (cmd, args) = TerminalSession::profile_to_command("WSL");
         assert_eq!(cmd, "wsl.exe");
         // Should use --rcfile to load init and -i for interactive mode
-        assert!(args.contains(&"--rcfile".to_string()), "Should use --rcfile");
+        assert!(
+            args.contains(&"--rcfile".to_string()),
+            "Should use --rcfile"
+        );
         assert!(args.contains(&"-i".to_string()), "Should be interactive");
         // Init file should contain PROMPT_COMMAND and preexec
         let init = shell_integration_bash();
@@ -543,8 +573,14 @@ mod tests {
             ("LX_TERMINAL_ID".into(), "t1".into()),
         ];
         let script = shell_integration_bash_with_env(&env);
-        assert!(script.contains("export LX_AUTOMATION_PORT='19280'"), "Should export port");
-        assert!(script.contains("export LX_TERMINAL_ID='t1'"), "Should export terminal ID");
+        assert!(
+            script.contains("export LX_AUTOMATION_PORT='19280'"),
+            "Should export port"
+        );
+        assert!(
+            script.contains("export LX_TERMINAL_ID='t1'"),
+            "Should export terminal ID"
+        );
         // Shell integration should still be present
         assert!(script.contains("PROMPT_COMMAND"));
         assert!(script.contains("__laymux_prompt_pre"));
@@ -554,7 +590,10 @@ mod tests {
     fn bash_init_escapes_single_quotes_in_env() {
         let env = vec![("TEST_VAR".into(), "it's a test".into())];
         let script = shell_integration_bash_with_env(&env);
-        assert!(script.contains(r"export TEST_VAR='it'\''s a test'"), "Should escape single quotes");
+        assert!(
+            script.contains(r"export TEST_VAR='it'\''s a test'"),
+            "Should escape single quotes"
+        );
     }
 
     #[test]
@@ -604,10 +643,7 @@ mod tests {
             init.contains("__laymux_preexec"),
             "Init should have preexec function"
         );
-        assert!(
-            init.contains("133;C"),
-            "Preexec should emit OSC 133 C"
-        );
+        assert!(init.contains("133;C"), "Preexec should emit OSC 133 C");
         assert!(
             init.contains("133;E;%s"),
             "Preexec should emit OSC 133 E with command text"

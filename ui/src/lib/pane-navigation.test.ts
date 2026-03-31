@@ -9,7 +9,7 @@ function pane(x: number, y: number, w: number, h: number) {
 describe("findPaneInDirection", () => {
   // 2-column layout: [left | right]
   const twoCols = [
-    pane(0, 0, 0.5, 1),   // 0: left
+    pane(0, 0, 0.5, 1), // 0: left
     pane(0.5, 0, 0.5, 1), // 1: right
   ];
 
@@ -30,7 +30,7 @@ describe("findPaneInDirection", () => {
 
   // 2-row layout: [top / bottom]
   const twoRows = [
-    pane(0, 0, 1, 0.5),   // 0: top
+    pane(0, 0, 1, 0.5), // 0: top
     pane(0, 0.5, 1, 0.5), // 1: bottom
   ];
 
@@ -46,9 +46,9 @@ describe("findPaneInDirection", () => {
   // [TL | TR]
   // [BL | BR]
   const grid2x2 = [
-    pane(0, 0, 0.5, 0.5),     // 0: top-left
-    pane(0.5, 0, 0.5, 0.5),   // 1: top-right
-    pane(0, 0.5, 0.5, 0.5),   // 2: bottom-left
+    pane(0, 0, 0.5, 0.5), // 0: top-left
+    pane(0.5, 0, 0.5, 0.5), // 1: top-right
+    pane(0, 0.5, 0.5, 0.5), // 2: bottom-left
     pane(0.5, 0.5, 0.5, 0.5), // 3: bottom-right
   ];
 
@@ -76,8 +76,8 @@ describe("findPaneInDirection", () => {
   // [    terminal (full width)    ]  top 60%
   // [ terminal 50% | browser 50% ]  bottom 40%
   const devSplit = [
-    pane(0, 0, 1, 0.6),       // 0: top full-width terminal
-    pane(0, 0.6, 0.5, 0.4),   // 1: bottom-left terminal
+    pane(0, 0, 1, 0.6), // 0: top full-width terminal
+    pane(0, 0.6, 0.5, 0.4), // 1: bottom-left terminal
     pane(0.5, 0.6, 0.5, 0.4), // 2: bottom-right browser
   ];
 

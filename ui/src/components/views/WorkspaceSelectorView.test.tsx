@@ -5,6 +5,7 @@ import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { getListeningPorts } from "@/lib/tauri-api";
 
 vi.mock("@/lib/persist-session", () => ({
@@ -111,10 +112,22 @@ describe("WorkspaceSelectorView", () => {
 
   it("displays git branch from terminal store (most recent activity)", () => {
     useWorkspaceStore.setState({
-      workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
-        panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
-      }],
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
       activeWorkspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
@@ -133,10 +146,22 @@ describe("WorkspaceSelectorView", () => {
 
   it("displays working directory from focused terminal", () => {
     useWorkspaceStore.setState({
-      workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
-        panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "PowerShell" } }],
-      }],
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
       activeWorkspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
@@ -184,7 +209,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("shows multiple layout cards when multiple layouts exist", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("Dev Split");
+    useWorkspaceStore.getState().exportAsNewLayout("Dev Split");
     render(<WorkspaceSelectorView />);
 
     const cards = screen.getAllByTestId(/^layout-card-/);
@@ -193,7 +218,7 @@ describe("WorkspaceSelectorView", () => {
 
   it("creates workspace with correct layout when layout card clicked", async () => {
     const user = userEvent.setup();
-    useWorkspaceStore.getState().saveAsNewLayout("Dev Split");
+    useWorkspaceStore.getState().exportAsNewLayout("Dev Split");
     render(<WorkspaceSelectorView />);
 
     const createBtns = screen.getAllByTestId(/^layout-create-/);
@@ -201,7 +226,8 @@ describe("WorkspaceSelectorView", () => {
 
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
     const newWs = useWorkspaceStore.getState().workspaces[1];
-    expect(newWs.layoutId).toBe(useWorkspaceStore.getState().layouts[1].id);
+    const exportedLayout = useWorkspaceStore.getState().layouts[1];
+    expect(newWs.panes).toHaveLength(exportedLayout.panes.length);
   });
 
   it("auto-switches to newly created workspace", async () => {
@@ -279,10 +305,16 @@ describe("WorkspaceSelectorView", () => {
 
   it("shows terminal count badge when terminals exist", () => {
     useTerminalStore.getState().registerInstance({
-      id: "t1", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default",
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
-      id: "t2", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default",
+      id: "t2",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
     });
 
     render(<WorkspaceSelectorView />);
@@ -291,20 +323,38 @@ describe("WorkspaceSelectorView", () => {
 
   it("shows per-terminal summaries for active workspace with 2+ terminals", () => {
     useWorkspaceStore.setState({
-      workspaces: [{
-        id: "ws-default", name: "Default", layoutId: "default-layout",
-        panes: [
-          { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
-          { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
-        ],
-      }],
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
       activeWorkspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
-      id: "terminal-p1", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+      id: "terminal-p1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
     });
     useTerminalStore.getState().registerInstance({
-      id: "terminal-p2", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default", label: "PS",
+      id: "terminal-p2",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
     });
     useTerminalStore.getState().updateInstanceInfo("terminal-p1", { cwd: "/home/user/project" });
     useTerminalStore.getState().updateInstanceInfo("terminal-p2", { cwd: "/home/user/api" });
@@ -319,23 +369,46 @@ describe("WorkspaceSelectorView", () => {
   it("shows pane minimaps in per-terminal summaries with correct highlight", () => {
     // Set up a workspace with 2 TerminalView panes (left/right split)
     useWorkspaceStore.setState({
-      workspaces: [{
-        id: "ws-default",
-        name: "Default",
-        layoutId: "default-layout",
-        panes: [
-          { id: "pane-left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
-          { id: "pane-right", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "PowerShell" } },
-        ],
-      }],
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+            {
+              id: "pane-right",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
       activeWorkspaceId: "ws-default",
     });
     // Register terminals with IDs matching pane IDs (terminal-{paneId} pattern)
     useTerminalStore.getState().registerInstance({
-      id: "terminal-pane-left", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+      id: "terminal-pane-left",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
     });
     useTerminalStore.getState().registerInstance({
-      id: "terminal-pane-right", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default", label: "PS",
+      id: "terminal-pane-right",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
     });
 
     render(<WorkspaceSelectorView />);
@@ -363,23 +436,46 @@ describe("WorkspaceSelectorView", () => {
   it("shows minimap with correct proportions for complex layout", () => {
     // 3-pane layout: top full-width, bottom-left, bottom-right
     useWorkspaceStore.setState({
-      workspaces: [{
-        id: "ws-default",
-        name: "Default",
-        layoutId: "default-layout",
-        panes: [
-          { id: "pane-top", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView", profile: "WSL" } },
-          { id: "pane-bl", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView", profile: "PowerShell" } },
-          { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "BrowserPreviewView" } },
-        ],
-      }],
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-top",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 0.6,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+            {
+              id: "pane-bl",
+              x: 0,
+              y: 0.6,
+              w: 0.5,
+              h: 0.4,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "BrowserPreviewView" } },
+          ],
+        },
+      ],
       activeWorkspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
-      id: "terminal-pane-top", profile: "WSL", syncGroup: "Default", workspaceId: "ws-default", label: "WSL",
+      id: "terminal-pane-top",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
     });
     useTerminalStore.getState().registerInstance({
-      id: "terminal-pane-bl", profile: "PowerShell", syncGroup: "Default", workspaceId: "ws-default", label: "PS",
+      id: "terminal-pane-bl",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
     });
 
     render(<WorkspaceSelectorView />);
@@ -390,7 +486,7 @@ describe("WorkspaceSelectorView", () => {
     const rects = svg.querySelectorAll("rect[data-pane-index]");
     expect(rects).toHaveLength(3);
     expect(rects[0].getAttribute("data-highlighted")).toBe("false"); // top pane
-    expect(rects[1].getAttribute("data-highlighted")).toBe("true");  // bottom-left (this terminal)
+    expect(rects[1].getAttribute("data-highlighted")).toBe("true"); // bottom-left (this terminal)
     expect(rects[2].getAttribute("data-highlighted")).toBe("false"); // bottom-right (browser)
   });
 
@@ -445,6 +541,58 @@ describe("WorkspaceSelectorView", () => {
     fireEvent.mouseEnter(item);
     fireEvent.click(screen.getByTestId(`workspace-close-${ws2.id}`));
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+  });
+
+  it("does not show dock terminal last command in active workspace summary", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    // Workspace terminal with old command
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test",
+      lastExitCode: 0,
+      lastCommandAt: Date.now() - 60000,
+    });
+    // Dock terminal with newer command (should NOT appear in workspace summary)
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-dock-bottom",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-dock-bottom", {
+      lastCommand: "cargo build",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+    });
+
+    render(<WorkspaceSelectorView />);
+    // Should show workspace terminal's command, not dock's
+    expect(screen.getByText(/npm test/)).toBeInTheDocument();
+    expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
   });
 
   it("workspace items always render 3 rows even without data", () => {
@@ -540,7 +688,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("removeLayout removes layout and reassigns workspaces", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("Extra");
+    useWorkspaceStore.getState().exportAsNewLayout("Extra");
     expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
 
     const extraId = useWorkspaceStore.getState().layouts[1].id;
@@ -549,10 +697,234 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("setDefaultLayout moves layout to first position", () => {
-    useWorkspaceStore.getState().saveAsNewLayout("NewDefault");
+    useWorkspaceStore.getState().exportAsNewLayout("NewDefault");
     const newId = useWorkspaceStore.getState().layouts[1].id;
 
     useWorkspaceStore.getState().setDefaultLayout(newId);
     expect(useWorkspaceStore.getState().layouts[0].id).toBe(newId);
+  });
+
+  // -- Pane-level notification badge --
+
+  it("shows notification border on pane command icon when pane has unread notifications", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test",
+      lastExitCode: 0,
+      lastCommandAt: Date.now(),
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", {
+      lastCommand: "cargo build",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+    });
+    // Add notification only for terminal-p1
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "Build complete",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    // terminal-p1 should have notification badge border
+    const badge1 = screen.getByTestId("pane-cmd-badge-terminal-p1");
+    expect(badge1).toBeInTheDocument();
+    expect(badge1.style.border).toContain("var(--accent)");
+
+    // terminal-p2 should NOT have notification badge border
+    const badge2 = screen.getByTestId("pane-cmd-badge-terminal-p2");
+    expect(badge2.style.border).not.toContain("var(--accent)");
+  });
+
+  it("shows notification border on hourglass icon for running command with notification", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "npm test",
+      lastCommandAt: Date.now(),
+    });
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "alert",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("⏳");
+    expect(badge.style.border).toContain("var(--accent)");
+  });
+
+  it("shows standalone notification dot when no command status but notification exists", () => {
+    // When there's no command icon, the notification badge should still appear
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    // No command but notification exists
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-p1",
+      workspaceId: "ws-default",
+      message: "alert",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    // There's no command icon, so we show a standalone notification dot
+    const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
+    expect(badge).toBeInTheDocument();
+  });
+
+  it("hides minimap when workspaceDisplay.minimap is false", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, minimap: false },
+    });
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Test",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Test",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2",
+      profile: "WSL",
+      syncGroup: "Test",
+      workspaceId: "ws-default",
+    });
+
+    render(<WorkspaceSelectorView />);
+    expect(screen.queryByTestId("pane-minimap-terminal-p1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pane-minimap-terminal-p2")).not.toBeInTheDocument();
+  });
+
+  it("hides activity when workspaceDisplay.activity is false", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, activity: false },
+    });
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Test",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Test",
+      workspaceId: "ws-default",
+    });
+
+    render(<WorkspaceSelectorView />);
+    expect(screen.queryByTestId("terminal-activity-terminal-p1")).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -18,6 +18,10 @@ pub struct AppState {
     /// Terminals that recently received a propagated command (e.g., cd from sync-cwd).
     /// Used to suppress OSC echo loops. Entries expire after PROPAGATION_TIMEOUT.
     pub propagated_terminals: Mutex<HashMap<String, Instant>>,
+    /// Terminal IDs that have been detected as running Claude Code.
+    /// Once a terminal shows a "Claude Code" title, it stays marked until closed.
+    /// This prevents missed detection when Claude changes its title to a task description.
+    pub known_claude_terminals: Mutex<HashSet<String>>,
 }
 
 impl AppState {
@@ -31,6 +35,7 @@ impl AppState {
             automation_channels: Mutex::new(HashMap::new()),
             automation_port: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
+            known_claude_terminals: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -68,5 +73,12 @@ mod tests {
         let state = AppState::new();
         let propagated = state.propagated_terminals.lock().unwrap();
         assert!(propagated.is_empty());
+    }
+
+    #[test]
+    fn known_claude_terminals_starts_empty() {
+        let state = AppState::new();
+        let known = state.known_claude_terminals.lock().unwrap();
+        assert!(known.is_empty());
     }
 }

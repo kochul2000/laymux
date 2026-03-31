@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand, detectClaudeTaskTransition, extractClaudeTaskDesc, isGenericClaudeTitle, getClaudeCompletionMessage } from "./activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectClaudeTaskTransition,
+  extractClaudeTaskDesc,
+  isGenericClaudeTitle,
+  getClaudeCompletionMessage,
+  parseClaudeMode,
+  isRalphActive,
+} from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -7,11 +16,17 @@ describe("detectActivityFromTitle", () => {
   });
 
   it("detects vim in longer title", () => {
-    expect(detectActivityFromTitle("vim - file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromTitle("vim - file.txt")).toEqual({
+      type: "interactiveApp",
+      name: "vim",
+    });
   });
 
   it("detects Claude Code as Claude", () => {
-    expect(detectActivityFromTitle("Claude Code")).toEqual({ type: "interactiveApp", name: "Claude" });
+    expect(detectActivityFromTitle("Claude Code")).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
   });
 
   it("detects nvim as neovim", () => {
@@ -34,13 +49,18 @@ describe("detectActivityFromTitle", () => {
   });
 
   it("detects app names with surrounding delimiters", () => {
-    expect(detectActivityFromTitle("vim - file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromTitle("vim - file.txt")).toEqual({
+      type: "interactiveApp",
+      name: "vim",
+    });
     expect(detectActivityFromTitle("vi file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
     expect(detectActivityFromTitle("running:vim")).toEqual({ type: "interactiveApp", name: "vim" });
   });
 
   it("returns undefined for path-like titles containing app names", () => {
-    expect(detectActivityFromTitle("//wsl.localhost/Ubuntu/home/user/python_projects")).toBeUndefined();
+    expect(
+      detectActivityFromTitle("//wsl.localhost/Ubuntu/home/user/python_projects"),
+    ).toBeUndefined();
     expect(detectActivityFromTitle("/home/user/vim-config")).toBeUndefined();
     expect(detectActivityFromTitle("C:\\Users\\name\\node_modules")).toBeUndefined();
   });
@@ -48,7 +68,10 @@ describe("detectActivityFromTitle", () => {
 
 describe("detectActivityFromCommand", () => {
   it("detects vim command", () => {
-    expect(detectActivityFromCommand("vim file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromCommand("vim file.txt")).toEqual({
+      type: "interactiveApp",
+      name: "vim",
+    });
   });
 
   it("detects bare vim", () => {
@@ -56,11 +79,17 @@ describe("detectActivityFromCommand", () => {
   });
 
   it("detects nvim as neovim", () => {
-    expect(detectActivityFromCommand("nvim src/main.rs")).toEqual({ type: "interactiveApp", name: "neovim" });
+    expect(detectActivityFromCommand("nvim src/main.rs")).toEqual({
+      type: "interactiveApp",
+      name: "neovim",
+    });
   });
 
   it("detects nano", () => {
-    expect(detectActivityFromCommand("nano /etc/hosts")).toEqual({ type: "interactiveApp", name: "nano" });
+    expect(detectActivityFromCommand("nano /etc/hosts")).toEqual({
+      type: "interactiveApp",
+      name: "nano",
+    });
   });
 
   it("detects htop", () => {
@@ -68,7 +97,10 @@ describe("detectActivityFromCommand", () => {
   });
 
   it("detects python3", () => {
-    expect(detectActivityFromCommand("python3")).toEqual({ type: "interactiveApp", name: "python" });
+    expect(detectActivityFromCommand("python3")).toEqual({
+      type: "interactiveApp",
+      name: "python",
+    });
   });
 
   it("detects python (not python3 script.py style)", () => {
@@ -87,11 +119,17 @@ describe("detectActivityFromCommand", () => {
   });
 
   it("handles sudo prefix", () => {
-    expect(detectActivityFromCommand("sudo vim /etc/hosts")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromCommand("sudo vim /etc/hosts")).toEqual({
+      type: "interactiveApp",
+      name: "vim",
+    });
   });
 
   it("handles commands with path prefix", () => {
-    expect(detectActivityFromCommand("/usr/bin/vim file.txt")).toEqual({ type: "interactiveApp", name: "vim" });
+    expect(detectActivityFromCommand("/usr/bin/vim file.txt")).toEqual({
+      type: "interactiveApp",
+      name: "vim",
+    });
   });
 
   it("detects claude as Claude", () => {
@@ -109,11 +147,15 @@ describe("detectClaudeTaskTransition", () => {
   const shellActivity = { type: "shell" as const };
 
   it("detects completed: spinner → ✳ with Claude activity", () => {
-    expect(detectClaudeTaskTransition("✶ Working on feature", "✳ Feature done", claudeActivity)).toBe("completed");
+    expect(
+      detectClaudeTaskTransition("✶ Working on feature", "✳ Feature done", claudeActivity),
+    ).toBe("completed");
   });
 
   it("detects started: ✳ → spinner with Claude activity", () => {
-    expect(detectClaudeTaskTransition("✳ Claude Code", "✶ Working on task", claudeActivity)).toBe("started");
+    expect(detectClaudeTaskTransition("✳ Claude Code", "✶ Working on task", claudeActivity)).toBe(
+      "started",
+    );
   });
 
   it("returns null for same state: spinner → spinner (still working)", () => {
@@ -121,7 +163,9 @@ describe("detectClaudeTaskTransition", () => {
   });
 
   it("returns null for same state ✳ → ✳ (still idle)", () => {
-    expect(detectClaudeTaskTransition("✳ Claude Code", "✳ Something else", claudeActivity)).toBeNull();
+    expect(
+      detectClaudeTaskTransition("✳ Claude Code", "✳ Something else", claudeActivity),
+    ).toBeNull();
   });
 
   it("returns null for non-Claude activity even with matching prefixes", () => {
@@ -151,14 +195,18 @@ describe("detectClaudeTaskTransition", () => {
   });
 
   it("detects completed when previousTitle is spinner and new is ✳ Claude Code (idle)", () => {
-    expect(detectClaudeTaskTransition("✶ Building project", "✳ Claude Code", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("✶ Building project", "✳ Claude Code", claudeActivity)).toBe(
+      "completed",
+    );
   });
 
   // Garbled encoding tests (Windows CP949 path)
   it("detects completed with garbled ✳ encoding", () => {
     const garbledIdle = "\udce2\uc454 Claude Code";
     const garbledWorking = "\udce2\uc7fc Claude Code";
-    expect(detectClaudeTaskTransition(garbledWorking, garbledIdle, claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition(garbledWorking, garbledIdle, claudeActivity)).toBe(
+      "completed",
+    );
   });
 
   it("detects started with garbled encoding", () => {
@@ -209,7 +257,9 @@ describe("getClaudeCompletionMessage", () => {
   it("works with various spinner characters", () => {
     expect(getClaudeCompletionMessage("✶ Build project", "✳ Claude Code")).toBe("Build project");
     expect(getClaudeCompletionMessage("✽ Running tests", "✳ Claude Code")).toBe("Running tests");
-    expect(getClaudeCompletionMessage("· Thinking about solution", "✳ Claude Code")).toBe("Thinking about solution");
+    expect(getClaudeCompletionMessage("· Thinking about solution", "✳ Claude Code")).toBe(
+      "Thinking about solution",
+    );
   });
 
   it("prefers previous title description over new title description", () => {
@@ -217,11 +267,15 @@ describe("getClaudeCompletionMessage", () => {
   });
 
   it("falls back to new title when previous title is generic", () => {
-    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Some specific task")).toBe("Some specific task");
+    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Some specific task")).toBe(
+      "Some specific task",
+    );
   });
 
   it("falls back to default message when both titles are generic", () => {
-    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Claude Code")).toBe("Claude task completed");
+    expect(getClaudeCompletionMessage("✻ Claude Code", "✳ Claude Code")).toBe(
+      "Claude task completed",
+    );
   });
 
   it("falls back to default message when both titles extract to empty", () => {
@@ -234,7 +288,10 @@ describe("getClaudeCompletionMessage", () => {
 
   it("handles garbled encoding — still creates non-generic message", () => {
     // Garbled spinner prefix may not be fully stripped, but result is still non-generic
-    const message = getClaudeCompletionMessage("\udce2\uc7fc Build project", "\udce2\uc454 Claude Code");
+    const message = getClaudeCompletionMessage(
+      "\udce2\uc7fc Build project",
+      "\udce2\uc454 Claude Code",
+    );
     expect(isGenericClaudeTitle(message)).toBe(false);
     expect(message).toContain("Build project");
   });
@@ -255,5 +312,48 @@ describe("Claude completion notification wiring (bug repro)", () => {
     const message = getClaudeCompletionMessage("✻ Fix the bug", "✳ Claude Code");
     expect(message).toBe("Fix the bug");
     expect(isGenericClaudeTitle(message)).toBe(false);
+  });
+});
+
+describe("parseClaudeMode", () => {
+  const claudeActivity = { type: "interactiveApp" as const, name: "Claude" };
+
+  it("returns undefined for non-Claude terminals", () => {
+    expect(parseClaudeMode("some title", { type: "shell" })).toBeUndefined();
+    expect(parseClaudeMode("some title", { type: "interactiveApp", name: "vim" })).toBeUndefined();
+    expect(parseClaudeMode("some title", undefined)).toBeUndefined();
+  });
+
+  it("returns idle for ✳ prefix title", () => {
+    expect(parseClaudeMode("✳ Claude Code", claudeActivity)).toBe("idle");
+  });
+
+  it("returns working for spinner prefix title", () => {
+    expect(parseClaudeMode("✶ Writing code...", claudeActivity)).toBe("working");
+  });
+
+  it("returns plan when title contains 'plan'", () => {
+    expect(parseClaudeMode("✶ Plan mode", claudeActivity)).toBe("plan");
+    expect(parseClaudeMode("✳ Plan: approach for fix", claudeActivity)).toBe("plan");
+  });
+
+  it("returns danger when title contains 'danger'", () => {
+    expect(parseClaudeMode("✳ Danger mode active", claudeActivity)).toBe("danger");
+  });
+
+  it("returns idle when title is undefined", () => {
+    expect(parseClaudeMode(undefined, claudeActivity)).toBe("idle");
+  });
+});
+
+describe("isRalphActive", () => {
+  it("returns true when title contains 'ralph'", () => {
+    expect(isRalphActive("✶ Ralph: fixing bugs")).toBe(true);
+    expect(isRalphActive("✳ Ralph loop active")).toBe(true);
+  });
+
+  it("returns false for normal Claude titles", () => {
+    expect(isRalphActive("✳ Claude Code")).toBe(false);
+    expect(isRalphActive(undefined)).toBe(false);
   });
 });

@@ -24,13 +24,11 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
   const terminalInstances = useTerminalStore((s) => s.instances);
 
   // Reverse for newest-first, then stable-sort unread above read
-  const sorted = [...notifications]
-    .reverse()
-    .sort((a, b) => {
-      const aUnread = a.readAt === null ? 0 : 1;
-      const bUnread = b.readAt === null ? 0 : 1;
-      return aUnread - bUnread;
-    });
+  const sorted = [...notifications].reverse().sort((a, b) => {
+    const aUnread = a.readAt === null ? 0 : 1;
+    const bUnread = b.readAt === null ? 0 : 1;
+    return aUnread - bUnread;
+  });
   const workspaceIds = [...new Set(sorted.map((n) => n.workspaceId))];
 
   return (
@@ -67,10 +65,7 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
                     borderBottom: "1px solid var(--border)",
                   }}
                 >
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
+                  <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
                     {workspaces.find((w) => w.id === wsId)?.name ?? wsId}
                   </span>
                   {hasUnread && (
@@ -89,9 +84,7 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
                   )}
                 </div>
                 {wsNotifs.map((n) => {
-                  const terminal = terminalInstances.find(
-                    (t) => t.id === n.terminalId,
-                  );
+                  const terminal = terminalInstances.find((t) => t.id === n.terminalId);
                   return (
                     <div
                       key={n.id}
@@ -120,10 +113,7 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
                       </span>
 
                       {/* Relative time */}
-                      <span
-                        className="shrink-0 text-xs"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
+                      <span className="shrink-0 text-xs" style={{ color: "var(--text-secondary)" }}>
                         {formatRelativeTime(n.createdAt)}
                       </span>
                     </div>

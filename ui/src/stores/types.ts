@@ -4,6 +4,7 @@ export type ViewType =
   | "TerminalView"
   | "BrowserPreviewView"
   | "IssueReporterView"
+  | "MemoView"
   | "EmptyView";
 
 export type DockPosition = "top" | "bottom" | "left" | "right";
@@ -39,7 +40,6 @@ export interface WorkspacePane {
 export interface Workspace {
   id: string;
   name: string;
-  layoutId: string;
   panes: WorkspacePane[];
 }
 

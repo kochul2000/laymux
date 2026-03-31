@@ -48,21 +48,33 @@ describe("tauri-api", () => {
       };
       mockInvoke.mockResolvedValue(mockResult);
 
-      const result = await createTerminalSession(
-        "t1",
-        "PowerShell",
-        80,
-        24,
-        "default",
-      );
+      const result = await createTerminalSession("t1", "PowerShell", 80, 24, "default");
       expect(mockInvoke).toHaveBeenCalledWith("create_terminal_session", {
         id: "t1",
         profile: "PowerShell",
         cols: 80,
         rows: 24,
         syncGroup: "default",
+        cwdReceive: true,
       });
       expect(result).toEqual(mockResult);
+    });
+
+    it("passes cwdReceive=false to backend", async () => {
+      mockInvoke.mockResolvedValue({
+        id: "t1",
+        title: "Terminal",
+        config: { profile: "WSL", cols: 80, rows: 24, sync_group: "", env: [] },
+      });
+      await createTerminalSession("t1", "WSL", 80, 24, "", false);
+      expect(mockInvoke).toHaveBeenCalledWith("create_terminal_session", {
+        id: "t1",
+        profile: "WSL",
+        cols: 80,
+        rows: 24,
+        syncGroup: "",
+        cwdReceive: false,
+      });
     });
   });
 
@@ -125,7 +137,7 @@ describe("tauri-api", () => {
 
   describe("loadSettings", () => {
     it("invokes load_settings", async () => {
-      const settings = { font: { face: "Consolas", size: 14 } };
+      const settings = { defaultProfile: "PowerShell", profiles: [] };
       mockInvoke.mockResolvedValue(settings);
       const result = await loadSettings();
       expect(mockInvoke).toHaveBeenCalledWith("load_settings");
@@ -136,7 +148,7 @@ describe("tauri-api", () => {
   describe("saveSettings", () => {
     it("invokes save_settings with settings", async () => {
       mockInvoke.mockResolvedValue(undefined);
-      const settings = { font: { face: "Fira Code", size: 16 } } as any;
+      const settings = { defaultProfile: "PowerShell", profiles: [] } as any;
       await saveSettings(settings);
       expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
         settings,
@@ -152,10 +164,7 @@ describe("tauri-api", () => {
       const callback = vi.fn();
       await onTerminalOutput("t1", callback);
 
-      expect(mockListen).toHaveBeenCalledWith(
-        "terminal-output-t1",
-        expect.any(Function),
-      );
+      expect(mockListen).toHaveBeenCalledWith("terminal-output-t1", expect.any(Function));
     });
   });
 
@@ -167,10 +176,7 @@ describe("tauri-api", () => {
       const callback = vi.fn();
       await onOpenFile(callback);
 
-      expect(mockListen).toHaveBeenCalledWith(
-        "open-file",
-        expect.any(Function),
-      );
+      expect(mockListen).toHaveBeenCalledWith("open-file", expect.any(Function));
     });
   });
 });

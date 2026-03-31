@@ -10,7 +10,6 @@ import { GridEditToolbar } from "./GridEditToolbar";
 import { useGridStore } from "@/stores/grid-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
-import { persistSession } from "@/lib/persist-session";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
@@ -35,15 +34,13 @@ describe("GridEditToolbar", () => {
     expect(useGridStore.getState().editMode).toBe(false);
   });
 
-  it("shows save action buttons in edit mode", async () => {
+  it("shows export action buttons in edit mode", async () => {
     const user = userEvent.setup();
     render(<GridEditToolbar />);
 
     await user.click(screen.getByTestId("edit-mode-toggle"));
-    expect(screen.getByTestId("save-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("save-propagate-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("save-as-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("revert-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("export-new-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("export-overwrite-select")).toBeInTheDocument();
   });
 
   it("does not show split/clear/delete buttons in edit mode (moved to pane control bar)", async () => {
@@ -57,53 +54,32 @@ describe("GridEditToolbar", () => {
     expect(screen.queryByTestId("delete-pane-btn")).not.toBeInTheDocument();
   });
 
-  it("save button calls saveWorkspace", async () => {
-    const user = userEvent.setup();
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    await user.click(screen.getByTestId("save-btn"));
-
-    expect(persistSession).toHaveBeenCalled();
-  });
-
-  it("save-propagate button calls saveAndPropagate", async () => {
-    const user = userEvent.setup();
-    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    await user.click(screen.getByTestId("save-propagate-btn"));
-
-    const ws2 = useWorkspaceStore.getState().workspaces[1];
-    expect(ws2.panes).toHaveLength(2);
-  });
-
-  it("revert button reverts workspace to layout template", async () => {
-    const user = userEvent.setup();
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(2);
-
-    render(<GridEditToolbar />);
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    await user.click(screen.getByTestId("revert-btn"));
-
-    expect(useWorkspaceStore.getState().getActiveWorkspace()!.panes).toHaveLength(1);
-  });
-
-  it("save-as button creates new layout with prompted name", async () => {
+  it("export-new button creates new layout with prompted name", async () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("My Layout");
     useWorkspaceStore.getState().splitPane(0, "horizontal");
 
     render(<GridEditToolbar />);
     await user.click(screen.getByTestId("edit-mode-toggle"));
-    await user.click(screen.getByTestId("save-as-btn"));
+    await user.click(screen.getByTestId("export-new-btn"));
 
     expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
     expect(useWorkspaceStore.getState().layouts[1].name).toBe("My Layout");
     promptSpy.mockRestore();
+  });
+
+  it("export-overwrite select overwrites existing layout", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.getState().splitPane(0, "vertical");
+
+    render(<GridEditToolbar />);
+    await user.click(screen.getByTestId("edit-mode-toggle"));
+
+    const select = screen.getByTestId("export-overwrite-select");
+    await user.selectOptions(select, "default-layout");
+
+    const layout = useWorkspaceStore.getState().layouts[0];
+    expect(layout.panes).toHaveLength(2);
   });
 
   it("renders dock toggle buttons for all 4 positions", () => {

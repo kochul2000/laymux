@@ -5,7 +5,8 @@ import { IssueReporterView } from "./IssueReporterView";
 
 // Mock fetch for screenshot capture
 const mockFetch = vi.fn().mockResolvedValue({
-  json: () => Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),
+  json: () =>
+    Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),
 });
 global.fetch = mockFetch;
 
@@ -25,7 +26,8 @@ describe("IssueReporterView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockResolvedValue({
-      json: () => Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),
+      json: () =>
+        Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),
     });
   });
 
@@ -165,7 +167,10 @@ describe("IssueReporterView", () => {
     const user = userEvent.setup();
     let resolveSubmit: (value: string) => void;
     mockInvoke.mockImplementation(
-      () => new Promise<string>((resolve) => { resolveSubmit = resolve; }),
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSubmit = resolve;
+        }),
     );
 
     render(<IssueReporterView />);

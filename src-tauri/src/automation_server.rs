@@ -63,13 +63,21 @@ pub struct SwitchWorkspaceBody {
 #[derive(Deserialize)]
 pub struct CreateWorkspaceBody {
     pub name: String,
-    #[serde(rename = "layoutId")]
-    pub layout_id: String,
+    #[serde(default, rename = "layoutId")]
+    pub layout_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct RenameWorkspaceBody {
     pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct ExportLayoutBody {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, rename = "layoutId")]
+    pub layout_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -147,7 +155,10 @@ pub fn write_discovery_file(port: u16) {
         "pid": std::process::id(),
         "version": env!("CARGO_PKG_VERSION"),
     });
-    let _ = std::fs::write(&path, serde_json::to_string_pretty(&content).unwrap_or_default());
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&content).unwrap_or_default(),
+    );
 }
 
 /// Remove discovery file on shutdown.
@@ -229,47 +240,47 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
 /// All registered routes as (method, path) pairs.
 /// Used by both the router and the docs completeness test.
 pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
-    ("GET",    "/api/v1/docs"),
-    ("GET",    "/api/v1/health"),
-    ("GET",    "/api/v1/workspaces"),
-    ("POST",   "/api/v1/workspaces"),
-    ("GET",    "/api/v1/workspaces/active"),
-    ("POST",   "/api/v1/workspaces/active"),
-    ("PUT",    "/api/v1/workspaces/{id}"),
+    ("GET", "/api/v1/docs"),
+    ("GET", "/api/v1/health"),
+    ("GET", "/api/v1/workspaces"),
+    ("POST", "/api/v1/workspaces"),
+    ("GET", "/api/v1/workspaces/active"),
+    ("POST", "/api/v1/workspaces/active"),
+    ("PUT", "/api/v1/workspaces/{id}"),
     ("DELETE", "/api/v1/workspaces/{id}"),
-    ("POST",   "/api/v1/workspaces/save"),
-    ("POST",   "/api/v1/workspaces/revert"),
-    ("GET",    "/api/v1/grid"),
-    ("POST",   "/api/v1/grid/edit-mode"),
-    ("POST",   "/api/v1/grid/focus"),
-    ("POST",   "/api/v1/grid/hover"),
-    ("POST",   "/api/v1/panes/split"),
+    ("POST", "/api/v1/layouts/export"),
+    ("GET", "/api/v1/grid"),
+    ("POST", "/api/v1/grid/edit-mode"),
+    ("POST", "/api/v1/grid/focus"),
+    ("POST", "/api/v1/grid/hover"),
+    ("POST", "/api/v1/panes/split"),
     ("DELETE", "/api/v1/panes/{index}"),
-    ("PUT",    "/api/v1/panes/{index}/view"),
-    ("GET",    "/api/v1/docks"),
-    ("PUT",    "/api/v1/docks/{position}/active-view"),
-    ("POST",   "/api/v1/docks/{position}/toggle"),
-    ("PUT",    "/api/v1/docks/{position}/size"),
-    ("PUT",    "/api/v1/docks/{position}/views"),
-    ("POST",   "/api/v1/docks/{position}/split"),
-    ("DELETE","/api/v1/docks/{position}/panes/{paneId}"),
-    ("GET",    "/api/v1/terminals"),
-    ("POST",   "/api/v1/terminals/{id}/write"),
-    ("GET",    "/api/v1/terminals/{id}/output"),
-    ("GET",    "/api/v1/notifications"),
-    ("POST",   "/api/v1/notifications"),
-    ("POST",   "/api/v1/notifications/mark-read"),
-    ("GET",    "/api/v1/workspaces/{id}/summary"),
-    ("POST",   "/api/v1/terminals/{id}/focus"),
-    ("GET",    "/api/v1/terminals/states"),
-    ("GET",    "/api/v1/layouts"),
-    ("POST",   "/api/v1/screenshot"),
-    ("POST",   "/api/v1/ui/settings"),
-    ("POST",   "/api/v1/ui/settings/navigate"),
-    ("PUT",    "/api/v1/settings/app-theme"),
-    ("PUT",    "/api/v1/settings/profile-defaults"),
-    ("PUT",    "/api/v1/settings/profiles/{index}"),
-    ("POST",   "/api/v1/ui/notifications"),
+    ("PUT", "/api/v1/panes/{index}/view"),
+    ("GET", "/api/v1/docks"),
+    ("POST", "/api/v1/docks/layout-mode/toggle"),
+    ("PUT", "/api/v1/docks/{position}/active-view"),
+    ("POST", "/api/v1/docks/{position}/toggle"),
+    ("PUT", "/api/v1/docks/{position}/size"),
+    ("PUT", "/api/v1/docks/{position}/views"),
+    ("POST", "/api/v1/docks/{position}/split"),
+    ("DELETE", "/api/v1/docks/{position}/panes/{paneId}"),
+    ("GET", "/api/v1/terminals"),
+    ("POST", "/api/v1/terminals/{id}/write"),
+    ("GET", "/api/v1/terminals/{id}/output"),
+    ("GET", "/api/v1/notifications"),
+    ("POST", "/api/v1/notifications"),
+    ("POST", "/api/v1/notifications/mark-read"),
+    ("GET", "/api/v1/workspaces/{id}/summary"),
+    ("POST", "/api/v1/terminals/{id}/focus"),
+    ("GET", "/api/v1/terminals/states"),
+    ("GET", "/api/v1/layouts"),
+    ("POST", "/api/v1/screenshot"),
+    ("POST", "/api/v1/ui/settings"),
+    ("POST", "/api/v1/ui/settings/navigate"),
+    ("PUT", "/api/v1/settings/app-theme"),
+    ("PUT", "/api/v1/settings/profile-defaults"),
+    ("PUT", "/api/v1/settings/profiles/{index}"),
+    ("POST", "/api/v1/ui/notifications"),
 ];
 
 pub fn build_router(state: ServerState) -> Router {
@@ -282,8 +293,7 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
-        .route("/api/v1/workspaces/save", post(workspaces_save))
-        .route("/api/v1/workspaces/revert", post(workspaces_revert))
+        .route("/api/v1/layouts/export", post(layouts_export))
         .route("/api/v1/grid", get(grid_get_state))
         .route("/api/v1/grid/edit-mode", post(grid_set_edit_mode))
         .route("/api/v1/grid/focus", post(grid_focus_pane))
@@ -292,19 +302,38 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
         .route("/api/v1/docks", get(docks_list))
-        .route("/api/v1/docks/{position}/active-view", put(docks_set_active_view))
-        .route("/api/v1/docks/{position}/toggle", post(docks_toggle_visible))
+        .route(
+            "/api/v1/docks/layout-mode/toggle",
+            post(docks_toggle_layout_mode),
+        )
+        .route(
+            "/api/v1/docks/{position}/active-view",
+            put(docks_set_active_view),
+        )
+        .route(
+            "/api/v1/docks/{position}/toggle",
+            post(docks_toggle_visible),
+        )
         .route("/api/v1/docks/{position}/size", put(docks_set_size))
         .route("/api/v1/docks/{position}/views", put(docks_set_views))
         .route("/api/v1/docks/{position}/split", post(docks_split_pane))
-        .route("/api/v1/docks/{position}/panes/{paneId}", delete(docks_remove_pane))
+        .route(
+            "/api/v1/docks/{position}/panes/{paneId}",
+            delete(docks_remove_pane),
+        )
         .route("/api/v1/terminals", get(terminals_list))
         .route("/api/v1/terminals/{id}/write", post(terminal_write))
         .route("/api/v1/terminals/{id}/output", get(terminal_output))
         .route("/api/v1/notifications", get(notifications_list))
         .route("/api/v1/notifications", post(notifications_add))
-        .route("/api/v1/notifications/mark-read", post(notifications_mark_read))
-        .route("/api/v1/workspaces/{id}/summary", get(workspaces_get_summary))
+        .route(
+            "/api/v1/notifications/mark-read",
+            post(notifications_mark_read),
+        )
+        .route(
+            "/api/v1/workspaces/{id}/summary",
+            get(workspaces_get_summary),
+        )
         .route("/api/v1/terminals/{id}/focus", post(terminals_set_focus))
         .route("/api/v1/terminals/states", get(terminals_states))
         .route("/api/v1/layouts", get(layouts_list))
@@ -312,9 +341,18 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
-        .route("/api/v1/settings/profile-defaults", put(settings_set_profile_defaults))
-        .route("/api/v1/settings/profiles/{index}", put(settings_update_profile))
-        .route("/api/v1/ui/notifications", post(ui_toggle_notification_panel))
+        .route(
+            "/api/v1/settings/profile-defaults",
+            put(settings_set_profile_defaults),
+        )
+        .route(
+            "/api/v1/settings/profiles/{index}",
+            put(settings_update_profile),
+        )
+        .route(
+            "/api/v1/ui/notifications",
+            post(ui_toggle_notification_panel),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -345,7 +383,7 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "GET", "path": "/api/v1/workspaces/active",
                 "description": "Get the currently active workspace with full pane details.",
-                "response": "{ workspace: { id, name, layoutId, panes: [...] } }"
+                "response": "{ workspace: { id, name, panes: [...] } }"
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces/active",
@@ -354,8 +392,8 @@ async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces",
-                "description": "Create a new workspace from a layout template.",
-                "body": { "name": "string", "layoutId": "string" }
+                "description": "Create a new workspace from a layout.",
+                "body": { "name": "string", "layoutId": "string (optional) — layout to use as template" }
             },
             {
                 "method": "PUT", "path": "/api/v1/workspaces/{id}",
@@ -367,12 +405,9 @@ async fn api_docs() -> impl IntoResponse {
                 "description": "Delete a workspace. Cannot delete the last one."
             },
             {
-                "method": "POST", "path": "/api/v1/workspaces/save",
-                "description": "Persist current state to settings.json."
-            },
-            {
-                "method": "POST", "path": "/api/v1/workspaces/revert",
-                "description": "Revert active workspace to its layout template."
+                "method": "POST", "path": "/api/v1/layouts/export",
+                "description": "Export active workspace pane structure as a layout.",
+                "body": { "name": "string (optional) — create new layout with this name", "layoutId": "string (optional) — overwrite existing layout" }
             },
             {
                 "method": "GET", "path": "/api/v1/grid",
@@ -415,6 +450,10 @@ async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/docks/{position}/active-view",
                 "description": "Set the active view of a dock. position: top|bottom|left|right.",
                 "body": { "view": "\"WorkspaceSelectorView\" | \"SettingsView\"" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/docks/layout-mode/toggle",
+                "description": "Toggle dock layout mode between horizontal and vertical."
             },
             {
                 "method": "POST", "path": "/api/v1/docks/{position}/toggle",
@@ -473,7 +512,7 @@ async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/layouts",
-                "description": "List available layout templates."
+                "description": "List available layouts."
             },
             {
                 "method": "POST", "path": "/api/v1/screenshot",
@@ -552,7 +591,12 @@ async fn terminal_write(
 ) -> impl IntoResponse {
     let ptys = match state.app_state.pty_handles.lock() {
         Ok(p) => p,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json("Lock error"))),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_json("Lock error")),
+            )
+        }
     };
 
     match ptys.get(&id) {
@@ -575,7 +619,12 @@ async fn terminal_output(
     let lines = query.lines.unwrap_or(100);
     let buffers = match state.app_state.output_buffers.lock() {
         Ok(b) => b,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json("Lock error"))),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_json("Lock error")),
+            )
+        }
     };
 
     match buffers.get(&id) {
@@ -615,11 +664,12 @@ async fn bridge_request(
 
     // Store the channel
     {
-        let mut channels = state
-            .app_state
-            .automation_channels
-            .lock()
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json("Lock error"))))?;
+        let mut channels = state.app_state.automation_channels.lock().map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_json("Lock error")),
+            )
+        })?;
         channels.insert(request_id.clone(), tx);
     }
 
@@ -682,7 +732,15 @@ async fn workspaces_list(AxumState(state): AxumState<ServerState>) -> impl IntoR
 }
 
 async fn workspaces_get_active(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "query", "workspaces", "getActive", serde_json::json!({})).await {
+    match bridge_request(
+        &state,
+        "query",
+        "workspaces",
+        "getActive",
+        serde_json::json!({}),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -761,23 +819,26 @@ async fn workspaces_delete(
     }
 }
 
-async fn workspaces_save(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "action", "workspaces", "save", serde_json::json!({})).await {
-        Ok(data) => (StatusCode::OK, Json(data)),
-        Err(e) => e,
+async fn layouts_export(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<ExportLayoutBody>,
+) -> impl IntoResponse {
+    let name = body.name.as_deref().unwrap_or("");
+    let layout_id = body.layout_id.as_deref().unwrap_or("");
+    if layout_id.is_empty() && name.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": "either 'name' (to create new) or 'layoutId' (to overwrite) is required"}),
+            ),
+        );
     }
-}
-
-async fn workspaces_revert(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "workspaces",
-        "revert",
-        serde_json::json!({}),
-    )
-    .await
-    {
+    let (action, params) = if !layout_id.is_empty() {
+        ("exportTo", serde_json::json!({ "layoutId": layout_id }))
+    } else {
+        ("exportNew", serde_json::json!({ "name": name }))
+    };
+    match bridge_request(&state, "action", "layouts", action, params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -934,6 +995,21 @@ async fn docks_set_active_view(
     }
 }
 
+async fn docks_toggle_layout_mode(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "docks",
+        "toggleLayoutMode",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 async fn docks_toggle_visible(
     AxumState(state): AxumState<ServerState>,
     Path(position): Path<String>,
@@ -997,7 +1073,10 @@ async fn docks_split_pane(
     Path(position): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let pane_id = body.get("paneId").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let pane_id = body
+        .get("paneId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     match bridge_request(
         &state,
         "action",
@@ -1033,15 +1112,7 @@ async fn docks_remove_pane(
 // -- Terminal list (frontend-bridged for instance metadata) --
 
 async fn terminals_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "query",
-        "terminals",
-        "list",
-        serde_json::json!({}),
-    )
-    .await
-    {
+    match bridge_request(&state, "query", "terminals", "list", serde_json::json!({})).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -1051,7 +1122,10 @@ async fn terminals_list(AxumState(state): AxumState<ServerState>) -> impl IntoRe
 
 async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     let states = crate::commands::detect_all_terminal_states(&state.app_state);
-    (StatusCode::OK, Json(serde_json::json!({ "states": states })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "states": states })),
+    )
 }
 
 // -- Notifications --
@@ -1155,7 +1229,15 @@ async fn layouts_list(AxumState(state): AxumState<ServerState>) -> impl IntoResp
 // -- UI actions --
 
 async fn ui_toggle_settings(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "action", "ui", "toggleSettings", serde_json::json!({})).await {
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "toggleSettings",
+        serde_json::json!({}),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -1165,7 +1247,10 @@ async fn ui_navigate_settings(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let section = body.get("section").and_then(|v| v.as_str()).unwrap_or("startup");
+    let section = body
+        .get("section")
+        .and_then(|v| v.as_str())
+        .unwrap_or("startup");
     match bridge_request(
         &state,
         "action",
@@ -1184,8 +1269,19 @@ async fn settings_set_app_theme(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let theme_id = body.get("themeId").and_then(|v| v.as_str()).unwrap_or("catppuccin-mocha");
-    match bridge_request(&state, "action", "settings", "setAppTheme", serde_json::json!({ "themeId": theme_id })).await {
+    let theme_id = body
+        .get("themeId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("catppuccin-mocha");
+    match bridge_request(
+        &state,
+        "action",
+        "settings",
+        "setAppTheme",
+        serde_json::json!({ "themeId": theme_id }),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -1207,16 +1303,31 @@ async fn settings_update_profile(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     match bridge_request(
-        &state, "action", "settings", "updateProfile",
+        &state,
+        "action",
+        "settings",
+        "updateProfile",
         serde_json::json!({ "index": index, "data": body }),
-    ).await {
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
 }
 
-async fn ui_toggle_notification_panel(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match bridge_request(&state, "action", "ui", "toggleNotificationPanel", serde_json::json!({})).await {
+async fn ui_toggle_notification_panel(
+    AxumState(state): AxumState<ServerState>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "toggleNotificationPanel",
+        serde_json::json!({}),
+    )
+    .await
+    {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
@@ -1271,7 +1382,9 @@ async fn screenshot_capture(AxumState(state): AxumState<ServerState>) -> impl In
     let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
     let screenshots_dir = project_root.join(".screenshots");
     let _ = std::fs::create_dir_all(&screenshots_dir);
 
@@ -1315,7 +1428,10 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
 
-    let input: Vec<u8> = input.bytes().filter(|&b| b != b'\n' && b != b'\r' && b != b' ').collect();
+    let input: Vec<u8> = input
+        .bytes()
+        .filter(|&b| b != b'\n' && b != b'\r' && b != b' ')
+        .collect();
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
 
     let chunks = input.chunks(4);
@@ -1492,7 +1608,9 @@ mod tests {
             // Extract Json body
             use axum::response::IntoResponse;
             let response = resp.into_response();
-            let body = axum::body::to_bytes(response.into_body(), 1_000_000).await.unwrap();
+            let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+                .await
+                .unwrap();
             serde_json::from_slice::<serde_json::Value>(&body).unwrap()
         });
 
@@ -1529,7 +1647,8 @@ mod tests {
 
     #[test]
     fn add_notification_body_deserializes() {
-        let json = r#"{"terminalId":"t1","workspaceId":"ws-1","message":"Build done","level":"success"}"#;
+        let json =
+            r#"{"terminalId":"t1","workspaceId":"ws-1","message":"Build done","level":"success"}"#;
         let body: AddNotificationBody = serde_json::from_str(json).unwrap();
         assert_eq!(body.terminal_id, "t1");
         assert_eq!(body.workspace_id, "ws-1");

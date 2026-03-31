@@ -1,5 +1,6 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
+import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
@@ -13,11 +14,13 @@ export interface TerminalSummaryInfo {
   profile: string;
   cwd: string | null;
   branch: string | null;
+  title: string | undefined;
   lastCommand: string | undefined;
   lastExitCode: number | undefined;
   lastCommandAt: number | undefined;
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
+  hasUnreadNotification: boolean;
 }
 
 export interface WorkspaceSummary {
@@ -33,30 +36,20 @@ export interface WorkspaceSummary {
   terminalSummaries: TerminalSummaryInfo[];
 }
 
-export function getBranchForWorkspace(
-  terminals: TerminalInstance[],
-): string | null {
-  const sorted = [...terminals].sort(
-    (a, b) => b.lastActivityAt - a.lastActivityAt,
-  );
+export function getBranchForWorkspace(terminals: TerminalInstance[]): string | null {
+  const sorted = [...terminals].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   return sorted[0]?.branch ?? null;
 }
 
-export function getCwdForWorkspace(
-  terminals: TerminalInstance[],
-): string | null {
+export function getCwdForWorkspace(terminals: TerminalInstance[]): string | null {
   const focused = terminals.find((t) => t.isFocused);
   if (focused) return focused.cwd ?? null;
 
-  const sorted = [...terminals].sort(
-    (a, b) => b.lastActivityAt - a.lastActivityAt,
-  );
+  const sorted = [...terminals].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   return sorted[0]?.cwd ?? null;
 }
 
-export function getPortsForWorkspace(
-  terminalPorts: Map<string, number[]>,
-): number[] {
+export function getPortsForWorkspace(terminalPorts: Map<string, number[]>): number[] {
   const all = new Set<number>();
   for (const ports of terminalPorts.values()) {
     ports.forEach((p) => all.add(p));
@@ -64,15 +57,11 @@ export function getPortsForWorkspace(
   return [...all].sort((a, b) => a - b);
 }
 
-export function getLastCommandForWorkspace(
-  terminals: TerminalInstance[],
-): LastCommandInfo | null {
+export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastCommandInfo | null {
   const withCommand = terminals.filter((t) => t.lastCommand);
   if (withCommand.length === 0) return null;
 
-  const sorted = [...withCommand].sort(
-    (a, b) => (b.lastCommandAt ?? 0) - (a.lastCommandAt ?? 0),
-  );
+  const sorted = [...withCommand].sort((a, b) => (b.lastCommandAt ?? 0) - (a.lastCommandAt ?? 0));
   const t = sorted[0];
   return {
     command: t.lastCommand!,
@@ -92,21 +81,13 @@ export function computeWorkspaceSummary(
   terminals: TerminalInstance[],
   terminalPorts: Map<string, number[]>,
   notifications: Notification[],
-  workspaceName?: string,
+  _workspaceName?: string,
 ): WorkspaceSummary {
-  const wsTerminals = terminals.filter(
-    (t) =>
-      t.workspaceId === workspaceId ||
-      (workspaceName && t.syncGroup === workspaceName),
-  );
-  const wsNotifications = notifications.filter(
-    (n) => n.workspaceId === workspaceId,
-  );
+  const wsTerminals = terminals.filter((t) => t.workspaceId === workspaceId);
+  const wsNotifications = notifications.filter((n) => n.workspaceId === workspaceId);
   const unread = wsNotifications.filter((n) => n.readAt === null);
 
-  const sortedTerminals = [...wsTerminals].sort(
-    (a, b) => b.lastActivityAt - a.lastActivityAt,
-  );
+  const sortedTerminals = [...wsTerminals].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
   return {
     workspaceId,
@@ -114,8 +95,7 @@ export function computeWorkspaceSummary(
     cwd: getCwdForWorkspace(wsTerminals),
     ports: getPortsForWorkspace(terminalPorts),
     unreadCount: unread.length,
-    latestNotification:
-      unread.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null,
+    latestNotification: unread.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null,
     hasUnread: unread.length > 0,
     lastCommand: getLastCommandForWorkspace(wsTerminals),
     terminalCount: wsTerminals.length,
@@ -125,16 +105,23 @@ export function computeWorkspaceSummary(
       profile: t.profile,
       cwd: t.cwd ?? null,
       branch: t.branch ?? null,
+      title: t.title,
       lastCommand: t.lastCommand,
       lastExitCode: t.lastExitCode,
       lastCommandAt: t.lastCommandAt,
       activity: t.activity,
       outputActive: t.outputActive ?? false,
+      hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
     })),
   };
 }
 
-export function abbreviatePath(cwd: string): string {
+/**
+ * Abbreviate a file path for display.
+ * @param cwd - The raw path string
+ * @param ellipsis - "start" (default) truncates the beginning (shows end), "end" truncates the end (shows beginning)
+ */
+export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start"): string {
   let path = cwd;
 
   // Strip file:// URI prefix (from OSC 7)
@@ -172,7 +159,12 @@ export function abbreviatePath(cwd: string): string {
   if (path.length > 30) {
     const sep = path.includes("/") ? "/" : "\\";
     const parts = path.split(sep);
-    return ".../" + parts.slice(-2).join("/");
+    if (ellipsis === "end") {
+      // Keep beginning, truncate end
+      return parts.slice(0, 3).join(sep) + sep + "...";
+    }
+    // Default: keep end, truncate beginning
+    return "..." + sep + parts.slice(-2).join(sep);
   }
 
   return path;
@@ -183,14 +175,29 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
   if (ports.length <= maxDisplay) {
     return ports.map((p) => `:${p}`).join("  ");
   }
-  const shown = ports.slice(0, maxDisplay).map((p) => `:${p}`).join("  ");
+  const shown = ports
+    .slice(0, maxDisplay)
+    .map((p) => `:${p}`)
+    .join("  ");
   return `${shown}  +${ports.length - maxDisplay}`;
 }
 
+const CLAUDE_MODE_LABELS: Record<ClaudeMode, { suffix: string; icon: string }> = {
+  idle: { suffix: "", icon: "✳" },
+  working: { suffix: "", icon: "✶" },
+  plan: { suffix: " Plan", icon: "📋" },
+  danger: { suffix: " Danger", icon: "⚠" },
+};
+
 /** Get a display label for terminal activity state. */
-export function formatActivity(activity: TerminalActivityInfo | undefined): {
+export function formatActivity(
+  activity: TerminalActivityInfo | undefined,
+  title?: string,
+): {
   label: string;
   color: string;
+  claudeMode?: ClaudeMode;
+  ralph?: boolean;
 } {
   if (!activity) return { label: "shell", color: "var(--text-secondary)" };
   switch (activity.type) {
@@ -198,11 +205,18 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
       return { label: "shell", color: "var(--text-secondary)" };
     case "running":
       return { label: "running", color: "var(--yellow)" };
-    case "interactiveApp":
+    case "interactiveApp": {
       if (activity.name === "Claude") {
-        return { label: activity.name, color: "#D97757" };
+        const mode = parseClaudeMode(title, activity);
+        const ralph = isRalphActive(title);
+        const modeInfo = mode ? CLAUDE_MODE_LABELS[mode] : { suffix: "", icon: "" };
+        const label = `${modeInfo.icon} Claude${modeInfo.suffix}${ralph ? " ®" : ""}`.trim();
+        const color =
+          mode === "danger" ? "var(--red)" : mode === "plan" ? "var(--yellow)" : "#D97757";
+        return { label, color, claudeMode: mode, ralph };
       }
       return { label: activity.name ?? "app", color: "var(--accent)" };
+    }
   }
 }
 

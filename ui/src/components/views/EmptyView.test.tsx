@@ -86,9 +86,7 @@ describe("EmptyView", () => {
     // Press "1" - should select first option (first terminal profile)
     await user.keyboard("1");
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "TerminalView" }),
-    );
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: "TerminalView" }));
   });
 
   it("grabs DOM focus when isFocused becomes true", () => {
@@ -125,6 +123,20 @@ describe("EmptyView", () => {
     // Each card has a ⠿ drag handle
     const handles = screen.getAllByText("⠿");
     expect(handles.length).toBeGreaterThan(0);
+  });
+
+  it("shows memo option button", () => {
+    render(<EmptyView />);
+    expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
+  });
+
+  it("calls onSelectView with MemoView when memo clicked", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(<EmptyView onSelectView={onSelect} />);
+
+    await user.click(screen.getByTestId("empty-view-memo"));
+    expect(onSelect).toHaveBeenCalledWith({ type: "MemoView" });
   });
 
   it("respects stored viewOrder", () => {

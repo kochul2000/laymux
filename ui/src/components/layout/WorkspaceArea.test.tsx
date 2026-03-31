@@ -96,7 +96,9 @@ describe("WorkspaceArea", () => {
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
 
     // Advance time past the idle timeout (default 2s)
-    act(() => { vi.advanceTimersByTime(2000); });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
 
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
     vi.useRealTimers();
@@ -110,17 +112,23 @@ describe("WorkspaceArea", () => {
     fireEvent.mouseEnter(pane);
 
     // Advance almost to timeout
-    act(() => { vi.advanceTimersByTime(1500); });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
 
     // Move mouse to reset timer
     fireEvent.mouseMove(pane);
 
     // Advance past original timeout but not past reset
-    act(() => { vi.advanceTimersByTime(1500); });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
 
     // Advance past reset timeout
-    act(() => { vi.advanceTimersByTime(500); });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
     vi.useRealTimers();
   });
@@ -133,7 +141,9 @@ describe("WorkspaceArea", () => {
     fireEvent.mouseEnter(pane);
 
     // Auto-hide
-    act(() => { vi.advanceTimersByTime(3000); });
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
 
     // Mouse move should re-show

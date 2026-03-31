@@ -1,5 +1,5 @@
 use laymux_lib::state::AppState;
-use laymux_lib::terminal::{TerminalConfig, TerminalSession, SyncGroup};
+use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
 
 #[test]
 fn state_manages_terminal_sessions() {
@@ -24,7 +24,10 @@ fn multiple_sessions_coexist() {
 
     for i in 0..5 {
         let id = format!("term-{i}");
-        terminals.insert(id.clone(), TerminalSession::new(id, TerminalConfig::default()));
+        terminals.insert(
+            id.clone(),
+            TerminalSession::new(id, TerminalConfig::default()),
+        );
     }
 
     assert_eq!(terminals.len(), 5);

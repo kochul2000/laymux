@@ -3,7 +3,8 @@ import { findNotificationNavTarget } from "./notification-navigation";
 import type { Notification } from "@/stores/notification-store";
 
 function makeNotif(
-  overrides: Partial<Notification> & Pick<Notification, "id" | "terminalId" | "workspaceId" | "createdAt">,
+  overrides: Partial<Notification> &
+    Pick<Notification, "id" | "terminalId" | "workspaceId" | "createdAt">,
 ): Notification {
   return {
     message: "test",
@@ -21,15 +22,33 @@ describe("findNotificationNavTarget", () => {
 
   it("returns null when all notifications are read", () => {
     const notifs: Notification[] = [
-      makeNotif({ id: "n1", terminalId: "terminal-p1", workspaceId: "ws-1", createdAt: 100, readAt: 200 }),
+      makeNotif({
+        id: "n1",
+        terminalId: "terminal-p1",
+        workspaceId: "ws-1",
+        createdAt: 100,
+        readAt: 200,
+      }),
     ];
     expect(findNotificationNavTarget(notifs, "recent")).toBeNull();
   });
 
   it("excludes read notifications from targets", () => {
     const notifs: Notification[] = [
-      makeNotif({ id: "n1", terminalId: "terminal-p1", workspaceId: "ws-1", createdAt: 100, readAt: 150 }),
-      makeNotif({ id: "n2", terminalId: "terminal-p2", workspaceId: "ws-1", createdAt: 200, readAt: 250 }),
+      makeNotif({
+        id: "n1",
+        terminalId: "terminal-p1",
+        workspaceId: "ws-1",
+        createdAt: 100,
+        readAt: 150,
+      }),
+      makeNotif({
+        id: "n2",
+        terminalId: "terminal-p2",
+        workspaceId: "ws-1",
+        createdAt: 200,
+        readAt: 250,
+      }),
       makeNotif({ id: "n3", terminalId: "terminal-p3", workspaceId: "ws-2", createdAt: 300 }),
     ];
     // Only n3 is unread — n1, n2 are read and should be excluded
@@ -109,7 +128,13 @@ describe("findNotificationNavTarget", () => {
   it("skips already-read notifications when finding consecutive", () => {
     const notifs: Notification[] = [
       makeNotif({ id: "n1", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 100 }),
-      makeNotif({ id: "n2", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 200, readAt: 250 }),
+      makeNotif({
+        id: "n2",
+        terminalId: "terminal-pA",
+        workspaceId: "ws-1",
+        createdAt: 200,
+        readAt: 250,
+      }),
       makeNotif({ id: "n3", terminalId: "terminal-pA", workspaceId: "ws-1", createdAt: 300 }),
     ];
     const result = findNotificationNavTarget(notifs, "recent")!;

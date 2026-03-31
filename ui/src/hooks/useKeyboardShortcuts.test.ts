@@ -6,14 +6,19 @@ import { useDockStore } from "@/stores/dock-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
+
+vi.mock("@/lib/tauri-api", () => ({
+  loadMemo: vi.fn().mockResolvedValue(""),
+  saveMemo: vi.fn().mockResolvedValue(undefined),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+}));
 
 function fireKey(
   key: string,
   mods: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {},
 ) {
-  document.dispatchEvent(
-    new KeyboardEvent("keydown", { key, ...mods, bubbles: true }),
-  );
+  document.dispatchEvent(new KeyboardEvent("keydown", { key, ...mods, bubbles: true }));
 }
 
 describe("useKeyboardShortcuts", () => {
@@ -23,6 +28,7 @@ describe("useKeyboardShortcuts", () => {
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   // --- Ctrl+Alt+1~9: workspace switch ---
@@ -194,7 +200,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -218,7 +224,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -242,7 +248,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
@@ -267,7 +273,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -291,7 +297,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -315,7 +321,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 1, h: 0.5, view: { type: "TerminalView" } },
             { id: "p2", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView" } },
@@ -332,14 +338,78 @@ describe("useKeyboardShortcuts", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
 
-  it("Alt+Arrow does nothing when no pane in that direction", () => {
+  // --- Alt+Arrow: dock navigation ---
+  it("Alt+Arrow enters visible dock when no workspace pane in that direction", () => {
+    // Left dock is visible by default — single pane workspace, pressing left enters dock
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowLeft", { altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+  });
+
+  it("Alt+Arrow does not enter hidden dock", () => {
+    // Hide the left dock first (it's visible by default)
+    useDockStore.getState().toggleDockVisible("left");
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowLeft", { altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("Alt+Arrow exits dock back to workspace", () => {
+    // Focus left dock, then press right to exit
+    useDockStore.getState().setFocusedDock("left");
+    useGridStore.setState({ focusedPaneIndex: null });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowRight", { altKey: true }); // right exits left dock
+
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("Alt+Arrow navigates between docks", () => {
+    // Top dock is visible but has no panes by default — add a view so it's navigable
+    useDockStore.getState().setDockActiveView("top", "SettingsView");
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true }); // from left dock → top dock
+
+    expect(useDockStore.getState().focusedDock).toBe("top");
+  });
+
+  it("Alt+Arrow dock nav disabled when dockArrowNav is false", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, dockArrowNav: false },
+    });
+    // Hide left dock to ensure dock nav doesn't interfere
+    useDockStore.getState().toggleDockVisible("left");
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowLeft", { altKey: true });
+
+    // Should NOT enter dock
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("Alt+Arrow does nothing when no pane and no dock in that direction", () => {
     useWorkspaceStore.setState({
       ...useWorkspaceStore.getState(),
       workspaces: [
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -348,6 +418,8 @@ describe("useKeyboardShortcuts", () => {
       ],
     });
 
+    // Hide left dock so pressing left at p1 has nowhere to go
+    useDockStore.getState().toggleDockVisible("left");
     useGridStore.setState({ focusedPaneIndex: 0 });
     renderHook(() => useKeyboardShortcuts());
 
@@ -364,7 +436,7 @@ describe("useKeyboardShortcuts", () => {
         {
           id: "ws-default",
           name: "Default",
-          layoutId: "default-layout",
+
           panes: [
             { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
             { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -381,6 +453,86 @@ describe("useKeyboardShortcuts", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
 
+  it("Alt+Arrow does not enter dock with no panes (empty dock)", () => {
+    // Top dock is visible but has no panes by default
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+
+    // Should NOT enter empty dock
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("Alt+Arrow does not navigate to empty dock from another dock", () => {
+    // Top dock is visible but has no panes by default
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+
+    // Should stay on left dock — top dock has no panes
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow same direction as dock position is a no-op", () => {
+    // Left Dock → ArrowLeft should do nothing (intentional)
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowLeft", { altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow in dock when all other docks are hidden stays put", () => {
+    // Hide all docks except left
+    useDockStore.getState().toggleDockVisible("top");
+    useDockStore.getState().toggleDockVisible("bottom");
+    useDockStore.getState().toggleDockVisible("right");
+    useDockStore.getState().setFocusedDock("left");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowUp", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+
+    fireKey("ArrowDown", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow exit dock restores pane 0 when focusedPaneIndex was non-null before", () => {
+    // Set focusedPaneIndex to 2, then enter dock (clears it), then exit
+    useWorkspaceStore.setState({
+      ...useWorkspaceStore.getState(),
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
+            { id: "p2", x: 0.33, y: 0, w: 0.34, h: 1, view: { type: "TerminalView" } },
+            { id: "p3", x: 0.67, y: 0, w: 0.33, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+    });
+    useGridStore.setState({ focusedPaneIndex: 2 });
+    renderHook(() => useKeyboardShortcuts());
+
+    // Enter left dock from pane 0 (leftmost)
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    fireKey("ArrowLeft", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+
+    // Exit back — currently restores to 0 (known limitation, see PR #66 review comment #2)
+    fireKey("ArrowRight", { altKey: true });
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
   // --- Ctrl+Alt+ArrowLeft/Right: notification-based pane navigation ---
   describe("Ctrl+Alt+ArrowLeft (most recent notification)", () => {
     it("navigates to pane with most recent unread notification", () => {
@@ -390,7 +542,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -401,8 +553,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "older", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "older",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "newest",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -420,13 +588,13 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-1",
             name: "WS1",
-            layoutId: "default-layout",
+
             panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
           {
             id: "ws-2",
             name: "WS2",
-            layoutId: "default-layout",
+
             panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
           },
         ],
@@ -453,7 +621,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -464,8 +632,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 alert", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 alert", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 alert",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 alert",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -486,7 +670,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -497,9 +681,33 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 old", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 middle", level: "info", createdAt: 200, readAt: null },
-          { id: "n3", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 recent", level: "info", createdAt: 300, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 old",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 middle",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
+          {
+            id: "n3",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 recent",
+            level: "info",
+            createdAt: 300,
+            readAt: null,
+          },
         ],
       });
 
@@ -510,8 +718,8 @@ describe("useKeyboardShortcuts", () => {
       // Sorted desc: n3(p1,300), n2(p2,200), n1(p1,100)
       // Only n3 is consecutive from top (n2 breaks it)
       expect(notifs[2].readAt).not.toBeNull(); // n3 (p1 recent) — read
-      expect(notifs[1].readAt).toBeNull();     // n2 (p2) — still unread
-      expect(notifs[0].readAt).toBeNull();     // n1 (p1 old) — still unread
+      expect(notifs[1].readAt).toBeNull(); // n2 (p2) — still unread
+      expect(notifs[0].readAt).toBeNull(); // n1 (p1 old) — still unread
     });
 
     it("does not navigate to already-read (auto-dismissed) notifications", () => {
@@ -521,7 +729,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -533,8 +741,24 @@ describe("useKeyboardShortcuts", () => {
       // All notifications are already read (auto-dismissed)
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 100, readAt: 105 },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "auto-dismissed", level: "info", createdAt: 200, readAt: 205 },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "auto-dismissed",
+            level: "info",
+            createdAt: 100,
+            readAt: 105,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "auto-dismissed",
+            level: "info",
+            createdAt: 200,
+            readAt: 205,
+          },
         ],
       });
 
@@ -563,7 +787,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -574,8 +798,24 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "oldest", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p2", workspaceId: "ws-default", message: "newest", level: "info", createdAt: 200, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "oldest",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "newest",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
         ],
       });
 
@@ -593,7 +833,7 @@ describe("useKeyboardShortcuts", () => {
           {
             id: "ws-default",
             name: "Default",
-            layoutId: "default-layout",
+
             panes: [
               { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
               { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
@@ -604,9 +844,33 @@ describe("useKeyboardShortcuts", () => {
 
       useNotificationStore.setState({
         notifications: [
-          { id: "n1", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 first", level: "info", createdAt: 100, readAt: null },
-          { id: "n2", terminalId: "terminal-p1", workspaceId: "ws-default", message: "p1 second", level: "info", createdAt: 200, readAt: null },
-          { id: "n3", terminalId: "terminal-p2", workspaceId: "ws-default", message: "p2 third", level: "info", createdAt: 300, readAt: null },
+          {
+            id: "n1",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 first",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+          {
+            id: "n2",
+            terminalId: "terminal-p1",
+            workspaceId: "ws-default",
+            message: "p1 second",
+            level: "info",
+            createdAt: 200,
+            readAt: null,
+          },
+          {
+            id: "n3",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "p2 third",
+            level: "info",
+            createdAt: 300,
+            readAt: null,
+          },
         ],
       });
 
@@ -618,7 +882,7 @@ describe("useKeyboardShortcuts", () => {
       // n1, n2 consecutive from p1 — both marked as read
       expect(notifs[0].readAt).not.toBeNull(); // n1
       expect(notifs[1].readAt).not.toBeNull(); // n2
-      expect(notifs[2].readAt).toBeNull();     // n3 — still unread
+      expect(notifs[2].readAt).toBeNull(); // n3 — still unread
     });
   });
 
@@ -678,7 +942,8 @@ describe("useKeyboardShortcuts", () => {
     fireKey("N", { ctrlKey: true, altKey: true });
 
     const newWs = useWorkspaceStore.getState().workspaces[1];
-    expect(newWs.layoutId).toBe("default-layout");
+    expect(newWs.panes).toHaveLength(1);
+    expect(newWs.panes[0].view.type).toBe("EmptyView");
   });
 
   // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---

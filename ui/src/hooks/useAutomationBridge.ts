@@ -1,10 +1,6 @@
 import { useEffect } from "react";
 import html2canvas from "html2canvas";
-import {
-  onAutomationRequest,
-  automationResponse,
-  type AutomationRequest,
-} from "@/lib/tauri-api";
+import { onAutomationRequest, automationResponse, type AutomationRequest } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
@@ -57,14 +53,6 @@ const handlers: HandlerMap = {
     rename: (p) => {
       useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
       return ok({ renamed: p.id });
-    },
-    save: () => {
-      useWorkspaceStore.getState().saveWorkspace();
-      return ok({ saved: true });
-    },
-    revert: () => {
-      useWorkspaceStore.getState().revertWorkspace();
-      return ok({ reverted: true });
     },
     getSummary: (p) => {
       const wsId = p.id as string;
@@ -121,9 +109,7 @@ const handlers: HandlerMap = {
       return ok({ docks });
     },
     setActiveView: (p) => {
-      useDockStore
-        .getState()
-        .setDockActiveView(p.position as DockPosition, p.view as ViewType);
+      useDockStore.getState().setDockActiveView(p.position as DockPosition, p.view as ViewType);
       return ok({ set: true });
     },
     toggleVisible: (p) => {
@@ -136,17 +122,17 @@ const handlers: HandlerMap = {
       return ok({ set: true });
     },
     setViews: (p) => {
-      const views = Array.isArray(p.views) ? p.views as ViewType[] : [];
+      const views = Array.isArray(p.views) ? (p.views as ViewType[]) : [];
       const store = useDockStore.getState();
-      const docks = store.docks.map((d) =>
-        d.position === p.position ? { ...d, views } : d,
-      );
+      const docks = store.docks.map((d) => (d.position === p.position ? { ...d, views } : d));
       useDockStore.setState({ docks });
       return ok({ set: true });
     },
     splitPane: (p) => {
       const paneId = typeof p.paneId === "string" ? p.paneId : undefined;
-      const direction = (p.direction === "vertical" ? "vertical" : "horizontal") as "horizontal" | "vertical";
+      const direction = (p.direction === "vertical" ? "vertical" : "horizontal") as
+        | "horizontal"
+        | "vertical";
       useDockStore.getState().splitDockPane(p.position as DockPosition, direction, paneId);
       return ok({ split: true });
     },
@@ -156,12 +142,16 @@ const handlers: HandlerMap = {
     },
     setDockPaneView: (p) => {
       const view = p.view as { type: string; [key: string]: unknown };
-      useDockStore.getState().setDockPaneView(
-        p.position as DockPosition,
-        p.paneId as string,
-        { ...view, type: view.type as ViewType },
-      );
+      useDockStore.getState().setDockPaneView(p.position as DockPosition, p.paneId as string, {
+        ...view,
+        type: view.type as ViewType,
+      });
       return ok({ viewSet: true });
+    },
+    toggleLayoutMode: () => {
+      useDockStore.getState().toggleLayoutMode();
+      const { layoutMode } = useDockStore.getState();
+      return ok({ layoutMode });
     },
   },
 
@@ -208,9 +198,7 @@ const handlers: HandlerMap = {
       return ok({ added: true });
     },
     unreadCount: (p) => {
-      const count = useNotificationStore
-        .getState()
-        .getUnreadCount(p.workspaceId as string);
+      const count = useNotificationStore.getState().getUnreadCount(p.workspaceId as string);
       return ok({ count });
     },
     markRead: (p) => {
@@ -223,6 +211,16 @@ const handlers: HandlerMap = {
     list: () => {
       const { layouts } = useWorkspaceStore.getState();
       return ok({ layouts });
+    },
+    exportNew: (p) => {
+      useWorkspaceStore.getState().exportAsNewLayout(p.name as string);
+      return ok({ exported: true });
+    },
+    exportTo: (p) => {
+      const layoutId = p.layoutId as string;
+      const success = useWorkspaceStore.getState().exportToLayout(layoutId);
+      if (!success) return err(`layout '${layoutId}' not found`);
+      return ok({ exported: true });
     },
   },
 
@@ -256,9 +254,10 @@ const handlers: HandlerMap = {
  *  composite each WebGL canvas (xterm.js terminals) onto the result manually. */
 export async function captureScreenshot(): Promise<string> {
   const root = document.documentElement;
+  const scale = window.devicePixelRatio || 1;
   const result = await html2canvas(root, {
     backgroundColor: null,
-    scale: 1,
+    scale,
     logging: false,
   });
 
@@ -269,7 +268,13 @@ export async function captureScreenshot(): Promise<string> {
       if (c.width === 0 || c.height === 0) return;
       const rect = c.getBoundingClientRect();
       try {
-        ctx.drawImage(c, rect.left, rect.top, rect.width, rect.height);
+        ctx.drawImage(
+          c,
+          rect.left * scale,
+          rect.top * scale,
+          rect.width * scale,
+          rect.height * scale,
+        );
       } catch {
         // drawImage may fail for tainted/cross-origin canvases — ignore
       }
@@ -324,12 +329,7 @@ export function useAutomationBridge() {
       if (cancelled) return;
       const result = await handleAsyncAutomationRequest(request);
       if (cancelled) return;
-      automationResponse(
-        request.requestId,
-        result.success,
-        result.data,
-        result.error,
-      );
+      automationResponse(request.requestId, result.success, result.data, result.error);
     }).then((fn) => {
       if (cancelled) {
         // Effect was already cleaned up before promise resolved (StrictMode race)

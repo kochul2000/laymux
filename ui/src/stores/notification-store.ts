@@ -27,59 +27,57 @@ interface NotificationStoreState {
   markNotificationsAsRead: (ids: string[]) => void;
   getUnreadCount: (workspaceId: string) => number;
   getLatestNotification: (workspaceId: string) => Notification | undefined;
+  hasUnreadForTerminal: (terminalId: string) => boolean;
 }
 
-export const useNotificationStore = create<NotificationStoreState>()(
-  (set, get) => ({
-    notifications: [],
+export const useNotificationStore = create<NotificationStoreState>()((set, get) => ({
+  notifications: [],
 
-    addNotification: ({ terminalId, workspaceId, message, level }) => {
-      const notification: Notification = {
-        id: `notif-${++notifId}`,
-        terminalId,
-        workspaceId,
-        message,
-        level: level ?? "info",
-        createdAt: Date.now(),
-        readAt: null,
-      };
-      set((state) => ({
-        notifications: [...state.notifications, notification],
-      }));
-    },
+  addNotification: ({ terminalId, workspaceId, message, level }) => {
+    const notification: Notification = {
+      id: `notif-${++notifId}`,
+      terminalId,
+      workspaceId,
+      message,
+      level: level ?? "info",
+      createdAt: Date.now(),
+      readAt: null,
+    };
+    set((state) => ({
+      notifications: [...state.notifications, notification],
+    }));
+  },
 
-    markWorkspaceAsRead: (workspaceId) => {
-      const now = Date.now();
-      set((state) => ({
-        notifications: state.notifications.map((n) =>
-          n.workspaceId === workspaceId && n.readAt === null
-            ? { ...n, readAt: now }
-            : n,
-        ),
-      }));
-    },
+  markWorkspaceAsRead: (workspaceId) => {
+    const now = Date.now();
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        n.workspaceId === workspaceId && n.readAt === null ? { ...n, readAt: now } : n,
+      ),
+    }));
+  },
 
-    markNotificationsAsRead: (ids) => {
-      const idSet = new Set(ids);
-      const now = Date.now();
-      set((state) => ({
-        notifications: state.notifications.map((n) =>
-          idSet.has(n.id) && n.readAt === null ? { ...n, readAt: now } : n,
-        ),
-      }));
-    },
+  markNotificationsAsRead: (ids) => {
+    const idSet = new Set(ids);
+    const now = Date.now();
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        idSet.has(n.id) && n.readAt === null ? { ...n, readAt: now } : n,
+      ),
+    }));
+  },
 
-    getUnreadCount: (workspaceId) => {
-      return get().notifications.filter(
-        (n) => n.workspaceId === workspaceId && n.readAt === null,
-      ).length;
-    },
+  getUnreadCount: (workspaceId) => {
+    return get().notifications.filter((n) => n.workspaceId === workspaceId && n.readAt === null)
+      .length;
+  },
 
-    getLatestNotification: (workspaceId) => {
-      const notifs = get().notifications.filter(
-        (n) => n.workspaceId === workspaceId,
-      );
-      return notifs.length > 0 ? notifs[notifs.length - 1] : undefined;
-    },
-  }),
-);
+  getLatestNotification: (workspaceId) => {
+    const notifs = get().notifications.filter((n) => n.workspaceId === workspaceId);
+    return notifs.length > 0 ? notifs[notifs.length - 1] : undefined;
+  },
+
+  hasUnreadForTerminal: (terminalId) => {
+    return get().notifications.some((n) => n.terminalId === terminalId && n.readAt === null);
+  },
+}));

@@ -86,7 +86,7 @@ const presets: Record<OscPresetName, OscHook[]> = {
     {
       osc: 133,
       param: "E",
-      run: "lx set-command-status --command \"$command\"",
+      run: 'lx set-command-status --command "$command"',
     },
   ],
   "track-command-result": [

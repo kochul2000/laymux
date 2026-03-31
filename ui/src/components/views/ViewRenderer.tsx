@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
@@ -6,11 +7,13 @@ import { TerminalView } from "./TerminalView";
 import { BrowserPreviewView } from "./BrowserPreviewView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
+import { MemoView } from "./MemoView";
 
-interface ViewRendererProps {
+export interface ViewRendererProps {
   viewType: ViewType | null;
   viewConfig?: ViewInstanceConfig;
   onSelectView?: (config: ViewInstanceConfig) => void;
+  workspaceId?: string;
   workspaceName?: string;
   paneId?: string;
   emptyViewContext?: EmptyViewContext;
@@ -18,8 +21,18 @@ interface ViewRendererProps {
   onKeyboardActivity?: () => void;
 }
 
-export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName, paneId, emptyViewContext, isFocused, onKeyboardActivity }: ViewRendererProps) {
+export function ViewRenderer({
+  viewType,
+  viewConfig,
+  onSelectView,
+  workspaceId,
+  paneId,
+  emptyViewContext,
+  isFocused,
+  onKeyboardActivity,
+}: ViewRendererProps) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const fallbackId = useId();
   switch (viewType) {
     case "WorkspaceSelectorView":
       return (
@@ -35,8 +48,8 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
       );
     case "TerminalView": {
       const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
-      const effectiveSyncGroup = configSyncGroup || workspaceName || "";
-      const instanceId = paneId ? `terminal-${paneId}` : `terminal-fallback-${Math.random().toString(36).slice(2)}`;
+      const effectiveSyncGroup = configSyncGroup || workspaceId || "";
+      const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
       return (
         <div data-testid="view-terminal" className="h-full">
           <TerminalView
@@ -45,6 +58,7 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
             syncGroup={effectiveSyncGroup}
             cwdSend={(viewConfig?.cwdSend as boolean) ?? true}
             cwdReceive={(viewConfig?.cwdReceive as boolean) ?? true}
+            workspaceId={workspaceId}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
           />
@@ -57,17 +71,25 @@ export function ViewRenderer({ viewType, viewConfig, onSelectView, workspaceName
           <IssueReporterView />
         </div>
       );
+    case "MemoView": {
+      const memoKey = paneId ? `memo-${paneId}` : `memo-${fallbackId}`;
+      return (
+        <div data-testid="view-memo" className="h-full">
+          <MemoView memoKey={memoKey} isFocused={isFocused} />
+        </div>
+      );
+    }
     case "BrowserPreviewView":
       return (
         <div data-testid="view-browser-preview" className="h-full">
-          <BrowserPreviewView
-            url={(viewConfig?.url as string) ?? undefined}
-          />
+          <BrowserPreviewView url={(viewConfig?.url as string) ?? undefined} />
         </div>
       );
     case "EmptyView":
     case null:
     default:
-      return <EmptyView onSelectView={onSelectView} context={emptyViewContext} isFocused={isFocused} />;
+      return (
+        <EmptyView onSelectView={onSelectView} context={emptyViewContext} isFocused={isFocused} />
+      );
   }
 }
