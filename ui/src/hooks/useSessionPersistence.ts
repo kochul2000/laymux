@@ -154,14 +154,6 @@ export function useSessionPersistence() {
                   view: {
                     ...p.view,
                     type: (p.view.type as ViewType) || "EmptyView",
-                    // Normalize cwdReceive/cwdSend to explicit booleans for TerminalView
-                    // to prevent UI/backend mismatch (issue #24)
-                    ...(p.view.type === "TerminalView"
-                      ? {
-                          cwdReceive: (p.view.cwdReceive as boolean) ?? true,
-                          cwdSend: (p.view.cwdSend as boolean) ?? true,
-                        }
-                      : {}),
                   },
                   x: p.x ?? 0,
                   y: p.y ?? 0,

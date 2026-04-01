@@ -174,6 +174,7 @@ export function Dock({
                   : undefined
             }
             emptyViewContext="dock"
+            location="dock"
           />
         </PaneControlBar>
       </div>
@@ -298,6 +299,7 @@ function DockGrid({
                 workspaceName={activeWsName}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
                 emptyViewContext="dock"
+                location="dock"
                 onKeyboardActivity={() => {
                   setHoveredPane(null);
                   if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);

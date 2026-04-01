@@ -77,6 +77,7 @@ async function persistSessionCore(): Promise<void> {
       ...(p.font ? { font: p.font } : {}),
       ...(p.restoreCwd !== undefined ? { restoreCwd: p.restoreCwd } : {}),
       ...(p.restoreOutput !== undefined ? { restoreOutput: p.restoreOutput } : {}),
+      ...(p.syncCwd !== undefined ? { syncCwd: p.syncCwd } : {}),
     })),
     colorSchemes: settingsState.colorSchemes.map((cs) => ({
       name: cs.name,
@@ -140,6 +141,7 @@ async function persistSessionCore(): Promise<void> {
     workspaceDisplay: { ...settingsState.workspaceDisplay },
     claude: { ...settingsState.claude },
     memo: { ...settingsState.memo },
+    syncCwdDefaults: { ...settingsState.syncCwdDefaults },
     docks: dockState.docks.map((d) => ({
       position: d.position,
       activeView: d.activeView,

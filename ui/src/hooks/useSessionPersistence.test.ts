@@ -160,7 +160,7 @@ describe("useSessionPersistence", () => {
     expect(leftDock?.visible).toBe(false);
   });
 
-  it("normalizes cwdReceive/cwdSend to explicit booleans when loading dock panes", async () => {
+  it("leaves cwdReceive/cwdSend undefined when not set in dock panes (resolved at render time via syncCwdDefaults)", async () => {
     // Override loadSettings to return dock panes without cwdReceive/cwdSend
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",
@@ -215,8 +215,10 @@ describe("useSessionPersistence", () => {
 
     const bottomDock = useDockStore.getState().getDock("bottom");
     const pane = bottomDock?.panes[0];
-    expect(pane?.view.cwdReceive).toBe(true);
-    expect(pane?.view.cwdSend).toBe(true);
+    // cwdReceive/cwdSend are no longer force-normalized at load time;
+    // they remain undefined so ViewRenderer resolves defaults from syncCwdDefaults settings
+    expect(pane?.view.cwdReceive).toBeUndefined();
+    expect(pane?.view.cwdSend).toBeUndefined();
   });
 
   it("preserves explicit cwdReceive=false from saved dock panes", async () => {

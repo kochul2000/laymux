@@ -113,6 +113,13 @@ export interface WorkspaceDisplaySettings {
   result: boolean;
 }
 
+export type SyncCwdConfig = "default" | { send: boolean; receive: boolean };
+
+export interface SyncCwdDefaults {
+  workspace: { send: boolean; receive: boolean };
+  dock: { send: boolean; receive: boolean };
+}
+
 export interface ProfileDefaults {
   colorScheme?: string;
   cursorShape?: string;
@@ -127,6 +134,7 @@ export interface ProfileDefaults {
   font?: FontSettings;
   restoreCwd?: boolean;
   restoreOutput?: boolean;
+  syncCwd?: SyncCwdConfig;
 }
 
 export interface Settings {
@@ -136,6 +144,7 @@ export interface Settings {
   font?: FontSettings;
   defaultProfile: string;
   profileDefaults?: ProfileDefaults;
+  syncCwdDefaults?: SyncCwdDefaults;
   viewOrder?: string[];
   appThemeId?: string;
   layouts: SettingsLayout[];
@@ -199,6 +208,7 @@ export interface Profile {
   font?: FontSettings;
   restoreCwd?: boolean;
   restoreOutput?: boolean;
+  syncCwd?: SyncCwdConfig;
 }
 
 export interface Keybinding {

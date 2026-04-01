@@ -526,4 +526,105 @@ describe("settings-store", () => {
     expect(workspaceDisplay.path).toBe(true);
     expect(workspaceDisplay.result).toBe(true);
   });
+
+  // --- syncCwdDefaults ---
+
+  it("has default syncCwdDefaults", () => {
+    const { syncCwdDefaults } = useSettingsStore.getState();
+    expect(syncCwdDefaults.workspace).toEqual({ send: true, receive: true });
+    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: false });
+  });
+
+  it("loads syncCwdDefaults from settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      syncCwdDefaults: {
+        workspace: { send: true, receive: false },
+        dock: { send: true, receive: true },
+      },
+    });
+    const { syncCwdDefaults } = useSettingsStore.getState();
+    expect(syncCwdDefaults.workspace).toEqual({ send: true, receive: false });
+    expect(syncCwdDefaults.dock).toEqual({ send: true, receive: true });
+  });
+
+  it("uses default syncCwdDefaults when not in loaded settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      defaultProfile: "WSL",
+    });
+    const { syncCwdDefaults } = useSettingsStore.getState();
+    expect(syncCwdDefaults.workspace).toEqual({ send: true, receive: true });
+    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: false });
+  });
+
+  it("setSyncCwdDefaults updates partial values", () => {
+    useSettingsStore.getState().setSyncCwdDefaults({
+      dock: { send: true, receive: true },
+    });
+    const { syncCwdDefaults } = useSettingsStore.getState();
+    expect(syncCwdDefaults.workspace).toEqual({ send: true, receive: true }); // unchanged
+    expect(syncCwdDefaults.dock).toEqual({ send: true, receive: true }); // updated
+  });
+
+  // --- resolveSyncCwdForProfile ---
+
+  it("resolveSyncCwdForProfile returns workspace defaults for unset profile", () => {
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "workspace");
+    expect(result).toEqual({ send: true, receive: true });
+  });
+
+  it("resolveSyncCwdForProfile returns dock defaults for unset profile", () => {
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "dock");
+    expect(result).toEqual({ send: false, receive: false });
+  });
+
+  it("resolveSyncCwdForProfile uses profile syncCwd override", () => {
+    useSettingsStore.getState().updateProfile(1, {
+      syncCwd: { send: false, receive: false },
+    });
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "workspace");
+    expect(result).toEqual({ send: false, receive: false });
+  });
+
+  it("resolveSyncCwdForProfile uses profileDefaults.syncCwd when profile has no override", () => {
+    useSettingsStore.getState().setProfileDefaults({
+      syncCwd: { send: true, receive: false },
+    });
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("PowerShell", "workspace");
+    expect(result).toEqual({ send: true, receive: false });
+  });
+
+  it('resolveSyncCwdForProfile: profileDefaults.syncCwd "default" delegates to location', () => {
+    useSettingsStore.getState().setProfileDefaults({
+      syncCwd: "default",
+    });
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "dock");
+    expect(result).toEqual({ send: false, receive: false });
+  });
+
+  it("loads profile syncCwd from settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      profiles: [
+        {
+          name: "Monitor",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+          syncCwd: { send: false, receive: false },
+        } as any,
+      ],
+    });
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("Monitor", "workspace");
+    expect(result).toEqual({ send: false, receive: false });
+  });
+
+  it("loads profileDefaults.syncCwd from settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      profileDefaults: {
+        syncCwd: { send: false, receive: true },
+      } as any,
+    });
+    const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "workspace");
+    expect(result).toEqual({ send: false, receive: true });
+  });
 });

@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import type { ClaudeSyncCwdMode, ClaudeSettings, MemoSettings } from "../lib/tauri-api";
+import {
+  resolveSyncCwd,
+  DEFAULT_SYNC_CWD_DEFAULTS,
+  type SyncCwdPair,
+  type SyncCwdConfig,
+  type SyncCwdDefaults,
+  type TerminalLocation,
+} from "../lib/sync-cwd-config";
 
 export interface FontSettings {
   face: string;
@@ -76,6 +84,12 @@ export interface WorkspaceDisplaySettings {
 }
 
 export type { MemoSettings } from "../lib/tauri-api";
+export type {
+  SyncCwdConfig,
+  SyncCwdPair,
+  SyncCwdDefaults,
+  TerminalLocation,
+} from "../lib/sync-cwd-config";
 
 export type CursorShape =
   | "bar"
@@ -103,6 +117,7 @@ export interface ProfileDefaults {
   font: FontSettings;
   restoreCwd: boolean;
   restoreOutput: boolean;
+  syncCwd: SyncCwdConfig;
 }
 
 export interface Profile {
@@ -128,6 +143,8 @@ export interface Profile {
   restoreCwd?: boolean;
   /** Whether to restore terminal output on restart. When undefined, inherits from profileDefaults. */
   restoreOutput?: boolean;
+  /** CWD sync behavior. When undefined, inherits from profileDefaults. "default" delegates to location-based syncCwdDefaults. */
+  syncCwd?: SyncCwdConfig;
 }
 
 export interface Keybinding {
@@ -150,6 +167,7 @@ export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
   "font",
   "restoreCwd",
   "restoreOutput",
+  "syncCwd",
 ];
 
 /** App UI theme — separate from terminal color schemes. */
@@ -239,6 +257,7 @@ interface SettingsState {
   workspaceDisplay: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
+  syncCwdDefaults: SyncCwdDefaults;
 
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
@@ -248,6 +267,7 @@ interface SettingsState {
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
+  setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
   addProfile: (profile: Profile) => void;
   removeProfile: (index: number) => void;
   updateProfile: (index: number, data: Partial<Profile>) => void;
@@ -261,6 +281,8 @@ interface SettingsState {
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
   /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
   resolveFont: (profileName: string) => FontSettings;
+  /** Resolve effective { send, receive } for CWD sync based on profile and location. */
+  resolveSyncCwdForProfile: (profileName: string, location: TerminalLocation) => SyncCwdPair;
   loadFromSettings: (
     data: Partial<
       Pick<
@@ -276,6 +298,7 @@ interface SettingsState {
         | "workspaceDisplay"
         | "claude"
         | "memo"
+        | "syncCwdDefaults"
       >
     > & { font?: FontSettings },
   ) => void;
@@ -306,6 +329,7 @@ const defaultProfileDefaults: ProfileDefaults = {
   font: { ...DEFAULT_FONT },
   restoreCwd: true,
   restoreOutput: true,
+  syncCwd: "default",
 };
 
 function makeProfile(name: string, commandLine: string, overrides?: Partial<Profile>): Profile {
@@ -622,6 +646,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
   memo: { ...DEFAULT_MEMO_PADDING },
+  syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -643,6 +668,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setMemo: (data) =>
     set((state) => ({
       memo: { ...state.memo, ...data },
+    })),
+
+  setSyncCwdDefaults: (data) =>
+    set((state) => ({
+      syncCwdDefaults: { ...state.syncCwdDefaults, ...data },
     })),
 
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
@@ -703,6 +733,17 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     if (profile?.font) return profile.font;
     if (state.profileDefaults?.font) return state.profileDefaults.font;
     return DEFAULT_FONT;
+  },
+
+  resolveSyncCwdForProfile: (profileName, location) => {
+    const state = get();
+    return resolveSyncCwd({
+      profileName,
+      location,
+      profiles: state.profiles,
+      profileDefaultsSyncCwd: state.profileDefaults.syncCwd,
+      syncCwdDefaults: state.syncCwdDefaults,
+    });
   },
 
   loadFromSettings: (data) => {
@@ -788,6 +829,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const memo = data.memo
       ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
       : undefined;
+    // Ensure syncCwdDefaults settings have all fields (backwards compat)
+    const syncCwdDefaults = data.syncCwdDefaults
+      ? {
+          ...DEFAULT_SYNC_CWD_DEFAULTS,
+          ...(data.syncCwdDefaults as Partial<SyncCwdDefaults>),
+        }
+      : undefined;
 
     // Strip legacy font field before spreading into state
     const { font: _legacyFont, ...rest } = data;
@@ -801,6 +849,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(workspaceDisplay ? { workspaceDisplay } : {}),
       ...(claude ? { claude } : {}),
       ...(memo ? { memo } : {}),
+      ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
   },
 }));
