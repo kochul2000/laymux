@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
+
+export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
 export interface TerminalSessionResult {
   id: string;
@@ -111,13 +114,6 @@ export interface WorkspaceDisplaySettings {
   activity: boolean;
   path: boolean;
   result: boolean;
-}
-
-export type SyncCwdConfig = "default" | { send: boolean; receive: boolean };
-
-export interface SyncCwdDefaults {
-  workspace: { send: boolean; receive: boolean };
-  dock: { send: boolean; receive: boolean };
 }
 
 export interface ProfileDefaults {

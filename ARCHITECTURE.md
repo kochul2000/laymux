@@ -459,6 +459,35 @@ Claude Code가 터미널에서 실행 중일 때 sync-cwd 전파를 제어한다
 
 **`! cd` 형식**: Claude Code는 프롬프트에서 `! <shell_command>` 구문으로 인라인 셸 실행을 지원. `command` 모드에서는 이 형식으로 cd를 전달하며, `LX_PROPAGATED` 래핑이 불필요하다.
 
+### CWD 동기화 기본값
+
+위치(workspace/dock)별로 CWD sync의 send/receive 기본값을 설정한다. 프로파일별 오버라이드도 지원한다.
+
+**해상도 우선순위** (높은 순):
+1. 개별 프로파일 `syncCwd`
+2. `profileDefaults.syncCwd`
+3. 위치별 `syncCwdDefaults` (workspace / dock)
+
+값이 `"default"`이면 다음 단계로 위임한다.
+
+```jsonc
+{
+  "syncCwdDefaults": {
+    "workspace": { "send": true, "receive": true },   // 기본값
+    "dock": { "send": false, "receive": false }        // 기본값
+  },
+  "profileDefaults": {
+    "syncCwd": "default"    // "default" | { "send": bool, "receive": bool }
+  },
+  "profiles": [
+    { "name": "WSL", "syncCwd": "default" },
+    { "name": "Monitor", "syncCwd": { "send": false, "receive": false } }
+  ]
+}
+```
+
+per-pane `cwdSend`/`cwdReceive` 오버라이드는 cascade 결과보다 우선한다.
+
 ---
 
 ## 11. 전체 데이터 흐름 요약

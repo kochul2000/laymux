@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { useSettingsStore, type TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
 import { PaneControlBar } from "./PaneControlBar";
@@ -18,6 +18,9 @@ export function WorkspaceArea() {
   const splitPane = useWorkspaceStore((s) => s.splitPane);
   const removePane = useWorkspaceStore((s) => s.removePane);
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const resolveSyncCwdForProfile = useSettingsStore((s) => s.resolveSyncCwdForProfile);
+  const location: TerminalLocation = "workspace";
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
@@ -109,19 +112,25 @@ export function WorkspaceArea() {
                   onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
                   onToggleCwdSend:
                     isActive && pane.view.type === "TerminalView"
-                      ? () =>
-                          setPaneView(i, {
-                            ...pane.view,
-                            cwdSend: !((pane.view.cwdSend as boolean) ?? true),
-                          })
+                      ? () => {
+                          const profileName =
+                            (pane.view.profile as string) || defaultProfile || "PowerShell";
+                          const resolved = resolveSyncCwdForProfile(profileName, location);
+                          const current =
+                            (pane.view.cwdSend as boolean | undefined) ?? resolved.send;
+                          setPaneView(i, { ...pane.view, cwdSend: !current });
+                        }
                       : undefined,
                   onToggleCwdReceive:
                     isActive && pane.view.type === "TerminalView"
-                      ? () =>
-                          setPaneView(i, {
-                            ...pane.view,
-                            cwdReceive: !((pane.view.cwdReceive as boolean) ?? true),
-                          })
+                      ? () => {
+                          const profileName =
+                            (pane.view.profile as string) || defaultProfile || "PowerShell";
+                          const resolved = resolveSyncCwdForProfile(profileName, location);
+                          const current =
+                            (pane.view.cwdReceive as boolean | undefined) ?? resolved.receive;
+                          setPaneView(i, { ...pane.view, cwdReceive: !current });
+                        }
                       : undefined,
                 }}
               >
