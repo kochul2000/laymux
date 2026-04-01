@@ -315,6 +315,9 @@ const DEFAULT_MEMO_PADDING: MemoSettings = {
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
 
+/** Fallback profile name when defaultProfile is unset. */
+export const FALLBACK_PROFILE = "PowerShell";
+
 const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
   cursorShape: "bar",

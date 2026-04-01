@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useSettingsStore, type TerminalLocation } from "@/stores/settings-store";
+import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
 import { PaneControlBar } from "./PaneControlBar";
@@ -114,7 +114,7 @@ export function WorkspaceArea() {
                     isActive && pane.view.type === "TerminalView"
                       ? () => {
                           const profileName =
-                            (pane.view.profile as string) || defaultProfile || "PowerShell";
+                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
                           const resolved = resolveSyncCwdForProfile(profileName, location);
                           const current =
                             (pane.view.cwdSend as boolean | undefined) ?? resolved.send;
@@ -125,7 +125,7 @@ export function WorkspaceArea() {
                     isActive && pane.view.type === "TerminalView"
                       ? () => {
                           const profileName =
-                            (pane.view.profile as string) || defaultProfile || "PowerShell";
+                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
                           const resolved = resolveSyncCwdForProfile(profileName, location);
                           const current =
                             (pane.view.cwdReceive as boolean | undefined) ?? resolved.receive;

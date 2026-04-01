@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
-import { useSettingsStore, type TerminalLocation } from "@/stores/settings-store";
+import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/stores/settings-store";
+import { resolveSyncCwd } from "@/lib/sync-cwd-config";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { TerminalView } from "./TerminalView";
@@ -35,7 +36,9 @@ export function ViewRenderer({
   location = "workspace",
 }: ViewRendererProps) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const resolveSyncCwdForProfile = useSettingsStore((s) => s.resolveSyncCwdForProfile);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
+  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const fallbackId = useId();
   switch (viewType) {
     case "WorkspaceSelectorView":
@@ -55,9 +58,15 @@ export function ViewRenderer({
       const effectiveSyncGroup = configSyncGroup || workspaceId || "";
       const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
       const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
-      const profileName = (viewConfig?.profile as string) || defaultProfile || "PowerShell";
+      const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
       // Resolve CWD sync defaults from settings cascade; per-pane overrides take priority
-      const resolvedDefaults = resolveSyncCwdForProfile(profileName, location);
+      const resolvedDefaults = resolveSyncCwd({
+        profileName,
+        location,
+        profiles,
+        profileDefaultsSyncCwd,
+        syncCwdDefaults,
+      });
       const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? resolvedDefaults.send;
       const cwdReceive =
         (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
