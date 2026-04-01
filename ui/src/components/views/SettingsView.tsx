@@ -647,6 +647,9 @@ const fallbackDefaults: ProfileDefaults = {
   suppressApplicationTitle: false,
   snapOnInput: true,
   font: { face: "Cascadia Mono", size: 14, weight: "normal" },
+  restoreCwd: true,
+  restoreOutput: true,
+  syncCwd: "default",
 };
 
 function DefaultsSection() {

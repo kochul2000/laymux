@@ -113,9 +113,10 @@ export function WorkspaceArea() {
                   onToggleCwdSend:
                     isActive && pane.view.type === "TerminalView"
                       ? () => {
-                          const profileName =
-                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
-                          const resolved = resolveSyncCwdForProfile(profileName, location);
+                          const resolved = resolveSyncCwdForProfile(
+                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE,
+                            location,
+                          );
                           const current =
                             (pane.view.cwdSend as boolean | undefined) ?? resolved.send;
                           setPaneView(i, { ...pane.view, cwdSend: !current });
@@ -124,9 +125,10 @@ export function WorkspaceArea() {
                   onToggleCwdReceive:
                     isActive && pane.view.type === "TerminalView"
                       ? () => {
-                          const profileName =
-                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
-                          const resolved = resolveSyncCwdForProfile(profileName, location);
+                          const resolved = resolveSyncCwdForProfile(
+                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE,
+                            location,
+                          );
                           const current =
                             (pane.view.cwdReceive as boolean | undefined) ?? resolved.receive;
                           setPaneView(i, { ...pane.view, cwdReceive: !current });

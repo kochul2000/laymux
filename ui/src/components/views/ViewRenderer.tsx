@@ -24,6 +24,59 @@ export interface ViewRendererProps {
   location?: TerminalLocation;
 }
 
+/** Wrapper that subscribes to sync-cwd settings only for TerminalView instances. */
+function TerminalViewWithSyncCwd({
+  viewConfig,
+  workspaceId,
+  paneId,
+  isFocused,
+  onKeyboardActivity,
+  location,
+}: {
+  viewConfig?: ViewInstanceConfig;
+  workspaceId?: string;
+  paneId?: string;
+  isFocused?: boolean;
+  onKeyboardActivity?: () => void;
+  location: TerminalLocation;
+}) {
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
+  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
+  const fallbackId = useId();
+
+  const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
+  const effectiveSyncGroup = configSyncGroup || workspaceId || "";
+  const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
+  const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
+  const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
+  const resolvedDefaults = resolveSyncCwd({
+    profileName,
+    location,
+    profiles,
+    profileDefaultsSyncCwd,
+    syncCwdDefaults,
+  });
+  const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? resolvedDefaults.send;
+  const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
+
+  return (
+    <TerminalView
+      instanceId={instanceId}
+      paneId={paneId}
+      profile={profileName}
+      syncGroup={effectiveSyncGroup}
+      cwdSend={cwdSend}
+      cwdReceive={cwdReceive}
+      workspaceId={workspaceId}
+      isFocused={isFocused}
+      onKeyboardActivity={onKeyboardActivity}
+      lastCwd={lastCwd}
+    />
+  );
+}
+
 export function ViewRenderer({
   viewType,
   viewConfig,
@@ -35,10 +88,6 @@ export function ViewRenderer({
   onKeyboardActivity,
   location = "workspace",
 }: ViewRendererProps) {
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const profiles = useSettingsStore((s) => s.profiles);
-  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
-  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const fallbackId = useId();
   switch (viewType) {
     case "WorkspaceSelectorView":
@@ -53,40 +102,19 @@ export function ViewRenderer({
           <SettingsView />
         </div>
       );
-    case "TerminalView": {
-      const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
-      const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-      const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
-      const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
-      const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
-      // Resolve CWD sync defaults from settings cascade; per-pane overrides take priority
-      const resolvedDefaults = resolveSyncCwd({
-        profileName,
-        location,
-        profiles,
-        profileDefaultsSyncCwd,
-        syncCwdDefaults,
-      });
-      const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? resolvedDefaults.send;
-      const cwdReceive =
-        (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
+    case "TerminalView":
       return (
         <div data-testid="view-terminal" className="h-full">
-          <TerminalView
-            instanceId={instanceId}
-            paneId={paneId}
-            profile={profileName}
-            syncGroup={effectiveSyncGroup}
-            cwdSend={cwdSend}
-            cwdReceive={cwdReceive}
+          <TerminalViewWithSyncCwd
+            viewConfig={viewConfig}
             workspaceId={workspaceId}
+            paneId={paneId}
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
-            lastCwd={lastCwd}
+            location={location}
           />
         </div>
       );
-    }
     case "IssueReporterView":
       return (
         <div data-testid="view-issue-reporter" className="h-full">
