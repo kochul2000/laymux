@@ -41,7 +41,6 @@ function TerminalViewWithSyncCwd({
   location: TerminalLocation;
 }) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const profiles = useSettingsStore((s) => s.profiles);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
   const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const fallbackId = useId();
@@ -51,10 +50,13 @@ function TerminalViewWithSyncCwd({
   const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
+  const profileSyncCwd = useSettingsStore(
+    (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
+  );
   const resolvedDefaults = resolveSyncCwd({
     profileName,
     location,
-    profiles,
+    profileSyncCwd,
     profileDefaultsSyncCwd,
     syncCwdDefaults,
   });

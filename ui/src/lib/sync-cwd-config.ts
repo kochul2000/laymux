@@ -27,21 +27,17 @@ export interface SyncCwdDefaults {
 /** Terminal location context. */
 export type TerminalLocation = "workspace" | "dock";
 
-/** Profile shape used for resolution (subset of full Profile). */
-export interface SyncCwdProfileInfo {
-  name: string;
-  syncCwd?: SyncCwdConfig;
-}
-
 export const DEFAULT_SYNC_CWD_DEFAULTS: SyncCwdDefaults = {
   workspace: { send: true, receive: true },
   dock: { send: false, receive: false },
 };
 
 export interface ResolveSyncCwdParams {
-  profileName: string;
+  /** Kept for caller context / debugging — not used in resolution logic. */
+  profileName?: string;
   location: TerminalLocation;
-  profiles?: SyncCwdProfileInfo[];
+  /** The syncCwd value from the matching profile (already looked up by caller). */
+  profileSyncCwd?: SyncCwdConfig;
   profileDefaultsSyncCwd?: SyncCwdConfig;
   syncCwdDefaults?: SyncCwdDefaults;
 }
@@ -51,9 +47,8 @@ export interface ResolveSyncCwdParams {
  */
 export function resolveSyncCwd(params: ResolveSyncCwdParams): SyncCwdPair {
   const {
-    profileName,
     location,
-    profiles,
+    profileSyncCwd,
     profileDefaultsSyncCwd,
     syncCwdDefaults = DEFAULT_SYNC_CWD_DEFAULTS,
   } = params;
@@ -61,9 +56,8 @@ export function resolveSyncCwd(params: ResolveSyncCwdParams): SyncCwdPair {
   const locationDefault = syncCwdDefaults[location];
 
   // Step 1: Check individual profile
-  const profile = profiles?.find((p) => p.name === profileName);
-  if (profile?.syncCwd != null && profile.syncCwd !== "default") {
-    return profile.syncCwd;
+  if (profileSyncCwd != null && profileSyncCwd !== "default") {
+    return profileSyncCwd;
   }
 
   // Step 2: Check profileDefaults

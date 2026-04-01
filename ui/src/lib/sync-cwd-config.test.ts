@@ -8,7 +8,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "workspace",
-      profiles: [{ name: "WSL" }],
     });
     expect(result).toEqual({ send: true, receive: true });
   });
@@ -17,7 +16,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "dock",
-      profiles: [{ name: "WSL" }],
     });
     expect(result).toEqual({ send: false, receive: false });
   });
@@ -28,7 +26,7 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "Monitor",
       location: "workspace",
-      profiles: [{ name: "Monitor", syncCwd: { send: false, receive: false } }],
+      profileSyncCwd: { send: false, receive: false },
     });
     expect(result).toEqual({ send: false, receive: false });
   });
@@ -37,7 +35,7 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "dock",
-      profiles: [{ name: "WSL", syncCwd: "default" }],
+      profileSyncCwd: "default",
     });
     expect(result).toEqual({ send: false, receive: false });
   });
@@ -48,7 +46,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "workspace",
-      profiles: [{ name: "WSL" }],
       profileDefaultsSyncCwd: { send: true, receive: false },
     });
     expect(result).toEqual({ send: true, receive: false });
@@ -58,7 +55,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "dock",
-      profiles: [{ name: "WSL" }],
       profileDefaultsSyncCwd: "default",
     });
     expect(result).toEqual({ send: false, receive: false });
@@ -70,7 +66,7 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "Monitor",
       location: "workspace",
-      profiles: [{ name: "Monitor", syncCwd: { send: false, receive: false } }],
+      profileSyncCwd: { send: false, receive: false },
       profileDefaultsSyncCwd: { send: true, receive: true },
     });
     expect(result).toEqual({ send: false, receive: false });
@@ -80,7 +76,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "workspace",
-      profiles: [{ name: "WSL" }],
       profileDefaultsSyncCwd: { send: false, receive: true },
       syncCwdDefaults: {
         workspace: { send: true, receive: true },
@@ -96,7 +91,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "workspace",
-      profiles: [{ name: "WSL" }],
       syncCwdDefaults: {
         workspace: { send: true, receive: false },
         dock: { send: false, receive: false },
@@ -109,7 +103,6 @@ describe("resolveSyncCwd", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "dock",
-      profiles: [{ name: "WSL" }],
       syncCwdDefaults: {
         workspace: { send: true, receive: true },
         dock: { send: true, receive: false },
@@ -120,16 +113,15 @@ describe("resolveSyncCwd", () => {
 
   // --- Edge cases ---
 
-  it("returns location defaults when profile not found", () => {
+  it("returns location defaults when profileSyncCwd is undefined", () => {
     const result = resolveSyncCwd({
       profileName: "NonExistent",
       location: "workspace",
-      profiles: [],
     });
     expect(result).toEqual({ send: true, receive: true });
   });
 
-  it("returns location defaults when profiles is undefined", () => {
+  it("returns location defaults when all overrides are undefined", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "dock",
@@ -137,11 +129,11 @@ describe("resolveSyncCwd", () => {
     expect(result).toEqual({ send: false, receive: false });
   });
 
-  it("handles undefined syncCwd on profile (same as no override)", () => {
+  it("handles undefined profileSyncCwd (same as no override)", () => {
     const result = resolveSyncCwd({
       profileName: "WSL",
       location: "workspace",
-      profiles: [{ name: "WSL", syncCwd: undefined }],
+      profileSyncCwd: undefined,
     });
     expect(result).toEqual({ send: true, receive: true });
   });

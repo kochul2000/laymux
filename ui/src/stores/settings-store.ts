@@ -318,7 +318,7 @@ export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, wei
 /** Fallback profile name when defaultProfile is unset. */
 export const FALLBACK_PROFILE = "PowerShell";
 
-const defaultProfileDefaults: ProfileDefaults = {
+export const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
   cursorShape: "bar",
   padding: { ...defaultPadding },
@@ -743,7 +743,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     return resolveSyncCwd({
       profileName,
       location,
-      profiles: state.profiles,
+      profileSyncCwd: state.profiles.find((p) => p.name === profileName)?.syncCwd,
       profileDefaultsSyncCwd: state.profileDefaults.syncCwd,
       syncCwdDefaults: state.syncCwdDefaults,
     });
