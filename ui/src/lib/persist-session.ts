@@ -141,6 +141,7 @@ async function persistSessionCore(): Promise<void> {
     workspaceDisplay: { ...settingsState.workspaceDisplay },
     claude: { ...settingsState.claude },
     memo: { ...settingsState.memo },
+    issueReporter: { ...settingsState.issueReporter },
     syncCwdDefaults: { ...settingsState.syncCwdDefaults },
     docks: dockState.docks.map((d) => ({
       position: d.position,

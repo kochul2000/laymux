@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ClaudeSyncCwdMode, ClaudeSettings, MemoSettings } from "../lib/tauri-api";
+import type { ClaudeSyncCwdMode, ClaudeSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 import {
   resolveSyncCwd,
   DEFAULT_SYNC_CWD_DEFAULTS,
@@ -83,7 +83,7 @@ export interface WorkspaceDisplaySettings {
   result: boolean;
 }
 
-export type { MemoSettings } from "../lib/tauri-api";
+export type { IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
   SyncCwdConfig,
   SyncCwdPair,
@@ -257,6 +257,7 @@ interface SettingsState {
   workspaceDisplay: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
+  issueReporter: IssueReporterSettings;
   syncCwdDefaults: SyncCwdDefaults;
 
   setDefaultProfile: (profile: string) => void;
@@ -266,6 +267,7 @@ interface SettingsState {
   setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
+  setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
   addProfile: (profile: Profile) => void;
@@ -298,6 +300,7 @@ interface SettingsState {
         | "workspaceDisplay"
         | "claude"
         | "memo"
+        | "issueReporter"
         | "syncCwdDefaults"
       >
     > & { font?: FontSettings },
@@ -649,6 +652,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
   memo: { ...DEFAULT_MEMO_PADDING },
+  issueReporter: { shell: "" },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -671,6 +675,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setMemo: (data) =>
     set((state) => ({
       memo: { ...state.memo, ...data },
+    })),
+
+  setIssueReporter: (data) =>
+    set((state) => ({
+      issueReporter: { ...state.issueReporter, ...data },
     })),
 
   setSyncCwdDefaults: (data) =>
@@ -828,6 +837,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const claude = data.claude
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
+    // Ensure issueReporter settings have all fields (backwards compat)
+    const issueReporter = data.issueReporter
+      ? { shell: "", ...(data.issueReporter as Partial<IssueReporterSettings>) }
+      : undefined;
     // Ensure memo settings have all fields (backwards compat)
     const memo = data.memo
       ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
@@ -851,6 +864,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(convenience ? { convenience } : {}),
       ...(workspaceDisplay ? { workspaceDisplay } : {}),
       ...(claude ? { claude } : {}),
+      ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));

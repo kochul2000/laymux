@@ -910,17 +910,55 @@ fn base64_encode(input: &[u8]) -> String {
     result
 }
 
+/// Parse a shell-like string into tokens, respecting single and double quotes.
+/// Unmatched trailing quotes treat the rest of the string as one token.
+fn shell_split(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                chars.next();
+            }
+            '"' | '\'' => {
+                let quote = ch;
+                chars.next(); // consume opening quote
+                while let Some(&c) = chars.peek() {
+                    if c == quote {
+                        chars.next(); // consume closing quote
+                        break;
+                    }
+                    current.push(c);
+                    chars.next();
+                }
+            }
+            _ => {
+                current.push(ch);
+                chars.next();
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
 /// Build a `std::process::Command` for `gh`, optionally wrapped by a shell prefix.
 /// When `shell_prefix` is empty, gh is invoked directly.
-/// When set (e.g. "wsl.exe -d Ubuntu --"), gh is invoked as:
-///   `wsl.exe -d Ubuntu -- gh {args...}`
+/// When set (e.g. `wsl.exe -d "My Distro" --`), gh is invoked as:
+///   `wsl.exe -d "My Distro" -- gh {args...}`
+/// Supports single/double-quoted arguments in the prefix.
 fn build_gh_command(shell_prefix: &str) -> std::process::Command {
-    let trimmed = shell_prefix.trim();
-    if trimmed.is_empty() {
+    let parts = shell_split(shell_prefix);
+    if parts.is_empty() {
         std::process::Command::new("gh")
     } else {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        let mut cmd = std::process::Command::new(parts[0]);
+        let mut cmd = std::process::Command::new(&parts[0]);
         for part in &parts[1..] {
             cmd.arg(part);
         }
@@ -1902,6 +1940,45 @@ mod tests {
         assert_eq!(cmd.get_program(), "bash");
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_double_quoted_arg() {
+        let cmd = build_gh_command(r#"wsl.exe -d "My Distro" --"#);
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_single_quoted_arg() {
+        let cmd = build_gh_command("wsl.exe -d 'My Distro' --");
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
+    }
+
+    #[test]
+    fn shell_split_basic() {
+        assert_eq!(shell_split(""), Vec::<String>::new());
+        assert_eq!(shell_split("   "), Vec::<String>::new());
+        assert_eq!(shell_split("a b c"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn shell_split_quotes() {
+        assert_eq!(shell_split(r#""hello world""#), vec!["hello world"]);
+        assert_eq!(shell_split("'hello world'"), vec!["hello world"]);
+        assert_eq!(
+            shell_split(r#"cmd "arg one" 'arg two' plain"#),
+            vec!["cmd", "arg one", "arg two", "plain"]
+        );
+    }
+
+    #[test]
+    fn shell_split_unclosed_quote() {
+        // Unclosed quote: rest of string is one token
+        assert_eq!(shell_split(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
     }
 
     #[test]

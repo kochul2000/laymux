@@ -1418,6 +1418,41 @@ function ClaudeSection() {
   );
 }
 
+// -- Section: Issue Reporter --
+
+function IssueReporterSection() {
+  const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
+  const setIssueReporter = useSettingsStore((s) => s.setIssueReporter);
+  const [issueReporter, setDraftIssueReporter] = useDraft(
+    "issueReporter",
+    storeIssueReporter,
+    (v) => setIssueReporter(v),
+  );
+  const updateIssueReporter = (partial: Partial<typeof issueReporter>) =>
+    setDraftIssueReporter((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>Issue Reporter</SectionTitle>
+
+      <div style={cardStyle} className="p-4">
+        <SettingRow
+          label="Shell"
+          desc="gh CLI를 실행할 셸 접두어. 비워두면 gh를 직접 실행. 따옴표 지원."
+        >
+          <FocusInput
+            data-testid="issue-reporter-shell-input"
+            className={inputCls}
+            placeholder='예: wsl.exe -d "My Distro" --'
+            value={issueReporter.shell}
+            onChange={(e) => updateIssueReporter({ shell: e.target.value })}
+          />
+        </SettingRow>
+      </div>
+    </div>
+  );
+}
+
 // -- Section: Memo --
 
 function MemoSection() {
@@ -2135,6 +2170,16 @@ export function SettingsView() {
           >
             Memo
           </button>
+          <button
+            data-testid="nav-issueReporter"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("issueReporter")}
+            onClick={() => setActiveNav("issueReporter")}
+            onMouseEnter={() => setNavHover("issueReporter")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Issue Reporter
+          </button>
 
           {/* Profiles group */}
           <div className="mt-3 flex items-center justify-between px-3 pb-1">
@@ -2224,6 +2269,7 @@ export function SettingsView() {
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "memo" && <MemoSection />}
+            {activeNav === "issueReporter" && <IssueReporterSection />}
           </div>
 
           {/* Sticky save bar — always visible at bottom */}
