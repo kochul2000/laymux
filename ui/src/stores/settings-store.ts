@@ -837,7 +837,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const claude = data.claude
       ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
       : undefined;
-    // Ensure issueReporter settings have all fields (backwards compat)
+    // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
       ? { shell: "", ...(data.issueReporter as Partial<IssueReporterSettings>) }
       : undefined;

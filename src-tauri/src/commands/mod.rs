@@ -910,9 +910,10 @@ fn base64_encode(input: &[u8]) -> String {
     result
 }
 
-/// Parse a shell-like string into tokens, respecting single and double quotes.
+/// Split an `issueReporter.shell` prefix into tokens, respecting single and double quotes.
 /// Unmatched trailing quotes treat the rest of the string as one token.
-fn shell_split(input: &str) -> Vec<String> {
+/// Note: backslash escapes (e.g. `\"`) are NOT supported.
+fn split_shell_prefix(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = input.chars().peekable();
@@ -954,7 +955,7 @@ fn shell_split(input: &str) -> Vec<String> {
 ///   `wsl.exe -d "My Distro" -- gh {args...}`
 /// Supports single/double-quoted arguments in the prefix.
 fn build_gh_command(shell_prefix: &str) -> std::process::Command {
-    let parts = shell_split(shell_prefix);
+    let parts = split_shell_prefix(shell_prefix);
     if parts.is_empty() {
         std::process::Command::new("gh")
     } else {
@@ -1959,26 +1960,26 @@ mod tests {
     }
 
     #[test]
-    fn shell_split_basic() {
-        assert_eq!(shell_split(""), Vec::<String>::new());
-        assert_eq!(shell_split("   "), Vec::<String>::new());
-        assert_eq!(shell_split("a b c"), vec!["a", "b", "c"]);
+    fn split_shell_prefix_basic() {
+        assert_eq!(split_shell_prefix(""), Vec::<String>::new());
+        assert_eq!(split_shell_prefix("   "), Vec::<String>::new());
+        assert_eq!(split_shell_prefix("a b c"), vec!["a", "b", "c"]);
     }
 
     #[test]
-    fn shell_split_quotes() {
-        assert_eq!(shell_split(r#""hello world""#), vec!["hello world"]);
-        assert_eq!(shell_split("'hello world'"), vec!["hello world"]);
+    fn split_shell_prefix_quotes() {
+        assert_eq!(split_shell_prefix(r#""hello world""#), vec!["hello world"]);
+        assert_eq!(split_shell_prefix("'hello world'"), vec!["hello world"]);
         assert_eq!(
-            shell_split(r#"cmd "arg one" 'arg two' plain"#),
+            split_shell_prefix(r#"cmd "arg one" 'arg two' plain"#),
             vec!["cmd", "arg one", "arg two", "plain"]
         );
     }
 
     #[test]
-    fn shell_split_unclosed_quote() {
+    fn split_shell_prefix_unclosed_quote() {
         // Unclosed quote: rest of string is one token
-        assert_eq!(shell_split(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
+        assert_eq!(split_shell_prefix(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
     }
 
     #[test]

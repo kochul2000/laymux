@@ -154,7 +154,7 @@ export interface Settings {
   workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
-  issueReporter?: IssueReporterSettings;
+  issueReporter: IssueReporterSettings;
 }
 
 export interface ColorScheme {
