@@ -90,6 +90,9 @@ export function useSessionPersistence() {
           ...(rawSettings.claude
             ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings }
             : {}),
+          ...(rawSettings.issueReporter
+            ? { issueReporter: rawSettings.issueReporter as import("@/lib/tauri-api").IssueReporterSettings }
+            : {}),
         });
 
         // Apply layouts and workspaces to workspace store

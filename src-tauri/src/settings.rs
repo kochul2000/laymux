@@ -422,6 +422,26 @@ fn default_memo_padding() -> u32 {
     12
 }
 
+/// Issue reporter settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueReporterSettings {
+    /// Shell prefix for running gh commands.
+    /// When set, gh is invoked as: `{shell_parts...} gh {args...}`
+    /// Example: "wsl.exe -d Ubuntu --"
+    /// When empty (default), gh is invoked directly.
+    #[serde(default)]
+    pub shell: String,
+}
+
+impl Default for IssueReporterSettings {
+    fn default() -> Self {
+        Self {
+            shell: String::new(),
+        }
+    }
+}
+
 /// MemoView settings (padding, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -526,6 +546,8 @@ pub struct Settings {
     pub claude: ClaudeSettings,
     #[serde(default)]
     pub memo: MemoSettings,
+    #[serde(default)]
+    pub issue_reporter: IssueReporterSettings,
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd_defaults: Option<serde_json::Value>,
@@ -599,6 +621,7 @@ impl Default for Settings {
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
+            issue_reporter: IssueReporterSettings::default(),
             sync_cwd_defaults: None,
         }
     }
@@ -775,6 +798,26 @@ mod tests {
         assert_eq!(settings.profiles.len(), 2);
         assert_eq!(settings.profiles[0].name, "PowerShell");
         assert_eq!(settings.profiles[1].name, "WSL");
+    }
+
+    #[test]
+    fn default_issue_reporter_settings() {
+        let settings = Settings::default();
+        assert_eq!(settings.issue_reporter.shell, "");
+    }
+
+    #[test]
+    fn issue_reporter_deserializes_from_json() {
+        let json = r#"{"issueReporter": {"shell": "wsl.exe -d Ubuntu --"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.issue_reporter.shell, "wsl.exe -d Ubuntu --");
+    }
+
+    #[test]
+    fn issue_reporter_defaults_when_absent() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.issue_reporter.shell, "");
     }
 
     #[test]

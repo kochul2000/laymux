@@ -627,4 +627,28 @@ describe("settings-store", () => {
     const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "workspace");
     expect(result).toEqual({ send: false, receive: true });
   });
+
+  // -- Issue Reporter --
+
+  it("has default issueReporter with empty shell", () => {
+    const { issueReporter } = useSettingsStore.getState();
+    expect(issueReporter.shell).toBe("");
+  });
+
+  it("setIssueReporter updates shell", () => {
+    useSettingsStore.getState().setIssueReporter({ shell: "wsl.exe -d Ubuntu --" });
+    expect(useSettingsStore.getState().issueReporter.shell).toBe("wsl.exe -d Ubuntu --");
+  });
+
+  it("loadFromSettings loads issueReporter", () => {
+    useSettingsStore.getState().loadFromSettings({
+      issueReporter: { shell: "bash -c" },
+    });
+    expect(useSettingsStore.getState().issueReporter.shell).toBe("bash -c");
+  });
+
+  it("loadFromSettings without issueReporter preserves defaults", () => {
+    useSettingsStore.getState().loadFromSettings({});
+    expect(useSettingsStore.getState().issueReporter.shell).toBe("");
+  });
 });

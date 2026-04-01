@@ -910,9 +910,80 @@ fn base64_encode(input: &[u8]) -> String {
     result
 }
 
+/// Split an `issueReporter.shell` prefix into tokens, respecting single and double quotes.
+/// Unmatched trailing quotes treat the rest of the string as one token.
+/// Note: backslash escapes (e.g. `\"`) are NOT supported.
+fn split_shell_prefix(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                chars.next();
+            }
+            '"' | '\'' => {
+                let quote = ch;
+                chars.next(); // consume opening quote
+                while let Some(&c) = chars.peek() {
+                    if c == quote {
+                        chars.next(); // consume closing quote
+                        break;
+                    }
+                    current.push(c);
+                    chars.next();
+                }
+            }
+            _ => {
+                current.push(ch);
+                chars.next();
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Build a `std::process::Command` for `gh`, optionally wrapped by a shell prefix.
+/// When `shell_prefix` is empty, gh is invoked directly.
+/// When set (e.g. `wsl.exe -d "My Distro" --`), gh is invoked as:
+///   `wsl.exe -d "My Distro" -- gh {args...}`
+/// Supports single/double-quoted arguments in the prefix.
+fn build_gh_command(shell_prefix: &str) -> std::process::Command {
+    let parts = split_shell_prefix(shell_prefix);
+    if parts.is_empty() {
+        std::process::Command::new("gh")
+    } else {
+        let mut cmd = std::process::Command::new(&parts[0]);
+        for part in &parts[1..] {
+            cmd.arg(part);
+        }
+        cmd.arg("gh");
+        cmd
+    }
+}
+
+/// Build a `gh` CLI command that runs without a visible console window on Windows.
+fn gh_command(shell_prefix: &str) -> std::process::Command {
+    let mut cmd = build_gh_command(shell_prefix);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd
+}
+
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
-fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String> {
+fn upload_screenshot_to_github(path: &std::path::Path, shell_prefix: &str) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Failed to read screenshot: {e}"))?;
     let b64 = base64_encode(&bytes);
 
@@ -922,7 +993,7 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
         .unwrap_or_else(|| "screenshot.png".to_string());
 
     // Get repo name
-    let repo_out = std::process::Command::new("gh")
+    let repo_out = gh_command(shell_prefix)
         .args([
             "repo",
             "view",
@@ -946,7 +1017,7 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
 
     // Upload via GitHub contents API
     let api_path = format!("repos/{repo}/contents/.github/issue-screenshots/{filename}");
-    let upload_out = std::process::Command::new("gh")
+    let upload_out = gh_command(shell_prefix)
         .args([
             "api",
             &api_path,
@@ -980,13 +1051,15 @@ pub async fn submit_github_issue(
     body: String,
     screenshot_path: Option<String>,
 ) -> Result<String, String> {
+    let settings = crate::settings::load_settings();
+    let shell_prefix = &settings.issue_reporter.shell;
     let mut full_body = body;
 
     // Upload screenshot to GitHub and embed the image in the body
     if let Some(ref path_str) = screenshot_path {
         let p = std::path::Path::new(path_str);
         if p.exists() {
-            match upload_screenshot_to_github(p) {
+            match upload_screenshot_to_github(p, shell_prefix) {
                 Ok(image_url) => {
                     full_body = format!("{full_body}\n\n![Screenshot]({image_url})");
                 }
@@ -997,7 +1070,7 @@ pub async fn submit_github_issue(
         }
     }
 
-    let output = std::process::Command::new("gh")
+    let output = gh_command(shell_prefix)
         .args(["issue", "create", "--title", &title, "--body", &full_body])
         .output()
         .map_err(|e| format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?"))?;
@@ -1838,6 +1911,75 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn build_gh_command_direct_invocation() {
+        let cmd = build_gh_command("");
+        assert_eq!(cmd.get_program(), "gh");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>().len(), 0);
+    }
+
+    #[test]
+    fn build_gh_command_with_shell_prefix() {
+        let cmd = build_gh_command("wsl.exe -d Ubuntu --");
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "Ubuntu", "--", "gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_whitespace_only_prefix() {
+        let cmd = build_gh_command("   ");
+        assert_eq!(cmd.get_program(), "gh");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>().len(), 0);
+    }
+
+    #[test]
+    fn build_gh_command_simple_shell() {
+        let cmd = build_gh_command("bash");
+        assert_eq!(cmd.get_program(), "bash");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_double_quoted_arg() {
+        let cmd = build_gh_command(r#"wsl.exe -d "My Distro" --"#);
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_single_quoted_arg() {
+        let cmd = build_gh_command("wsl.exe -d 'My Distro' --");
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "My Distro", "--", "gh"]);
+    }
+
+    #[test]
+    fn split_shell_prefix_basic() {
+        assert_eq!(split_shell_prefix(""), Vec::<String>::new());
+        assert_eq!(split_shell_prefix("   "), Vec::<String>::new());
+        assert_eq!(split_shell_prefix("a b c"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn split_shell_prefix_quotes() {
+        assert_eq!(split_shell_prefix(r#""hello world""#), vec!["hello world"]);
+        assert_eq!(split_shell_prefix("'hello world'"), vec!["hello world"]);
+        assert_eq!(
+            split_shell_prefix(r#"cmd "arg one" 'arg two' plain"#),
+            vec!["cmd", "arg one", "arg two", "plain"]
+        );
+    }
+
+    #[test]
+    fn split_shell_prefix_unclosed_quote() {
+        // Unclosed quote: rest of string is one token
+        assert_eq!(split_shell_prefix(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
     }
 
     #[test]

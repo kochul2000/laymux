@@ -101,6 +101,10 @@ export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
 }
 
+export interface IssueReporterSettings {
+  shell: string;
+}
+
 export interface MemoSettings {
   paddingTop: number;
   paddingRight: number;
@@ -150,6 +154,7 @@ export interface Settings {
   workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
   memo: MemoSettings;
+  issueReporter: IssueReporterSettings;
 }
 
 export interface ColorScheme {
