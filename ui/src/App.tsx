@@ -5,6 +5,7 @@ import { useSyncEvents } from "@/hooks/useSyncEvents";
 import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { saveBeforeClose } from "@/lib/persist-session";
+import { createCloseHandler } from "@/lib/window-close-handler";
 
 export function App() {
   useKeyboardShortcuts();
@@ -20,25 +21,14 @@ export function App() {
       .then(({ getCurrentWindow }) => {
         if (cancelled) return;
         const appWindow = getCurrentWindow();
-        const CLOSE_TIMEOUT_MS = 5000;
+        const handler = createCloseHandler({
+          destroy: () => appWindow.destroy(),
+          close: () => appWindow.close(),
+          saveBeforeClose,
+          timeoutMs: 5000,
+        });
         appWindow
-          .onCloseRequested(async (event) => {
-            event.preventDefault();
-            try {
-              const result = await Promise.race([
-                saveBeforeClose().then(() => "saved" as const),
-                new Promise<"timeout">((resolve) =>
-                  setTimeout(() => resolve("timeout"), CLOSE_TIMEOUT_MS),
-                ),
-              ]);
-              if (result === "timeout") {
-                console.warn("[App] saveBeforeClose timed out after", CLOSE_TIMEOUT_MS, "ms");
-              }
-            } catch (err) {
-              console.error("[App] saveBeforeClose failed:", err);
-            }
-            await appWindow.destroy();
-          })
+          .onCloseRequested(handler)
           .then((unlisten) => {
             if (cancelled) unlisten();
             else cleanupRef.current = unlisten;
