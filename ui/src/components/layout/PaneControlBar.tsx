@@ -383,22 +383,19 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
 
-  if (mode === "minimized") {
-    // Minimized: 3-dot 버튼만 표시. 클릭하면 hover 모드로 복귀.
-    // ⚠️ 절대 "minimizedOpen" 같은 중간 상태를 추가하지 말 것.
-    //    minimized 안에서 바를 임시 확장하는 서브 모드는 포커스/숨김 동작을
-    //    완전히 망가뜨린다. minimize → hover 단방향 전환만 허용.
-    return (
-      <div className="relative h-full w-full" data-testid="pane-control-minimized">
-        {children}
-        {hovered && <MinimizedButton onExpand={() => setMode("hover")} />}
-      </div>
-    );
-  }
+  // 모든 모드에서 children을 동일한 DOM 위치에 유지하여
+  // pin/unpin 전환 시 React가 children을 리마운트하지 않도록 한다.
+  const modeTestId =
+    mode === "minimized"
+      ? "pane-control-minimized"
+      : isPinned
+        ? "pane-control-pinned"
+        : "pane-control-hover";
 
-  if (isPinned) {
-    return (
-      <div className="flex h-full w-full flex-col" data-testid="pane-control-pinned">
+  return (
+    <div className="flex h-full w-full flex-col" data-testid={modeTestId}>
+      {/* Pinned bar: 상단에 고정, 공간 차지 */}
+      {isPinned && (
         <div
           data-testid="pane-control-bar"
           className="flex shrink-0 items-center"
@@ -410,30 +407,38 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
         >
           <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
         </div>
-        <div className="min-h-0 flex-1">{children}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative h-full w-full" data-testid="pane-control-hover">
-      {children}
-      {showBar && (
-        <div
-          data-testid="pane-control-bar"
-          className="absolute right-1 top-1 z-20 flex items-center"
-          style={{
-            height: BAR_H,
-            background: barBgHover,
-            backdropFilter: "blur(8px)",
-            borderBottom: `1px solid ${sepClr}`,
-            borderLeft: `1px solid ${sepClr}`,
-            borderRadius: `0 0 0 ${RADIUS + 2}px`,
-          }}
-        >
-          <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
-        </div>
       )}
+
+      {/* children은 항상 이 위치에 렌더링 — 모드 전환으로 리마운트되지 않음 */}
+      <div className="relative min-h-0 flex-1">
+        {children}
+
+        {/* Hover bar: absolute overlay */}
+        {!isPinned && mode !== "minimized" && showBar && (
+          <div
+            data-testid="pane-control-bar"
+            className="absolute right-1 top-1 z-20 flex items-center"
+            style={{
+              height: BAR_H,
+              background: barBgHover,
+              backdropFilter: "blur(8px)",
+              borderBottom: `1px solid ${sepClr}`,
+              borderLeft: `1px solid ${sepClr}`,
+              borderRadius: `0 0 0 ${RADIUS + 2}px`,
+            }}
+          >
+            <BarContent
+              currentView={currentView}
+              actions={actions}
+              mode={mode}
+              onSetMode={setMode}
+            />
+          </div>
+        )}
+
+        {/* Minimized: 3-dot 버튼만 표시. 클릭하면 hover 모드로 복귀. */}
+        {mode === "minimized" && hovered && <MinimizedButton onExpand={() => setMode("hover")} />}
+      </div>
     </div>
   );
 }
