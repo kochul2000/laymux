@@ -179,10 +179,12 @@ export function useSessionPersistence() {
 
         // Clean orphaned terminal output cache files
         const allPaneIds: string[] = [
-          ...(rawSettings.workspaces?.flatMap((ws) => ws.panes.map((p) => p.id).filter(Boolean)) ??
-            []),
-          ...(rawSettings.docks?.flatMap((d) => d.panes?.map((p) => p.id).filter(Boolean) ?? []) ??
-            []),
+          ...(rawSettings.workspaces?.flatMap((ws) =>
+            ws.panes.map((p) => p.id).filter((id): id is string => Boolean(id))
+          ) ?? []),
+          ...(rawSettings.docks?.flatMap((d) =>
+            d.panes?.map((p) => p.id).filter((id): id is string => Boolean(id)) ?? []
+          ) ?? []),
         ];
         if (allPaneIds.length > 0) {
           cleanTerminalOutputCache(allPaneIds).catch((err) => {

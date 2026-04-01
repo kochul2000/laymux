@@ -466,8 +466,8 @@ export function TerminalView({
           if (xtermEl) {
             imeContainerRef.current = xtermEl;
             setupImeHandler(xtermEl, {
-              fontSize: settingsState.font.size,
-              fontFamily: `'${settingsState.font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+              fontSize: settingsState.resolveFont(profile).size,
+              fontFamily: `'${settingsState.resolveFont(profile).face}', 'Cascadia Mono', 'Consolas', monospace`,
               terminal,
             });
           }
