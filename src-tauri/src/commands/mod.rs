@@ -910,6 +910,40 @@ fn base64_encode(input: &[u8]) -> String {
     result
 }
 
+/// Build a `std::process::Command` for `gh`, optionally wrapped by a shell prefix.
+/// When `shell_prefix` is empty, gh is invoked directly.
+/// When set (e.g. "wsl.exe -d Ubuntu --"), gh is invoked as:
+///   `wsl.exe -d Ubuntu -- gh {args...}`
+fn build_gh_command(shell_prefix: &str) -> std::process::Command {
+    let trimmed = shell_prefix.trim();
+    if trimmed.is_empty() {
+        std::process::Command::new("gh")
+    } else {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        let mut cmd = std::process::Command::new(parts[0]);
+        for part in &parts[1..] {
+            cmd.arg(part);
+        }
+        cmd.arg("gh");
+        cmd
+    }
+}
+
+/// Build a `gh` CLI command that runs without a visible console window on Windows.
+/// Reads `issueReporter.shell` from settings to determine the shell prefix.
+fn gh_command() -> std::process::Command {
+    let settings = crate::settings::load_settings();
+    let mut cmd = build_gh_command(&settings.issue_reporter.shell);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd
+}
+
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
 fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String> {
@@ -922,7 +956,7 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
         .unwrap_or_else(|| "screenshot.png".to_string());
 
     // Get repo name
-    let repo_out = std::process::Command::new("gh")
+    let repo_out = gh_command()
         .args([
             "repo",
             "view",
@@ -946,7 +980,7 @@ fn upload_screenshot_to_github(path: &std::path::Path) -> Result<String, String>
 
     // Upload via GitHub contents API
     let api_path = format!("repos/{repo}/contents/.github/issue-screenshots/{filename}");
-    let upload_out = std::process::Command::new("gh")
+    let upload_out = gh_command()
         .args([
             "api",
             &api_path,
@@ -997,7 +1031,7 @@ pub async fn submit_github_issue(
         }
     }
 
-    let output = std::process::Command::new("gh")
+    let output = gh_command()
         .args(["issue", "create", "--title", &title, "--body", &full_body])
         .output()
         .map_err(|e| format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?"))?;
@@ -1838,6 +1872,36 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn build_gh_command_direct_invocation() {
+        let cmd = build_gh_command("");
+        assert_eq!(cmd.get_program(), "gh");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>().len(), 0);
+    }
+
+    #[test]
+    fn build_gh_command_with_shell_prefix() {
+        let cmd = build_gh_command("wsl.exe -d Ubuntu --");
+        assert_eq!(cmd.get_program(), "wsl.exe");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["-d", "Ubuntu", "--", "gh"]);
+    }
+
+    #[test]
+    fn build_gh_command_whitespace_only_prefix() {
+        let cmd = build_gh_command("   ");
+        assert_eq!(cmd.get_program(), "gh");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>().len(), 0);
+    }
+
+    #[test]
+    fn build_gh_command_simple_shell() {
+        let cmd = build_gh_command("bash");
+        assert_eq!(cmd.get_program(), "bash");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args, vec!["gh"]);
     }
 
     #[test]

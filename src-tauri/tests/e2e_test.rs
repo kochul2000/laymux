@@ -1,8 +1,8 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
-    ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FontSettings, Keybinding,
-    Layout, LayoutPane, MemoSettings, Profile, ProfileDefaults, Settings, Workspace, WorkspacePane,
-    WorkspacePaneView,
+    ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FontSettings,
+    IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings, Profile, ProfileDefaults,
+    Settings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -162,6 +162,7 @@ fn settings_round_trip_with_full_config() {
         convenience: ConvenienceSettings::default(),
         claude: ClaudeSettings::default(),
         memo: MemoSettings::default(),
+        issue_reporter: IssueReporterSettings::default(),
         sync_cwd_defaults: None,
     };
 
