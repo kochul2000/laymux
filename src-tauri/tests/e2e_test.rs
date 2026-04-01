@@ -162,6 +162,7 @@ fn settings_round_trip_with_full_config() {
         convenience: ConvenienceSettings::default(),
         claude: ClaudeSettings::default(),
         memo: MemoSettings::default(),
+        sync_cwd_defaults: None,
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();

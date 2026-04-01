@@ -401,6 +401,40 @@ describe("persistSession", () => {
     expect(savedArg.workspaces[0].panes[0].id).toBeDefined();
     expect(savedArg.workspaces[0].panes[0].id).not.toBe("");
   });
+
+  it("preserves syncCwdDefaults in saved settings", async () => {
+    useSettingsStore.getState().setSyncCwdDefaults({
+      workspace: { send: true, receive: false },
+      dock: { send: true, receive: true },
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.syncCwdDefaults).toEqual({
+      workspace: { send: true, receive: false },
+      dock: { send: true, receive: true },
+    });
+  });
+
+  it("preserves profile syncCwd in saved settings", async () => {
+    useSettingsStore.getState().updateProfile(0, {
+      syncCwd: { send: false, receive: false },
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].syncCwd).toEqual({ send: false, receive: false });
+  });
+
+  it("preserves profile syncCwd 'default' value", async () => {
+    // Default profiles have syncCwd: "default" from profileDefaults
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.profiles[0].syncCwd).toBe("default");
+  });
 });
 
 // -- saveBeforeClose tests --

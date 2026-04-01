@@ -125,6 +125,9 @@ pub struct Profile {
     /// Whether to restore terminal output on restart. When None, inherits from profileDefaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_output: Option<bool>,
+    /// CWD sync behavior: "default" or { send: bool, receive: bool }. Opaque to backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_cwd: Option<serde_json::Value>,
 }
 
 impl Default for Profile {
@@ -149,6 +152,7 @@ impl Default for Profile {
             font: None,
             restore_cwd: None,
             restore_output: None,
+            sync_cwd: None,
         }
     }
 }
@@ -244,6 +248,9 @@ pub struct ProfileDefaults {
     /// Whether to restore terminal output on restart.
     #[serde(default = "default_true")]
     pub restore_output: bool,
+    /// CWD sync behavior: "default" or { send: bool, receive: bool }. Opaque to backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_cwd: Option<serde_json::Value>,
 }
 
 impl Default for ProfileDefaults {
@@ -262,6 +269,7 @@ impl Default for ProfileDefaults {
             font: FontSettings::default(),
             restore_cwd: true,
             restore_output: true,
+            sync_cwd: None,
         }
     }
 }
@@ -518,6 +526,9 @@ pub struct Settings {
     pub claude: ClaudeSettings,
     #[serde(default)]
     pub memo: MemoSettings,
+    /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_cwd_defaults: Option<serde_json::Value>,
 }
 
 fn default_app_theme_id() -> String {
@@ -588,6 +599,7 @@ impl Default for Settings {
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
+            sync_cwd_defaults: None,
         }
     }
 }

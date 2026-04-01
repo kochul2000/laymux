@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
+
+export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
 export interface TerminalSessionResult {
   id: string;
@@ -127,6 +130,7 @@ export interface ProfileDefaults {
   font?: FontSettings;
   restoreCwd?: boolean;
   restoreOutput?: boolean;
+  syncCwd?: SyncCwdConfig;
 }
 
 export interface Settings {
@@ -136,6 +140,7 @@ export interface Settings {
   font?: FontSettings;
   defaultProfile: string;
   profileDefaults?: ProfileDefaults;
+  syncCwdDefaults?: SyncCwdDefaults;
   viewOrder?: string[];
   appThemeId?: string;
   layouts: SettingsLayout[];
@@ -199,6 +204,7 @@ export interface Profile {
   font?: FontSettings;
   restoreCwd?: boolean;
   restoreOutput?: boolean;
+  syncCwd?: SyncCwdConfig;
 }
 
 export interface Keybinding {

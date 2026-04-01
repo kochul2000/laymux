@@ -5,6 +5,7 @@ import {
   makeDefaultColorScheme,
   makeProfileFromDefaults,
   builtinAppThemes,
+  defaultProfileDefaults,
   type FontSettings,
   type Profile,
   type ProfileDefaults,
@@ -635,19 +636,7 @@ function AdvancedFields({
 
 // -- Section: Profile Defaults --
 
-const fallbackDefaults: ProfileDefaults = {
-  colorScheme: "",
-  cursorShape: "bar",
-  padding: { top: 8, right: 8, bottom: 8, left: 8 },
-  scrollbackLines: 9001,
-  opacity: 100,
-  bellStyle: "audible",
-  closeOnExit: "automatic",
-  antialiasingMode: "grayscale",
-  suppressApplicationTitle: false,
-  snapOnInput: true,
-  font: { face: "Cascadia Mono", size: 14, weight: "normal" },
-};
+const fallbackDefaults: ProfileDefaults = { ...defaultProfileDefaults };
 
 function DefaultsSection() {
   const rawDefaults = useSettingsStore((s) => s.profileDefaults);
