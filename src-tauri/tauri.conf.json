@@ -5,8 +5,8 @@
   "identifier": "com.laymux.app",
   "build": {
     "frontendDist": "../ui/dist",
-    "beforeDevCommand": "cd ../ui && npm run dev",
-    "beforeBuildCommand": "cd ../ui && npm run build",
+    "beforeDevCommand": "cd ui && npm run dev",
+    "beforeBuildCommand": "cd ui && npm run build",
     "devUrl": "http://localhost:1420"
   },
   "app": {
