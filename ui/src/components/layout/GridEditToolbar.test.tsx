@@ -75,4 +75,24 @@ describe("GridEditToolbar", () => {
     await user.click(screen.getByTestId("dock-toggle-top"));
     expect(useDockStore.getState().getDock("top")!.visible).toBe(false);
   });
+
+  it("shows Saved! after export-new", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "prompt").mockReturnValue("Test Layout");
+    render(<GridEditToolbar />);
+
+    await user.click(screen.getByTestId("export-new-btn"));
+
+    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
+  });
+
+  it("shows Saved! after overwrite", async () => {
+    const user = userEvent.setup();
+    render(<GridEditToolbar />);
+
+    const select = screen.getByTestId("export-overwrite-select");
+    await user.selectOptions(select, "default-layout");
+
+    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
+  });
 });

@@ -22,6 +22,12 @@ export function GridEditToolbar() {
   const toggleLayoutMode = useDockStore((s) => s.toggleLayoutMode);
 
   const [maximized, setMaximized] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
+
+  const flashSaved = useCallback(() => {
+    setShowSaved(true);
+    setTimeout(() => setShowSaved(false), 1500);
+  }, []);
 
   useEffect(() => {
     getWindow()
@@ -123,7 +129,10 @@ export function GridEditToolbar() {
           data-testid="export-new-btn"
           onClick={() => {
             const name = window.prompt("New layout name:");
-            if (name?.trim()) exportAsNewLayout(name.trim());
+            if (name?.trim()) {
+              exportAsNewLayout(name.trim());
+              flashSaved();
+            }
           }}
           className={btnBase}
           style={btnStyle}
@@ -148,6 +157,7 @@ export function GridEditToolbar() {
               if (e.target.value) {
                 exportToLayout(e.target.value);
                 e.target.value = "";
+                flashSaved();
               }
             }}
           >
@@ -164,6 +174,15 @@ export function GridEditToolbar() {
               </option>
             ))}
           </select>
+        )}
+        {showSaved && (
+          <span
+            data-testid="layout-saved-indicator"
+            className="text-[11px] font-medium"
+            style={{ color: "var(--accent, #4ec9b0)" }}
+          >
+            Saved!
+          </span>
         )}
       </div>
 
