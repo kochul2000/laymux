@@ -159,11 +159,14 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "test msg",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -198,11 +201,14 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build done",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -324,11 +330,14 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -996,12 +1005,15 @@ describe("WorkspaceSelectorView", () => {
       lastExitCode: 1,
       lastCommandAt: Date.now(),
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     // Add notification only for terminal-p1
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build complete",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 
@@ -1041,11 +1053,14 @@ describe("WorkspaceSelectorView", () => {
       lastCommand: "npm test",
       lastCommandAt: Date.now(),
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 
@@ -1078,12 +1093,15 @@ describe("WorkspaceSelectorView", () => {
       workspaceId: "ws-default",
       label: "WSL",
     });
+    // Temporarily switch away so notification is not auto-dismissed
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     // No command but notification exists
     useNotificationStore.getState().addNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 
