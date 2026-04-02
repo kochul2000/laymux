@@ -42,6 +42,7 @@ export function Dock({
 }: DockProps) {
   const showIconBar = views.length > 1 && panes.length <= 1;
   const focusedDock = useDockStore((s) => s.focusedDock);
+  const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
@@ -166,6 +167,7 @@ export function Dock({
             viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
             workspaceName={activeWsName}
+            isFocused={isFocused}
             onSelectView={
               singlePaneId
                 ? (config) => onSetPaneView?.(singlePaneId, config)
@@ -198,6 +200,8 @@ function DockGrid({
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
   onResizePane?: (paneId: string, delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>) => void;
 }) {
+  const focusedDock = useDockStore((s) => s.focusedDock);
+  const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
@@ -245,6 +249,7 @@ function DockGrid({
     >
       {panes.map((pane) => {
         const isHovered = hoveredPane === pane.id;
+        const isPaneFocused = focusedDock === position && focusedDockPaneId === pane.id;
         return (
           <div
             key={pane.id}
@@ -297,6 +302,7 @@ function DockGrid({
                 viewConfig={pane.view}
                 paneId={pane.id}
                 workspaceName={activeWsName}
+                isFocused={isPaneFocused}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
                 emptyViewContext="dock"
                 location="dock"

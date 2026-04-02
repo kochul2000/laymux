@@ -2,6 +2,41 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { App } from "./App";
 
+// Mock @tauri-apps/api/window for useWindowGeometry hook
+vi.mock("@tauri-apps/api/window", () => {
+  const unlisten = vi.fn();
+  const mockWindow = {
+    onMoved: vi.fn().mockResolvedValue(unlisten),
+    onResized: vi.fn().mockResolvedValue(unlisten),
+    onCloseRequested: vi.fn().mockResolvedValue(unlisten),
+    setSize: vi.fn().mockResolvedValue(undefined),
+    setPosition: vi.fn().mockResolvedValue(undefined),
+    maximize: vi.fn().mockResolvedValue(undefined),
+    minimize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    destroy: vi.fn().mockResolvedValue(undefined),
+    isMaximized: vi.fn().mockResolvedValue(false),
+    isMinimized: vi.fn().mockResolvedValue(false),
+    toggleMaximize: vi.fn().mockResolvedValue(undefined),
+    outerPosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
+    outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
+  };
+  return {
+    getCurrentWindow: vi.fn().mockReturnValue(mockWindow),
+    availableMonitors: vi.fn().mockResolvedValue([]),
+    PhysicalSize: class {
+      width: number;
+      height: number;
+      constructor(w: number, h: number) { this.width = w; this.height = h; }
+    },
+    PhysicalPosition: class {
+      x: number;
+      y: number;
+      constructor(x: number, y: number) { this.x = x; this.y = y; }
+    },
+  };
+});
+
 // Mock tauri-api to prevent unhandled errors in test environment
 vi.mock("@/lib/tauri-api", () => {
   const unlisten = vi.fn();

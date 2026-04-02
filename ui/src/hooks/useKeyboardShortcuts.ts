@@ -72,8 +72,23 @@ export function useKeyboardShortcuts() {
           const { focusedDock } = dockStore;
           const dockArrowNav = useSettingsStore.getState().convenience.dockArrowNav;
 
-          // If currently focused on a dock, try to exit it
+          // If currently focused on a dock, try navigation within dock panes first
           if (focusedDock !== null) {
+            const dock = dockStore.getDock(focusedDock);
+            const { focusedDockPaneId } = dockStore;
+
+            // Try to navigate within dock panes if multiple exist
+            if (dock && dock.panes.length > 1 && focusedDockPaneId) {
+              const currentIdx = dock.panes.findIndex((p) => p.id === focusedDockPaneId);
+              if (currentIdx >= 0) {
+                const nextIdx = findPaneInDirection(dock.panes, currentIdx, direction);
+                if (nextIdx !== null) {
+                  dockStore.setFocusedDock(focusedDock, dock.panes[nextIdx].id);
+                  return;
+                }
+              }
+            }
+
             const exitDir = getDockExitDirection(focusedDock);
             if (direction === exitDir) {
               // Exit dock → go back to workspace
