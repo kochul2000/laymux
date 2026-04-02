@@ -181,8 +181,6 @@ describe("NotificationStore", () => {
 
   describe("auto-dismiss for active workspace", () => {
     it("marks notification as read immediately when added to the active workspace in workspace dismiss mode", () => {
-       
-      const _wsStore = useWorkspaceStore.getState();
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
 
       useNotificationStore.getState().addNotification({

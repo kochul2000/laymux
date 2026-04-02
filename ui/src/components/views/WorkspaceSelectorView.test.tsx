@@ -82,6 +82,29 @@ function buildSummariesFromStores(ids: string[]): TerminalSummaryResponse[] {
     .filter((s): s is TerminalSummaryResponse => s !== null);
 }
 
+/** Add a notification that bypasses auto-dismiss by temporarily switching away from the target workspace. */
+function addUnreadNotification(params: {
+  terminalId: string;
+  workspaceId: string;
+  message: string;
+}) {
+  const prev = useWorkspaceStore.getState().activeWorkspaceId;
+  if (prev === params.workspaceId) {
+    useWorkspaceStore.getState().addWorkspace("__temp__", "default-layout");
+    const tempId = useWorkspaceStore.getState().workspaces.find((w) => w.name === "__temp__")!.id;
+    useWorkspaceStore.getState().setActiveWorkspace(tempId);
+  }
+  useNotificationStore.getState().addNotification(params);
+  if (prev === params.workspaceId) {
+    useWorkspaceStore.getState().setActiveWorkspace(prev);
+    useWorkspaceStore
+      .getState()
+      .removeWorkspace(
+        useWorkspaceStore.getState().workspaces.find((w) => w.name === "__temp__")!.id,
+      );
+  }
+}
+
 describe("WorkspaceSelectorView", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -159,14 +182,11 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "test msg",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -201,14 +221,11 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build done",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -330,14 +347,11 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
@@ -1005,15 +1019,12 @@ describe("WorkspaceSelectorView", () => {
       lastExitCode: 1,
       lastCommandAt: Date.now(),
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     // Add notification only for terminal-p1
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build complete",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 
@@ -1053,14 +1064,11 @@ describe("WorkspaceSelectorView", () => {
       lastCommand: "npm test",
       lastCommandAt: Date.now(),
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 
@@ -1093,15 +1101,12 @@ describe("WorkspaceSelectorView", () => {
       workspaceId: "ws-default",
       label: "WSL",
     });
-    // Temporarily switch away so notification is not auto-dismissed
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-temp" });
     // No command but notification exists
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
-    useWorkspaceStore.setState({ activeWorkspaceId: "ws-default" });
 
     render(<WorkspaceSelectorView />);
 

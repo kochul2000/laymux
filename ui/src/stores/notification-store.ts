@@ -1,4 +1,6 @@
 import { create } from "zustand";
+// Cross-store reads (getState snapshots) — direction: notification → {workspace, settings, grid}
+// Keep this unidirectional to avoid circular dependency issues.
 import { useWorkspaceStore } from "./workspace-store";
 import { useSettingsStore } from "./settings-store";
 import { useGridStore } from "./grid-store";
