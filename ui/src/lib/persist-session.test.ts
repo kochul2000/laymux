@@ -19,6 +19,7 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
   saveTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
   cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
+  getTerminalCwds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/terminal-serialize-registry", () => ({
@@ -33,7 +34,12 @@ import {
   _resetClosingDown,
   truncateFromEnd,
 } from "./persist-session";
-import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
+import {
+  saveSettings,
+  saveTerminalOutputCache,
+  cleanTerminalOutputCache,
+  getTerminalCwds,
+} from "@/lib/tauri-api";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -328,29 +334,24 @@ describe("persistSession", () => {
 
   // -- lastCwd injection tests --
 
-  it("injects lastCwd into workspace TerminalView panes from terminal store", async () => {
+  it("injects lastCwd into workspace TerminalView panes from backend CWDs", async () => {
     const wsState = useWorkspaceStore.getState();
     const paneId = wsState.workspaces[0].panes[0].id;
     wsState.setPaneView(0, { type: "TerminalView", profile: "WSL" });
 
-    // Register a terminal instance with CWD
-    useTerminalStore.getState().registerInstance({
-      id: `terminal-${paneId}`,
-      profile: "WSL",
-      syncGroup: "default",
-      workspaceId: wsState.workspaces[0].id,
-    });
-    useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
-      cwd: "/home/user/project",
+    // Mock backend CWD (single source of truth)
+    vi.mocked(getTerminalCwds).mockResolvedValue({
+      [`terminal-${paneId}`]: "/home/user/project",
     });
 
     await persistSession();
 
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastCwd).toBe("/home/user/project");
+    expect(getTerminalCwds).toHaveBeenCalledTimes(1);
   });
 
-  it("injects lastCwd into dock TerminalView panes from terminal store", async () => {
+  it("injects lastCwd into dock TerminalView panes from backend CWDs", async () => {
     const dockState = useDockStore.getState();
     const dockPaneId = dockState.getDock("left")!.panes[0].id;
     dockState.setDockPaneView("left", dockPaneId, {
@@ -358,14 +359,9 @@ describe("persistSession", () => {
       profile: "WSL",
     });
 
-    useTerminalStore.getState().registerInstance({
-      id: `terminal-${dockPaneId}`,
-      profile: "WSL",
-      syncGroup: "default",
-      workspaceId: "",
-    });
-    useTerminalStore.getState().updateInstanceInfo(`terminal-${dockPaneId}`, {
-      cwd: "/tmp/dock-cwd",
+    // Mock backend CWD (single source of truth)
+    vi.mocked(getTerminalCwds).mockResolvedValue({
+      [`terminal-${dockPaneId}`]: "/tmp/dock-cwd",
     });
 
     await persistSession();

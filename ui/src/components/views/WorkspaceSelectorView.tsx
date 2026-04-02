@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
-import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
-  computeWorkspaceSummary,
+  computeWorkspaceSummaryFromBackend,
   abbreviatePath,
   formatCommand,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
+import { useBackendSummaries } from "@/hooks/useBackendSummaries";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
@@ -789,12 +789,41 @@ export function WorkspaceSelectorView() {
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
-  const terminalInstances = useTerminalStore((s) => s.instances);
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
-  const terminalPorts = new Map<string, number[]>();
+
+  // Collect all terminal IDs across all workspaces for backend summary fetch
+  const allTerminalIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const ws of workspaces) {
+      for (const p of ws.panes) {
+        if (p.view.type === "TerminalView") {
+          ids.push(`terminal-${p.id}`);
+        }
+      }
+    }
+    return ids;
+  }, [workspaces]);
+
+  const { summaries: backendSummaries, markRead } = useBackendSummaries(allTerminalIds);
+
+  // Build a lookup map: terminalId → TerminalSummaryResponse
+  const summaryMap = useMemo(() => {
+    const map = new Map<string, (typeof backendSummaries)[number]>();
+    for (const s of backendSummaries) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [backendSummaries]);
 
   const handleSelectWorkspace = (wsId: string) => {
     markWorkspaceAsRead(wsId);
+    // Mark backend notifications as read for this workspace's terminals
+    const wsTerminalIds =
+      workspaces
+        .find((ws) => ws.id === wsId)
+        ?.panes.filter((p) => p.view.type === "TerminalView")
+        .map((p) => `terminal-${p.id}`) ?? [];
+    if (wsTerminalIds.length > 0) markRead(wsTerminalIds);
     setActiveWorkspace(wsId);
   };
 
@@ -848,13 +877,12 @@ export function WorkspaceSelectorView() {
       <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
         {workspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
-          const summary = computeWorkspaceSummary(
-            ws.id,
-            terminalInstances,
-            terminalPorts,
-            notifications,
-            ws.name,
-          );
+          // Filter backend summaries for this workspace's terminal panes
+          const wsTerminalSummaries = ws.panes
+            .filter((p) => p.view.type === "TerminalView")
+            .map((p) => summaryMap.get(`terminal-${p.id}`))
+            .filter(Boolean) as (typeof backendSummaries)[number][];
+          const summary = computeWorkspaceSummaryFromBackend(ws.id, wsTerminalSummaries);
           return (
             <WorkspaceItem
               key={ws.id}

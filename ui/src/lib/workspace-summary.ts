@@ -1,5 +1,6 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
+import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
 
 export interface LastCommandInfo {
@@ -114,6 +115,91 @@ export function computeWorkspaceSummary(
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
     })),
   };
+}
+
+/**
+ * Compute workspace summary from backend terminal summaries (single source of truth).
+ * This replaces the store-based `computeWorkspaceSummary` for WorkspaceSelectorView.
+ */
+export function computeWorkspaceSummaryFromBackend(
+  workspaceId: string,
+  backendSummaries: TerminalSummaryResponse[],
+): WorkspaceSummary {
+  // Map backend summaries to TerminalSummaryInfo
+  const terminalSummaries: TerminalSummaryInfo[] = backendSummaries.map((s) => ({
+    id: s.id,
+    label: abbreviateProfile(s.profile),
+    profile: s.profile,
+    cwd: s.cwd,
+    branch: s.branch,
+    title: s.title,
+    lastCommand: s.lastCommand ?? undefined,
+    lastExitCode: s.lastExitCode ?? undefined,
+    lastCommandAt: s.lastCommandAt ?? undefined,
+    activity: s.activity as TerminalActivityInfo,
+    outputActive: s.outputActive,
+    hasUnreadNotification: s.unreadNotificationCount > 0,
+  }));
+
+  // Workspace-level aggregation
+  const branch = backendSummaries.find((s) => s.branch)?.branch ?? null;
+  const cwd = backendSummaries.find((s) => s.cwd)?.cwd ?? null;
+
+  // Last command: pick the most recent
+  let lastCommand: LastCommandInfo | null = null;
+  for (const s of backendSummaries) {
+    if (s.lastCommand && s.lastCommandAt != null) {
+      if (!lastCommand || s.lastCommandAt > lastCommand.timestamp) {
+        lastCommand = {
+          command: s.lastCommand,
+          exitCode: s.lastExitCode ?? undefined,
+          timestamp: s.lastCommandAt,
+        };
+      }
+    }
+  }
+
+  // Unread notification aggregation
+  const unreadCount = backendSummaries.reduce((sum, s) => sum + s.unreadNotificationCount, 0);
+  let latestNotification: Notification | null = null;
+  for (const s of backendSummaries) {
+    if (s.latestNotification) {
+      if (!latestNotification || s.latestNotification.createdAt > latestNotification.createdAt) {
+        latestNotification = {
+          id: String(s.latestNotification.id),
+          terminalId: s.latestNotification.terminalId,
+          workspaceId,
+          message: s.latestNotification.message,
+          level: s.latestNotification.level as Notification["level"],
+          createdAt: s.latestNotification.createdAt,
+          readAt: s.latestNotification.readAt,
+        };
+      }
+    }
+  }
+
+  return {
+    workspaceId,
+    branch,
+    cwd,
+    ports: [],
+    unreadCount,
+    latestNotification,
+    hasUnread: unreadCount > 0,
+    lastCommand,
+    terminalCount: backendSummaries.length,
+    terminalSummaries,
+  };
+}
+
+/** Abbreviate a profile name for compact display (3 chars). */
+function abbreviateProfile(profile: string): string {
+  const lower = profile.toLowerCase();
+  if (lower === "powershell" || lower === "ps") return "PS";
+  if (lower.startsWith("wsl")) return "WSL";
+  if (lower === "cmd" || lower === "command prompt") return "CMD";
+  if (profile.length <= 3) return profile;
+  return profile.slice(0, 3);
 }
 
 /**

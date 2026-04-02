@@ -73,6 +73,7 @@ vi.mock("@/lib/tauri-api", () => {
     onAutomationRequest: vi.fn().mockResolvedValue(unlisten),
     automationResponse: vi.fn().mockResolvedValue(undefined),
     onClaudeTerminalDetected: vi.fn().mockResolvedValue(unlisten),
+    onTerminalCwdChanged: vi.fn().mockResolvedValue(unlisten),
     markClaudeTerminal: vi.fn().mockResolvedValue(true),
   };
 });

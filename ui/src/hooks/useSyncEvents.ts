@@ -9,6 +9,7 @@ import {
   onSetTabTitle,
   onCommandStatus,
   onClaudeTerminalDetected,
+  onTerminalCwdChanged,
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { sendDesktopNotification } from "./useOsNotification";
@@ -45,6 +46,17 @@ export function useSyncEvents() {
             activity: { type: "interactiveApp", name: "Claude" },
           });
         }
+      }),
+    );
+
+    // terminal-cwd-changed: backend PTY callback detected CWD from OSC 7/9;9.
+    // This is the single source of truth — update frontend store to match.
+    trackListener(
+      onTerminalCwdChanged((data) => {
+        if (cancelled) return;
+        useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+          cwd: data.cwd,
+        });
       }),
     );
 
