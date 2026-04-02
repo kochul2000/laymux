@@ -885,15 +885,39 @@ export function WorkspaceSelectorView() {
           const isActive = ws.id === activeWorkspaceId;
           // Filter backend summaries for this workspace's terminal panes.
           // Fall back to lastCwd from settings when backend hasn't detected CWD yet
-          // (e.g., shell hasn't emitted OSC 7 after restart).
+          // (e.g., shell hasn't emitted OSC 7 after restart, or session not created yet).
           const wsTerminalSummaries = ws.panes
             .filter((p) => p.view.type === "TerminalView")
             .map((p) => {
-              const summary = summaryMap.get(`terminal-${p.id}`);
-              if (summary && !summary.cwd && p.view.lastCwd) {
-                return { ...summary, cwd: p.view.lastCwd as string };
+              const termId = `terminal-${p.id}`;
+              const summary = summaryMap.get(termId);
+              if (summary) {
+                // Backend has summary but no CWD yet — use lastCwd from settings
+                if (!summary.cwd && p.view.lastCwd) {
+                  return { ...summary, cwd: p.view.lastCwd as string };
+                }
+                return summary;
               }
-              return summary;
+              // No backend summary yet (session not created) — synthesize minimal placeholder
+              if (p.view.lastCwd) {
+                return {
+                  id: termId,
+                  profile: (p.view.profile as string) ?? "",
+                  title: "",
+                  cwd: p.view.lastCwd as string,
+                  branch: null,
+                  lastCommand: null,
+                  lastExitCode: null,
+                  lastCommandAt: null,
+                  commandRunning: false,
+                  activity: { type: "shell" as const },
+                  outputActive: false,
+                  isClaude: false,
+                  unreadNotificationCount: 0,
+                  latestNotification: null,
+                } satisfies (typeof backendSummaries)[number];
+              }
+              return undefined;
             })
             .filter(Boolean) as (typeof backendSummaries)[number][];
           const summary = computeWorkspaceSummaryFromBackend(

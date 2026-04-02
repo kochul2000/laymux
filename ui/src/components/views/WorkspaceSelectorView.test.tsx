@@ -1221,4 +1221,38 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByText("~/myproject")).toBeInTheDocument();
     });
   });
+
+  it("shows lastCwd even when backend session does not exist yet", async () => {
+    // Simulate very early app startup: no terminal session at all in the backend
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-nosession",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: {
+                type: "TerminalView",
+                profile: "WSL",
+                lastCwd: "/home/user/earlystart",
+              },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    // Do NOT register any terminal instance — simulates no backend session
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByText("~/earlystart")).toBeInTheDocument();
+    });
+  });
 });
