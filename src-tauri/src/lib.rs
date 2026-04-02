@@ -111,6 +111,8 @@ pub fn run() {
             commands::save_terminal_output_cache,
             commands::load_terminal_output_cache,
             commands::clean_terminal_output_cache,
+            commands::save_window_geometry,
+            commands::load_window_geometry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

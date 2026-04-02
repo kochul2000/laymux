@@ -1910,6 +1910,62 @@ pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, 
     clean_terminal_output_cache_in(&cache_dir, &active_pane_ids)
 }
 
+/// Window geometry to persist across restarts.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct WindowGeometry {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub maximized: bool,
+}
+
+fn window_geometry_path() -> Result<std::path::PathBuf, String> {
+    let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+    Ok(cache_dir.join("window-geometry.json"))
+}
+
+/// Save window geometry to cache.
+#[tauri::command]
+pub fn save_window_geometry(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    maximized: bool,
+) -> Result<(), String> {
+    let geo = WindowGeometry {
+        x,
+        y,
+        width,
+        height,
+        maximized,
+    };
+    let json = serde_json::to_string(&geo).map_err(|e| format!("Serialize: {e}"))?;
+    let path = window_geometry_path()?;
+    std::fs::write(&path, json.as_bytes()).map_err(|e| format!("Write: {e}"))
+}
+
+/// Load window geometry from cache. Returns null if not found.
+#[tauri::command]
+pub fn load_window_geometry() -> Result<Option<WindowGeometry>, String> {
+    let path = match window_geometry_path() {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let s = String::from_utf8(bytes).map_err(|e| format!("UTF-8: {e}"))?;
+            let geo: WindowGeometry =
+                serde_json::from_str(&s).map_err(|e| format!("Deserialize: {e}"))?;
+            Ok(Some(geo))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Read: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,152 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockLoadWindowGeometry = vi.fn();
+const mockSaveWindowGeometry = vi.fn();
+
+vi.mock("@/lib/tauri-api", () => ({
+  loadWindowGeometry: (...args: unknown[]) => mockLoadWindowGeometry(...args),
+  saveWindowGeometry: (...args: unknown[]) => mockSaveWindowGeometry(...args),
+}));
+
+const mockGetCurrentWindow = vi.fn();
+const mockAvailableMonitors = vi.fn();
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => mockGetCurrentWindow(),
+  availableMonitors: () => mockAvailableMonitors(),
+  PhysicalSize: class {
+    width: number;
+    height: number;
+    constructor(w: number, h: number) {
+      this.width = w;
+      this.height = h;
+    }
+  },
+  PhysicalPosition: class {
+    x: number;
+    y: number;
+    constructor(x: number, y: number) {
+      this.x = x;
+      this.y = y;
+    }
+  },
+}));
+
+import { restoreWindowGeometry, captureWindowGeometry } from "./useWindowGeometry";
+
+describe("useWindowGeometry", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("restoreWindowGeometry", () => {
+    it("does nothing when no saved geometry", async () => {
+      mockLoadWindowGeometry.mockResolvedValue(null);
+      const mockWindow = {
+        setSize: vi.fn(),
+        setPosition: vi.fn(),
+        maximize: vi.fn(),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      expect(mockWindow.setSize).not.toHaveBeenCalled();
+      expect(mockWindow.setPosition).not.toHaveBeenCalled();
+    });
+
+    it("restores saved size and position", async () => {
+      mockLoadWindowGeometry.mockResolvedValue({
+        x: 100,
+        y: 200,
+        width: 1400,
+        height: 900,
+        maximized: false,
+      });
+      mockAvailableMonitors.mockResolvedValue([
+        { size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 } },
+      ]);
+      const mockWindow = {
+        setSize: vi.fn().mockResolvedValue(undefined),
+        setPosition: vi.fn().mockResolvedValue(undefined),
+        maximize: vi.fn(),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      expect(mockWindow.setSize).toHaveBeenCalled();
+      expect(mockWindow.setPosition).toHaveBeenCalled();
+      expect(mockWindow.maximize).not.toHaveBeenCalled();
+    });
+
+    it("maximizes window when saved as maximized", async () => {
+      mockLoadWindowGeometry.mockResolvedValue({
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1080,
+        maximized: true,
+      });
+      mockAvailableMonitors.mockResolvedValue([
+        { size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 } },
+      ]);
+      const mockWindow = {
+        setSize: vi.fn().mockResolvedValue(undefined),
+        setPosition: vi.fn().mockResolvedValue(undefined),
+        maximize: vi.fn().mockResolvedValue(undefined),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      expect(mockWindow.maximize).toHaveBeenCalled();
+    });
+
+    it("clamps size to monitor bounds when saved size exceeds screen", async () => {
+      mockLoadWindowGeometry.mockResolvedValue({
+        x: 0,
+        y: 0,
+        width: 3000,
+        height: 2000,
+        maximized: false,
+      });
+      mockAvailableMonitors.mockResolvedValue([
+        { size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 } },
+      ]);
+      const mockWindow = {
+        setSize: vi.fn().mockResolvedValue(undefined),
+        setPosition: vi.fn().mockResolvedValue(undefined),
+        maximize: vi.fn(),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      const sizeArg = mockWindow.setSize.mock.calls[0][0];
+      expect(sizeArg.width).toBeLessThanOrEqual(1920);
+      expect(sizeArg.height).toBeLessThanOrEqual(1080);
+    });
+  });
+
+  describe("captureWindowGeometry", () => {
+    it("captures current window state and saves", async () => {
+      mockSaveWindowGeometry.mockResolvedValue(undefined);
+      const mockWindow = {
+        outerPosition: vi.fn().mockResolvedValue({ x: 50, y: 100 }),
+        outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
+        isMaximized: vi.fn().mockResolvedValue(false),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await captureWindowGeometry();
+
+      expect(mockSaveWindowGeometry).toHaveBeenCalledWith({
+        x: 50,
+        y: 100,
+        width: 1200,
+        height: 800,
+        maximized: false,
+      });
+    });
+  });
+});

@@ -90,6 +90,22 @@ export async function cleanTerminalOutputCache(activePaneIds: string[]): Promise
   return invoke("clean_terminal_output_cache", { activePaneIds });
 }
 
+export interface WindowGeometry {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+}
+
+export async function saveWindowGeometry(geo: WindowGeometry): Promise<void> {
+  return invoke("save_window_geometry", geo);
+}
+
+export async function loadWindowGeometry(): Promise<WindowGeometry | null> {
+  return invoke("load_window_geometry");
+}
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;

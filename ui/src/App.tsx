@@ -6,12 +6,14 @@ import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { saveBeforeClose } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
+import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 
 export function App() {
   useKeyboardShortcuts();
   useSyncEvents();
   useSessionPersistence();
   useAutomationBridge();
+  useWindowGeometry();
 
   // Save terminal state before window close (Alt+F4, OS close, etc.)
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -24,7 +26,10 @@ export function App() {
         const handler = createCloseHandler({
           destroy: () => appWindow.destroy(),
           close: () => appWindow.close(),
-          saveBeforeClose,
+          saveBeforeClose: async () => {
+            await captureWindowGeometry();
+            await saveBeforeClose();
+          },
           timeoutMs: 5000,
         });
         appWindow
