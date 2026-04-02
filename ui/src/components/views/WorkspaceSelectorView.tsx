@@ -282,10 +282,9 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            outline: "1px solid var(--accent)",
-                            outlineOffset: 3,
+                            background: "rgba(137,180,250,0.12)",
                             borderRadius: 3,
-                            color: "var(--text-primary)",
+                            filter: "brightness(1.3)",
                           }
                         : {}),
                     }}
@@ -407,10 +406,9 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            outline: "1px solid var(--accent)",
-                            outlineOffset: 3,
+                            background: "rgba(137,180,250,0.12)",
                             borderRadius: 3,
-                            color: "var(--text-primary)",
+                            filter: "brightness(1.3)",
                           }
                         : {}),
                     }}
