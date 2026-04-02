@@ -50,11 +50,27 @@ function navigateByNotification(direction: "recent" | "oldest") {
   markNotificationsAsRead(target.notificationIds);
 }
 
+/** Check if the currently focused element is a text-editable field (input, textarea, contentEditable). */
+function isTextInputFocused(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return true;
+  if (
+    el instanceof HTMLElement &&
+    (el.isContentEditable || el.getAttribute("contenteditable") === "true")
+  )
+    return true;
+  return false;
+}
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Delete key: remove focused pane (no modifier required)
+      // Skip when a text-editable element has focus (e.g. input, textarea, contentEditable)
       if (e.key === "Delete") {
+        if (isTextInputFocused()) return;
         const { focusedPaneIndex } = useGridStore.getState();
         if (focusedPaneIndex !== null) {
           e.preventDefault();

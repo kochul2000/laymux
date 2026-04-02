@@ -217,6 +217,96 @@ describe("useKeyboardShortcuts", () => {
     expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(1);
   });
 
+  it("Delete key does nothing when focus is on an input element", () => {
+    useWorkspaceStore.setState({
+      ...useWorkspaceStore.getState(),
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+          ],
+        },
+      ],
+    });
+
+    useGridStore.setState({ focusedPaneIndex: 1 });
+    renderHook(() => useKeyboardShortcuts());
+
+    // Create an input element, focus it, then fire Delete
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    fireKey("Delete");
+
+    expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
+    document.body.removeChild(input);
+  });
+
+  it("Delete key does nothing when focus is on a textarea element", () => {
+    useWorkspaceStore.setState({
+      ...useWorkspaceStore.getState(),
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+          ],
+        },
+      ],
+    });
+
+    useGridStore.setState({ focusedPaneIndex: 1 });
+    renderHook(() => useKeyboardShortcuts());
+
+    const textarea = document.createElement("textarea");
+    document.body.appendChild(textarea);
+    textarea.focus();
+
+    fireKey("Delete");
+
+    expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
+    document.body.removeChild(textarea);
+  });
+
+  it("Delete key does nothing when focus is on a contentEditable element", () => {
+    useWorkspaceStore.setState({
+      ...useWorkspaceStore.getState(),
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+          ],
+        },
+      ],
+    });
+
+    useGridStore.setState({ focusedPaneIndex: 1 });
+    renderHook(() => useKeyboardShortcuts());
+
+    const div = document.createElement("div");
+    div.setAttribute("contenteditable", "true");
+    div.tabIndex = 0; // Make focusable in jsdom
+    document.body.appendChild(div);
+    div.focus();
+
+    fireKey("Delete");
+
+    expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
+    document.body.removeChild(div);
+  });
+
   it("Delete key does nothing when no pane is focused", () => {
     useWorkspaceStore.setState({
       ...useWorkspaceStore.getState(),
