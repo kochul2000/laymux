@@ -676,4 +676,12 @@ describe("settings-store", () => {
     useSettingsStore.getState().loadFromSettings({});
     expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
   });
+
+  it("loadFromSettings ignores invalid workspaceSortOrder values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSortOrder: "invalid-value" as any,
+    });
+    // Should keep the default, not blindly accept the invalid value
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  });
 });

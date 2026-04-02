@@ -867,11 +867,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         }
       : undefined;
 
+    // Validate workspaceSortOrder — only accept known values, otherwise drop it
+    const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
+    const validatedSortOrder =
+      data.workspaceSortOrder && validSortOrders.includes(data.workspaceSortOrder)
+        ? { workspaceSortOrder: data.workspaceSortOrder }
+        : {};
+
     // Strip legacy font field before spreading into state
-    const { font: _legacyFont, ...rest } = data;
+    const { font: _legacyFont, workspaceSortOrder: _rawSort, ...rest } = data;
     set((state) => ({
       ...state,
       ...rest,
+      ...validatedSortOrder,
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),

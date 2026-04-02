@@ -327,7 +327,7 @@ describe("WorkspaceStore", () => {
   });
 
   describe("reorderWorkspaces", () => {
-    it("reorders workspaces by moving an item from one index to another", () => {
+    it("reorders workspaces by moving an item by ID", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);
       addWorkspace("WS3", layouts[0].id);
@@ -336,28 +336,28 @@ describe("WorkspaceStore", () => {
       expect(before).toHaveLength(3);
       const ids = before.map((ws) => ws.id);
 
-      // Move last (index 2) to first (index 0)
-      useWorkspaceStore.getState().reorderWorkspaces(2, 0);
+      // Move last to first position
+      useWorkspaceStore.getState().reorderWorkspaces(ids[2], ids[0]);
       const after = useWorkspaceStore.getState().workspaces;
       expect(after.map((ws) => ws.id)).toEqual([ids[2], ids[0], ids[1]]);
     });
 
-    it("does nothing for same from/to index", () => {
+    it("does nothing for same from/to ID", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);
 
       const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      useWorkspaceStore.getState().reorderWorkspaces(0, 0);
+      useWorkspaceStore.getState().reorderWorkspaces(before[0], before[0]);
       const after = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
       expect(after).toEqual(before);
     });
 
-    it("does nothing for out-of-bounds indices", () => {
+    it("does nothing for non-existent IDs", () => {
       const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      useWorkspaceStore.getState().reorderWorkspaces(-1, 0);
+      useWorkspaceStore.getState().reorderWorkspaces("nonexistent", before[0]);
       expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
 
-      useWorkspaceStore.getState().reorderWorkspaces(0, 5);
+      useWorkspaceStore.getState().reorderWorkspaces(before[0], "nonexistent");
       expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
     });
 
@@ -369,7 +369,7 @@ describe("WorkspaceStore", () => {
       const paneIds0 = before[0].panes.map((p) => p.id);
       const paneIds1 = before[1].panes.map((p) => p.id);
 
-      useWorkspaceStore.getState().reorderWorkspaces(1, 0);
+      useWorkspaceStore.getState().reorderWorkspaces(before[1].id, before[0].id);
       const after = useWorkspaceStore.getState().workspaces;
       expect(after[0].panes.map((p) => p.id)).toEqual(paneIds1);
       expect(after[1].panes.map((p) => p.id)).toEqual(paneIds0);

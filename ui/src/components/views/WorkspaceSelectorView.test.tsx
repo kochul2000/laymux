@@ -970,23 +970,22 @@ describe("WorkspaceSelectorView", () => {
       expect(item).toHaveAttribute("draggable", "false");
     });
 
-    it("fires reorderWorkspaces on drag-drop", () => {
+    it("fires reorderWorkspaces on drag-drop and verifies order", () => {
       useSettingsStore.getState().setWorkspaceSortOrder("manual");
       render(<WorkspaceSelectorView />);
 
       const item1 = screen.getByTestId("workspace-item-ws-1");
       const item3 = screen.getByTestId("workspace-item-ws-3");
 
-      // Simulate drag start on first item
+      // Simulate drag ws-1 onto ws-3
       fireEvent.dragStart(item1, { dataTransfer: { setData: vi.fn(), effectAllowed: "" } });
-      // Simulate drop on third item
       fireEvent.dragOver(item3, { dataTransfer: { dropEffect: "" }, preventDefault: vi.fn() });
-      fireEvent.drop(item3, { dataTransfer: { getData: () => "0" }, preventDefault: vi.fn() });
+      fireEvent.drop(item3, { dataTransfer: { getData: () => "ws-1" }, preventDefault: vi.fn() });
 
-      // After drop, ws-1 should be moved to index 2 (after ws-3)
+      // ws-1 moved to ws-3's position: splice removes ws-1 → [ws-2, ws-3], then inserts at index 2 → [ws-2, ws-3, ws-1]
       const workspaces = useWorkspaceStore.getState().workspaces;
-      // The exact result depends on implementation but reorderWorkspaces should have been called
       expect(workspaces).toHaveLength(3);
+      expect(workspaces.map((w) => w.id)).toEqual(["ws-2", "ws-3", "ws-1"]);
     });
   });
 
