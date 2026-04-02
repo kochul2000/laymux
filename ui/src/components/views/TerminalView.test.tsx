@@ -20,10 +20,11 @@ let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
+const mockWrite = vi.fn();
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     open = vi.fn();
-    write = vi.fn();
+    write = mockWrite;
     onData = mockOnData;
     onResize = mockOnResize;
     onTitleChange = mockOnTitleChange;
@@ -834,6 +835,30 @@ describe("TerminalView", () => {
           true,
           undefined,
         );
+      });
+    });
+
+    it("pushes restored content into scrollback with padding newlines", async () => {
+      mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
+
+      render(
+        <TerminalView
+          instanceId="t-restore-scroll"
+          paneId="pane-scroll"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-scroll");
+      });
+
+      // Should write: cached content, separator, then padding newlines (rows=24)
+      await vi.waitFor(() => {
+        const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
+        expect(calls).toContain("cached-terminal-output");
+        expect(calls).toContain("\r\n".repeat(24));
       });
     });
 

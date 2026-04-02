@@ -499,6 +499,9 @@ export function TerminalView({
               if (cached && cached.length > 0) {
                 terminal.write(cached);
                 terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+                // Push restored content into scrollback so shell init
+                // clear-screen sequences don't destroy it
+                terminal.write("\r\n".repeat(terminal.rows));
               }
             } catch (err) {
               // "Cache not found" is expected for new panes — log anything else
