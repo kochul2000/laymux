@@ -29,9 +29,7 @@ export function createCloseHandler(deps: CloseHandlerDeps) {
     try {
       await Promise.race([
         deps.saveBeforeClose().then(() => "saved" as const),
-        new Promise<"timeout">((resolve) =>
-          setTimeout(() => resolve("timeout"), deps.timeoutMs),
-        ),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), deps.timeoutMs)),
       ]);
     } catch {
       // Save failure is non-fatal — proceed to close

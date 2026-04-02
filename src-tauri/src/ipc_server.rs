@@ -134,7 +134,7 @@ where
             drop(path_clone);
         });
 
-        return Ok(path);
+        Ok(path)
     }
 
     #[cfg(not(target_os = "windows"))]

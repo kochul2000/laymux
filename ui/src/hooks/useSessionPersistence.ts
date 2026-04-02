@@ -91,7 +91,10 @@ export function useSessionPersistence() {
             ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings }
             : {}),
           ...(rawSettings.issueReporter
-            ? { issueReporter: rawSettings.issueReporter as import("@/lib/tauri-api").IssueReporterSettings }
+            ? {
+                issueReporter:
+                  rawSettings.issueReporter as import("@/lib/tauri-api").IssueReporterSettings,
+              }
             : {}),
         });
 
@@ -180,10 +183,10 @@ export function useSessionPersistence() {
         // Clean orphaned terminal output cache files
         const allPaneIds: string[] = [
           ...(rawSettings.workspaces?.flatMap((ws) =>
-            ws.panes.map((p) => p.id).filter((id): id is string => Boolean(id))
+            ws.panes.map((p) => p.id).filter((id): id is string => Boolean(id)),
           ) ?? []),
-          ...(rawSettings.docks?.flatMap((d) =>
-            d.panes?.map((p) => p.id).filter((id): id is string => Boolean(id)) ?? []
+          ...(rawSettings.docks?.flatMap(
+            (d) => d.panes?.map((p) => p.id).filter((id): id is string => Boolean(id)) ?? [],
           ) ?? []),
         ];
         if (allPaneIds.length > 0) {

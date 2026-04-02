@@ -23,6 +23,7 @@ pub fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn create_terminal_session(
     id: String,
     profile: String,
@@ -369,10 +370,10 @@ fn handle_lx_message_dispatch(
             all,
             target_group,
         } => {
-            cleanup_stale_propagations(&state);
+            cleanup_stale_propagations(state);
 
             // Check if this is an echo from a propagated command — suppress to prevent loop
-            if is_propagated(&state, &terminal_id)? {
+            if is_propagated(state, &terminal_id)? {
                 return Ok(LxResponse::ok(Some(format!(
                     "sync-cwd {} suppressed (propagated)",
                     path
@@ -383,7 +384,7 @@ fn handle_lx_message_dispatch(
             let normalized_path = normalize_wsl_path(&path);
 
             // Skip if CWD hasn't actually changed for this terminal
-            if should_skip_sync_cwd(&state, &terminal_id, &normalized_path) {
+            if should_skip_sync_cwd(state, &terminal_id, &normalized_path) {
                 return Ok(LxResponse::ok(Some(format!(
                     "sync-cwd {} skipped (unchanged)",
                     normalized_path
@@ -391,10 +392,10 @@ fn handle_lx_message_dispatch(
             }
 
             // Update stored CWD for the source terminal
-            update_terminal_cwd(&state, &terminal_id, &normalized_path);
+            update_terminal_cwd(state, &terminal_id, &normalized_path);
 
             let all_targets = resolve_target_terminals(
-                &state,
+                state,
                 &terminal_id,
                 &group_id,
                 all,
@@ -402,21 +403,21 @@ fn handle_lx_message_dispatch(
             )?;
 
             // Skip targets that have cwd_receive disabled
-            let receiving_targets = filter_targets_cwd_receive(&state, &all_targets);
+            let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
 
             // Skip targets that have a command running (e.g., interactive apps like Claude Code)
             let settings = crate::settings::load_settings();
             let (idle_targets, claude_ids) =
-                filter_targets_not_busy(&state, &receiving_targets, &settings.claude.sync_cwd);
+                filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd);
 
             // Skip targets that are already at the same CWD
             let target_terminals =
-                filter_targets_needing_cd(&state, &idle_targets, &normalized_path);
+                filter_targets_needing_cd(state, &idle_targets, &normalized_path);
 
             // Write cd command to target terminals (with propagation flag + path conversion)
             if !target_terminals.is_empty() {
                 write_cd_to_group_terminals(
-                    &state,
+                    state,
                     &target_terminals,
                     &terminal_id,
                     &normalized_path,
@@ -426,12 +427,12 @@ fn handle_lx_message_dispatch(
 
             // Mark targets so their OSC echo won't re-propagate
             if !target_terminals.is_empty() {
-                mark_propagated(&state, &target_terminals)?;
+                mark_propagated(state, &target_terminals)?;
             }
 
             // Update stored CWD for receiving targets only (respect cwd_receive filter)
             for tid in &receiving_targets {
-                update_terminal_cwd(&state, tid, &normalized_path);
+                update_terminal_cwd(state, tid, &normalized_path);
             }
 
             // Emit sync-cwd event to frontend — only receiving targets, not all
@@ -551,7 +552,7 @@ fn handle_lx_message_dispatch(
                 .unwrap_or_default();
             drop(groups);
 
-            write_to_group_terminals(&state, &target_ids, "", &format!("{command}\n"))?;
+            write_to_group_terminals(state, &target_ids, "", &format!("{command}\n"))?;
 
             Ok(LxResponse::ok(Some(format!(
                 "sent '{}' to {} terminals in group '{}'",
@@ -840,7 +841,7 @@ pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
         })
         .collect();
 
-    result.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    result.sort_unstable_by_key(|a| a.to_lowercase());
     result.dedup();
     Ok(result)
 }
@@ -888,7 +889,7 @@ pub fn open_settings_file() -> Result<(), String> {
 /// Simple base64 encoder (no external crate needed).
 fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
@@ -970,6 +971,7 @@ fn build_gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Build a `gh` CLI command that runs without a visible console window on Windows.
 fn gh_command(shell_prefix: &str) -> std::process::Command {
+    #[allow(unused_mut)]
     let mut cmd = build_gh_command(shell_prefix);
 
     #[cfg(target_os = "windows")]
@@ -983,7 +985,10 @@ fn gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
-fn upload_screenshot_to_github(path: &std::path::Path, shell_prefix: &str) -> Result<String, String> {
+fn upload_screenshot_to_github(
+    path: &std::path::Path,
+    shell_prefix: &str,
+) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Failed to read screenshot: {e}"))?;
     let b64 = base64_encode(&bytes);
 
@@ -1195,12 +1200,13 @@ fn should_skip_sync_cwd(state: &AppState, terminal_id: &str, normalized_path: &s
 /// Checks the terminal output buffer for the last OSC 133 marker:
 /// - OSC 133;C (preexec) = command is running → exclude
 /// - OSC 133;D (exit code) = at shell prompt → include
+///
 /// Filter out terminals that have cwd_receive disabled.
 fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<String> {
     if let Ok(terminals) = state.terminals.lock() {
         targets
             .iter()
-            .filter(|id| terminals.get(id.as_str()).map_or(true, |s| s.cwd_receive))
+            .filter(|id| terminals.get(id.as_str()).is_none_or(|s| s.cwd_receive))
             .cloned()
             .collect()
     } else {
@@ -1470,7 +1476,7 @@ fn extract_last_terminal_title(data: &[u8]) -> Option<String> {
                 .position(|w| w == needle)
             {
                 let abs_pos = start + found;
-                if best_pos.map_or(true, |bp| abs_pos > bp) {
+                if best_pos.is_none_or(|bp| abs_pos > bp) {
                     best_pos = Some(abs_pos);
                     best_code = needle[2]; // '0' or '2'
                 }
@@ -1554,9 +1560,9 @@ fn filter_targets_needing_cd(
         targets
             .iter()
             .filter(|id| {
-                terminals.get(id.as_str()).map_or(true, |session| {
-                    session.cwd.as_deref() != Some(normalized_path)
-                })
+                terminals
+                    .get(id.as_str())
+                    .is_none_or(|session| session.cwd.as_deref() != Some(normalized_path))
             })
             .cloned()
             .collect()
@@ -1871,10 +1877,11 @@ fn clean_terminal_output_cache_in(
     for entry in std::fs::read_dir(&dir).map_err(|e| format!("Read dir: {e}"))? {
         let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".dat") && !active_set.contains(&name) {
-            if std::fs::remove_file(entry.path()).is_ok() {
-                removed += 1;
-            }
+        if name.ends_with(".dat")
+            && !active_set.contains(&name)
+            && std::fs::remove_file(entry.path()).is_ok()
+        {
+            removed += 1;
         }
     }
     Ok(removed)
@@ -1979,7 +1986,10 @@ mod tests {
     #[test]
     fn split_shell_prefix_unclosed_quote() {
         // Unclosed quote: rest of string is one token
-        assert_eq!(split_shell_prefix(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
+        assert_eq!(
+            split_shell_prefix(r#"cmd "unclosed arg"#),
+            vec!["cmd", "unclosed arg"]
+        );
     }
 
     #[test]

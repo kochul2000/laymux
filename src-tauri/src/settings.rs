@@ -332,47 +332,32 @@ pub struct Workspace {
 /// Claude Code sync-cwd propagation mode.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ClaudeSyncCwdMode {
     /// Don't propagate cd when Claude Code is detected (default).
+    #[default]
     Skip,
     /// When Claude Code is idle, send `! cd /path` format.
     Command,
 }
 
-impl Default for ClaudeSyncCwdMode {
-    fn default() -> Self {
-        Self::Skip
-    }
-}
-
 /// Claude Code integration settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
 }
 
-impl Default for ClaudeSettings {
-    fn default() -> Self {
-        Self {
-            sync_cwd: ClaudeSyncCwdMode::default(),
-        }
-    }
-}
-
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum PathEllipsisMode {
+    #[default]
     Start,
     End,
-}
-
-impl Default for PathEllipsisMode {
-    fn default() -> Self {
-        Self::Start
-    }
 }
 
 fn default_scrollbar_style() -> String {
@@ -425,6 +410,7 @@ fn default_memo_padding() -> u32 {
 /// Issue reporter settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct IssueReporterSettings {
     /// Shell prefix for running gh commands.
     /// When set, gh is invoked as: `{shell_parts...} gh {args...}`
@@ -432,14 +418,6 @@ pub struct IssueReporterSettings {
     /// When empty (default), gh is invoked directly.
     #[serde(default)]
     pub shell: String,
-}
-
-impl Default for IssueReporterSettings {
-    fn default() -> Self {
-        Self {
-            shell: String::new(),
-        }
-    }
 }
 
 /// MemoView settings (padding, etc.).
