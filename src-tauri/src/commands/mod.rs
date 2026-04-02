@@ -1559,9 +1559,9 @@ fn filter_targets_needing_cd(
         targets
             .iter()
             .filter(|id| {
-                terminals.get(id.as_str()).is_none_or(|session| {
-                    session.cwd.as_deref() != Some(normalized_path)
-                })
+                terminals
+                    .get(id.as_str())
+                    .is_none_or(|session| session.cwd.as_deref() != Some(normalized_path))
             })
             .cloned()
             .collect()
@@ -1876,10 +1876,12 @@ fn clean_terminal_output_cache_in(
     for entry in std::fs::read_dir(&dir).map_err(|e| format!("Read dir: {e}"))? {
         let entry = entry.map_err(|e| format!("Dir entry: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".dat") && !active_set.contains(&name)
-            && std::fs::remove_file(entry.path()).is_ok() {
-                removed += 1;
-            }
+        if name.ends_with(".dat")
+            && !active_set.contains(&name)
+            && std::fs::remove_file(entry.path()).is_ok()
+        {
+            removed += 1;
+        }
     }
     Ok(removed)
 }

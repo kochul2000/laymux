@@ -341,7 +341,6 @@ pub enum ClaudeSyncCwdMode {
     Command,
 }
 
-
 /// Claude Code integration settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -350,7 +349,6 @@ pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
 }
-
 
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -361,7 +359,6 @@ pub enum PathEllipsisMode {
     Start,
     End,
 }
-
 
 fn default_scrollbar_style() -> String {
     "overlay".to_string()
@@ -422,7 +419,6 @@ pub struct IssueReporterSettings {
     #[serde(default)]
     pub shell: String,
 }
-
 
 /// MemoView settings (padding, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
