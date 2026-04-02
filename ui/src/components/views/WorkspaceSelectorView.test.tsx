@@ -1510,4 +1510,62 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByText("/mnt/c/Users/kochul")).toBeInTheDocument();
     });
   });
+
+  it("displays IssueReporterView pane with proper label instead of ---", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-issue",
+          name: "Issue WS",
+          panes: [
+            {
+              id: "pane-issue1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "IssueReporterView" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-issue",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    // Should NOT show "---" (the Empty abbreviation)
+    const wsRow = screen.getByTestId("ws-row-2-ws-issue");
+    expect(wsRow.textContent).not.toBe("---");
+    // Should show a meaningful label for IssueReporterView
+    expect(wsRow.textContent).toContain("ISS");
+  });
+
+  it("displays MemoView pane with proper label instead of ---", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-memo",
+          name: "Memo WS",
+          panes: [
+            {
+              id: "pane-memo1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "MemoView" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-memo",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    const wsRow = screen.getByTestId("ws-row-2-ws-memo");
+    expect(wsRow.textContent).not.toBe("---");
+    expect(wsRow.textContent).toContain("MEM");
+  });
 });
