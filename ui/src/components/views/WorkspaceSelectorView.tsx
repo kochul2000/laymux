@@ -356,7 +356,7 @@ function WorkspaceItem({
                               color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
                               opacity: isActive ? 0.7 : 0.5,
                               ...(pathEllipsis === "start"
-                                ? { direction: "rtl", textAlign: "left" }
+                                ? { direction: "rtl", unicodeBidi: "plaintext", textAlign: "left" }
                                 : {}),
                             }}
                           >
@@ -534,7 +534,9 @@ function WorkspaceItem({
               style={{
                 color: "var(--text-secondary)",
                 opacity: 0.5,
-                ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}),
+                ...(pathEllipsis === "start"
+                  ? { direction: "rtl", unicodeBidi: "plaintext", textAlign: "left" }
+                  : {}),
               }}
             >
               {(() => {
