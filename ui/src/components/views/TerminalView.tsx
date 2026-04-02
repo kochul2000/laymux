@@ -194,6 +194,7 @@ export function TerminalView({
     // DOM keydown for when focus is elsewhere (e.g., after clicking control bar).
     const outerEl = containerRef.current?.parentElement;
     terminal.onKey(() => {
+      if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     });
     const handleKeyDown = () => {
