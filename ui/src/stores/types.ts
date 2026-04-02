@@ -15,6 +15,8 @@ export interface LayoutPane {
   w: number;
   h: number;
   viewType: ViewType;
+  /** Full view config including profile etc. When present, used instead of bare viewType. */
+  viewConfig?: ViewInstanceConfig;
 }
 
 export interface Layout {

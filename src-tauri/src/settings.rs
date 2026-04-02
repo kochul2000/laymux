@@ -283,6 +283,9 @@ pub struct LayoutPane {
     pub w: f64,
     pub h: f64,
     pub view_type: String,
+    /// Full view config (type + profile etc). When present, used instead of bare viewType.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_config: Option<serde_json::Value>,
 }
 
 /// Layout definition.
@@ -570,6 +573,7 @@ impl Default for Settings {
                     w: 1.0,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 }],
             }],
             workspaces: vec![Workspace {

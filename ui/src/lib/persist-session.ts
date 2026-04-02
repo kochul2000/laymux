@@ -115,6 +115,7 @@ async function persistSessionCore(): Promise<void> {
         w: p.w,
         h: p.h,
         viewType: p.viewType,
+        ...(p.viewConfig ? { viewConfig: p.viewConfig } : {}),
       })),
     })),
     workspaces: wsState.workspaces.map((ws) => ({

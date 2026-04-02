@@ -218,6 +218,24 @@ describe("Workspace Store E2E", () => {
       expect(layout.panes.length).toBe(2);
     });
 
+    it("exportToLayout should preserve view config (profile etc)", () => {
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      useWorkspaceStore.getState().exportToLayout("default-layout");
+
+      const layout = useWorkspaceStore.getState().layouts[0];
+      expect(layout.panes[0].viewConfig).toEqual({ type: "TerminalView", profile: "WSL" });
+    });
+
+    it("addWorkspace from layout with viewConfig should restore view config", () => {
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      useWorkspaceStore.getState().exportToLayout("default-layout");
+
+      useWorkspaceStore.getState().addWorkspace("Test WS", "default-layout");
+
+      const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "Test WS")!;
+      expect(ws.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
+    });
+
     it("exportAsNewLayout should not affect other workspaces", () => {
       useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
       useWorkspaceStore.getState().splitPane(0, "vertical");

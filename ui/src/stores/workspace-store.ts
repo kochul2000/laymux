@@ -1,7 +1,31 @@
 import { create } from "zustand";
-import type { Layout, Workspace, WorkspacePane, ViewInstanceConfig } from "./types";
+import type { Layout, LayoutPane, Workspace, WorkspacePane, ViewInstanceConfig } from "./types";
 import { persistSession } from "@/lib/persist-session";
 import { removePaneAndRedistribute } from "./pane-removal";
+
+/** Convert a workspace pane to a layout pane (preserving view config). */
+function toLayoutPane(p: WorkspacePane): LayoutPane {
+  return {
+    x: p.x,
+    y: p.y,
+    w: p.w,
+    h: p.h,
+    viewType: p.view.type,
+    viewConfig: { ...p.view },
+  };
+}
+
+/** Convert a layout pane to a workspace pane (restoring view config). */
+function toWorkspacePane(p: LayoutPane): WorkspacePane {
+  return {
+    id: generateId("pane"),
+    x: p.x,
+    y: p.y,
+    w: p.w,
+    h: p.h,
+    view: p.viewConfig ? { ...p.viewConfig } : { type: p.viewType },
+  };
+}
 
 function generateId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -96,14 +120,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const ws: Workspace = {
       id: generateId("ws"),
       name: uniqueName,
-      panes: layout.panes.map((p) => ({
-        id: generateId("pane"),
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-        view: { type: p.viewType },
-      })),
+      panes: layout.panes.map(toWorkspacePane),
     };
 
     set((state) => ({ workspaces: [...state.workspaces, ws] }));
@@ -235,13 +252,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const newLayout: Layout = {
       id: generateId("layout"),
       name,
-      panes: ws.panes.map((p) => ({
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-        viewType: p.view.type,
-      })),
+      panes: ws.panes.map(toLayoutPane),
     };
 
     set((state) => ({ layouts: [...state.layouts, newLayout] }));
@@ -255,13 +266,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const { layouts } = get();
     if (!layouts.some((l) => l.id === layoutId)) return false;
 
-    const updatedPanes = ws.panes.map((p) => ({
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
-      viewType: p.view.type,
-    }));
+    const updatedPanes = ws.panes.map(toLayoutPane);
 
     set((state) => ({
       layouts: state.layouts.map((l) => (l.id === layoutId ? { ...l, panes: updatedPanes } : l)),
@@ -290,7 +295,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const newLayout = {
       id: generateId("layout"),
       name: newName,
-      panes: layout.panes.map((p) => ({ ...p })),
+      panes: layout.panes.map((p) => ({
+        ...p,
+        ...(p.viewConfig ? { viewConfig: { ...p.viewConfig } } : {}),
+      })),
     };
 
     set((state) => ({

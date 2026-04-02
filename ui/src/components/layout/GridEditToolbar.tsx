@@ -136,7 +136,13 @@ export function GridEditToolbar() {
           <select
             data-testid="export-overwrite-select"
             className={btnBase}
-            style={{ ...btnStyle, cursor: "pointer", minWidth: 90 }}
+            style={{
+              ...btnStyle,
+              cursor: "pointer",
+              minWidth: 90,
+              backgroundColor: "var(--bg-surface)",
+              color: "var(--text-secondary)",
+            }}
             defaultValue=""
             onChange={(e) => {
               if (e.target.value) {
@@ -145,11 +151,15 @@ export function GridEditToolbar() {
               }
             }}
           >
-            <option value="" disabled>
+            <option value="" disabled style={{ background: "var(--bg-surface)" }}>
               Overwrite...
             </option>
             {layouts.map((l) => (
-              <option key={l.id} value={l.id}>
+              <option
+                key={l.id}
+                value={l.id}
+                style={{ background: "var(--bg-surface)", color: "var(--text-primary)" }}
+              >
                 {l.name}
               </option>
             ))}
