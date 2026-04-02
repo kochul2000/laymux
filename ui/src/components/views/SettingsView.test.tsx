@@ -556,6 +556,55 @@ describe("SettingsView", () => {
     expect(screen.getByText("Scrollback Lines")).toBeInTheDocument();
   });
 
+  // -- Session Restore settings in Advanced --
+
+  it("shows session restore checkboxes in Profile Defaults Advanced section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    expect(screen.getByText("Restore Working Directory")).toBeInTheDocument();
+    expect(screen.getByText("Restore Terminal Output")).toBeInTheDocument();
+  });
+
+  it("session restore checkboxes are checked by default", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const restoreCwd = screen.getByTestId("restore-cwd-checkbox") as HTMLInputElement;
+    const restoreOutput = screen.getByTestId("restore-output-checkbox") as HTMLInputElement;
+    expect(restoreCwd.checked).toBe(true);
+    expect(restoreOutput.checked).toBe(true);
+  });
+
+  it("updates profileDefaults restoreOutput after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const checkbox = screen.getByTestId("restore-output-checkbox") as HTMLInputElement;
+    await user.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    // Not saved yet
+    expect(useSettingsStore.getState().profileDefaults.restoreOutput).toBe(true);
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().profileDefaults.restoreOutput).toBe(false);
+  });
+
+  it("shows session restore checkboxes in profile Additional Settings", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await navigateToProfile(user, "PowerShell");
+    const tabBar = screen.getByTestId("profile-tabs");
+    await user.click(within(tabBar).getByText("Additional Settings"));
+
+    expect(screen.getByText("Restore Working Directory")).toBeInTheDocument();
+    expect(screen.getByText("Restore Terminal Output")).toBeInTheDocument();
+  });
+
   it("does NOT update profileDefaults cursor shape until Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

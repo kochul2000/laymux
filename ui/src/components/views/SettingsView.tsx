@@ -505,6 +505,8 @@ function AdvancedFields({
     | "antialiasingMode"
     | "suppressApplicationTitle"
     | "snapOnInput"
+    | "restoreCwd"
+    | "restoreOutput"
   >;
   onChange: (d: Partial<Profile>) => void;
   defaults?: ProfileDefaults;
@@ -627,6 +629,48 @@ function AdvancedFields({
               </span>
             </label>
             {resetBtn("snapOnInput")}
+          </div>
+        </SettingRow>
+
+        <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+          Session Restore
+        </h4>
+        <SettingRow
+          label="Restore Working Directory"
+          desc="Restore last working directory on restart"
+        >
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="restore-cwd-checkbox"
+                type="checkbox"
+                checked={data.restoreCwd}
+                onChange={(e) => onChange({ restoreCwd: e.target.checked })}
+              />
+              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                Start terminal in last used directory
+              </span>
+            </label>
+            {resetBtn("restoreCwd")}
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="Restore Terminal Output"
+          desc="Restore previous terminal output on restart"
+        >
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="restore-output-checkbox"
+                type="checkbox"
+                checked={data.restoreOutput}
+                onChange={(e) => onChange({ restoreOutput: e.target.checked })}
+              />
+              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                Show previous session output above new shell
+              </span>
+            </label>
+            {resetBtn("restoreOutput")}
           </div>
         </SettingRow>
       </div>

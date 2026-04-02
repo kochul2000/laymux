@@ -497,7 +497,7 @@ export function TerminalView({
               if (cancelled) return;
               if (cached && cached.length > 0) {
                 terminal.write(cached);
-                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
                 // Push restored content into scrollback so shell init
                 // clear-screen sequences don't destroy it
                 terminal.write("\r\n".repeat(terminal.rows));
