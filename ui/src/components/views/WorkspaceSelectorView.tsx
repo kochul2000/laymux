@@ -283,6 +283,7 @@ function WorkspaceItem({
                       ...(isFocusedPane
                         ? {
                             outline: "1px solid var(--accent)",
+                            outlineOffset: 3,
                             borderRadius: 3,
                             color: "var(--text-primary)",
                           }
@@ -407,6 +408,7 @@ function WorkspaceItem({
                       ...(isFocusedPane
                         ? {
                             outline: "1px solid var(--accent)",
+                            outlineOffset: 3,
                             borderRadius: 3,
                             color: "var(--text-primary)",
                           }
