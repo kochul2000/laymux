@@ -482,3 +482,61 @@ export async function markClaudeTerminal(id: string): Promise<boolean> {
 export async function isClaudeTerminal(id: string): Promise<boolean> {
   return invoke("is_claude_terminal", { id });
 }
+
+// -- Terminal CWD (single source of truth in backend) --
+
+/** Get CWD for all terminals from backend (single source of truth).
+ *  Returns a map of terminal_id → normalized CWD path. */
+export async function getTerminalCwds(): Promise<Record<string, string>> {
+  return invoke("get_terminal_cwds");
+}
+
+/** Listen for CWD change events detected directly from PTY output in the backend. */
+export function onTerminalCwdChanged(
+  callback: (data: { terminalId: string; cwd: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ terminalId: string; cwd: string }>("terminal-cwd-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
+// -- Terminal summaries (single source of truth for workspace list) --
+
+export interface TerminalNotificationResponse {
+  id: number;
+  terminalId: string;
+  message: string;
+  level: string;
+  createdAt: number;
+  readAt: number | null;
+}
+
+export interface TerminalSummaryResponse {
+  id: string;
+  profile: string;
+  title: string;
+  cwd: string | null;
+  branch: string | null;
+  lastCommand: string | null;
+  lastExitCode: number | null;
+  lastCommandAt: number | null;
+  commandRunning: boolean;
+  activity: { type: "shell" } | { type: "running" } | { type: "interactiveApp"; name: string };
+  outputActive: boolean;
+  isClaude: boolean;
+  unreadNotificationCount: number;
+  latestNotification: TerminalNotificationResponse | null;
+}
+
+/** Get comprehensive summary for requested terminals from backend (single source of truth).
+ *  Returns all data needed to render WorkspaceSelectorView. */
+export async function getTerminalSummaries(
+  terminalIds: string[],
+): Promise<TerminalSummaryResponse[]> {
+  return invoke("get_terminal_summaries", { terminalIds });
+}
+
+/** Mark notifications as read for the given terminal IDs. Returns count of marked. */
+export async function markNotificationsRead(terminalIds: string[]): Promise<number> {
+  return invoke("mark_notifications_read", { terminalIds });
+}

@@ -61,6 +61,18 @@ impl Default for TerminalConfig {
     }
 }
 
+/// Notification stored in the backend (single source of truth).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalNotification {
+    pub id: u64,
+    pub terminal_id: String,
+    pub message: String,
+    pub level: String, // "info" | "error" | "warning" | "success"
+    pub created_at: u64,
+    pub read_at: Option<u64>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TerminalSession {
     pub id: String,
@@ -81,6 +93,15 @@ pub struct TerminalSession {
     /// Whether this terminal accepts CWD sync from other terminals.
     #[serde(default = "default_true")]
     pub cwd_receive: bool,
+    /// Last command text from OSC 133 E / SetCommandStatus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_command: Option<String>,
+    /// Exit code of the last command from OSC 133 D / SetCommandStatus.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_exit_code: Option<i32>,
+    /// Unix timestamp (millis) when last command status was updated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_command_at: Option<u64>,
 }
 
 fn default_true() -> bool {
@@ -98,6 +119,9 @@ impl TerminalSession {
             command_running: false,
             wsl_distro: None,
             cwd_receive: true,
+            last_command: None,
+            last_exit_code: None,
+            last_command_at: None,
         }
     }
 

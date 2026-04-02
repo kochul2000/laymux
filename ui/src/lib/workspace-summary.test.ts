@@ -5,12 +5,14 @@ import {
   getPortsForWorkspace,
   getLastCommandForWorkspace,
   computeWorkspaceSummary,
+  computeWorkspaceSummaryFromBackend,
   abbreviatePath,
   formatRelativeTime,
   formatPorts,
   formatCommand,
   formatActivity,
 } from "./workspace-summary";
+import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import type { TerminalInstance } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 
@@ -501,6 +503,47 @@ describe("formatActivity", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
     expect(result.ralph).toBe(true);
     expect(result.label).toContain("®");
+  });
+});
+
+describe("computeWorkspaceSummaryFromBackend", () => {
+  function makeBackendSummary(
+    overrides: Partial<TerminalSummaryResponse> & { id: string },
+  ): TerminalSummaryResponse {
+    return {
+      profile: "WSL",
+      title: "",
+      cwd: null,
+      branch: null,
+      lastCommand: null,
+      lastExitCode: null,
+      lastCommandAt: null,
+      commandRunning: false,
+      activity: { type: "shell" },
+      outputActive: false,
+      isClaude: false,
+      unreadNotificationCount: 0,
+      latestNotification: null,
+      ...overrides,
+    };
+  }
+
+  it("uses provided ports for active workspace", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries, [3000, 8080]);
+    expect(result.ports).toEqual([3000, 8080]);
+  });
+
+  it("defaults to empty ports when not provided", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.ports).toEqual([]);
+  });
+
+  it("returns empty ports for inactive workspace", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries, []);
+    expect(result.ports).toEqual([]);
   });
 });
 

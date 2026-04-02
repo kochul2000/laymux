@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
@@ -6,10 +6,15 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { getListeningPorts } from "@/lib/tauri-api";
+import { getListeningPorts, getTerminalSummaries } from "@/lib/tauri-api";
+import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@/lib/tauri-api", () => ({
@@ -29,13 +34,64 @@ vi.mock("@/lib/tauri-api", () => ({
   onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
   getGitBranch: vi.fn().mockResolvedValue(null),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
+  getTerminalSummaries: vi.fn().mockResolvedValue([]),
+  markNotificationsRead: vi.fn().mockResolvedValue(0),
 }));
+
+/**
+ * Build TerminalSummaryResponse objects from the current useTerminalStore
+ * and useNotificationStore state — bridges old test setup to the new
+ * backend-fetched architecture.
+ */
+function buildSummariesFromStores(ids: string[]): TerminalSummaryResponse[] {
+  const { instances } = useTerminalStore.getState();
+  const { notifications } = useNotificationStore.getState();
+  return ids
+    .map((id) => {
+      const inst = instances.find((i) => i.id === id);
+      if (!inst) return null;
+      const termNotifs = notifications.filter((n) => n.terminalId === id);
+      const unread = termNotifs.filter((n) => n.readAt === null);
+      const latestUnread = [...unread].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+      return {
+        id: inst.id,
+        profile: inst.profile,
+        title: inst.title ?? "Terminal",
+        cwd: inst.cwd ?? null,
+        branch: inst.branch ?? null,
+        lastCommand: inst.lastCommand ?? null,
+        lastExitCode: inst.lastExitCode ?? null,
+        lastCommandAt: inst.lastCommandAt ?? null,
+        commandRunning: inst.lastCommand != null && inst.lastExitCode == null,
+        activity: inst.activity ?? { type: "shell" as const },
+        outputActive: inst.outputActive ?? false,
+        isClaude: false,
+        unreadNotificationCount: unread.length,
+        latestNotification: latestUnread
+          ? {
+              id: 1,
+              terminalId: id,
+              message: latestUnread.message,
+              level: latestUnread.level,
+              createdAt: latestUnread.createdAt,
+              readAt: null,
+            }
+          : null,
+      } satisfies TerminalSummaryResponse;
+    })
+    .filter((s): s is TerminalSummaryResponse => s !== null);
+}
 
 describe("WorkspaceSelectorView", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
+
+    // Wire getTerminalSummaries to read from the stores dynamically
+    vi.mocked(getTerminalSummaries).mockImplementation(async (ids: string[]) => {
+      return buildSummariesFromStores(ids);
+    });
   });
 
   it("renders workspace list", () => {
@@ -76,25 +132,81 @@ describe("WorkspaceSelectorView", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
   });
 
-  it("shows unread badge when notifications exist", () => {
+  it("shows unread badge when notifications exist", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
     useNotificationStore.getState().addNotification({
-      terminalId: "t1",
+      terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "test msg",
     });
     render(<WorkspaceSelectorView />);
-    expect(screen.getByTestId("unread-badge-ws-default")).toBeInTheDocument();
-    expect(screen.getByTestId("unread-badge-ws-default")).toHaveTextContent("1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("unread-badge-ws-default")).toBeInTheDocument();
+      expect(screen.getByTestId("unread-badge-ws-default")).toHaveTextContent("1");
+    });
   });
 
-  it("shows latest notification text", () => {
+  it("shows latest notification text", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
     useNotificationStore.getState().addNotification({
-      terminalId: "t1",
+      terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build done",
     });
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText(/Build done/)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Build done/)).toBeInTheDocument();
+    });
   });
 
   it("marks notifications read when workspace is clicked", async () => {
@@ -110,7 +222,7 @@ describe("WorkspaceSelectorView", () => {
     expect(useNotificationStore.getState().getUnreadCount("ws-default")).toBe(0);
   });
 
-  it("displays git branch from terminal store (most recent activity)", () => {
+  it("displays git branch from terminal store (most recent activity)", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -141,10 +253,13 @@ describe("WorkspaceSelectorView", () => {
     });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText("feature/login")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("feature/login")).toBeInTheDocument();
+    });
   });
 
-  it("displays working directory from focused terminal", () => {
+  it("displays working directory from focused terminal", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -176,18 +291,48 @@ describe("WorkspaceSelectorView", () => {
     useTerminalStore.getState().setTerminalFocus("terminal-p1");
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText("~/dev/project")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("~/dev/project")).toBeInTheDocument();
+    });
   });
 
-  it("shows unread state when workspace has unread notifications", () => {
+  it("shows unread state when workspace has unread notifications", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
     useNotificationStore.getState().addNotification({
-      terminalId: "t1",
+      terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
     });
     render(<WorkspaceSelectorView />);
 
-    expect(screen.getByTestId("unread-badge-ws-default")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("unread-badge-ws-default")).toBeInTheDocument();
+    });
   });
 
   it("has a notification panel toggle button", () => {
@@ -251,77 +396,166 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.queryByText(/:8080/)).not.toBeInTheDocument();
   });
 
-  it("displays last command with success indicator", () => {
+  it("displays last command with success indicator", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
     useTerminalStore.getState().registerInstance({
-      id: "t1",
+      id: "terminal-p1",
       profile: "PowerShell",
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useTerminalStore.getState().updateInstanceInfo("t1", {
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
       lastCommand: "npm test",
       lastExitCode: 0,
       lastCommandAt: Date.now(),
     });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText(/npm test/)).toBeInTheDocument();
-    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+
+    await waitFor(() => {
+      expect(screen.getByText(/npm test/)).toBeInTheDocument();
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+    });
   });
 
-  it("displays last command with failure indicator", () => {
+  it("displays last command with failure indicator", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
     useTerminalStore.getState().registerInstance({
-      id: "t1",
+      id: "terminal-p1",
       profile: "PowerShell",
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useTerminalStore.getState().updateInstanceInfo("t1", {
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
       lastCommand: "npm build",
       lastExitCode: 1,
       lastCommandAt: Date.now(),
     });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText(/npm build/)).toBeInTheDocument();
-    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+
+    await waitFor(() => {
+      expect(screen.getByText(/npm build/)).toBeInTheDocument();
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+    });
   });
 
-  it("displays running indicator when command has no exit code", () => {
+  it("displays running indicator when command has no exit code", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
     useTerminalStore.getState().registerInstance({
-      id: "t1",
+      id: "terminal-p1",
       profile: "PowerShell",
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useTerminalStore.getState().updateInstanceInfo("t1", {
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
       lastCommand: "npm test",
       lastCommandAt: Date.now(),
     });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+    });
   });
 
-  it("shows terminal count badge when terminals exist", () => {
+  it("shows terminal count badge when terminals exist", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
     useTerminalStore.getState().registerInstance({
-      id: "t1",
+      id: "terminal-p1",
       profile: "WSL",
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
     useTerminalStore.getState().registerInstance({
-      id: "t2",
+      id: "terminal-p2",
       profile: "PowerShell",
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByTestId("terminal-count-ws-default")).toHaveTextContent("2");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-count-ws-default")).toHaveTextContent("2");
+    });
   });
 
-  it("shows per-terminal summaries for active workspace with 2+ terminals", () => {
+  it("shows per-terminal summaries for active workspace with 2+ terminals", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -360,13 +594,16 @@ describe("WorkspaceSelectorView", () => {
     useTerminalStore.getState().updateInstanceInfo("terminal-p2", { cwd: "/home/user/api" });
 
     render(<WorkspaceSelectorView />);
-    expect(screen.getByText("WSL")).toBeInTheDocument();
-    expect(screen.getByText("PS")).toBeInTheDocument();
-    expect(screen.getByText("~/project")).toBeInTheDocument();
-    expect(screen.getByText("~/api")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("WSL")).toBeInTheDocument();
+      expect(screen.getByText("PS")).toBeInTheDocument();
+      expect(screen.getByText("~/project")).toBeInTheDocument();
+      expect(screen.getByText("~/api")).toBeInTheDocument();
+    });
   });
 
-  it("shows pane minimaps in per-terminal summaries with correct highlight", () => {
+  it("shows pane minimaps in per-terminal summaries with correct highlight", async () => {
     // Set up a workspace with 2 TerminalView panes (left/right split)
     useWorkspaceStore.setState({
       workspaces: [
@@ -413,27 +650,29 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
 
-    // Each terminal summary should have a minimap
-    const minimap1 = screen.getByTestId("pane-minimap-terminal-pane-left");
-    const minimap2 = screen.getByTestId("pane-minimap-terminal-pane-right");
-    expect(minimap1).toBeInTheDocument();
-    expect(minimap2).toBeInTheDocument();
+    await waitFor(() => {
+      // Each terminal summary should have a minimap
+      const minimap1 = screen.getByTestId("pane-minimap-terminal-pane-left");
+      const minimap2 = screen.getByTestId("pane-minimap-terminal-pane-right");
+      expect(minimap1).toBeInTheDocument();
+      expect(minimap2).toBeInTheDocument();
 
-    // First minimap: pane-left highlighted (index 0)
-    const svg1 = minimap1.querySelector("svg")!;
-    const rects1 = svg1.querySelectorAll("rect[data-pane-index]");
-    expect(rects1).toHaveLength(2);
-    expect(rects1[0].getAttribute("data-highlighted")).toBe("true");
-    expect(rects1[1].getAttribute("data-highlighted")).toBe("false");
+      // First minimap: pane-left highlighted (index 0)
+      const svg1 = minimap1.querySelector("svg")!;
+      const rects1 = svg1.querySelectorAll("rect[data-pane-index]");
+      expect(rects1).toHaveLength(2);
+      expect(rects1[0].getAttribute("data-highlighted")).toBe("true");
+      expect(rects1[1].getAttribute("data-highlighted")).toBe("false");
 
-    // Second minimap: pane-right highlighted (index 1)
-    const svg2 = minimap2.querySelector("svg")!;
-    const rects2 = svg2.querySelectorAll("rect[data-pane-index]");
-    expect(rects2[0].getAttribute("data-highlighted")).toBe("false");
-    expect(rects2[1].getAttribute("data-highlighted")).toBe("true");
+      // Second minimap: pane-right highlighted (index 1)
+      const svg2 = minimap2.querySelector("svg")!;
+      const rects2 = svg2.querySelectorAll("rect[data-pane-index]");
+      expect(rects2[0].getAttribute("data-highlighted")).toBe("false");
+      expect(rects2[1].getAttribute("data-highlighted")).toBe("true");
+    });
   });
 
-  it("shows minimap with correct proportions for complex layout", () => {
+  it("shows minimap with correct proportions for complex layout", async () => {
     // 3-pane layout: top full-width, bottom-left, bottom-right
     useWorkspaceStore.setState({
       workspaces: [
@@ -480,14 +719,16 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
 
-    // Minimap for bottom-left terminal should show all 3 panes, highlight index 1
-    const minimap = screen.getByTestId("pane-minimap-terminal-pane-bl");
-    const svg = minimap.querySelector("svg")!;
-    const rects = svg.querySelectorAll("rect[data-pane-index]");
-    expect(rects).toHaveLength(3);
-    expect(rects[0].getAttribute("data-highlighted")).toBe("false"); // top pane
-    expect(rects[1].getAttribute("data-highlighted")).toBe("true"); // bottom-left (this terminal)
-    expect(rects[2].getAttribute("data-highlighted")).toBe("false"); // bottom-right (browser)
+    await waitFor(() => {
+      // Minimap for bottom-left terminal should show all 3 panes, highlight index 1
+      const minimap = screen.getByTestId("pane-minimap-terminal-pane-bl");
+      const svg = minimap.querySelector("svg")!;
+      const rects = svg.querySelectorAll("rect[data-pane-index]");
+      expect(rects).toHaveLength(3);
+      expect(rects[0].getAttribute("data-highlighted")).toBe("false"); // top pane
+      expect(rects[1].getAttribute("data-highlighted")).toBe("true"); // bottom-left (this terminal)
+      expect(rects[2].getAttribute("data-highlighted")).toBe("false"); // bottom-right (browser)
+    });
   });
 
   it("shows close button on workspace items when hovered and multiple exist", () => {
@@ -543,7 +784,7 @@ describe("WorkspaceSelectorView", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
-  it("does not show dock terminal last command in active workspace summary", () => {
+  it("does not show dock terminal last command in active workspace summary", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -589,10 +830,13 @@ describe("WorkspaceSelectorView", () => {
     });
 
     render(<WorkspaceSelectorView />);
-    // Should show workspace terminal's command, not dock's
-    expect(screen.getByText(/npm test/)).toBeInTheDocument();
-    expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+
+    await waitFor(() => {
+      // Should show workspace terminal's command, not dock's
+      expect(screen.getByText(/npm test/)).toBeInTheDocument();
+      expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+    });
   });
 
   it("workspace items always render 3 rows even without data", () => {
@@ -706,7 +950,7 @@ describe("WorkspaceSelectorView", () => {
 
   // -- Pane-level notification badge --
 
-  it("shows notification border on pane command icon when pane has unread notifications", () => {
+  it("shows notification border on pane command icon when pane has unread notifications", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -760,17 +1004,19 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
 
-    // terminal-p1 should have notification badge border
-    const badge1 = screen.getByTestId("pane-cmd-badge-terminal-p1");
-    expect(badge1).toBeInTheDocument();
-    expect(badge1.style.border).toContain("var(--accent)");
+    await waitFor(() => {
+      // terminal-p1 should have notification badge border
+      const badge1 = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge1).toBeInTheDocument();
+      expect(badge1.style.border).toContain("var(--accent)");
 
-    // terminal-p2 should NOT have notification badge border
-    const badge2 = screen.getByTestId("pane-cmd-badge-terminal-p2");
-    expect(badge2.style.border).not.toContain("var(--accent)");
+      // terminal-p2 should NOT have notification badge border
+      const badge2 = screen.getByTestId("pane-cmd-badge-terminal-p2");
+      expect(badge2.style.border).not.toContain("var(--accent)");
+    });
   });
 
-  it("shows notification border on hourglass icon for running command with notification", () => {
+  it("shows notification border on hourglass icon for running command with notification", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -802,13 +1048,15 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
 
-    const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent("⏳");
-    expect(badge.style.border).toContain("var(--accent)");
+    await waitFor(() => {
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("⏳");
+      expect(badge.style.border).toContain("var(--accent)");
+    });
   });
 
-  it("shows standalone notification dot when no command status but notification exists", () => {
+  it("shows standalone notification dot when no command status but notification exists", async () => {
     // When there's no command icon, the notification badge should still appear
     useWorkspaceStore.setState({
       workspaces: [
@@ -838,12 +1086,14 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
 
-    // There's no command icon, so we show a standalone notification dot
-    const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
-    expect(badge).toBeInTheDocument();
+    await waitFor(() => {
+      // There's no command icon, so we show a standalone notification dot
+      const badge = screen.getByTestId("pane-notif-dot-terminal-p1");
+      expect(badge).toBeInTheDocument();
+    });
   });
 
-  it("hides minimap when workspaceDisplay.minimap is false", () => {
+  it("hides minimap when workspaceDisplay.minimap is false", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
       workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, minimap: false },
@@ -889,11 +1139,13 @@ describe("WorkspaceSelectorView", () => {
     });
 
     render(<WorkspaceSelectorView />);
+
+    // Even after data loads, minimaps should be hidden
     expect(screen.queryByTestId("pane-minimap-terminal-p1")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pane-minimap-terminal-p2")).not.toBeInTheDocument();
   });
 
-  it("hides activity when workspaceDisplay.activity is false", () => {
+  it("hides activity when workspaceDisplay.activity is false", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
       workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, activity: false },
@@ -925,6 +1177,7 @@ describe("WorkspaceSelectorView", () => {
     });
 
     render(<WorkspaceSelectorView />);
+
     expect(screen.queryByTestId("terminal-activity-terminal-p1")).not.toBeInTheDocument();
   });
 });

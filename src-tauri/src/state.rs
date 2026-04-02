@@ -1,13 +1,29 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty::PtyHandle;
-use crate::terminal::{SyncGroup, TerminalSession};
+use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 
+/// Global application state shared across all commands and PTY callbacks.
+///
+/// ## Lock ordering
+///
+/// When acquiring multiple locks, always follow this order to prevent deadlocks:
+///
+/// 1. `terminals`
+/// 2. `output_buffers`
+/// 3. `known_claude_terminals`
+/// 4. `notifications`
+/// 5. `sync_groups`
+/// 6. `propagated_terminals`
+/// 7. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+///
+/// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
-    pub terminals: Mutex<HashMap<String, TerminalSession>>,
+    pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
     pub ipc_socket_path: Mutex<Option<String>>,
@@ -24,12 +40,17 @@ pub struct AppState {
     /// Once a terminal is marked, it stays marked until the terminal session closes.
     /// Both backend (CWD skip) and frontend (activity display) consume this state.
     pub known_claude_terminals: Arc<Mutex<HashSet<String>>>,
+    /// Single source of truth for terminal notifications.
+    /// Stored in backend so `get_terminal_summaries` can return unread counts.
+    pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
+    /// Auto-incrementing counter for notification IDs.
+    pub notification_counter: AtomicU64,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            terminals: Mutex::new(HashMap::new()),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
             sync_groups: Mutex::new(HashMap::new()),
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),
@@ -38,6 +59,8 @@ impl AppState {
             automation_port: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
+            notifications: Arc::new(Mutex::new(Vec::new())),
+            notification_counter: AtomicU64::new(1),
         }
     }
 }
@@ -82,5 +105,12 @@ mod tests {
         let state = AppState::new();
         let known = state.known_claude_terminals.lock().unwrap();
         assert!(known.is_empty());
+    }
+
+    #[test]
+    fn notifications_starts_empty() {
+        let state = AppState::new();
+        let notifs = state.notifications.lock().unwrap();
+        assert!(notifs.is_empty());
     }
 }

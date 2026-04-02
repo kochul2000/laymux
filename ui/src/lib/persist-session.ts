@@ -2,12 +2,12 @@ import {
   saveSettings,
   saveTerminalOutputCache,
   cleanTerminalOutputCache,
+  getTerminalCwds,
   type Settings,
 } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useTerminalStore } from "@/stores/terminal-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
 /** Maximum serialized terminal output size to cache (2M chars). Outputs exceeding this are truncated from the front, keeping recent lines. */
@@ -44,7 +44,10 @@ async function persistSessionCore(): Promise<void> {
   const settingsState = useSettingsStore.getState();
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
-  const terminalInstances = useTerminalStore.getState().instances;
+
+  // Fetch CWDs from backend (single source of truth).
+  // Falls back to empty map if backend is unreachable (e.g., during tests).
+  const backendCwds = await getTerminalCwds().catch(() => ({}) as Record<string, string>);
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
@@ -125,8 +128,8 @@ async function persistSessionCore(): Promise<void> {
         const viewExtra: Record<string, unknown> = {};
         if (p.view.type === "TerminalView") {
           const termId = `terminal-${p.id}`;
-          const inst = terminalInstances.find((i) => i.id === termId);
-          if (inst?.cwd) viewExtra.lastCwd = inst.cwd;
+          const cwd = backendCwds[termId];
+          if (cwd) viewExtra.lastCwd = cwd;
         }
         return {
           id: p.id,
@@ -154,8 +157,8 @@ async function persistSessionCore(): Promise<void> {
         const dockViewExtra: Record<string, unknown> = {};
         if (p.view.type === "TerminalView") {
           const termId = `terminal-${p.id}`;
-          const inst = terminalInstances.find((i) => i.id === termId);
-          if (inst?.cwd) dockViewExtra.lastCwd = inst.cwd;
+          const cwd = backendCwds[termId];
+          if (cwd) dockViewExtra.lastCwd = cwd;
         }
         return {
           id: p.id,
