@@ -31,11 +31,17 @@ vi.mock("@tauri-apps/api/window", () => ({
   },
 }));
 
-import { restoreWindowGeometry, captureWindowGeometry } from "./useWindowGeometry";
+import {
+  restoreWindowGeometry,
+  captureWindowGeometry,
+  _resetCachedGeometry,
+  _getCachedGeometry,
+} from "./useWindowGeometry";
 
 describe("useWindowGeometry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetCachedGeometry();
   });
 
   describe("restoreWindowGeometry", () => {
@@ -126,6 +132,53 @@ describe("useWindowGeometry", () => {
       expect(sizeArg.width).toBeLessThanOrEqual(1920);
       expect(sizeArg.height).toBeLessThanOrEqual(1080);
     });
+
+    it("skips geometry with negative coordinates (minimized window)", async () => {
+      mockLoadWindowGeometry.mockResolvedValue({
+        x: -32000,
+        y: -32000,
+        width: 160,
+        height: 28,
+        maximized: false,
+      });
+      mockAvailableMonitors.mockResolvedValue([
+        { size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 } },
+      ]);
+      const mockWindow = {
+        setSize: vi.fn(),
+        setPosition: vi.fn(),
+        maximize: vi.fn(),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      expect(mockWindow.setSize).not.toHaveBeenCalled();
+      expect(mockWindow.setPosition).not.toHaveBeenCalled();
+    });
+
+    it("skips geometry with too small size", async () => {
+      mockLoadWindowGeometry.mockResolvedValue({
+        x: 100,
+        y: 100,
+        width: 50,
+        height: 20,
+        maximized: false,
+      });
+      mockAvailableMonitors.mockResolvedValue([
+        { size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 } },
+      ]);
+      const mockWindow = {
+        setSize: vi.fn(),
+        setPosition: vi.fn(),
+        maximize: vi.fn(),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await restoreWindowGeometry();
+
+      expect(mockWindow.setSize).not.toHaveBeenCalled();
+    });
   });
 
   describe("captureWindowGeometry", () => {
@@ -135,6 +188,7 @@ describe("useWindowGeometry", () => {
         outerPosition: vi.fn().mockResolvedValue({ x: 50, y: 100 }),
         outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
         isMaximized: vi.fn().mockResolvedValue(false),
+        isMinimized: vi.fn().mockResolvedValue(false),
       };
       mockGetCurrentWindow.mockReturnValue(mockWindow);
 
@@ -147,6 +201,74 @@ describe("useWindowGeometry", () => {
         height: 800,
         maximized: false,
       });
+    });
+
+    it("updates cached geometry on normal capture", async () => {
+      mockSaveWindowGeometry.mockResolvedValue(undefined);
+      const mockWindow = {
+        outerPosition: vi.fn().mockResolvedValue({ x: 200, y: 300 }),
+        outerSize: vi.fn().mockResolvedValue({ width: 1400, height: 900 }),
+        isMaximized: vi.fn().mockResolvedValue(false),
+        isMinimized: vi.fn().mockResolvedValue(false),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await captureWindowGeometry();
+
+      expect(_getCachedGeometry()).toEqual({
+        x: 200,
+        y: 300,
+        width: 1400,
+        height: 900,
+        maximized: false,
+      });
+    });
+
+    it("saves cached geometry when window is minimized", async () => {
+      // First capture in normal state to populate cache
+      mockSaveWindowGeometry.mockResolvedValue(undefined);
+      const normalWindow = {
+        outerPosition: vi.fn().mockResolvedValue({ x: 100, y: 200 }),
+        outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
+        isMaximized: vi.fn().mockResolvedValue(false),
+        isMinimized: vi.fn().mockResolvedValue(false),
+      };
+      mockGetCurrentWindow.mockReturnValue(normalWindow);
+      await captureWindowGeometry();
+      mockSaveWindowGeometry.mockClear();
+
+      // Now capture while minimized — should save the cached values
+      const minimizedWindow = {
+        outerPosition: vi.fn().mockResolvedValue({ x: -32000, y: -32000 }),
+        outerSize: vi.fn().mockResolvedValue({ width: 160, height: 28 }),
+        isMaximized: vi.fn().mockResolvedValue(false),
+        isMinimized: vi.fn().mockResolvedValue(true),
+      };
+      mockGetCurrentWindow.mockReturnValue(minimizedWindow);
+
+      await captureWindowGeometry();
+
+      expect(mockSaveWindowGeometry).toHaveBeenCalledWith({
+        x: 100,
+        y: 200,
+        width: 1200,
+        height: 800,
+        maximized: false,
+      });
+    });
+
+    it("skips saving when minimized and no cached geometry", async () => {
+      const mockWindow = {
+        outerPosition: vi.fn().mockResolvedValue({ x: -32000, y: -32000 }),
+        outerSize: vi.fn().mockResolvedValue({ width: 160, height: 28 }),
+        isMaximized: vi.fn().mockResolvedValue(false),
+        isMinimized: vi.fn().mockResolvedValue(true),
+      };
+      mockGetCurrentWindow.mockReturnValue(mockWindow);
+
+      await captureWindowGeometry();
+
+      expect(mockSaveWindowGeometry).not.toHaveBeenCalled();
     });
   });
 });
