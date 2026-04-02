@@ -133,18 +133,7 @@ pub fn smart_paste(image_dir: &str, profile: &str) -> Result<SmartPasteResult, S
 }
 
 fn dirs_config_path() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|p| PathBuf::from(p).join("laymux"))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var("HOME")
-            .ok()
-            .map(|p| PathBuf::from(p).join(".config").join("laymux"))
-    }
+    crate::settings::dirs_config_path()
 }
 
 // -- Platform-specific implementation --

@@ -613,19 +613,22 @@ pub fn settings_path() -> PathBuf {
 }
 
 pub(crate) fn dirs_config_path() -> Option<PathBuf> {
-    // On Windows: %APPDATA%/laymux
-    // On Linux: ~/.config/laymux
+    let dir_name = if cfg!(debug_assertions) {
+        "laymux-dev"
+    } else {
+        "laymux"
+    };
     #[cfg(target_os = "windows")]
     {
         std::env::var("APPDATA")
             .ok()
-            .map(|p| PathBuf::from(p).join("laymux"))
+            .map(|p| PathBuf::from(p).join(dir_name))
     }
     #[cfg(not(target_os = "windows"))]
     {
         std::env::var("HOME")
             .ok()
-            .map(|p| PathBuf::from(p).join(".config").join("laymux"))
+            .map(|p| PathBuf::from(p).join(".config").join(dir_name))
     }
 }
 
