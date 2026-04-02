@@ -7,6 +7,21 @@ use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty::PtyHandle;
 use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 
+/// Global application state shared across all commands and PTY callbacks.
+///
+/// ## Lock ordering
+///
+/// When acquiring multiple locks, always follow this order to prevent deadlocks:
+///
+/// 1. `terminals`
+/// 2. `output_buffers`
+/// 3. `known_claude_terminals`
+/// 4. `notifications`
+/// 5. `sync_groups`
+/// 6. `propagated_terminals`
+/// 7. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+///
+/// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,

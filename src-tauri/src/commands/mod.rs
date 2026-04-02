@@ -14,6 +14,10 @@ use crate::terminal::{
 /// How long a propagation flag remains valid before expiring.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Maximum number of notifications to keep. When exceeded, oldest read notifications
+/// are evicted first. Unread notifications are never evicted by this limit.
+const MAX_NOTIFICATIONS: usize = 500;
+
 /// Number of bytes to scan from the end of a terminal output buffer when detecting
 /// activity state or Claude Code presence. 16KB covers terminal title sequences
 /// even when OSC 133 markers have scrolled out.
@@ -316,6 +320,11 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         known.remove(&id);
     }
 
+    // Clean up notifications for this terminal
+    if let Ok(mut notifs) = state.notifications.lock() {
+        notifs.retain(|n| n.terminal_id != id);
+    }
+
     Ok(())
 }
 
@@ -596,6 +605,7 @@ fn handle_lx_message_dispatch(
                 };
                 if let Ok(mut notifs) = state.notifications.lock() {
                     notifs.push(notification);
+                    evict_old_notifications(&mut notifs);
                 }
             }
 
@@ -1411,12 +1421,11 @@ fn any_terminal_title_contains(data: &[u8], substring: &str) -> bool {
     false
 }
 
-/// Extract CWD from the last OSC 7 sequence in PTY output data.
-/// Format: `\x1b]7;<url>\x07` or `\x1b]7;<url>\x1b\\`
-/// Returns the raw URL/path (e.g., "file://localhost/home/user").
-fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
-    let needle: &[u8] = &[0x1b, b']', b'7', b';'];
-    let mut last_cwd: Option<String> = None;
+/// Extract the payload of the last occurrence of an OSC sequence identified by `needle`.
+/// Scans for `needle` (e.g., `\x1b]7;`) and returns the text up to the BEL (`\x07`)
+/// or ST (`\x1b\\`) terminator. Returns `None` if no complete match is found.
+fn extract_last_osc_payload(data: &[u8], needle: &[u8]) -> Option<String> {
+    let mut last: Option<String> = None;
     let mut start = 0;
 
     while start + needle.len() <= data.len() {
@@ -1425,13 +1434,13 @@ fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
             .position(|w| w == needle)
         {
             let abs_pos = start + found;
-            let path_start = abs_pos + needle.len();
-            if path_start < data.len() {
-                let remaining = &data[path_start..];
+            let payload_start = abs_pos + needle.len();
+            if payload_start < data.len() {
+                let remaining = &data[payload_start..];
                 if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
-                    let path = String::from_utf8_lossy(&remaining[..end]);
-                    if !path.is_empty() {
-                        last_cwd = Some(path.into_owned());
+                    let payload = String::from_utf8_lossy(&remaining[..end]);
+                    if !payload.is_empty() {
+                        last = Some(payload.into_owned());
                     }
                 }
             }
@@ -1440,39 +1449,19 @@ fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
             break;
         }
     }
-    last_cwd
+    last
+}
+
+/// Extract CWD from the last OSC 7 sequence in PTY output data.
+/// Format: `\x1b]7;<url>\x07` or `\x1b]7;<url>\x1b\\`
+fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
+    extract_last_osc_payload(data, &[0x1b, b']', b'7', b';'])
 }
 
 /// Extract CWD from the last OSC 9;9 sequence in PTY output data.
 /// Format: `\x1b]9;9;<path>\x07`
-/// Returns the raw path (e.g., "C:/Users/kochul").
 fn extract_last_osc9_9_cwd(data: &[u8]) -> Option<String> {
-    let needle: &[u8] = &[0x1b, b']', b'9', b';', b'9', b';'];
-    let mut last_cwd: Option<String> = None;
-    let mut start = 0;
-
-    while start + needle.len() <= data.len() {
-        if let Some(found) = data[start..]
-            .windows(needle.len())
-            .position(|w| w == needle)
-        {
-            let abs_pos = start + found;
-            let path_start = abs_pos + needle.len();
-            if path_start < data.len() {
-                let remaining = &data[path_start..];
-                if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
-                    let path = String::from_utf8_lossy(&remaining[..end]);
-                    if !path.is_empty() {
-                        last_cwd = Some(path.into_owned());
-                    }
-                }
-            }
-            start = abs_pos + 1;
-        } else {
-            break;
-        }
-    }
-    last_cwd
+    extract_last_osc_payload(data, &[0x1b, b']', b'9', b';', b'9', b';'])
 }
 
 /// Check if a terminal is running Claude Code.
@@ -1773,6 +1762,9 @@ pub struct TerminalSummaryResponse {
 
 /// Tauri command: get comprehensive summary for requested terminals (single source of truth).
 /// Returns all data needed to render WorkspaceSelectorView for the given terminal IDs.
+///
+/// Lock order: terminals → output_buffers → known_claude_terminals → notifications
+/// (see `AppState` doc for the canonical ordering).
 #[tauri::command]
 pub fn get_terminal_summaries(
     terminal_ids: Vec<String>,
@@ -1923,6 +1915,28 @@ pub fn mark_notifications_read(
         }
     }
     Ok(count)
+}
+
+/// Evict oldest read notifications when the list exceeds MAX_NOTIFICATIONS.
+/// Unread notifications are never evicted. Only read (already consumed) entries are removed.
+fn evict_old_notifications(notifs: &mut Vec<crate::terminal::TerminalNotification>) {
+    if notifs.len() <= MAX_NOTIFICATIONS {
+        return;
+    }
+    // Remove oldest read notifications first (smallest created_at with read_at set)
+    let over = notifs.len() - MAX_NOTIFICATIONS;
+    let mut read_indices: Vec<usize> = notifs
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.read_at.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    // Already sorted by insertion order (oldest first), take the first `over` entries
+    read_indices.truncate(over);
+    // Remove in reverse order to keep indices stable
+    for &i in read_indices.iter().rev() {
+        notifs.remove(i);
+    }
 }
 
 /// Filter target terminals to only those whose CWD differs from the sync path.
@@ -4329,5 +4343,110 @@ mod tests {
         let notifs = state.notifications.lock().unwrap();
         assert!(notifs[0].read_at.is_some()); // t1 marked
         assert!(notifs[1].read_at.is_none()); // t2 untouched
+    }
+
+    // -- evict_old_notifications tests --
+
+    #[test]
+    fn evict_removes_oldest_read_notifications() {
+        let mut notifs: Vec<TerminalNotification> = Vec::new();
+        // Fill with MAX_NOTIFICATIONS + 5 notifications, all read
+        for i in 0..(MAX_NOTIFICATIONS + 5) {
+            notifs.push(TerminalNotification {
+                id: i as u64,
+                terminal_id: "t1".into(),
+                message: format!("msg-{i}"),
+                level: "info".into(),
+                created_at: i as u64,
+                read_at: Some(1000),
+            });
+        }
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS + 5);
+        evict_old_notifications(&mut notifs);
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS);
+        // Oldest 5 should be removed
+        assert_eq!(notifs[0].id, 5);
+    }
+
+    #[test]
+    fn evict_preserves_unread_notifications() {
+        let mut notifs: Vec<TerminalNotification> = Vec::new();
+        // Fill with MAX_NOTIFICATIONS + 3: first 3 are unread, rest are read
+        for i in 0..(MAX_NOTIFICATIONS + 3) {
+            notifs.push(TerminalNotification {
+                id: i as u64,
+                terminal_id: "t1".into(),
+                message: format!("msg-{i}"),
+                level: "info".into(),
+                created_at: i as u64,
+                read_at: if i < 3 { None } else { Some(1000) },
+            });
+        }
+        evict_old_notifications(&mut notifs);
+        // All 3 unread should survive; 3 oldest read removed
+        let unread_count = notifs.iter().filter(|n| n.read_at.is_none()).count();
+        assert_eq!(unread_count, 3);
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS);
+    }
+
+    #[test]
+    fn evict_noop_under_limit() {
+        let mut notifs: Vec<TerminalNotification> = vec![TerminalNotification {
+            id: 1,
+            terminal_id: "t1".into(),
+            message: "msg".into(),
+            level: "info".into(),
+            created_at: 100,
+            read_at: Some(200),
+        }];
+        evict_old_notifications(&mut notifs);
+        assert_eq!(notifs.len(), 1);
+    }
+
+    // -- close_terminal cleans up notifications --
+
+    #[test]
+    fn close_terminal_removes_notifications() {
+        let state = AppState::new();
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.push(TerminalNotification {
+                id: 1,
+                terminal_id: "t1".into(),
+                message: "test".into(),
+                level: "info".into(),
+                created_at: 100,
+                read_at: None,
+            });
+            notifs.push(TerminalNotification {
+                id: 2,
+                terminal_id: "t2".into(),
+                message: "other".into(),
+                level: "info".into(),
+                created_at: 200,
+                read_at: None,
+            });
+        }
+        // Simulate close_terminal_session cleanup for t1
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.retain(|n| n.terminal_id != "t1");
+        }
+        let notifs = state.notifications.lock().unwrap();
+        assert_eq!(notifs.len(), 1);
+        assert_eq!(notifs[0].terminal_id, "t2");
+    }
+
+    // -- extract_last_osc_payload shared function --
+
+    #[test]
+    fn extract_osc_payload_with_custom_needle() {
+        // Verify the shared function works for an arbitrary needle
+        let needle = &[0x1b, b']', b'7', b';'];
+        let data = b"\x1b]7;file://localhost/test\x07";
+        assert_eq!(
+            extract_last_osc_payload(data, needle),
+            Some("file://localhost/test".into())
+        );
     }
 }
