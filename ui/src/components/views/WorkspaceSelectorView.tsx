@@ -356,14 +356,16 @@ function WorkspaceItem({
                               color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
                               opacity: isActive ? 0.7 : 0.5,
                               ...(pathEllipsis === "start"
-                                ? { direction: "rtl", unicodeBidi: "plaintext", textAlign: "left" }
+                                ? { direction: "rtl", textAlign: "left" }
                                 : {}),
                             }}
                           >
-                            {abbreviatePath(
-                              isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
-                              pathEllipsis,
-                            )}
+                            <bdi>
+                              {abbreviatePath(
+                                isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
+                                pathEllipsis,
+                              )}
+                            </bdi>
                           </span>
                         </>
                       )}
@@ -534,19 +536,19 @@ function WorkspaceItem({
               style={{
                 color: "var(--text-secondary)",
                 opacity: 0.5,
-                ...(pathEllipsis === "start"
-                  ? { direction: "rtl", unicodeBidi: "plaintext", textAlign: "left" }
-                  : {}),
+                ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}),
               }}
             >
-              {(() => {
-                const cwdSource = summary.terminalSummaries.find((t) => t.cwd);
-                const displayCwd =
-                  cwdSource && isWindowsProfile(cwdSource.profile)
-                    ? mntPathToWindows(summary.cwd)
-                    : summary.cwd;
-                return abbreviatePath(displayCwd, pathEllipsis);
-              })()}
+              <bdi>
+                {(() => {
+                  const cwdSource = summary.terminalSummaries.find((t) => t.cwd);
+                  const displayCwd =
+                    cwdSource && isWindowsProfile(cwdSource.profile)
+                      ? mntPathToWindows(summary.cwd)
+                      : summary.cwd;
+                  return abbreviatePath(displayCwd, pathEllipsis);
+                })()}
+              </bdi>
             </span>
           )}
         </div>
