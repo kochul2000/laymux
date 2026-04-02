@@ -207,16 +207,19 @@ describe("handleAutomationRequest", () => {
   });
 
   it("gets workspace summary via automation API", () => {
+    // Use a non-active workspace so notifications stay unread (auto-dismiss applies to active ws)
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
       syncGroup: "Default",
-      workspaceId: "ws-default",
+      workspaceId: ws2.id,
     });
     useTerminalStore.getState().updateInstanceInfo("t1", { branch: "main", cwd: "/home/user" });
     useNotificationStore.getState().addNotification({
       terminalId: "t1",
-      workspaceId: "ws-default",
+      workspaceId: ws2.id,
       message: "test",
     });
 
@@ -225,7 +228,7 @@ describe("handleAutomationRequest", () => {
       category: "query",
       target: "workspaces",
       method: "getSummary",
-      params: { id: "ws-default" },
+      params: { id: ws2.id },
     });
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;

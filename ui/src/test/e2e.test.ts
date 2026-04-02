@@ -1177,20 +1177,19 @@ describe("Cross-Store Integration E2E", () => {
       useTerminalStore.getState().updateInstanceInfo(id, { cwd: "/home/user/project" });
     }
 
-    // 3. Receive notification
-    const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+    // 3. Receive notification for a non-active workspace
     useNotificationStore
       .getState()
-      .addNotification({ terminalId: "t1", workspaceId: activeWsId, message: "Build complete" });
+      .addNotification({ terminalId: "t1", workspaceId: "ws-other", message: "Build complete" });
 
-    // 4. Verify state
+    // 4. Verify state (active workspace is ws-1, notification is for ws-other so it stays unread)
     const instances = useTerminalStore.getState().instances;
     expect(instances.every((i) => i.cwd === "/home/user/project")).toBe(true);
-    expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(1);
+    expect(useNotificationStore.getState().getUnreadCount("ws-other")).toBe(1);
 
     // 5. Switch workspace marks notification as read
-    useNotificationStore.getState().markWorkspaceAsRead("ws-1");
-    expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(0);
+    useNotificationStore.getState().markWorkspaceAsRead("ws-other");
+    expect(useNotificationStore.getState().getUnreadCount("ws-other")).toBe(0);
   });
 
   it("should simulate sync-branch updating all group terminals", () => {
@@ -1249,27 +1248,30 @@ describe("Cross-Store Integration E2E", () => {
   });
 
   it("should handle notifications for multiple workspaces simultaneously", () => {
+    // active workspace is ws-1; create two more non-active workspaces
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
     const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
+    const ws3Id = useWorkspaceStore.getState().workspaces[2].id;
 
-    // Notifications arrive for both workspaces
+    // Notifications arrive for non-active workspaces (ws-1 is active, so use ws2/ws3)
     useNotificationStore
       .getState()
-      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Build failed" });
+      .addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Build failed" });
     useNotificationStore
       .getState()
-      .addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Tests passed" });
+      .addNotification({ terminalId: "t1", workspaceId: ws3Id, message: "Tests passed" });
     useNotificationStore
       .getState()
-      .addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "Retry started" });
+      .addNotification({ terminalId: "t1", workspaceId: ws2Id, message: "Retry started" });
 
-    expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(2);
-    expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(1);
+    expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(2);
+    expect(useNotificationStore.getState().getUnreadCount(ws3Id)).toBe(1);
 
-    // Mark ws-1 as read
-    useNotificationStore.getState().markWorkspaceAsRead("ws-1");
-    expect(useNotificationStore.getState().getUnreadCount("ws-1")).toBe(0);
-    expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(1); // Still unread
+    // Mark ws2 as read
+    useNotificationStore.getState().markWorkspaceAsRead(ws2Id);
+    expect(useNotificationStore.getState().getUnreadCount(ws2Id)).toBe(0);
+    expect(useNotificationStore.getState().getUnreadCount(ws3Id)).toBe(1); // Still unread
   });
 
   it("should simulate terminal close and sync group cleanup", () => {
