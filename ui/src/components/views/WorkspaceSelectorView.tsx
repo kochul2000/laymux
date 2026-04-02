@@ -282,7 +282,7 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            background: "rgba(137,180,250,0.08)",
+                            outline: "1px solid var(--accent)",
                             borderRadius: 3,
                             color: "var(--text-primary)",
                           }
@@ -406,7 +406,7 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            background: "rgba(137,180,250,0.08)",
+                            outline: "1px solid var(--accent)",
                             borderRadius: 3,
                             color: "var(--text-primary)",
                           }
