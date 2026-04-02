@@ -456,7 +456,6 @@ export function TerminalView({
         // Open terminal now that container has real dimensions
         if (containerRef.current) {
           terminal.open(containerRef.current);
-
         }
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
@@ -611,7 +610,6 @@ export function TerminalView({
     } catch {
       /* xterm mock may not support options setter */
     }
-
   }, [currentSchemeName, colorSchemes, font]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes

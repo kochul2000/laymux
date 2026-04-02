@@ -983,7 +983,10 @@ fn gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
-fn upload_screenshot_to_github(path: &std::path::Path, shell_prefix: &str) -> Result<String, String> {
+fn upload_screenshot_to_github(
+    path: &std::path::Path,
+    shell_prefix: &str,
+) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Failed to read screenshot: {e}"))?;
     let b64 = base64_encode(&bytes);
 
@@ -1979,7 +1982,10 @@ mod tests {
     #[test]
     fn split_shell_prefix_unclosed_quote() {
         // Unclosed quote: rest of string is one token
-        assert_eq!(split_shell_prefix(r#"cmd "unclosed arg"#), vec!["cmd", "unclosed arg"]);
+        assert_eq!(
+            split_shell_prefix(r#"cmd "unclosed arg"#),
+            vec!["cmd", "unclosed arg"]
+        );
     }
 
     #[test]

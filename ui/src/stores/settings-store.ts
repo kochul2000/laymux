@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { ClaudeSyncCwdMode, ClaudeSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
+import type {
+  ClaudeSyncCwdMode,
+  ClaudeSettings,
+  IssueReporterSettings,
+  MemoSettings,
+} from "../lib/tauri-api";
 import {
   resolveSyncCwd,
   DEFAULT_SYNC_CWD_DEFAULTS,
