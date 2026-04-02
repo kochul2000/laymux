@@ -27,12 +27,18 @@ vi.mock("@tauri-apps/api/window", () => {
     PhysicalSize: class {
       width: number;
       height: number;
-      constructor(w: number, h: number) { this.width = w; this.height = h; }
+      constructor(w: number, h: number) {
+        this.width = w;
+        this.height = h;
+      }
     },
     PhysicalPosition: class {
       x: number;
       y: number;
-      constructor(x: number, y: number) { this.x = x; this.y = y; }
+      constructor(x: number, y: number) {
+        this.x = x;
+        this.y = y;
+      }
     },
   };
 });
@@ -66,6 +72,8 @@ vi.mock("@/lib/tauri-api", () => {
     sendOsNotification: vi.fn().mockResolvedValue(undefined),
     onAutomationRequest: vi.fn().mockResolvedValue(unlisten),
     automationResponse: vi.fn().mockResolvedValue(undefined),
+    onClaudeTerminalDetected: vi.fn().mockResolvedValue(unlisten),
+    markClaudeTerminal: vi.fn().mockResolvedValue(true),
   };
 });
 

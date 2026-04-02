@@ -18,10 +18,12 @@ pub struct AppState {
     /// Terminals that recently received a propagated command (e.g., cd from sync-cwd).
     /// Used to suppress OSC echo loops. Entries expire after PROPAGATION_TIMEOUT.
     pub propagated_terminals: Mutex<HashMap<String, Instant>>,
-    /// Terminal IDs that have been detected as running Claude Code.
-    /// Once a terminal shows a "Claude Code" title, it stays marked until closed.
-    /// This prevents missed detection when Claude changes its title to a task description.
-    pub known_claude_terminals: Mutex<HashSet<String>>,
+    /// Single source of truth for Claude Code terminal detection.
+    /// Populated proactively by the PTY output callback (real-time) and
+    /// by frontend via `mark_claude_terminal` command (from command text detection).
+    /// Once a terminal is marked, it stays marked until the terminal session closes.
+    /// Both backend (CWD skip) and frontend (activity display) consume this state.
+    pub known_claude_terminals: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -35,7 +37,7 @@ impl AppState {
             automation_channels: Mutex::new(HashMap::new()),
             automation_port: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
-            known_claude_terminals: Mutex::new(HashSet::new()),
+            known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }

@@ -460,3 +460,25 @@ export async function automationResponse(
   });
   return invoke("automation_response", { responseJson });
 }
+
+// -- Claude terminal detection (single source of truth in backend) --
+
+/** Listen for Claude Code terminal detection events from the backend PTY callback. */
+export function onClaudeTerminalDetected(
+  callback: (terminalId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("claude-terminal-detected", (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Register a terminal as running Claude Code in the backend (single source of truth).
+ *  Called when the frontend detects Claude from command text (OSC 133 E). */
+export async function markClaudeTerminal(id: string): Promise<boolean> {
+  return invoke("mark_claude_terminal", { id });
+}
+
+/** Check if a terminal is registered as Claude Code in the backend. */
+export async function isClaudeTerminal(id: string): Promise<boolean> {
+  return invoke("is_claude_terminal", { id });
+}

@@ -90,6 +90,8 @@ pub fn run() {
             commands::resize_terminal,
             commands::write_to_terminal,
             commands::close_terminal_session,
+            commands::mark_claude_terminal,
+            commands::is_claude_terminal,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
             commands::list_system_monospace_fonts,

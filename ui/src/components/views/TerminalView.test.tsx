@@ -108,6 +108,7 @@ vi.mock("@/lib/tauri-api", () => ({
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
+  markClaudeTerminal: vi.fn().mockResolvedValue(true),
 }));
 
 describe("TerminalView", () => {
