@@ -326,6 +326,56 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  describe("reorderWorkspaces", () => {
+    it("reorders workspaces by moving an item from one index to another", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+      addWorkspace("WS3", layouts[0].id);
+
+      const before = useWorkspaceStore.getState().workspaces;
+      expect(before).toHaveLength(3);
+      const ids = before.map((ws) => ws.id);
+
+      // Move last (index 2) to first (index 0)
+      useWorkspaceStore.getState().reorderWorkspaces(2, 0);
+      const after = useWorkspaceStore.getState().workspaces;
+      expect(after.map((ws) => ws.id)).toEqual([ids[2], ids[0], ids[1]]);
+    });
+
+    it("does nothing for same from/to index", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+
+      const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      useWorkspaceStore.getState().reorderWorkspaces(0, 0);
+      const after = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      expect(after).toEqual(before);
+    });
+
+    it("does nothing for out-of-bounds indices", () => {
+      const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      useWorkspaceStore.getState().reorderWorkspaces(-1, 0);
+      expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
+
+      useWorkspaceStore.getState().reorderWorkspaces(0, 5);
+      expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
+    });
+
+    it("preserves pane IDs after reorder", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+
+      const before = useWorkspaceStore.getState().workspaces;
+      const paneIds0 = before[0].panes.map((p) => p.id);
+      const paneIds1 = before[1].panes.map((p) => p.id);
+
+      useWorkspaceStore.getState().reorderWorkspaces(1, 0);
+      const after = useWorkspaceStore.getState().workspaces;
+      expect(after[0].panes.map((p) => p.id)).toEqual(paneIds1);
+      expect(after[1].panes.map((p) => p.id)).toEqual(paneIds0);
+    });
+  });
+
   describe("Pane ID stability", () => {
     it("default workspace panes have an id", () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;

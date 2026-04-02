@@ -166,6 +166,7 @@ export interface Settings {
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
+  workspaceSortOrder?: string;
   convenience: ConvenienceSettings;
   workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;

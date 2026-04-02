@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -54,10 +54,17 @@ function WorkspaceItem({
   panes,
   canClose,
   pathEllipsis,
+  draggable,
+  isDragOver,
   onSelect,
   onClose,
   onDuplicate,
   onRename,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
 }: {
   ws: { id: string; name: string };
   index: number;
@@ -66,10 +73,17 @@ function WorkspaceItem({
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
+  draggable: boolean;
+  isDragOver: boolean;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
@@ -94,9 +108,15 @@ function WorkspaceItem({
     <div
       data-testid={`workspace-item-${ws.id}`}
       data-active={isActive ? "true" : "false"}
+      draggable={draggable}
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
       className="relative mb-0.5 cursor-pointer rounded py-2"
       style={{
         background: isActive
@@ -105,6 +125,7 @@ function WorkspaceItem({
             ? "rgba(255,255,255,0.03)"
             : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
+        borderTop: isDragOver ? "2px solid var(--accent)" : "2px solid transparent",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
       }}
@@ -772,6 +793,9 @@ function LayoutCard({
 export function WorkspaceSelectorView() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [notifBtnHovered, setNotifBtnHovered] = useState(false);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
+
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
@@ -779,6 +803,7 @@ export function WorkspaceSelectorView() {
   const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
+  const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const layouts = useWorkspaceStore((s) => s.layouts);
   const renameLayout = useWorkspaceStore((s) => s.renameLayout);
   const removeLayout = useWorkspaceStore((s) => s.removeLayout);
@@ -791,7 +816,58 @@ export function WorkspaceSelectorView() {
 
   const terminalInstances = useTerminalStore((s) => s.instances);
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
+  const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
+  const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
   const terminalPorts = new Map<string, number[]>();
+
+  // Sort workspaces based on current sort order
+  const sortedWorkspaces =
+    workspaceSortOrder === "notification"
+      ? [...workspaces].sort((a, b) => {
+          const aNotifs = notifications.filter((n) => n.workspaceId === a.id && n.readAt === null);
+          const bNotifs = notifications.filter((n) => n.workspaceId === b.id && n.readAt === null);
+          const aLatest = aNotifs.length > 0 ? Math.max(...aNotifs.map((n) => n.createdAt)) : 0;
+          const bLatest = bNotifs.length > 0 ? Math.max(...bNotifs.map((n) => n.createdAt)) : 0;
+          return bLatest - aLatest; // Most recent notification first
+        })
+      : workspaces;
+
+  const isManualSort = workspaceSortOrder === "manual";
+
+  // Drag and drop handlers
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    dragIndexRef.current = index;
+    e.dataTransfer.setData("text/plain", String(index));
+    e.dataTransfer.effectAllowed = "move";
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverIndex(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, toIndex: number) => {
+      e.preventDefault();
+      setDragOverIndex(null);
+      const fromIndex = dragIndexRef.current;
+      if (fromIndex !== null && fromIndex !== toIndex) {
+        reorderWorkspaces(fromIndex, toIndex);
+      }
+      dragIndexRef.current = null;
+    },
+    [reorderWorkspaces],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setDragOverIndex(null);
+    dragIndexRef.current = null;
+  }, []);
 
   const handleSelectWorkspace = (wsId: string) => {
     markWorkspaceAsRead(wsId);
@@ -844,9 +920,54 @@ export function WorkspaceSelectorView() {
         style={{ borderColor: "var(--border)", opacity: 0.5 }}
       />
 
+      {/* Sort order toggle */}
+      <div className="mx-2 mb-1 flex items-center justify-between">
+        <span
+          className="text-[10px] font-medium uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.5 }}
+        >
+          Workspaces
+        </span>
+        <button
+          data-testid="sort-order-toggle"
+          onClick={() =>
+            setWorkspaceSortOrder(workspaceSortOrder === "manual" ? "notification" : "manual")
+          }
+          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[9px]"
+          style={{
+            color: "var(--text-secondary)",
+            background: "rgba(255,255,255,0.04)",
+            border: "none",
+            opacity: 0.7,
+          }}
+          title={
+            workspaceSortOrder === "manual"
+              ? "Sort: Manual (drag to reorder)"
+              : "Sort: Notification (most recent first)"
+          }
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            {workspaceSortOrder === "manual" ? (
+              <>
+                <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
+                <rect x="1" y="4.25" width="8" height="1.5" rx="0.5" fill="currentColor" />
+                <rect x="1" y="7.5" width="8" height="1.5" rx="0.5" fill="currentColor" />
+              </>
+            ) : (
+              <>
+                <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
+                <rect x="1" y="4.25" width="6" height="1.5" rx="0.5" fill="currentColor" />
+                <rect x="1" y="7.5" width="4" height="1.5" rx="0.5" fill="currentColor" />
+              </>
+            )}
+          </svg>
+          {workspaceSortOrder === "manual" ? "Manual" : "Notif"}
+        </button>
+      </div>
+
       {/* Workspace list */}
       <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
-        {workspaces.map((ws, idx) => {
+        {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
           const summary = computeWorkspaceSummary(
             ws.id,
@@ -865,6 +986,8 @@ export function WorkspaceSelectorView() {
               panes={ws.panes}
               canClose={workspaces.length > 1}
               pathEllipsis={pathEllipsis}
+              draggable={isManualSort}
+              isDragOver={dragOverIndex === idx}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
@@ -877,6 +1000,11 @@ export function WorkspaceSelectorView() {
                 const newName = window.prompt("Rename workspace:", ws.name);
                 if (newName?.trim()) renameWorkspace(ws.id, newName.trim());
               }}
+              onDragStart={(e) => handleDragStart(e, idx)}
+              onDragOver={(e) => handleDragOver(e, idx)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, idx)}
+              onDragEnd={handleDragEnd}
             />
           );
         })}

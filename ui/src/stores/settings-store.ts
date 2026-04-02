@@ -88,6 +88,9 @@ export interface WorkspaceDisplaySettings {
   result: boolean;
 }
 
+/** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
+export type WorkspaceSortOrder = "manual" | "notification";
+
 export type { IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
   SyncCwdConfig,
@@ -264,6 +267,7 @@ interface SettingsState {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   syncCwdDefaults: SyncCwdDefaults;
+  workspaceSortOrder: WorkspaceSortOrder;
 
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
@@ -273,6 +277,7 @@ interface SettingsState {
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
+  setWorkspaceSortOrder: (order: WorkspaceSortOrder) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
   addProfile: (profile: Profile) => void;
@@ -307,6 +312,7 @@ interface SettingsState {
         | "memo"
         | "issueReporter"
         | "syncCwdDefaults"
+        | "workspaceSortOrder"
       >
     > & { font?: FontSettings },
   ) => void;
@@ -659,6 +665,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   memo: { ...DEFAULT_MEMO_PADDING },
   issueReporter: { shell: "" },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
+  workspaceSortOrder: "manual" as WorkspaceSortOrder,
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
 
@@ -686,6 +693,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set((state) => ({
       issueReporter: { ...state.issueReporter, ...data },
     })),
+
+  setWorkspaceSortOrder: (order) => set({ workspaceSortOrder: order }),
 
   setSyncCwdDefaults: (data) =>
     set((state) => ({
