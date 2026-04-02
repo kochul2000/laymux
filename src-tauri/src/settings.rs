@@ -406,7 +406,7 @@ impl Default for ConvenienceSettings {
     }
 }
 
-fn default_memo_padding() -> u32 {
+fn default_view_padding() -> u32 {
     8
 }
 
@@ -420,13 +420,13 @@ pub struct IssueReporterSettings {
     /// When empty (default), gh is invoked directly.
     #[serde(default)]
     pub shell: String,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_top: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_right: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_bottom: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_left: u32,
 }
 
@@ -446,13 +446,13 @@ impl Default for IssueReporterSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoSettings {
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_top: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_right: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_bottom: u32,
-    #[serde(default = "default_memo_padding")]
+    #[serde(default = "default_view_padding")]
     pub padding_left: u32,
 }
 
