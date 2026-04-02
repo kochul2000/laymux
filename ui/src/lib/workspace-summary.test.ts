@@ -7,6 +7,7 @@ import {
   computeWorkspaceSummary,
   computeWorkspaceSummaryFromBackend,
   abbreviatePath,
+  mntPathToWindows,
   formatRelativeTime,
   formatPorts,
   formatCommand,
@@ -422,6 +423,30 @@ describe("abbreviatePath", () => {
     const winPath = "D:\\Projects\\work\\really\\deeply\\nested\\dir\\sub";
     const result = abbreviatePath(winPath, "end");
     expect(result).toBe("D:\\Projects\\work\\...");
+  });
+});
+
+describe("mntPathToWindows", () => {
+  it("converts /mnt/c/Users/test to C:\\Users\\test", () => {
+    expect(mntPathToWindows("/mnt/c/Users/test")).toBe("C:\\Users\\test");
+  });
+
+  it("converts /mnt/d/Projects to D:\\Projects", () => {
+    expect(mntPathToWindows("/mnt/d/Projects")).toBe("D:\\Projects");
+  });
+
+  it("converts /mnt/c/ to C:\\", () => {
+    expect(mntPathToWindows("/mnt/c/")).toBe("C:\\");
+  });
+
+  it("converts /mnt/c to C:\\", () => {
+    expect(mntPathToWindows("/mnt/c")).toBe("C:\\");
+  });
+
+  it("returns non-mnt paths unchanged", () => {
+    expect(mntPathToWindows("/home/user")).toBe("/home/user");
+    expect(mntPathToWindows("/tmp")).toBe("/tmp");
+    expect(mntPathToWindows("C:\\Users")).toBe("C:\\Users");
   });
 });
 

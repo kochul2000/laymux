@@ -259,6 +259,18 @@ export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start")
   return path;
 }
 
+/**
+ * Convert a `/mnt/X/...` WSL mount path to a Windows path `X:\...`.
+ * Returns the original path unchanged if it's not a `/mnt/X/...` pattern.
+ */
+export function mntPathToWindows(path: string): string {
+  const match = path.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/);
+  if (!match) return path;
+  const drive = match[1].toUpperCase();
+  const tail = match[2] ? match[2].replace(/\//g, "\\") : "\\";
+  return `${drive}:${tail}`;
+}
+
 export function formatPorts(ports: number[], maxDisplay = 5): string {
   if (ports.length === 0) return "";
   if (ports.length <= maxDisplay) {

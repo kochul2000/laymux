@@ -1255,4 +1255,82 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByText("~/earlystart")).toBeInTheDocument();
     });
   });
+
+  it("displays PowerShell CWD as Windows path instead of /mnt/...", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-ps1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-ps1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-ps1", {
+      cwd: "/mnt/c/Users/kochul/Projects",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should show as Windows path, not /mnt/c/...
+      expect(screen.getByText("~/Projects")).toBeInTheDocument();
+    });
+  });
+
+  it("does NOT convert /mnt/ path for WSL terminals", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-wsl1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-wsl1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-pane-wsl1", {
+      cwd: "/mnt/c/Users/kochul",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // WSL should keep the /mnt/ path format
+      expect(screen.getByText("/mnt/c/Users/kochul")).toBeInTheDocument();
+    });
+  });
 });

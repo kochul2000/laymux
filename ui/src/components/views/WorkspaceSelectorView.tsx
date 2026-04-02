@@ -6,6 +6,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import {
   computeWorkspaceSummaryFromBackend,
   abbreviatePath,
+  mntPathToWindows,
   formatCommand,
   formatRelativeTime,
   formatActivity,
@@ -25,6 +26,12 @@ const LABEL_ABBREV: Record<string, string> = {
   Browser: "WEB",
   Empty: "---",
 };
+/** Check if a profile is a Windows-native shell (PowerShell, CMD) that uses Windows paths. */
+function isWindowsProfile(profile: string): boolean {
+  const lower = profile.toLowerCase();
+  return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
+}
+
 function shortLabel(label: string): string {
   return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
 }
@@ -353,7 +360,10 @@ function WorkspaceItem({
                                 : {}),
                             }}
                           >
-                            {abbreviatePath(ts.cwd, pathEllipsis)}
+                            {abbreviatePath(
+                              isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
+                              pathEllipsis,
+                            )}
                           </span>
                         </>
                       )}
@@ -527,7 +537,14 @@ function WorkspaceItem({
                 ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}),
               }}
             >
-              {abbreviatePath(summary.cwd, pathEllipsis)}
+              {(() => {
+                const cwdSource = summary.terminalSummaries.find((t) => t.cwd);
+                const displayCwd =
+                  cwdSource && isWindowsProfile(cwdSource.profile)
+                    ? mntPathToWindows(summary.cwd)
+                    : summary.cwd;
+                return abbreviatePath(displayCwd, pathEllipsis);
+              })()}
             </span>
           )}
         </div>
