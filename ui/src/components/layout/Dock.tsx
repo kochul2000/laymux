@@ -322,7 +322,6 @@ function DockGrid({
           const pane = panes[idx];
           if (pane && onRemovePane) onRemovePane(pane.id);
         }}
-        editMode={true}
       />
     </div>
   );

@@ -7,51 +7,19 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 import { GridEditToolbar } from "./GridEditToolbar";
-import { useGridStore } from "@/stores/grid-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
-    useGridStore.setState(useGridStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
   });
 
-  it("renders edit mode toggle button", () => {
+  it("always shows export action buttons", () => {
     render(<GridEditToolbar />);
-    expect(screen.getByTestId("edit-mode-toggle")).toBeInTheDocument();
-  });
-
-  it("toggles edit mode on click", async () => {
-    const user = userEvent.setup();
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    expect(useGridStore.getState().editMode).toBe(true);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    expect(useGridStore.getState().editMode).toBe(false);
-  });
-
-  it("shows export action buttons in edit mode", async () => {
-    const user = userEvent.setup();
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
     expect(screen.getByTestId("export-new-btn")).toBeInTheDocument();
     expect(screen.getByTestId("export-overwrite-select")).toBeInTheDocument();
-  });
-
-  it("does not show split/clear/delete buttons in edit mode (moved to pane control bar)", async () => {
-    const user = userEvent.setup();
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("edit-mode-toggle"));
-    expect(screen.queryByTestId("split-horizontal-btn")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("split-vertical-btn")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("clear-view-btn")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("delete-pane-btn")).not.toBeInTheDocument();
   });
 
   it("export-new button creates new layout with prompted name", async () => {
@@ -60,7 +28,6 @@ describe("GridEditToolbar", () => {
     useWorkspaceStore.getState().splitPane(0, "horizontal");
 
     render(<GridEditToolbar />);
-    await user.click(screen.getByTestId("edit-mode-toggle"));
     await user.click(screen.getByTestId("export-new-btn"));
 
     expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
@@ -73,7 +40,6 @@ describe("GridEditToolbar", () => {
     useWorkspaceStore.getState().splitPane(0, "vertical");
 
     render(<GridEditToolbar />);
-    await user.click(screen.getByTestId("edit-mode-toggle"));
 
     const select = screen.getByTestId("export-overwrite-select");
     await user.selectOptions(select, "default-layout");

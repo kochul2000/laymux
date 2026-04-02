@@ -1,6 +1,5 @@
 import { useCallback, useRef } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useGridStore } from "@/stores/grid-store";
 import {
   findPaneBoundaries,
   calcResizeDelta,
@@ -24,8 +23,6 @@ interface Props {
   onResizePane?: (index: number, delta: Partial<GridPane>) => void;
   /** Remove callback by index. If omitted, calls workspace store. */
   onRemovePane?: (index: number) => void;
-  /** Whether handles are visible. If omitted, reads editMode from grid store. */
-  editMode?: boolean;
 }
 
 export function PaneBoundaryHandles({
@@ -35,14 +32,11 @@ export function PaneBoundaryHandles({
   getLatestPanes: propGetLatestPanes,
   onResizePane: propOnResizePane,
   onRemovePane: propOnRemovePane,
-  editMode: propEditMode,
 }: Props) {
-  const storeEditMode = useGridStore((s) => s.editMode);
   const activeWorkspace = useWorkspaceStore((s) => s.getActiveWorkspace());
   const storeResizePane = useWorkspaceStore((s) => s.resizePane);
   const storeRemovePane = useWorkspaceStore((s) => s.removePane);
 
-  const editMode = propEditMode ?? storeEditMode;
   const panes = propPanes ?? activeWorkspace?.panes ?? [];
   const getLatestPanes =
     propGetLatestPanes ?? (() => useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? []);
@@ -143,7 +137,7 @@ export function PaneBoundaryHandles({
     [removePane, getLatestPanes],
   );
 
-  if (!editMode || panes.length <= 1) return null;
+  if (panes.length <= 1) return null;
 
   const boundaries = findPaneBoundaries(panes);
 

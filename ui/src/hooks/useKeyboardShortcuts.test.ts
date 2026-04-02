@@ -209,36 +209,12 @@ describe("useKeyboardShortcuts", () => {
       ],
     });
 
-    useGridStore.setState({ editMode: true, focusedPaneIndex: 1 });
+    useGridStore.setState({ focusedPaneIndex: 1 });
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("Delete");
 
     expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(1);
-  });
-
-  it("Delete key does nothing when edit mode is off", () => {
-    useWorkspaceStore.setState({
-      ...useWorkspaceStore.getState(),
-      workspaces: [
-        {
-          id: "ws-default",
-          name: "Default",
-
-          panes: [
-            { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
-            { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
-          ],
-        },
-      ],
-    });
-
-    useGridStore.setState({ editMode: false, focusedPaneIndex: 1 });
-    renderHook(() => useKeyboardShortcuts());
-
-    fireKey("Delete");
-
-    expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
   });
 
   it("Delete key does nothing when no pane is focused", () => {
@@ -257,7 +233,7 @@ describe("useKeyboardShortcuts", () => {
       ],
     });
 
-    useGridStore.setState({ editMode: true, focusedPaneIndex: null });
+    useGridStore.setState({ focusedPaneIndex: null });
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("Delete");

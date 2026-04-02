@@ -53,10 +53,10 @@ function navigateByNotification(direction: "recent" | "oldest") {
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Delete key: remove focused pane in edit mode (no modifier required)
+      // Delete key: remove focused pane (no modifier required)
       if (e.key === "Delete") {
-        const { editMode, focusedPaneIndex } = useGridStore.getState();
-        if (editMode && focusedPaneIndex !== null) {
+        const { focusedPaneIndex } = useGridStore.getState();
+        if (focusedPaneIndex !== null) {
           e.preventDefault();
           useWorkspaceStore.getState().removePane(focusedPaneIndex);
         }
