@@ -29,6 +29,20 @@ function shortLabel(label: string): string {
   return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
 }
 
+/** Determine command status icon based on exit code and output activity. */
+function getCommandIcon(exitCode: number | undefined, outputActive?: boolean): string {
+  if (exitCode === undefined) return "⏳";
+  if (outputActive) return "⏳";
+  return exitCode === 0 ? "✓" : "✗";
+}
+
+/** Determine command status color based on exit code and output activity. */
+function getCommandColor(exitCode: number | undefined, outputActive?: boolean): string {
+  if (exitCode === undefined) return "var(--yellow)";
+  if (outputActive) return "var(--yellow)";
+  return exitCode === 0 ? "var(--green)" : "var(--red)";
+}
+
 function CountBadge({ count, testId }: { count: number; testId?: string }) {
   return (
     <span
@@ -76,20 +90,8 @@ function WorkspaceItem({
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
 
   const cmdInfo = summary.lastCommand;
-  const cmdIcon = cmdInfo
-    ? cmdInfo.exitCode === undefined
-      ? "⏳"
-      : cmdInfo.exitCode === 0
-        ? "✓"
-        : "✗"
-    : null;
-  const cmdColor = cmdInfo
-    ? cmdInfo.exitCode === undefined
-      ? "var(--yellow)"
-      : cmdInfo.exitCode === 0
-        ? "var(--green)"
-        : "var(--red)"
-    : undefined;
+  const cmdIcon = cmdInfo ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive) : null;
+  const cmdColor = cmdInfo ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive) : undefined;
 
   return (
     <div
@@ -261,18 +263,10 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdIcon = ts.lastCommand
-                  ? ts.lastExitCode === undefined
-                    ? "⏳"
-                    : ts.lastExitCode === 0
-                      ? "✓"
-                      : "✗"
+                  ? getCommandIcon(ts.lastExitCode, ts.outputActive)
                   : null;
                 const tCmdColor = ts.lastCommand
-                  ? ts.lastExitCode === undefined
-                    ? "var(--yellow)"
-                    : ts.lastExitCode === 0
-                      ? "var(--green)"
-                      : "var(--red)"
+                  ? getCommandColor(ts.lastExitCode, ts.outputActive)
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
