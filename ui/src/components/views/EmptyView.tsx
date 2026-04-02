@@ -23,7 +23,7 @@ function EmptyViewCard({
   index,
   hovered,
   dragging,
-  dragOver,
+  dropPosition,
   onSelect,
   onHover,
   onDragStart,
@@ -35,7 +35,7 @@ function EmptyViewCard({
   index: number;
   hovered: boolean;
   dragging: boolean;
-  dragOver: boolean;
+  dropPosition: "top" | "bottom" | null;
   onSelect: () => void;
   onHover: (entering: boolean) => void;
   onDragStart: () => void;
@@ -53,7 +53,9 @@ function EmptyViewCard({
       onDrop={onDrop}
       style={{
         opacity: dragging ? 0.4 : 1,
-        borderTop: dragOver ? "2px solid var(--accent)" : "2px solid transparent",
+        borderTop: dropPosition === "top" ? "2px solid var(--accent)" : "2px solid transparent",
+        borderBottom:
+          dropPosition === "bottom" ? "2px solid var(--accent)" : "2px solid transparent",
         transition: "opacity 0.15s",
       }}
     >
@@ -202,31 +204,51 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
 
   // Drag state
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [dropInfo, setDropInfo] = useState<{ index: number; position: "top" | "bottom" } | null>(
+    null,
+  );
+  const dropPositionRef = useRef<{ index: number; position: "top" | "bottom" } | null>(null);
 
   const handleDragStart = (idx: number) => {
     setDragIdx(idx);
   };
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault();
-    setDragOverIdx(idx);
+    if (dragIdx === null || dragIdx === idx) {
+      setDropInfo(null);
+      dropPositionRef.current = null;
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+    const info = { index: idx, position };
+    dropPositionRef.current = info;
+    setDropInfo((prev) => (prev?.index === idx && prev?.position === position ? prev : info));
   };
-  const handleDrop = (targetIdx: number) => {
-    if (dragIdx === null || dragIdx === targetIdx) {
+  const handleDrop = () => {
+    const target = dropPositionRef.current;
+    if (dragIdx === null || !target || dragIdx === target.index) {
       setDragIdx(null);
-      setDragOverIdx(null);
+      setDropInfo(null);
+      dropPositionRef.current = null;
       return;
     }
     const reordered = [...options];
     const [moved] = reordered.splice(dragIdx, 1);
-    reordered.splice(targetIdx, 0, moved);
+    // Recalculate insert index after removal
+    let insertIdx = target.index;
+    if (dragIdx < target.index) insertIdx--;
+    if (target.position === "bottom") insertIdx++;
+    reordered.splice(Math.min(insertIdx, reordered.length), 0, moved);
     setViewOrder(reordered.map((o) => o.key));
     setDragIdx(null);
-    setDragOverIdx(null);
+    setDropInfo(null);
+    dropPositionRef.current = null;
   };
   const handleDragEnd = () => {
     setDragIdx(null);
-    setDragOverIdx(null);
+    setDropInfo(null);
+    dropPositionRef.current = null;
   };
 
   const handleSelect = useCallback(
@@ -283,13 +305,15 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
             index={i}
             hovered={hoveredIdx === i}
             dragging={dragIdx === i}
-            dragOver={dragOverIdx === i && dragIdx !== i}
+            dropPosition={
+              dropInfo && dropInfo.index === i && dragIdx !== i ? dropInfo.position : null
+            }
             onSelect={() => handleSelect(i)}
             onHover={(entering) => setHoveredIdx(entering ? i : null)}
             onDragStart={() => handleDragStart(i)}
             onDragOver={(e) => handleDragOver(e, i)}
             onDragEnd={handleDragEnd}
-            onDrop={() => handleDrop(i)}
+            onDrop={handleDrop}
           />
         ))}
       </div>
