@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -8,7 +8,11 @@ import {
   onLxNotify,
   onSetTabTitle,
   onCommandStatus,
+  onClaudeTerminalDetected,
+  onTerminalCwdChanged,
+  markClaudeTerminal,
 } from "@/lib/tauri-api";
+import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
 import { detectActivityFromCommand } from "@/lib/activity-detection";
 
@@ -16,7 +20,19 @@ import { detectActivityFromCommand } from "@/lib/activity-detection";
  * Hook that listens for sync events from the Tauri backend
  * and updates the appropriate stores.
  */
+/** Debounce delay for persisting CWD changes to settings.json (ms). */
+const CWD_PERSIST_DEBOUNCE_MS = 2000;
+
 export function useSyncEvents() {
+  const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const debouncedPersistCwd = useCallback(() => {
+    if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
+    cwdPersistTimerRef.current = setTimeout(() => {
+      persistSession();
+    }, CWD_PERSIST_DEBOUNCE_MS);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
@@ -31,6 +47,33 @@ export function useSyncEvents() {
       });
     }
 
+    // claude-terminal-detected: backend PTY callback detected Claude Code in terminal title.
+    // This is the single source of truth — set activity so frontend display matches.
+    trackListener(
+      onClaudeTerminalDetected((terminalId) => {
+        if (cancelled) return;
+        const { updateInstanceInfo, instances } = useTerminalStore.getState();
+        const instance = instances.find((i) => i.id === terminalId);
+        if (instance) {
+          updateInstanceInfo(terminalId, {
+            activity: { type: "interactiveApp", name: "Claude" },
+          });
+        }
+      }),
+    );
+
+    // terminal-cwd-changed: backend PTY callback detected CWD from OSC 7/9;9.
+    // This is the single source of truth — update frontend store to match.
+    trackListener(
+      onTerminalCwdChanged((data) => {
+        if (cancelled) return;
+        useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+          cwd: data.cwd,
+        });
+        debouncedPersistCwd();
+      }),
+    );
+
     // sync-cwd: update CWD for all targeted terminals + source
     trackListener(
       onSyncCwd((data) => {
@@ -44,6 +87,7 @@ export function useSyncEvents() {
         for (const targetId of targetSet) {
           updateInstanceInfo(targetId, { cwd: data.path });
         }
+        debouncedPersistCwd();
       }),
     );
 
@@ -112,6 +156,12 @@ export function useSyncEvents() {
           const appActivity = detectActivityFromCommand(data.command);
           if (appActivity) {
             update.activity = appActivity;
+            // Notify backend so known_claude_terminals (single source of truth) is updated.
+            // This covers the case where the user typed "claude" but the title
+            // hasn't been set yet (PTY callback hasn't seen "Claude Code" title).
+            if (appActivity.name === "Claude") {
+              markClaudeTerminal(data.terminalId).catch(() => {});
+            }
           } else {
             update.activity = { type: "running" };
           }
@@ -145,6 +195,7 @@ export function useSyncEvents() {
 
     return () => {
       cancelled = true;
+      if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
       for (const unlisten of unlisteners) {
         unlisten();
       }

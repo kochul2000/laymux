@@ -161,4 +161,19 @@ describe("WorkspaceArea", () => {
     const indicators = screen.getAllByTestId("pane-focus-indicator");
     expect(indicators).toHaveLength(1);
   });
+
+  it("sets focused pane on mouseDown inside MemoView textarea", () => {
+    // Setup: split into 2 panes, set pane 1 as MemoView, focus pane 0
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    useWorkspaceStore.getState().setPaneView(1, { type: "MemoView" });
+    useGridStore.setState({ focusedPaneIndex: 0 });
+
+    render(<WorkspaceArea />);
+
+    // mouseDown on pane 1's MemoView textarea should set focus to pane 1
+    const textarea = screen.getByTestId("memo-textarea");
+    fireEvent.mouseDown(textarea);
+
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
 });

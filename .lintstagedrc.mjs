@@ -1,6 +1,6 @@
 import path from "path";
 
-/** Convert Windows backslashes to forward slashes for bash compatibility. */
+/** Convert backslashes to forward slashes for cross-platform compatibility. */
 function toPosix(p) {
   return p.replace(/\\/g, "/");
 }

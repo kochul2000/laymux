@@ -67,7 +67,7 @@ export function WorkspaceArea() {
               key={pane.id}
               data-testid={isActive ? `workspace-pane-${i}` : undefined}
               className="absolute overflow-hidden"
-              onClick={() => {
+              onMouseDown={() => {
                 if (!isActive) return;
                 setFocusedPane(i);
                 useDockStore.getState().setFocusedDock(null);

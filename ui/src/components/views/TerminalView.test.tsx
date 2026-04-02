@@ -108,6 +108,7 @@ vi.mock("@/lib/tauri-api", () => ({
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
+  markClaudeTerminal: vi.fn().mockResolvedValue(true),
 }));
 
 describe("TerminalView", () => {
@@ -491,6 +492,41 @@ describe("TerminalView", () => {
     selectionCallback();
 
     expect(mockClipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  // -- Hide mouse cursor on typing --
+
+  it("hides mouse cursor when typing in terminal (onKey)", async () => {
+    render(<TerminalView instanceId="t-cursor1" profile="PowerShell" syncGroup="" />);
+
+    // Capture the onKey callback
+    expect(mockOnKey).toHaveBeenCalled();
+    const onKeyCallback = mockOnKey.mock.calls[0][0];
+
+    // outerEl in the component is containerRef.current?.parentElement
+    // containerRef is on the inner div, parentElement is the data-testid div
+    const testIdDiv = screen.getByTestId("terminal-view-t-cursor1");
+    expect(testIdDiv.style.cursor).toBe("");
+
+    // Simulate typing via terminal.onKey
+    onKeyCallback({ key: "a", domEvent: new KeyboardEvent("keydown", { key: "a" }) });
+
+    expect(testIdDiv.style.cursor).toBe("none");
+  });
+
+  it("restores mouse cursor on mouse move after typing", async () => {
+    render(<TerminalView instanceId="t-cursor2" profile="PowerShell" syncGroup="" />);
+
+    const onKeyCallback = mockOnKey.mock.calls[0][0];
+    const testIdDiv = screen.getByTestId("terminal-view-t-cursor2");
+
+    // Type to hide cursor
+    onKeyCallback({ key: "a", domEvent: new KeyboardEvent("keydown", { key: "a" }) });
+    expect(testIdDiv.style.cursor).toBe("none");
+
+    // Move mouse to restore cursor
+    testIdDiv.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    expect(testIdDiv.style.cursor).toBe("");
   });
 
   // -- Ctrl+Wheel Zoom --

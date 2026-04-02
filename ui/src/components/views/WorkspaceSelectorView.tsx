@@ -2,15 +2,17 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
-import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
-  computeWorkspaceSummary,
+  computeWorkspaceSummaryFromBackend,
   abbreviatePath,
+  mntPathToWindows,
   formatCommand,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
+import { useBackendSummaries } from "@/hooks/useBackendSummaries";
+import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
@@ -24,8 +26,28 @@ const LABEL_ABBREV: Record<string, string> = {
   Browser: "WEB",
   Empty: "---",
 };
+/** Check if a profile is a Windows-native shell (PowerShell, CMD) that uses Windows paths. */
+function isWindowsProfile(profile: string): boolean {
+  const lower = profile.toLowerCase();
+  return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
+}
+
 function shortLabel(label: string): string {
   return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
+}
+
+/** Determine command status icon based on exit code and output activity. */
+function getCommandIcon(exitCode: number | undefined, outputActive?: boolean): string {
+  if (exitCode === undefined) return "⏳";
+  if (outputActive) return "⏳";
+  return exitCode === 0 ? "✓" : "✗";
+}
+
+/** Determine command status color based on exit code and output activity. */
+function getCommandColor(exitCode: number | undefined, outputActive?: boolean): string {
+  if (exitCode === undefined) return "var(--yellow)";
+  if (outputActive) return "var(--yellow)";
+  return exitCode === 0 ? "var(--green)" : "var(--red)";
 }
 
 function CountBadge({ count, testId }: { count: number; testId?: string }) {
@@ -93,20 +115,8 @@ function WorkspaceItem({
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
 
   const cmdInfo = summary.lastCommand;
-  const cmdIcon = cmdInfo
-    ? cmdInfo.exitCode === undefined
-      ? "⏳"
-      : cmdInfo.exitCode === 0
-        ? "✓"
-        : "✗"
-    : null;
-  const cmdColor = cmdInfo
-    ? cmdInfo.exitCode === undefined
-      ? "var(--yellow)"
-      : cmdInfo.exitCode === 0
-        ? "var(--green)"
-        : "var(--red)"
-    : undefined;
+  const cmdIcon = cmdInfo ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive) : null;
+  const cmdColor = cmdInfo ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive) : undefined;
 
   return (
     <div
@@ -290,18 +300,10 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdIcon = ts.lastCommand
-                  ? ts.lastExitCode === undefined
-                    ? "⏳"
-                    : ts.lastExitCode === 0
-                      ? "✓"
-                      : "✗"
+                  ? getCommandIcon(ts.lastExitCode, ts.outputActive)
                   : null;
                 const tCmdColor = ts.lastCommand
-                  ? ts.lastExitCode === undefined
-                    ? "var(--yellow)"
-                    : ts.lastExitCode === 0
-                      ? "var(--green)"
-                      : "var(--red)"
+                  ? getCommandColor(ts.lastExitCode, ts.outputActive)
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
@@ -388,7 +390,12 @@ function WorkspaceItem({
                                 : {}),
                             }}
                           >
-                            {abbreviatePath(ts.cwd, pathEllipsis)}
+                            <bdi>
+                              {abbreviatePath(
+                                isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
+                                pathEllipsis,
+                              )}
+                            </bdi>
                           </span>
                         </>
                       )}
@@ -562,7 +569,16 @@ function WorkspaceItem({
                 ...(pathEllipsis === "start" ? { direction: "rtl", textAlign: "left" } : {}),
               }}
             >
-              {abbreviatePath(summary.cwd, pathEllipsis)}
+              <bdi>
+                {(() => {
+                  const cwdSource = summary.terminalSummaries.find((t) => t.cwd);
+                  const displayCwd =
+                    cwdSource && isWindowsProfile(cwdSource.profile)
+                      ? mntPathToWindows(summary.cwd)
+                      : summary.cwd;
+                  return abbreviatePath(displayCwd, pathEllipsis);
+                })()}
+              </bdi>
             </span>
           )}
         </div>
@@ -799,9 +815,6 @@ function LayoutCard({
   );
 }
 
-// Stable empty map — avoids re-creating a new Map per render since port data is populated externally.
-const EMPTY_PORT_MAP = new Map<string, number[]>();
-
 export function WorkspaceSelectorView() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [notifBtnHovered, setNotifBtnHovered] = useState(false);
@@ -825,10 +838,39 @@ export function WorkspaceSelectorView() {
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
-  const terminalInstances = useTerminalStore((s) => s.instances);
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
   const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+
+  // Collect all terminal IDs across all workspaces for backend summary fetch
+  const allTerminalIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const ws of workspaces) {
+      for (const p of ws.panes) {
+        if (p.view.type === "TerminalView") {
+          ids.push(`terminal-${p.id}`);
+        }
+      }
+    }
+    return ids;
+  }, [workspaces]);
+
+  const { summaries: backendSummaries, markRead } = useBackendSummaries(allTerminalIds);
+  const listeningPorts = usePortDetection();
+  const portNumbers = useMemo(
+    () => [...new Set(listeningPorts.map((p) => p.port))].sort((a, b) => a - b),
+    [listeningPorts],
+  );
+
+  // Build a lookup map: terminalId → TerminalSummaryResponse
+  const summaryMap = useMemo(() => {
+    const map = new Map<string, (typeof backendSummaries)[number]>();
+    for (const s of backendSummaries) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [backendSummaries]);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(() => {
@@ -920,6 +962,13 @@ export function WorkspaceSelectorView() {
 
   const handleSelectWorkspace = (wsId: string) => {
     markWorkspaceAsRead(wsId);
+    // Mark backend notifications as read for this workspace's terminals
+    const wsTerminalIds =
+      workspaces
+        .find((ws) => ws.id === wsId)
+        ?.panes.filter((p) => p.view.type === "TerminalView")
+        .map((p) => `terminal-${p.id}`) ?? [];
+    if (wsTerminalIds.length > 0) markRead(wsTerminalIds);
     setActiveWorkspace(wsId);
   };
 
@@ -1018,12 +1067,47 @@ export function WorkspaceSelectorView() {
       <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
         {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
-          const summary = computeWorkspaceSummary(
+          // Filter backend summaries for this workspace's terminal panes.
+          // Fall back to lastCwd from settings when backend hasn't detected CWD yet
+          // (e.g., shell hasn't emitted OSC 7 after restart, or session not created yet).
+          const wsTerminalSummaries = ws.panes
+            .filter((p) => p.view.type === "TerminalView")
+            .map((p) => {
+              const termId = `terminal-${p.id}`;
+              const summary = summaryMap.get(termId);
+              if (summary) {
+                // Backend has summary but no CWD yet — use lastCwd from settings
+                if (!summary.cwd && p.view.lastCwd) {
+                  return { ...summary, cwd: p.view.lastCwd as string };
+                }
+                return summary;
+              }
+              // No backend summary yet (session not created) — synthesize minimal placeholder
+              if (p.view.lastCwd) {
+                return {
+                  id: termId,
+                  profile: (p.view.profile as string) || defaultProfile,
+                  title: "",
+                  cwd: p.view.lastCwd as string,
+                  branch: null,
+                  lastCommand: null,
+                  lastExitCode: null,
+                  lastCommandAt: null,
+                  commandRunning: false,
+                  activity: { type: "shell" as const },
+                  outputActive: false,
+                  isClaude: false,
+                  unreadNotificationCount: 0,
+                  latestNotification: null,
+                } satisfies (typeof backendSummaries)[number];
+              }
+              return undefined;
+            })
+            .filter(Boolean) as (typeof backendSummaries)[number][];
+          const summary = computeWorkspaceSummaryFromBackend(
             ws.id,
-            terminalInstances,
-            EMPTY_PORT_MAP,
-            notifications,
-            ws.name,
+            wsTerminalSummaries,
+            isActive ? portNumbers : [],
           );
           return (
             <WorkspaceItem

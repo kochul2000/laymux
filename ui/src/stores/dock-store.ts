@@ -24,6 +24,7 @@ interface DockStoreState {
   docks: DockState[];
   layoutMode: DockLayoutMode;
   focusedDock: DockPosition | null;
+  focusedDockPaneId: string | null;
 
   getDock: (position: DockPosition) => DockState | undefined;
   setDockActiveView: (
@@ -34,7 +35,7 @@ interface DockStoreState {
   toggleDockVisible: (position: DockPosition) => void;
   toggleLayoutMode: () => void;
   setDockSize: (position: DockPosition, size: number) => void;
-  setFocusedDock: (position: DockPosition | null) => void;
+  setFocusedDock: (position: DockPosition | null, paneId?: string) => void;
 
   // Pane management (2D grid, same model as workspace)
   splitDockPane: (
@@ -67,6 +68,7 @@ function makeDock(position: DockPosition, activeView: ViewType | null, size: num
 export const useDockStore = create<DockStoreState>()((set, get) => ({
   layoutMode: "horizontal" as DockLayoutMode,
   focusedDock: null,
+  focusedDockPaneId: null,
   docks: [
     makeDock("top", null, 200),
     makeDock("bottom", null, 200),
@@ -100,7 +102,29 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
 
   toggleDockVisible: (position) => {
     set((state) => ({
-      docks: state.docks.map((d) => (d.position === position ? { ...d, visible: !d.visible } : d)),
+      docks: state.docks.map((d) => {
+        if (d.position !== position) return d;
+        const nowVisible = !d.visible;
+        // Ensure at least one pane when toggling visible
+        if (nowVisible && d.panes.length === 0) {
+          return {
+            ...d,
+            visible: true,
+            activeView: d.activeView ?? "EmptyView",
+            panes: [
+              {
+                id: generateId("dp"),
+                view: { type: d.activeView ?? "EmptyView" },
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+              },
+            ],
+          };
+        }
+        return { ...d, visible: nowVisible };
+      }),
     }));
   },
 
@@ -117,8 +141,14 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
     }));
   },
 
-  setFocusedDock: (position) => {
-    set({ focusedDock: position });
+  setFocusedDock: (position, paneId) => {
+    if (position === null) {
+      set({ focusedDock: null, focusedDockPaneId: null });
+      return;
+    }
+    // Auto-resolve paneId to first pane if not specified
+    const resolvedPaneId = paneId ?? get().getDock(position)?.panes[0]?.id ?? null;
+    set({ focusedDock: position, focusedDockPaneId: resolvedPaneId });
   },
 
   splitDockPane: (position, direction, paneId) => {

@@ -170,14 +170,30 @@ export function useSessionPersistence() {
                   h: p.h ?? 1,
                 }))
               : undefined;
+            const effectiveActiveView = (saved.activeView as ViewType) ?? d.activeView;
+            let effectivePanes = loadedPanes ?? d.panes;
+            // Ensure at least one pane exists for visible docks
+            const effectiveVisible = saved.visible ?? d.visible;
+            if (effectivePanes.length === 0 && effectiveVisible) {
+              effectivePanes = [
+                {
+                  id: `dp-${crypto.randomUUID().slice(0, 8)}`,
+                  view: { type: effectiveActiveView ?? "EmptyView" },
+                  x: 0,
+                  y: 0,
+                  w: 1,
+                  h: 1,
+                },
+              ];
+            }
             return {
               ...d,
-              activeView: (saved.activeView as ViewType) ?? d.activeView,
+              activeView: effectiveActiveView,
               views: Array.isArray(savedAny.views) ? (savedAny.views as ViewType[]) : d.views,
               visible: saved.visible ?? d.visible,
               size:
                 typeof savedAny.size === "number" && savedAny.size >= 50 ? savedAny.size : d.size,
-              ...(loadedPanes ? { panes: loadedPanes } : {}),
+              panes: effectivePanes,
             };
           });
           useDockStore.setState({ docks: updatedDocks });

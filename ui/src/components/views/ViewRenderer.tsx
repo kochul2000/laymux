@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useRef, useEffect } from "react";
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/stores/settings-store";
 import { resolveSyncCwd } from "@/lib/sync-cwd-config";
@@ -79,6 +79,27 @@ function TerminalViewWithSyncCwd({
   );
 }
 
+/** Wrapper that grabs DOM focus for views that don't manage it themselves. */
+function FocusableView({
+  isFocused,
+  testId,
+  children,
+}: {
+  isFocused?: boolean;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isFocused) ref.current?.focus();
+  }, [isFocused]);
+  return (
+    <div ref={ref} data-testid={testId} className="h-full" tabIndex={-1} style={{ outline: "none" }}>
+      {children}
+    </div>
+  );
+}
+
 export function ViewRenderer({
   viewType,
   viewConfig,
@@ -94,15 +115,15 @@ export function ViewRenderer({
   switch (viewType) {
     case "WorkspaceSelectorView":
       return (
-        <div data-testid="view-workspace-selector" className="h-full">
+        <FocusableView testId="view-workspace-selector" isFocused={isFocused}>
           <WorkspaceSelectorView />
-        </div>
+        </FocusableView>
       );
     case "SettingsView":
       return (
-        <div data-testid="view-settings" className="h-full">
+        <FocusableView testId="view-settings" isFocused={isFocused}>
           <SettingsView />
-        </div>
+        </FocusableView>
       );
     case "TerminalView":
       return (
@@ -119,9 +140,9 @@ export function ViewRenderer({
       );
     case "IssueReporterView":
       return (
-        <div data-testid="view-issue-reporter" className="h-full">
+        <FocusableView testId="view-issue-reporter" isFocused={isFocused}>
           <IssueReporterView />
-        </div>
+        </FocusableView>
       );
     case "MemoView": {
       const memoKey = paneId ? `memo-${paneId}` : `memo-${fallbackId}`;
@@ -133,9 +154,9 @@ export function ViewRenderer({
     }
     case "BrowserPreviewView":
       return (
-        <div data-testid="view-browser-preview" className="h-full">
+        <FocusableView testId="view-browser-preview" isFocused={isFocused}>
           <BrowserPreviewView url={(viewConfig?.url as string) ?? undefined} />
-        </div>
+        </FocusableView>
       );
     case "EmptyView":
     case null:

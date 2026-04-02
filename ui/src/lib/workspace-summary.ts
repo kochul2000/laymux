@@ -1,11 +1,13 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
+import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
+  outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
 }
 
 export interface TerminalSummaryInfo {
@@ -117,6 +119,93 @@ export function computeWorkspaceSummary(
 }
 
 /**
+ * Compute workspace summary from backend terminal summaries (single source of truth).
+ * This replaces the store-based `computeWorkspaceSummary` for WorkspaceSelectorView.
+ */
+export function computeWorkspaceSummaryFromBackend(
+  workspaceId: string,
+  backendSummaries: TerminalSummaryResponse[],
+  ports: number[] = [],
+): WorkspaceSummary {
+  // Map backend summaries to TerminalSummaryInfo
+  const terminalSummaries: TerminalSummaryInfo[] = backendSummaries.map((s) => ({
+    id: s.id,
+    label: abbreviateProfile(s.profile),
+    profile: s.profile,
+    cwd: s.cwd,
+    branch: s.branch,
+    title: s.title,
+    lastCommand: s.lastCommand ?? undefined,
+    lastExitCode: s.lastExitCode ?? undefined,
+    lastCommandAt: s.lastCommandAt ?? undefined,
+    activity: s.activity as TerminalActivityInfo,
+    outputActive: s.outputActive,
+    hasUnreadNotification: s.unreadNotificationCount > 0,
+  }));
+
+  // Workspace-level aggregation
+  const branch = backendSummaries.find((s) => s.branch)?.branch ?? null;
+  const cwd = backendSummaries.find((s) => s.cwd)?.cwd ?? null;
+
+  // Last command: pick the most recent
+  let lastCommand: LastCommandInfo | null = null;
+  for (const s of backendSummaries) {
+    if (s.lastCommand && s.lastCommandAt != null) {
+      if (!lastCommand || s.lastCommandAt > lastCommand.timestamp) {
+        lastCommand = {
+          command: s.lastCommand,
+          exitCode: s.lastExitCode ?? undefined,
+          timestamp: s.lastCommandAt,
+          outputActive: s.outputActive,
+        };
+      }
+    }
+  }
+
+  // Unread notification aggregation
+  const unreadCount = backendSummaries.reduce((sum, s) => sum + s.unreadNotificationCount, 0);
+  let latestNotification: Notification | null = null;
+  for (const s of backendSummaries) {
+    if (s.latestNotification) {
+      if (!latestNotification || s.latestNotification.createdAt > latestNotification.createdAt) {
+        latestNotification = {
+          id: String(s.latestNotification.id),
+          terminalId: s.latestNotification.terminalId,
+          workspaceId,
+          message: s.latestNotification.message,
+          level: s.latestNotification.level as Notification["level"],
+          createdAt: s.latestNotification.createdAt,
+          readAt: s.latestNotification.readAt,
+        };
+      }
+    }
+  }
+
+  return {
+    workspaceId,
+    branch,
+    cwd,
+    ports,
+    unreadCount,
+    latestNotification,
+    hasUnread: unreadCount > 0,
+    lastCommand,
+    terminalCount: backendSummaries.length,
+    terminalSummaries,
+  };
+}
+
+/** Abbreviate a profile name for compact display (3 chars). */
+function abbreviateProfile(profile: string): string {
+  const lower = profile.toLowerCase();
+  if (lower === "powershell" || lower === "ps") return "PS";
+  if (lower.startsWith("wsl")) return "WSL";
+  if (lower === "cmd" || lower === "command prompt") return "CMD";
+  if (profile.length <= 3) return profile;
+  return profile.slice(0, 3);
+}
+
+/**
  * Abbreviate a file path for display.
  * @param cwd - The raw path string
  * @param ellipsis - "start" (default) truncates the beginning (shows end), "end" truncates the end (shows beginning)
@@ -168,6 +257,18 @@ export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start")
   }
 
   return path;
+}
+
+/**
+ * Convert a `/mnt/X/...` WSL mount path to a Windows path `X:\...`.
+ * Returns the original path unchanged if it's not a `/mnt/X/...` pattern.
+ */
+export function mntPathToWindows(path: string): string {
+  const match = path.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/);
+  if (!match) return path;
+  const drive = match[1].toUpperCase();
+  const tail = match[2] ? match[2].replace(/\//g, "\\") : "\\";
+  return `${drive}:${tail}`;
 }
 
 export function formatPorts(ports: number[], maxDisplay = 5): string {

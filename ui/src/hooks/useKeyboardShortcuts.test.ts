@@ -323,6 +323,9 @@ describe("useKeyboardShortcuts", () => {
     fireKey("ArrowLeft", { altKey: true });
 
     expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useDockStore.getState().focusedDockPaneId).toBe(
+      useDockStore.getState().getDock("left")!.panes[0].id,
+    );
     expect(useGridStore.getState().focusedPaneIndex).toBeNull();
   });
 
@@ -460,6 +463,38 @@ describe("useKeyboardShortcuts", () => {
     fireKey("ArrowLeft", { altKey: true });
 
     expect(useDockStore.getState().focusedDock).toBe("left");
+  });
+
+  it("Alt+Arrow navigates between panes within a split dock", () => {
+    // Split left dock into two vertical panes (top/bottom)
+    useDockStore.getState().splitDockPane("left", "horizontal");
+    const leftDock = useDockStore.getState().getDock("left")!;
+    expect(leftDock.panes).toHaveLength(2);
+
+    // Focus the first pane
+    useDockStore.getState().setFocusedDock("left", leftDock.panes[0].id);
+    renderHook(() => useKeyboardShortcuts());
+
+    // Press down → should move to second pane
+    fireKey("ArrowDown", { altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useDockStore.getState().focusedDockPaneId).toBe(leftDock.panes[1].id);
+  });
+
+  it("Alt+Arrow exits dock when no pane in that direction within dock", () => {
+    // Split left dock into two vertical panes
+    useDockStore.getState().splitDockPane("left", "horizontal");
+    const leftDock = useDockStore.getState().getDock("left")!;
+
+    // Focus second (bottom) pane, press right → should exit dock
+    useDockStore.getState().setFocusedDock("left", leftDock.panes[1].id);
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowRight", { altKey: true }); // exit direction for left dock
+
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
   it("Alt+Arrow in dock when all other docks are hidden stays put", () => {

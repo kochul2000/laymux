@@ -119,6 +119,10 @@ export interface ClaudeSettings {
 
 export interface IssueReporterSettings {
   shell: string;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
 }
 
 export interface MemoSettings {
@@ -456,4 +460,84 @@ export async function automationResponse(
     error: error ?? null,
   });
   return invoke("automation_response", { responseJson });
+}
+
+// -- Claude terminal detection (single source of truth in backend) --
+
+/** Listen for Claude Code terminal detection events from the backend PTY callback. */
+export function onClaudeTerminalDetected(
+  callback: (terminalId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("claude-terminal-detected", (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Register a terminal as running Claude Code in the backend (single source of truth).
+ *  Called when the frontend detects Claude from command text (OSC 133 E). */
+export async function markClaudeTerminal(id: string): Promise<boolean> {
+  return invoke("mark_claude_terminal", { id });
+}
+
+/** Check if a terminal is registered as Claude Code in the backend. */
+export async function isClaudeTerminal(id: string): Promise<boolean> {
+  return invoke("is_claude_terminal", { id });
+}
+
+// -- Terminal CWD (single source of truth in backend) --
+
+/** Get CWD for all terminals from backend (single source of truth).
+ *  Returns a map of terminal_id → normalized CWD path. */
+export async function getTerminalCwds(): Promise<Record<string, string>> {
+  return invoke("get_terminal_cwds");
+}
+
+/** Listen for CWD change events detected directly from PTY output in the backend. */
+export function onTerminalCwdChanged(
+  callback: (data: { terminalId: string; cwd: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ terminalId: string; cwd: string }>("terminal-cwd-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
+// -- Terminal summaries (single source of truth for workspace list) --
+
+export interface TerminalNotificationResponse {
+  id: number;
+  terminalId: string;
+  message: string;
+  level: string;
+  createdAt: number;
+  readAt: number | null;
+}
+
+export interface TerminalSummaryResponse {
+  id: string;
+  profile: string;
+  title: string;
+  cwd: string | null;
+  branch: string | null;
+  lastCommand: string | null;
+  lastExitCode: number | null;
+  lastCommandAt: number | null;
+  commandRunning: boolean;
+  activity: { type: "shell" } | { type: "running" } | { type: "interactiveApp"; name: string };
+  outputActive: boolean;
+  isClaude: boolean;
+  unreadNotificationCount: number;
+  latestNotification: TerminalNotificationResponse | null;
+}
+
+/** Get comprehensive summary for requested terminals from backend (single source of truth).
+ *  Returns all data needed to render WorkspaceSelectorView. */
+export async function getTerminalSummaries(
+  terminalIds: string[],
+): Promise<TerminalSummaryResponse[]> {
+  return invoke("get_terminal_summaries", { terminalIds });
+}
+
+/** Mark notifications as read for the given terminal IDs. Returns count of marked. */
+export async function markNotificationsRead(terminalIds: string[]): Promise<number> {
+  return invoke("mark_notifications_read", { terminalIds });
 }

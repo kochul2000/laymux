@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { useSyncEvents } from "./useSyncEvents";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+
+vi.mock("@/lib/persist-session", () => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+import { persistSession } from "@/lib/persist-session";
 
 // Mock tauri-api event listeners
 const mockOnSyncCwd = vi.fn();
@@ -11,6 +16,9 @@ const mockOnSyncBranch = vi.fn();
 const mockOnLxNotify = vi.fn();
 const mockOnSetTabTitle = vi.fn();
 const mockOnCommandStatus = vi.fn();
+const mockOnClaudeTerminalDetected = vi.fn();
+const mockOnTerminalCwdChanged = vi.fn();
+const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
 
@@ -20,6 +28,9 @@ vi.mock("@/lib/tauri-api", () => ({
   onLxNotify: (...args: unknown[]) => mockOnLxNotify(...args),
   onSetTabTitle: (...args: unknown[]) => mockOnSetTabTitle(...args),
   onCommandStatus: (...args: unknown[]) => mockOnCommandStatus(...args),
+  onClaudeTerminalDetected: (...args: unknown[]) => mockOnClaudeTerminalDetected(...args),
+  onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),
+  markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -40,6 +51,8 @@ describe("useSyncEvents", () => {
     mockOnLxNotify.mockResolvedValue(unlisten);
     mockOnSetTabTitle.mockResolvedValue(unlisten);
     mockOnCommandStatus.mockResolvedValue(unlisten);
+    mockOnClaudeTerminalDetected.mockResolvedValue(unlisten);
+    mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
   });
 
   it("registers sync-cwd listener on mount", () => {
@@ -246,5 +259,115 @@ describe("useSyncEvents", () => {
     callback({ message: "Build done", terminalId: "t1" });
 
     expect(mockSendDesktopNotification).not.toHaveBeenCalled();
+  });
+
+  it("registers claude-terminal-detected listener on mount", () => {
+    renderHook(() => useSyncEvents());
+    expect(mockOnClaudeTerminalDetected).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("sets activity to Claude on claude-terminal-detected event", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnClaudeTerminalDetected.mock.calls[0][0];
+    callback("t1");
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("calls markClaudeTerminal when command text detects Claude", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", command: "claude" });
+
+    expect(mockMarkClaudeTerminal).toHaveBeenCalledWith("t1");
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("calls persistSession (debounced) on terminal-cwd-changed event", async () => {
+    vi.useFakeTimers();
+    vi.mocked(persistSession).mockClear();
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalCwdChanged.mock.calls[0][0];
+    callback({ terminalId: "t1", cwd: "/home/user/a" });
+    callback({ terminalId: "t1", cwd: "/home/user/b" });
+
+    // Not called yet (debounced)
+    expect(persistSession).not.toHaveBeenCalled();
+
+    // Advance past debounce window
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // Called exactly once (debounced)
+    expect(persistSession).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("calls persistSession (debounced) on sync-cwd event", async () => {
+    vi.useFakeTimers();
+    vi.mocked(persistSession).mockClear();
+
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnSyncCwd.mock.calls[0][0];
+    callback({
+      path: "/home/user/project",
+      terminalId: "t1",
+      groupId: "g1",
+      targets: ["t1"],
+    });
+
+    expect(persistSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(persistSession).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("does NOT call markClaudeTerminal for non-Claude commands", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", command: "vim file.txt" });
+
+    expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
   });
 });

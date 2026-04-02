@@ -7,10 +7,16 @@ use crate::cli::{LxMessage, LxResponse};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty;
 use crate::state::AppState;
-use crate::terminal::{TerminalActivity, TerminalConfig, TerminalSession, TerminalStateInfo};
+use crate::terminal::{
+    TerminalActivity, TerminalConfig, TerminalNotification, TerminalSession, TerminalStateInfo,
+};
 
 /// How long a propagation flag remains valid before expiring.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum number of notifications to keep. When exceeded, oldest read notifications
+/// are evicted first. Unread notifications are never evicted by this limit.
+const MAX_NOTIFICATIONS: usize = 500;
 
 /// Number of bytes to scan from the end of a terminal output buffer when detecting
 /// activity state or Claude Code presence. 16KB covers terminal title sequences
@@ -102,13 +108,72 @@ pub fn create_terminal_session(
     let app_clone = app.clone();
     let output_buffers = state.output_buffers.clone();
     let buffer_terminal_id = id.clone();
+    let known_claude = state.known_claude_terminals.clone();
+    let claude_detect_id = id.clone();
+    let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminals_for_cwd = state.terminals.clone();
+    let cwd_terminal_id = id.clone();
+    let cwd_app = app.clone();
     let pty_handle = pty::spawn_pty(&session, move |data| {
+        // IMPORTANT: Each lock below is acquired and released independently (never nested).
+        // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
+        // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
+
         // Write to output buffer
         if let Ok(mut buffers) = output_buffers.lock() {
             if let Some(buf) = buffers.get_mut(&buffer_terminal_id) {
                 buf.push(&data);
             }
         }
+
+        // Proactive Claude Code detection: scan each PTY output chunk for
+        // "Claude Code" in terminal title (OSC 0/2). Once detected, the terminal
+        // is permanently registered in known_claude_terminals (single source of truth).
+        // AtomicBool fast-path avoids scanning after first detection.
+        if !claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
+            if any_terminal_title_contains(&data, "Claude Code") {
+                claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut known) = known_claude.lock() {
+                    known.insert(claude_detect_id.clone());
+                }
+                let _ = app_clone.emit("claude-terminal-detected", &claude_detect_id);
+            }
+        }
+
+        // Proactive CWD detection: scan each PTY output chunk for OSC 7 or OSC 9;9.
+        // Updates backend TerminalSession.cwd directly (single source of truth).
+        // This ensures CWD is always up-to-date even if the frontend hasn't processed
+        // the OSC sequence yet (e.g., during rapid close after Claude Code exit).
+        if let Some(raw_cwd) =
+            extract_last_osc7_cwd(&data).or_else(|| extract_last_osc9_9_cwd(&data))
+        {
+            let normalized = normalize_wsl_path(&raw_cwd);
+            let mut changed = false;
+            if let Ok(mut terms) = terminals_for_cwd.lock() {
+                if let Some(session) = terms.get_mut(&cwd_terminal_id) {
+                    if session.cwd.as_deref() != Some(&normalized) {
+                        // Extract WSL distro before normalization strips it
+                        if session.wsl_distro.is_none() {
+                            if let Some(distro) = extract_wsl_distro_from_path(&raw_cwd) {
+                                session.wsl_distro = Some(distro);
+                            }
+                        }
+                        session.cwd = Some(normalized.clone());
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                let _ = cwd_app.emit(
+                    "terminal-cwd-changed",
+                    serde_json::json!({
+                        "terminalId": cwd_terminal_id,
+                        "cwd": normalized,
+                    }),
+                );
+            }
+        }
+
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
 
@@ -259,7 +324,35 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         known.remove(&id);
     }
 
+    // Clean up notifications for this terminal
+    if let Ok(mut notifs) = state.notifications.lock() {
+        notifs.retain(|n| n.terminal_id != id);
+    }
+
     Ok(())
+}
+
+/// Register a terminal as running Claude Code (single source of truth).
+/// Called by the frontend when it detects Claude from command text (OSC 133 E).
+/// The PTY callback also populates this from title detection, but the frontend
+/// may detect earlier via command text (e.g., user typed "claude").
+#[tauri::command]
+pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let mut known = state
+        .known_claude_terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(known.insert(id))
+}
+
+/// Check if a terminal is registered as running Claude Code.
+#[tauri::command]
+pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let known = state
+        .known_claude_terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(known.contains(&id))
 }
 
 #[tauri::command]
@@ -459,6 +552,17 @@ fn handle_lx_message_dispatch(
             terminal_id,
             group_id,
         } => {
+            // Update stored branch for the source terminal (single source of truth)
+            {
+                let mut terminals = state
+                    .terminals
+                    .lock()
+                    .map_err(|e| format!("Lock error: {e}"))?;
+                if let Some(session) = terminals.get_mut(&terminal_id) {
+                    session.branch = Some(branch.clone());
+                }
+            }
+
             // Emit sync-branch event to frontend for UI updates
             let _ = app.emit(
                 "sync-branch",
@@ -488,6 +592,27 @@ fn handle_lx_message_dispatch(
             terminal_id,
             level,
         } => {
+            // Store notification in backend (single source of truth)
+            {
+                let notification = crate::terminal::TerminalNotification {
+                    id: state
+                        .notification_counter
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                    terminal_id: terminal_id.clone(),
+                    message: message.clone(),
+                    level: level.clone().unwrap_or_else(|| "info".to_string()),
+                    created_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                    read_at: None,
+                };
+                if let Ok(mut notifs) = state.notifications.lock() {
+                    notifs.push(notification);
+                    evict_old_notifications(&mut notifs);
+                }
+            }
+
             // Emit notification to frontend
             let mut payload = serde_json::json!({
                 "message": message,
@@ -578,19 +703,27 @@ fn handle_lx_message_dispatch(
             command,
             exit_code,
         } => {
-            // Update command_running state on the terminal session.
-            // command present (no exit_code) → command started → running = true
-            // exit_code present → command finished → running = false
+            // Update command state on the terminal session (single source of truth).
             {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
                 let mut terminals = state
                     .terminals
                     .lock()
                     .map_err(|e| format!("Lock error: {e}"))?;
                 if let Some(session) = terminals.get_mut(&terminal_id) {
-                    if exit_code.is_some() {
-                        session.command_running = false;
-                    } else if command.is_some() {
+                    if let Some(ref cmd) = command {
+                        session.last_command = Some(cmd.clone());
+                        session.last_exit_code = None;
+                        session.last_command_at = Some(now_ms);
                         session.command_running = true;
+                    }
+                    if let Some(code) = exit_code {
+                        session.last_exit_code = Some(code);
+                        session.last_command_at = Some(now_ms);
+                        session.command_running = false;
                     }
                 }
             }
@@ -1292,6 +1425,49 @@ fn any_terminal_title_contains(data: &[u8], substring: &str) -> bool {
     false
 }
 
+/// Extract the payload of the last occurrence of an OSC sequence identified by `needle`.
+/// Scans for `needle` (e.g., `\x1b]7;`) and returns the text up to the BEL (`\x07`)
+/// or ST (`\x1b\\`) terminator. Returns `None` if no complete match is found.
+fn extract_last_osc_payload(data: &[u8], needle: &[u8]) -> Option<String> {
+    let mut last: Option<String> = None;
+    let mut start = 0;
+
+    while start + needle.len() <= data.len() {
+        if let Some(found) = data[start..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+        {
+            let abs_pos = start + found;
+            let payload_start = abs_pos + needle.len();
+            if payload_start < data.len() {
+                let remaining = &data[payload_start..];
+                if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
+                    let payload = String::from_utf8_lossy(&remaining[..end]);
+                    if !payload.is_empty() {
+                        last = Some(payload.into_owned());
+                    }
+                }
+            }
+            start = abs_pos + 1;
+        } else {
+            break;
+        }
+    }
+    last
+}
+
+/// Extract CWD from the last OSC 7 sequence in PTY output data.
+/// Format: `\x1b]7;<url>\x07` or `\x1b]7;<url>\x1b\\`
+fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
+    extract_last_osc_payload(data, &[0x1b, b']', b'7', b';'])
+}
+
+/// Extract CWD from the last OSC 9;9 sequence in PTY output data.
+/// Format: `\x1b]9;9;<path>\x07`
+fn extract_last_osc9_9_cwd(data: &[u8]) -> Option<String> {
+    extract_last_osc_payload(data, &[0x1b, b']', b'9', b';', b'9', b';'])
+}
+
 /// Check if a terminal is running Claude Code.
 /// Uses two-pronged detection:
 /// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
@@ -1547,6 +1723,168 @@ pub fn get_terminal_states(
     state: State<Arc<AppState>>,
 ) -> std::collections::HashMap<String, TerminalStateInfo> {
     detect_all_terminal_states(&state)
+}
+
+/// Tauri command: get CWD for all terminals from backend (single source of truth).
+/// Returns a map of terminal_id → normalized CWD path.
+#[tauri::command]
+pub fn get_terminal_cwds(
+    state: State<Arc<AppState>>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut result = std::collections::HashMap::new();
+    for (id, session) in terminals.iter() {
+        if let Some(ref cwd) = session.cwd {
+            result.insert(id.clone(), cwd.clone());
+        }
+    }
+    Ok(result)
+}
+
+/// Response for a single terminal in `get_terminal_summaries`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSummaryResponse {
+    pub id: String,
+    pub profile: String,
+    pub title: String,
+    pub cwd: Option<String>,
+    pub branch: Option<String>,
+    pub last_command: Option<String>,
+    pub last_exit_code: Option<i32>,
+    pub last_command_at: Option<u64>,
+    pub command_running: bool,
+    pub activity: TerminalActivity,
+    pub output_active: bool,
+    pub is_claude: bool,
+    pub unread_notification_count: u32,
+    pub latest_notification: Option<TerminalNotification>,
+}
+
+/// Tauri command: get comprehensive summary for requested terminals (single source of truth).
+/// Returns all data needed to render WorkspaceSelectorView for the given terminal IDs.
+///
+/// Lock order: terminals → output_buffers → known_claude_terminals → notifications
+/// (see `AppState` doc for the canonical ordering).
+#[tauri::command]
+pub fn get_terminal_summaries(
+    terminal_ids: Vec<String>,
+    state: State<Arc<AppState>>,
+) -> Result<Vec<TerminalSummaryResponse>, String> {
+    get_terminal_summaries_inner(&terminal_ids, &state)
+}
+
+/// Core implementation of `get_terminal_summaries` without Tauri State wrapper.
+/// Used by both the Tauri command and tests.
+///
+/// Lock order: terminals → output_buffers → known_claude_terminals → notifications
+/// (see `AppState` doc for the canonical ordering).
+pub fn get_terminal_summaries_inner(
+    terminal_ids: &[String],
+    state: &AppState,
+) -> Result<Vec<TerminalSummaryResponse>, String> {
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    let buffers = state
+        .output_buffers
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    let known_claude = state
+        .known_claude_terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    let notifications = state
+        .notifications
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+
+    let mut result = Vec::with_capacity(terminal_ids.len());
+
+    for tid in terminal_ids {
+        let Some(session) = terminals.get(tid.as_str()) else {
+            continue;
+        };
+        let state_info = detect_terminal_state(buffers.get(tid.as_str()));
+        let is_claude = known_claude.contains(tid.as_str());
+        let term_notifs: Vec<&TerminalNotification> = notifications
+            .iter()
+            .filter(|n| n.terminal_id == *tid)
+            .collect();
+        let unread_count = term_notifs.iter().filter(|n| n.read_at.is_none()).count() as u32;
+        let latest_unread = term_notifs
+            .iter()
+            .filter(|n| n.read_at.is_none())
+            .max_by_key(|n| n.created_at)
+            .map(|n| (*n).clone());
+
+        result.push(TerminalSummaryResponse {
+            id: tid.clone(),
+            profile: session.config.profile.clone(),
+            title: session.title.clone(),
+            cwd: session.cwd.clone(),
+            branch: session.branch.clone(),
+            last_command: session.last_command.clone(),
+            last_exit_code: session.last_exit_code,
+            last_command_at: session.last_command_at,
+            command_running: session.command_running,
+            activity: state_info.activity,
+            output_active: state_info.output_active,
+            is_claude,
+            unread_notification_count: unread_count,
+            latest_notification: latest_unread,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Tauri command: mark notifications as read for the given terminal IDs.
+#[tauri::command]
+pub fn mark_notifications_read(
+    terminal_ids: Vec<String>,
+    state: State<Arc<AppState>>,
+) -> Result<u32, String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut count = 0u32;
+    if let Ok(mut notifs) = state.notifications.lock() {
+        for n in notifs.iter_mut() {
+            if terminal_ids.contains(&n.terminal_id) && n.read_at.is_none() {
+                n.read_at = Some(now_ms);
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+/// Evict oldest read notifications when the list exceeds MAX_NOTIFICATIONS.
+/// Unread notifications are never evicted. Only read (already consumed) entries are removed.
+fn evict_old_notifications(notifs: &mut Vec<crate::terminal::TerminalNotification>) {
+    if notifs.len() <= MAX_NOTIFICATIONS {
+        return;
+    }
+    // Remove oldest read notifications first (smallest created_at with read_at set)
+    let over = notifs.len() - MAX_NOTIFICATIONS;
+    let mut read_indices: Vec<usize> = notifs
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.read_at.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    // Already sorted by insertion order (oldest first), take the first `over` entries
+    read_indices.truncate(over);
+    // Remove in reverse order to keep indices stable
+    for &i in read_indices.iter().rev() {
+        notifs.remove(i);
+    }
 }
 
 /// Filter target terminals to only those whose CWD differs from the sync path.
@@ -3498,6 +3836,565 @@ mod tests {
         assert!(
             !filtered.contains(&"t2".to_string()),
             "Persistently known Claude terminal should be skipped"
+        );
+    }
+
+    #[test]
+    fn proactive_claude_detection_from_pty_output_chunk() {
+        // Simulates the PTY callback scenario: a raw output chunk containing
+        // a Claude Code title should be detected by any_terminal_title_contains.
+        // In production, the PTY callback uses this to populate known_claude_terminals.
+        let chunk = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some terminal output here";
+        assert!(any_terminal_title_contains(chunk, "Claude Code"));
+
+        // After registration (simulating PTY callback behavior),
+        // filter_targets_not_busy should skip the terminal
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t-claude".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            // Buffer now only has task title, no "Claude Code"
+            buf.push(b"\x1b]0;\xe2\x9c\xb6 Working on task\x07");
+            buffers.insert("t-claude".into(), buf);
+            let mut buf_normal = crate::output_buffer::TerminalOutputBuffer::default();
+            buf_normal.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t-normal".into(), buf_normal);
+        }
+        let targets = vec!["t-normal".into(), "t-claude".into()];
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered.contains(&"t-normal".to_string()));
+        assert!(
+            !filtered.contains(&"t-claude".to_string()),
+            "Proactively registered Claude terminal must be skipped in skip mode"
+        );
+    }
+
+    #[test]
+    fn mark_claude_terminal_returns_true_on_first_insert() {
+        let state = AppState::new();
+        let mut known = state.known_claude_terminals.lock().unwrap();
+        assert!(
+            known.insert("t1".to_string()),
+            "First insert should return true"
+        );
+        assert!(
+            !known.insert("t1".to_string()),
+            "Second insert should return false"
+        );
+    }
+
+    #[test]
+    fn is_claude_terminal_after_mark() {
+        let state = AppState::new();
+        {
+            let mut known = state.known_claude_terminals.lock().unwrap();
+            known.insert("t1".to_string());
+        }
+        let known = state.known_claude_terminals.lock().unwrap();
+        assert!(known.contains("t1"));
+        assert!(!known.contains("t2"));
+    }
+
+    // -- extract_last_osc7_cwd tests --
+
+    #[test]
+    fn extract_osc7_cwd_bel_terminator() {
+        let data = b"\x1b]7;file://localhost/home/user\x07";
+        assert_eq!(
+            extract_last_osc7_cwd(data),
+            Some("file://localhost/home/user".into())
+        );
+    }
+
+    #[test]
+    fn extract_osc7_cwd_st_terminator() {
+        let data = b"\x1b]7;file://localhost/C:/Users/test\x1b\\";
+        assert_eq!(
+            extract_last_osc7_cwd(data),
+            Some("file://localhost/C:/Users/test".into())
+        );
+    }
+
+    #[test]
+    fn extract_osc7_cwd_multiple_returns_last() {
+        let data = b"\x1b]7;file://localhost/old\x07some output\x1b]7;file://localhost/new\x07";
+        assert_eq!(
+            extract_last_osc7_cwd(data),
+            Some("file://localhost/new".into())
+        );
+    }
+
+    #[test]
+    fn extract_osc7_cwd_none_when_absent() {
+        let data = b"plain terminal output with no osc";
+        assert_eq!(extract_last_osc7_cwd(data), None);
+    }
+
+    #[test]
+    fn extract_osc7_cwd_none_when_truncated() {
+        // Sequence starts but no terminator
+        let data = b"\x1b]7;file://localhost/home/user";
+        assert_eq!(extract_last_osc7_cwd(data), None);
+    }
+
+    #[test]
+    fn extract_osc7_cwd_mixed_with_other_osc() {
+        // OSC 0 title + OSC 7 CWD in same chunk
+        let data = b"\x1b]0;My Terminal\x07\x1b]7;file://localhost/tmp\x07";
+        assert_eq!(
+            extract_last_osc7_cwd(data),
+            Some("file://localhost/tmp".into())
+        );
+    }
+
+    // -- extract_last_osc9_9_cwd tests --
+
+    #[test]
+    fn extract_osc9_9_cwd_basic() {
+        let data = b"\x1b]9;9;C:/Users/kochul\x07";
+        assert_eq!(
+            extract_last_osc9_9_cwd(data),
+            Some("C:/Users/kochul".into())
+        );
+    }
+
+    #[test]
+    fn extract_osc9_9_cwd_wsl_unc() {
+        let data = b"\x1b]9;9;//wsl.localhost/Ubuntu-22.04/home/user\x07";
+        assert_eq!(
+            extract_last_osc9_9_cwd(data),
+            Some("//wsl.localhost/Ubuntu-22.04/home/user".into())
+        );
+    }
+
+    #[test]
+    fn extract_osc9_9_cwd_multiple_returns_last() {
+        let data = b"\x1b]9;9;C:/old\x07output\x1b]9;9;C:/new\x07";
+        assert_eq!(extract_last_osc9_9_cwd(data), Some("C:/new".into()));
+    }
+
+    #[test]
+    fn extract_osc9_9_cwd_none_when_absent() {
+        let data = b"no osc 9;9 here";
+        assert_eq!(extract_last_osc9_9_cwd(data), None);
+    }
+
+    #[test]
+    fn extract_osc9_9_cwd_ignores_non_9_subcode() {
+        // OSC 9 with non-9 subcode (e.g., notification)
+        let data = b"\x1b]9;Hello notification\x07";
+        assert_eq!(extract_last_osc9_9_cwd(data), None);
+    }
+
+    #[test]
+    fn close_terminal_clears_claude_tracking() {
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        // Simulate close_terminal_session cleanup
+        state.known_claude_terminals.lock().unwrap().remove("t1");
+        assert!(!state.known_claude_terminals.lock().unwrap().contains("t1"));
+    }
+
+    // -- SyncBranch stores branch --
+
+    #[test]
+    fn sync_branch_updates_session_branch() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        // Simulate SyncBranch handler updating branch
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            if let Some(session) = terminals.get_mut("t1") {
+                session.branch = Some("feature/login".into());
+            }
+        }
+        let terminals = state.terminals.lock().unwrap();
+        assert_eq!(
+            terminals.get("t1").unwrap().branch.as_deref(),
+            Some("feature/login")
+        );
+    }
+
+    // -- SetCommandStatus stores command data --
+
+    #[test]
+    fn set_command_status_stores_command() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        // Simulate command started
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            if let Some(session) = terminals.get_mut("t1") {
+                session.last_command = Some("npm test".into());
+                session.last_exit_code = None;
+                session.last_command_at = Some(1000);
+                session.command_running = true;
+            }
+        }
+        let terminals = state.terminals.lock().unwrap();
+        let session = terminals.get("t1").unwrap();
+        assert_eq!(session.last_command.as_deref(), Some("npm test"));
+        assert_eq!(session.last_exit_code, None);
+        assert!(session.command_running);
+        assert_eq!(session.last_command_at, Some(1000));
+    }
+
+    #[test]
+    fn set_command_status_stores_exit_code() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+            session.last_command = Some("npm test".into());
+            session.command_running = true;
+            terminals.insert("t1".into(), session);
+        }
+        // Simulate exit code
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            if let Some(session) = terminals.get_mut("t1") {
+                session.last_exit_code = Some(0);
+                session.last_command_at = Some(2000);
+                session.command_running = false;
+            }
+        }
+        let terminals = state.terminals.lock().unwrap();
+        let session = terminals.get("t1").unwrap();
+        assert_eq!(session.last_command.as_deref(), Some("npm test"));
+        assert_eq!(session.last_exit_code, Some(0));
+        assert!(!session.command_running);
+    }
+
+    // -- Notify stores notification --
+
+    #[test]
+    fn notify_stores_notification() {
+        let state = AppState::new();
+        let notification = crate::terminal::TerminalNotification {
+            id: state
+                .notification_counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            terminal_id: "t1".into(),
+            message: "Build complete".into(),
+            level: "success".into(),
+            created_at: 12345,
+            read_at: None,
+        };
+        state.notifications.lock().unwrap().push(notification);
+
+        let notifs = state.notifications.lock().unwrap();
+        assert_eq!(notifs.len(), 1);
+        assert_eq!(notifs[0].message, "Build complete");
+        assert_eq!(notifs[0].level, "success");
+        assert!(notifs[0].read_at.is_none());
+    }
+
+    #[test]
+    fn notify_increments_id() {
+        let state = AppState::new();
+        let id1 = state
+            .notification_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id2 = state
+            .notification_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(id2, id1 + 1);
+    }
+
+    // -- get_terminal_summaries tests --
+
+    #[test]
+    fn get_terminal_summaries_empty_ids() {
+        let state = AppState::new();
+        let result = get_terminal_summaries_inner(&[], &state).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn get_terminal_summaries_returns_session_data() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+            session.cwd = Some("/home/user".into());
+            session.branch = Some("main".into());
+            session.last_command = Some("cargo test".into());
+            session.last_exit_code = Some(0);
+            session.last_command_at = Some(12345);
+            terminals.insert("t1".into(), session);
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            buffers.insert(
+                "t1".into(),
+                crate::output_buffer::TerminalOutputBuffer::default(),
+            );
+        }
+
+        let result = get_terminal_summaries_inner(&["t1".into()], &state).unwrap();
+        assert_eq!(result.len(), 1);
+        let t = &result[0];
+        assert_eq!(t.id, "t1");
+        assert_eq!(t.cwd.as_deref(), Some("/home/user"));
+        assert_eq!(t.branch.as_deref(), Some("main"));
+        assert_eq!(t.last_command.as_deref(), Some("cargo test"));
+        assert_eq!(t.last_exit_code, Some(0));
+        assert_eq!(t.last_command_at, Some(12345));
+        assert_eq!(t.profile, "PowerShell");
+    }
+
+    #[test]
+    fn get_terminal_summaries_skips_missing_ids() {
+        let state = AppState::new();
+        let result = get_terminal_summaries_inner(&["nonexistent".into()], &state).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn get_terminal_summaries_includes_claude_detection() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            buffers.insert(
+                "t1".into(),
+                crate::output_buffer::TerminalOutputBuffer::default(),
+            );
+        }
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".into());
+
+        let result = get_terminal_summaries_inner(&["t1".into()], &state).unwrap();
+        assert!(result[0].is_claude);
+    }
+
+    #[test]
+    fn get_terminal_summaries_includes_notifications() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            buffers.insert(
+                "t1".into(),
+                crate::output_buffer::TerminalOutputBuffer::default(),
+            );
+        }
+        // Add 2 unread + 1 read notification
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.push(TerminalNotification {
+                id: 1,
+                terminal_id: "t1".into(),
+                message: "old".into(),
+                level: "info".into(),
+                created_at: 100,
+                read_at: Some(200),
+            });
+            notifs.push(TerminalNotification {
+                id: 2,
+                terminal_id: "t1".into(),
+                message: "unread1".into(),
+                level: "error".into(),
+                created_at: 300,
+                read_at: None,
+            });
+            notifs.push(TerminalNotification {
+                id: 3,
+                terminal_id: "t1".into(),
+                message: "unread2".into(),
+                level: "warning".into(),
+                created_at: 400,
+                read_at: None,
+            });
+        }
+
+        let result = get_terminal_summaries_inner(&["t1".into()], &state).unwrap();
+        assert_eq!(result[0].unread_notification_count, 2);
+        let latest = result[0].latest_notification.as_ref().unwrap();
+        assert_eq!(latest.message, "unread2");
+        assert_eq!(latest.created_at, 400);
+    }
+
+    // -- mark_notifications_read tests --
+
+    #[test]
+    fn mark_notifications_read_sets_read_at() {
+        let state = AppState::new();
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.push(TerminalNotification {
+                id: 1,
+                terminal_id: "t1".into(),
+                message: "test".into(),
+                level: "info".into(),
+                created_at: 100,
+                read_at: None,
+            });
+            notifs.push(TerminalNotification {
+                id: 2,
+                terminal_id: "t2".into(),
+                message: "other".into(),
+                level: "info".into(),
+                created_at: 200,
+                read_at: None,
+            });
+        }
+
+        // Mark t1 as read
+        let now_ms = 999u64;
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            for n in notifs.iter_mut() {
+                if n.terminal_id == "t1" && n.read_at.is_none() {
+                    n.read_at = Some(now_ms);
+                }
+            }
+        }
+
+        let notifs = state.notifications.lock().unwrap();
+        assert!(notifs[0].read_at.is_some()); // t1 marked
+        assert!(notifs[1].read_at.is_none()); // t2 untouched
+    }
+
+    // -- evict_old_notifications tests --
+
+    #[test]
+    fn evict_removes_oldest_read_notifications() {
+        let mut notifs: Vec<TerminalNotification> = Vec::new();
+        // Fill with MAX_NOTIFICATIONS + 5 notifications, all read
+        for i in 0..(MAX_NOTIFICATIONS + 5) {
+            notifs.push(TerminalNotification {
+                id: i as u64,
+                terminal_id: "t1".into(),
+                message: format!("msg-{i}"),
+                level: "info".into(),
+                created_at: i as u64,
+                read_at: Some(1000),
+            });
+        }
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS + 5);
+        evict_old_notifications(&mut notifs);
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS);
+        // Oldest 5 should be removed
+        assert_eq!(notifs[0].id, 5);
+    }
+
+    #[test]
+    fn evict_preserves_unread_notifications() {
+        let mut notifs: Vec<TerminalNotification> = Vec::new();
+        // Fill with MAX_NOTIFICATIONS + 3: first 3 are unread, rest are read
+        for i in 0..(MAX_NOTIFICATIONS + 3) {
+            notifs.push(TerminalNotification {
+                id: i as u64,
+                terminal_id: "t1".into(),
+                message: format!("msg-{i}"),
+                level: "info".into(),
+                created_at: i as u64,
+                read_at: if i < 3 { None } else { Some(1000) },
+            });
+        }
+        evict_old_notifications(&mut notifs);
+        // All 3 unread should survive; 3 oldest read removed
+        let unread_count = notifs.iter().filter(|n| n.read_at.is_none()).count();
+        assert_eq!(unread_count, 3);
+        assert_eq!(notifs.len(), MAX_NOTIFICATIONS);
+    }
+
+    #[test]
+    fn evict_noop_under_limit() {
+        let mut notifs: Vec<TerminalNotification> = vec![TerminalNotification {
+            id: 1,
+            terminal_id: "t1".into(),
+            message: "msg".into(),
+            level: "info".into(),
+            created_at: 100,
+            read_at: Some(200),
+        }];
+        evict_old_notifications(&mut notifs);
+        assert_eq!(notifs.len(), 1);
+    }
+
+    // -- close_terminal cleans up notifications --
+
+    #[test]
+    fn close_terminal_removes_notifications() {
+        let state = AppState::new();
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.push(TerminalNotification {
+                id: 1,
+                terminal_id: "t1".into(),
+                message: "test".into(),
+                level: "info".into(),
+                created_at: 100,
+                read_at: None,
+            });
+            notifs.push(TerminalNotification {
+                id: 2,
+                terminal_id: "t2".into(),
+                message: "other".into(),
+                level: "info".into(),
+                created_at: 200,
+                read_at: None,
+            });
+        }
+        // Simulate close_terminal_session cleanup for t1
+        {
+            let mut notifs = state.notifications.lock().unwrap();
+            notifs.retain(|n| n.terminal_id != "t1");
+        }
+        let notifs = state.notifications.lock().unwrap();
+        assert_eq!(notifs.len(), 1);
+        assert_eq!(notifs[0].terminal_id, "t2");
+    }
+
+    // -- extract_last_osc_payload shared function --
+
+    #[test]
+    fn extract_osc_payload_with_custom_needle() {
+        // Verify the shared function works for an arbitrary needle
+        let needle = &[0x1b, b']', b'7', b';'];
+        let data = b"\x1b]7;file://localhost/test\x07";
+        assert_eq!(
+            extract_last_osc_payload(data, needle),
+            Some("file://localhost/test".into())
         );
     }
 }

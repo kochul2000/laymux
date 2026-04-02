@@ -166,6 +166,7 @@ export function Dock({
             viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
             workspaceName={activeWsName}
+            isFocused={isFocused}
             onSelectView={
               singlePaneId
                 ? (config) => onSetPaneView?.(singlePaneId, config)
@@ -198,6 +199,8 @@ function DockGrid({
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
   onResizePane?: (paneId: string, delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>) => void;
 }) {
+  const focusedDock = useDockStore((s) => s.focusedDock);
+  const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
@@ -245,6 +248,7 @@ function DockGrid({
     >
       {panes.map((pane) => {
         const isHovered = hoveredPane === pane.id;
+        const isPaneFocused = focusedDock === position && focusedDockPaneId === pane.id;
         return (
           <div
             key={pane.id}
@@ -265,6 +269,12 @@ function DockGrid({
               if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
             }}
           >
+            {isPaneFocused && (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
+              />
+            )}
             <PaneControlBar
               currentView={pane.view}
               hovered={isHovered}
@@ -297,6 +307,7 @@ function DockGrid({
                 viewConfig={pane.view}
                 paneId={pane.id}
                 workspaceName={activeWsName}
+                isFocused={isPaneFocused}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
                 emptyViewContext="dock"
                 location="dock"

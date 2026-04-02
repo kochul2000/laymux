@@ -5,12 +5,15 @@ import {
   getPortsForWorkspace,
   getLastCommandForWorkspace,
   computeWorkspaceSummary,
+  computeWorkspaceSummaryFromBackend,
   abbreviatePath,
+  mntPathToWindows,
   formatRelativeTime,
   formatPorts,
   formatCommand,
   formatActivity,
 } from "./workspace-summary";
+import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import type { TerminalInstance } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 
@@ -423,6 +426,30 @@ describe("abbreviatePath", () => {
   });
 });
 
+describe("mntPathToWindows", () => {
+  it("converts /mnt/c/Users/test to C:\\Users\\test", () => {
+    expect(mntPathToWindows("/mnt/c/Users/test")).toBe("C:\\Users\\test");
+  });
+
+  it("converts /mnt/d/Projects to D:\\Projects", () => {
+    expect(mntPathToWindows("/mnt/d/Projects")).toBe("D:\\Projects");
+  });
+
+  it("converts /mnt/c/ to C:\\", () => {
+    expect(mntPathToWindows("/mnt/c/")).toBe("C:\\");
+  });
+
+  it("converts /mnt/c to C:\\", () => {
+    expect(mntPathToWindows("/mnt/c")).toBe("C:\\");
+  });
+
+  it("returns non-mnt paths unchanged", () => {
+    expect(mntPathToWindows("/home/user")).toBe("/home/user");
+    expect(mntPathToWindows("/tmp")).toBe("/tmp");
+    expect(mntPathToWindows("C:\\Users")).toBe("C:\\Users");
+  });
+});
+
 describe("formatPorts", () => {
   it("returns empty string for no ports", () => {
     expect(formatPorts([])).toBe("");
@@ -501,6 +528,94 @@ describe("formatActivity", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
     expect(result.ralph).toBe(true);
     expect(result.label).toContain("®");
+  });
+});
+
+describe("computeWorkspaceSummaryFromBackend", () => {
+  function makeBackendSummary(
+    overrides: Partial<TerminalSummaryResponse> & { id: string },
+  ): TerminalSummaryResponse {
+    return {
+      profile: "WSL",
+      title: "",
+      cwd: null,
+      branch: null,
+      lastCommand: null,
+      lastExitCode: null,
+      lastCommandAt: null,
+      commandRunning: false,
+      activity: { type: "shell" },
+      outputActive: false,
+      isClaude: false,
+      unreadNotificationCount: 0,
+      latestNotification: null,
+      ...overrides,
+    };
+  }
+
+  it("uses provided ports for active workspace", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries, [3000, 8080]);
+    expect(result.ports).toEqual([3000, 8080]);
+  });
+
+  it("defaults to empty ports when not provided", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.ports).toEqual([]);
+  });
+
+  it("returns empty ports for inactive workspace", () => {
+    const summaries = [makeBackendSummary({ id: "t1" })];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries, []);
+    expect(result.ports).toEqual([]);
+  });
+
+  it("includes outputActive in terminal summaries", () => {
+    const summaries = [
+      makeBackendSummary({ id: "t1", outputActive: true }),
+      makeBackendSummary({ id: "t2", outputActive: false }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.terminalSummaries[0].outputActive).toBe(true);
+    expect(result.terminalSummaries[1].outputActive).toBe(false);
+  });
+
+  it("sets outputActive on workspace lastCommand from the source terminal", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "pytest",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+        outputActive: true,
+      }),
+      makeBackendSummary({
+        id: "t2",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 100,
+        outputActive: false,
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    // lastCommand should come from t1 (most recent) and carry its outputActive
+    expect(result.lastCommand?.command).toBe("pytest");
+    expect(result.lastCommand?.outputActive).toBe(true);
+  });
+
+  it("sets outputActive=false on workspace lastCommand when source terminal has no output", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+        outputActive: false,
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.lastCommand?.outputActive).toBe(false);
   });
 });
 
