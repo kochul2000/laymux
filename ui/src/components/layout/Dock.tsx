@@ -270,6 +270,12 @@ function DockGrid({
               if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
             }}
           >
+            {isPaneFocused && (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
+              />
+            )}
             <PaneControlBar
               currentView={pane.view}
               hovered={isHovered}

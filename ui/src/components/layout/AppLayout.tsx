@@ -175,7 +175,7 @@ export function AppLayout() {
           onResizePane={(paneId, delta) => resizeDockPane(pos, paneId, delta)}
         />
         <DockResizeHandle position={pos} />
-        {isFocused && (
+        {isFocused && dock.panes.length < 2 && (
           <div
             className="pointer-events-none absolute inset-0"
             style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}

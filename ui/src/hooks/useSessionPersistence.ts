@@ -169,12 +169,13 @@ export function useSessionPersistence() {
               : undefined;
             const effectiveActiveView = (saved.activeView as ViewType) ?? d.activeView;
             let effectivePanes = loadedPanes ?? d.panes;
-            // Ensure at least one pane exists when activeView is set
-            if (effectiveActiveView && effectivePanes.length === 0) {
+            // Ensure at least one pane exists for visible docks
+            const effectiveVisible = saved.visible ?? d.visible;
+            if (effectivePanes.length === 0 && effectiveVisible) {
               effectivePanes = [
                 {
                   id: `dp-${crypto.randomUUID().slice(0, 8)}`,
-                  view: { type: effectiveActiveView },
+                  view: { type: effectiveActiveView ?? "EmptyView" },
                   x: 0,
                   y: 0,
                   w: 1,
