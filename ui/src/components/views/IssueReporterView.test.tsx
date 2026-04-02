@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { IssueReporterView } from "./IssueReporterView";
+import { useSettingsStore } from "@/stores/settings-store";
 
 // Mock fetch for screenshot capture
 const mockFetch = vi.fn().mockResolvedValue({
@@ -25,6 +26,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 describe("IssueReporterView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     mockFetch.mockResolvedValue({
       json: () =>
         Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),
@@ -37,6 +39,28 @@ describe("IssueReporterView", () => {
     expect(screen.getByTestId("issue-title")).toBeInTheDocument();
     expect(screen.getByTestId("issue-body")).toBeInTheDocument();
     expect(screen.getByTestId("issue-submit")).toBeInTheDocument();
+  });
+
+  it("applies default padding (8px) from settings", () => {
+    render(<IssueReporterView />);
+    const view = screen.getByTestId("issue-reporter-view");
+    expect(view.style.padding).toBe("8px");
+  });
+
+  it("applies custom padding from settings", () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      issueReporter: {
+        ...useSettingsStore.getState().issueReporter,
+        paddingTop: 20,
+        paddingRight: 10,
+        paddingBottom: 5,
+        paddingLeft: 15,
+      },
+    });
+    render(<IssueReporterView />);
+    const view = screen.getByTestId("issue-reporter-view");
+    expect(view.style.padding).toBe("20px 10px 5px 15px");
   });
 
   it("disables submit button after successful submission", async () => {

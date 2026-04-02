@@ -407,13 +407,12 @@ impl Default for ConvenienceSettings {
 }
 
 fn default_memo_padding() -> u32 {
-    12
+    8
 }
 
 /// Issue reporter settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[derive(Default)]
 pub struct IssueReporterSettings {
     /// Shell prefix for running gh commands.
     /// When set, gh is invoked as: `{shell_parts...} gh {args...}`
@@ -421,6 +420,26 @@ pub struct IssueReporterSettings {
     /// When empty (default), gh is invoked directly.
     #[serde(default)]
     pub shell: String,
+    #[serde(default = "default_memo_padding")]
+    pub padding_top: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_right: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_bottom: u32,
+    #[serde(default = "default_memo_padding")]
+    pub padding_left: u32,
+}
+
+impl Default for IssueReporterSettings {
+    fn default() -> Self {
+        Self {
+            shell: String::new(),
+            padding_top: 8,
+            padding_right: 8,
+            padding_bottom: 8,
+            padding_left: 8,
+        }
+    }
 }
 
 /// MemoView settings (padding, etc.).
@@ -440,10 +459,10 @@ pub struct MemoSettings {
 impl Default for MemoSettings {
     fn default() -> Self {
         Self {
-            padding_top: 12,
-            padding_right: 12,
-            padding_bottom: 12,
-            padding_left: 12,
+            padding_top: 8,
+            padding_right: 8,
+            padding_bottom: 8,
+            padding_left: 8,
         }
     }
 }

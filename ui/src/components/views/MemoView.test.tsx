@@ -99,10 +99,10 @@ describe("MemoView", () => {
     expect(textarea.style.padding).toBe("20px 10px 5px 15px");
   });
 
-  it("uses default padding (12px) when no memo settings customized", () => {
+  it("uses default padding (8px) when no memo settings customized", () => {
     render(<MemoView memoKey="pane-default-pad" />);
     const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-    expect(textarea.style.padding).toBe("12px");
+    expect(textarea.style.padding).toBe("8px");
   });
 
   it("renders empty when loadMemo fails", async () => {

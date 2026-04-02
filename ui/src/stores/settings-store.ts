@@ -315,10 +315,18 @@ interface SettingsState {
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
 
 const DEFAULT_MEMO_PADDING: MemoSettings = {
-  paddingTop: 12,
-  paddingRight: 12,
-  paddingBottom: 12,
-  paddingLeft: 12,
+  paddingTop: 8,
+  paddingRight: 8,
+  paddingBottom: 8,
+  paddingLeft: 8,
+};
+
+const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
+  shell: "",
+  paddingTop: 8,
+  paddingRight: 8,
+  paddingBottom: 8,
+  paddingLeft: 8,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
@@ -657,7 +665,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
   memo: { ...DEFAULT_MEMO_PADDING },
-  issueReporter: { shell: "" },
+  issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
 
   setAppTheme: (appThemeId) => set({ appThemeId }),
@@ -844,7 +852,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
-      ? { shell: "", ...(data.issueReporter as Partial<IssueReporterSettings>) }
+      ? { ...DEFAULT_ISSUE_REPORTER, ...(data.issueReporter as Partial<IssueReporterSettings>) }
       : undefined;
     // Ensure memo settings have all fields (backwards compat)
     const memo = data.memo

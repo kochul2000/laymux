@@ -1492,6 +1492,49 @@ function IssueReporterSection() {
             onChange={(e) => updateIssueReporter({ shell: e.target.value })}
           />
         </SettingRow>
+
+        {/* Padding */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Padding
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              이슈 리포터 영역의 안쪽 여백 (px)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+                const key = `padding${dir}` as keyof typeof issueReporter;
+                return (
+                  <label key={dir} className="flex items-center gap-1.5">
+                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      {dir}
+                    </span>
+                    <input
+                      data-testid={`issue-reporter-padding-${dir.toLowerCase()}`}
+                      type="number"
+                      min={0}
+                      max={64}
+                      className={inputCls}
+                      style={{ width: 60 }}
+                      value={issueReporter[key]}
+                      onChange={(e) =>
+                        updateIssueReporter({
+                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
