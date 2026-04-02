@@ -77,6 +77,7 @@ export function IssueReporterView() {
       className="flex h-full flex-col"
       style={{
         color: "var(--text-primary)",
+        background: "var(--bg-base)",
         padding: `${ir.paddingTop}px ${ir.paddingRight}px ${ir.paddingBottom}px ${ir.paddingLeft}px`,
       }}
     >
