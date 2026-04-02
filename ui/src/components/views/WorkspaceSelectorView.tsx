@@ -46,13 +46,13 @@ function CountBadge({ count, testId }: { count: number; testId?: string }) {
   );
 }
 
-interface DragHandlers {
+interface DragContext {
   enabled: boolean;
-  isDragOver: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
+  dragOverId: string | null;
+  onDragStart: (e: React.DragEvent, wsId: string) => void;
+  onDragOver: (e: React.DragEvent, wsId: string) => void;
   onDragLeave: () => void;
-  onDrop: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent, wsId: string) => void;
   onDragEnd: () => void;
 }
 
@@ -77,7 +77,7 @@ function WorkspaceItem({
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
-  drag: DragHandlers;
+  drag: DragContext;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
@@ -110,10 +110,10 @@ function WorkspaceItem({
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onDragStart={drag.onDragStart}
-      onDragOver={drag.onDragOver}
+      onDragStart={(e) => drag.onDragStart(e, ws.id)}
+      onDragOver={(e) => drag.onDragOver(e, ws.id)}
       onDragLeave={drag.onDragLeave}
-      onDrop={drag.onDrop}
+      onDrop={(e) => drag.onDrop(e, ws.id)}
       onDragEnd={drag.onDragEnd}
       className="relative mb-0.5 cursor-pointer rounded py-2"
       style={{
@@ -123,7 +123,7 @@ function WorkspaceItem({
             ? "rgba(255,255,255,0.03)"
             : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: drag.isDragOver ? "2px solid var(--accent)" : "2px solid transparent",
+        borderTop: drag.dragOverId === ws.id ? "2px solid var(--accent)" : "2px solid transparent",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
       }}
@@ -815,11 +815,14 @@ export function WorkspaceSelectorView() {
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
   const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
-  const terminalPorts = new Map<string, number[]>();
+  const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(() => {
     if (workspaceSortOrder !== "notification") return workspaces;
+    // Pre-compute original indices for stable secondary sort (avoids indexOf reference issues)
+    const originalIndex = new Map<string, number>();
+    workspaces.forEach((ws, i) => originalIndex.set(ws.id, i));
     // Pre-compute latest unread notification time per workspace (O(M))
     const latestByWs = new Map<string, number>();
     for (const n of notifications) {
@@ -830,12 +833,9 @@ export function WorkspaceSelectorView() {
     return [...workspaces].sort((a, b) => {
       const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
       if (diff !== 0) return diff;
-      // Stable secondary sort: preserve original array order for equal notification times
-      return workspaces.indexOf(a) - workspaces.indexOf(b);
+      return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
     });
   }, [workspaces, notifications, workspaceSortOrder]);
-
-  const isManualSort = workspaceSortOrder === "manual";
 
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);
@@ -849,7 +849,7 @@ export function WorkspaceSelectorView() {
   const handleDragOver = useCallback((e: React.DragEvent, wsId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    setDragOverIndex(wsId);
+    setDragOverIndex((prev) => (prev === wsId ? prev : wsId));
   }, []);
 
   const handleDragLeave = useCallback(() => {
@@ -873,6 +873,22 @@ export function WorkspaceSelectorView() {
     setDragOverIndex(null);
     dragIdRef.current = null;
   }, []);
+
+  const isManualSort = workspaceSortOrder === "manual";
+
+  // Single shared drag context object — avoids creating N objects per render
+  const dragContext: DragContext = useMemo(
+    () => ({
+      enabled: isManualSort,
+      dragOverId: dragOverIndex,
+      onDragStart: handleDragStart,
+      onDragOver: handleDragOver,
+      onDragLeave: handleDragLeave,
+      onDrop: handleDrop,
+      onDragEnd: handleDragEnd,
+    }),
+    [isManualSort, dragOverIndex, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd],
+  );
 
   const handleSelectWorkspace = (wsId: string) => {
     markWorkspaceAsRead(wsId);
@@ -991,15 +1007,7 @@ export function WorkspaceSelectorView() {
               panes={ws.panes}
               canClose={workspaces.length > 1}
               pathEllipsis={pathEllipsis}
-              drag={{
-                enabled: isManualSort,
-                isDragOver: dragOverIndex === ws.id,
-                onDragStart: (e) => handleDragStart(e, ws.id),
-                onDragOver: (e) => handleDragOver(e, ws.id),
-                onDragLeave: handleDragLeave,
-                onDrop: (e) => handleDrop(e, ws.id),
-                onDragEnd: handleDragEnd,
-              }}
+              drag={dragContext}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
