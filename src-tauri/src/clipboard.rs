@@ -259,7 +259,7 @@ fn parse_dib_to_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let w = width as u32;
     let h = abs_height;
     let bytes_per_pixel = (bit_count / 8) as usize;
-    let row_stride = ((w as usize * bytes_per_pixel + 3) / 4) * 4; // 4-byte aligned
+    let row_stride = (w as usize * bytes_per_pixel).div_ceil(4) * 4; // 4-byte aligned
 
     // Pixel data starts after the header (and optional color masks for BI_BITFIELDS)
     let pixel_offset = if compression == 3 && header_size <= 40 {

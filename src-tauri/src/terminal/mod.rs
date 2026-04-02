@@ -178,7 +178,7 @@ impl TerminalSession {
             ShellType::PowerShell => {
                 let mut init = shell_integration_powershell();
                 if !startup_command.is_empty() {
-                    init.push_str("\n");
+                    init.push('\n');
                     init.push_str(startup_command);
                 }
                 (
@@ -244,8 +244,8 @@ impl SyncGroup {
 /// Overrides `prompt` to emit:
 /// - OSC 133;D (command exit code) — enables notify-on-fail
 /// - OSC 7 (current working directory) — enables sync-cwd
-/// Uses single quotes and concatenation to avoid double-quote escaping issues
-/// with PowerShell's -Command parameter.
+///   Uses single quotes and concatenation to avoid double-quote escaping issues
+///   with PowerShell's -Command parameter.
 fn shell_integration_powershell() -> String {
     // PowerShell 5.1 doesn't support `e escape — use [char]27 instead.
     // OSC sequences are embedded directly in the prompt return string.

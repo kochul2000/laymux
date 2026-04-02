@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 pub mod cli;
 
 use serde::{Deserialize, Serialize};
