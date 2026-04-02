@@ -25,10 +25,7 @@ const LABEL_ABBREV: Record<string, string> = {
   Debian: "DEB",
   Browser: "WEB",
   Empty: "---",
-  IssueReporterView: "ISS",
-  MemoView: "MEM",
-  SettingsView: "SET",
-  WorkspaceSelectorView: "WRK",
+  EmptyView: "---",
 };
 /** Check if a profile is a Windows-native shell (PowerShell, CMD) that uses Windows paths. */
 function isWindowsProfile(profile: string): boolean {
@@ -511,8 +508,6 @@ function WorkspaceItem({
                 );
               }
               // EmptyView or other view types (IssueReporterView, MemoView, etc.)
-              const viewLabel =
-                pane.view.type === "EmptyView" ? shortLabel("Empty") : shortLabel(pane.view.type);
               return (
                 <div
                   key={pane.id}
@@ -547,7 +542,7 @@ function WorkspaceItem({
                       className="shrink-0 font-medium"
                       style={{ color: "var(--text-secondary)", opacity: 0.4 }}
                     >
-                      {viewLabel}
+                      {shortLabel(pane.view.type)}
                     </span>
                   </div>
                 </div>
