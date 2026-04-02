@@ -115,6 +115,10 @@ pub fn create_terminal_session(
     let cwd_terminal_id = id.clone();
     let cwd_app = app.clone();
     let pty_handle = pty::spawn_pty(&session, move |data| {
+        // IMPORTANT: Each lock below is acquired and released independently (never nested).
+        // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
+        // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
+
         // Write to output buffer
         if let Ok(mut buffers) = output_buffers.lock() {
             if let Some(buf) = buffers.get_mut(&buffer_terminal_id) {

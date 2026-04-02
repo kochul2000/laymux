@@ -23,8 +23,8 @@ export function useBackendSummaries(terminalIds: string[]) {
     try {
       const result = await getTerminalSummaries(idsRef.current);
       setSummaries(result);
-    } catch {
-      // Backend unreachable (e.g., during shutdown)
+    } catch (err) {
+      console.warn("[useBackendSummaries] fetch failed:", err);
     }
   }, []);
 
