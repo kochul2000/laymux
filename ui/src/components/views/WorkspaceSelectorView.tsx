@@ -883,10 +883,18 @@ export function WorkspaceSelectorView() {
       <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
         {workspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
-          // Filter backend summaries for this workspace's terminal panes
+          // Filter backend summaries for this workspace's terminal panes.
+          // Fall back to lastCwd from settings when backend hasn't detected CWD yet
+          // (e.g., shell hasn't emitted OSC 7 after restart).
           const wsTerminalSummaries = ws.panes
             .filter((p) => p.view.type === "TerminalView")
-            .map((p) => summaryMap.get(`terminal-${p.id}`))
+            .map((p) => {
+              const summary = summaryMap.get(`terminal-${p.id}`);
+              if (summary && !summary.cwd && p.view.lastCwd) {
+                return { ...summary, cwd: p.view.lastCwd as string };
+              }
+              return summary;
+            })
             .filter(Boolean) as (typeof backendSummaries)[number][];
           const summary = computeWorkspaceSummaryFromBackend(
             ws.id,

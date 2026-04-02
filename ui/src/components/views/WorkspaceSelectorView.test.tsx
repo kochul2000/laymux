@@ -1180,4 +1180,45 @@ describe("WorkspaceSelectorView", () => {
 
     expect(screen.queryByTestId("terminal-activity-terminal-p1")).not.toBeInTheDocument();
   });
+
+  it("falls back to lastCwd from settings when backend has no CWD yet", async () => {
+    // Simulate app restart: pane has lastCwd but terminal hasn't emitted OSC 7 yet
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-fb1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: {
+                type: "TerminalView",
+                profile: "WSL",
+                lastCwd: "/home/user/myproject",
+              },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    // Register terminal instance WITHOUT cwd (shell hasn't started yet)
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-fb1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByText("~/myproject")).toBeInTheDocument();
+    });
+  });
 });
