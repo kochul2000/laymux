@@ -254,6 +254,7 @@ function WorkspaceItem({
             const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
             return panes.map((pane, paneIdx) => {
               const paneIndex = showMinimap ? paneIdx : -1;
+              const isFocusedPane = isActive && gridFocused === paneIdx;
               if (pane.view.type === "TerminalView") {
                 const termId = `terminal-${pane.id}`;
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
@@ -277,13 +278,22 @@ function WorkspaceItem({
                   <div
                     key={pane.id}
                     className="flex items-center gap-1.5 truncate text-[11px]"
-                    style={{ paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18 }}
+                    style={{
+                      paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
+                      ...(isFocusedPane
+                        ? {
+                            background: "rgba(137,180,250,0.08)",
+                            borderRadius: 3,
+                            color: "var(--text-primary)",
+                          }
+                        : {}),
+                    }}
                   >
                     {showMinimap && wsDisplay.minimap && (
                       <span
                         className="shrink-0"
                         data-testid={`pane-minimap-${termId}`}
-                        style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}
+                        style={{ opacity: isFocusedPane ? 1 : 0.5 }}
                       >
                         <PaneMinimap
                           panes={minimapPanes}
@@ -392,13 +402,22 @@ function WorkspaceItem({
                   <div
                     key={pane.id}
                     className="flex items-center gap-1.5 truncate text-[11px]"
-                    style={{ paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18 }}
+                    style={{
+                      paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
+                      ...(isFocusedPane
+                        ? {
+                            background: "rgba(137,180,250,0.08)",
+                            borderRadius: 3,
+                            color: "var(--text-primary)",
+                          }
+                        : {}),
+                    }}
                   >
                     {showMinimap && wsDisplay.minimap && (
                       <span
                         className="shrink-0"
                         data-testid={`pane-minimap-browser-${pane.id}`}
-                        style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}
+                        style={{ opacity: isFocusedPane ? 1 : 0.5 }}
                       >
                         <PaneMinimap
                           panes={minimapPanes}
@@ -455,13 +474,22 @@ function WorkspaceItem({
                 <div
                   key={pane.id}
                   className="flex items-center gap-1.5 truncate text-[11px]"
-                  style={{ paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18 }}
+                  style={{
+                    paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
+                    ...(isFocusedPane
+                      ? {
+                          background: "rgba(137,180,250,0.08)",
+                          borderRadius: 3,
+                          color: "var(--text-primary)",
+                        }
+                      : {}),
+                  }}
                 >
                   {showMinimap && wsDisplay.minimap && (
                     <span
                       className="shrink-0"
                       data-testid={`pane-minimap-empty-${pane.id}`}
-                      style={{ opacity: gridFocused === paneIdx ? 1 : 0.5 }}
+                      style={{ opacity: isFocusedPane ? 1 : 0.5 }}
                     >
                       <PaneMinimap
                         panes={minimapPanes}
