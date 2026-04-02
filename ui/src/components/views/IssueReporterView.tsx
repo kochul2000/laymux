@@ -7,7 +7,7 @@ interface IssueReporterViewProps {
   isFocused?: boolean;
 }
 
-export function IssueReporterView({ isFocused }: IssueReporterViewProps = {}) {
+export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [screenshotPath, setScreenshotPath] = useState<string | null>(null);
@@ -29,21 +29,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps = {}) {
       titleRef.current?.focus();
     }
   }, [isFocused]);
-
-  // Ctrl+Enter to submit
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "Enter") {
-        e.preventDefault();
-        handleSubmit();
-      }
-    };
-    const container = titleRef.current?.closest("[data-testid='issue-reporter-view']");
-    if (container) {
-      container.addEventListener("keydown", handleKeyDown as EventListener);
-      return () => container.removeEventListener("keydown", handleKeyDown as EventListener);
-    }
-  });
 
   const captureScreenshot = async () => {
     setState("capturing");
@@ -80,6 +65,13 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps = {}) {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
   const handleNewReport = () => {
     setTitle("");
     setBody("");
@@ -102,6 +94,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps = {}) {
     <div
       data-testid="issue-reporter-view"
       className="flex h-full flex-col"
+      onKeyDown={handleKeyDown}
       style={{
         color: "var(--text-primary)",
         background: "var(--bg-base)",
