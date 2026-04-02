@@ -827,9 +827,12 @@ export function WorkspaceSelectorView() {
       const prev = latestByWs.get(n.workspaceId) ?? 0;
       if (n.createdAt > prev) latestByWs.set(n.workspaceId, n.createdAt);
     }
-    return [...workspaces].sort(
-      (a, b) => (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0),
-    );
+    return [...workspaces].sort((a, b) => {
+      const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
+      if (diff !== 0) return diff;
+      // Stable secondary sort: preserve original array order for equal notification times
+      return workspaces.indexOf(a) - workspaces.indexOf(b);
+    });
   }, [workspaces, notifications, workspaceSortOrder]);
 
   const isManualSort = workspaceSortOrder === "manual";

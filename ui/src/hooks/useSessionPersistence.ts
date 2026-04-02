@@ -82,7 +82,10 @@ export function useSessionPersistence() {
               command: kb.command,
             })) ?? [],
           ...(rawSettings.workspaceSortOrder
-            ? { workspaceSortOrder: rawSettings.workspaceSortOrder as string }
+            ? {
+                workspaceSortOrder:
+                  rawSettings.workspaceSortOrder as import("@/stores/settings-store").WorkspaceSortOrder,
+              }
             : {}),
           ...(rawSettings.convenience
             ? {
