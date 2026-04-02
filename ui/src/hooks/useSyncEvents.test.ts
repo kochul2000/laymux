@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { useSyncEvents } from "./useSyncEvents";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+
+vi.mock("@/lib/persist-session", () => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+}));
+import { persistSession } from "@/lib/persist-session";
 
 // Mock tauri-api event listeners
 const mockOnSyncCwd = vi.fn();
@@ -294,6 +299,60 @@ describe("useSyncEvents", () => {
     expect(mockMarkClaudeTerminal).toHaveBeenCalledWith("t1");
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
     expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("calls persistSession (debounced) on terminal-cwd-changed event", async () => {
+    vi.useFakeTimers();
+    vi.mocked(persistSession).mockClear();
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalCwdChanged.mock.calls[0][0];
+    callback({ terminalId: "t1", cwd: "/home/user/a" });
+    callback({ terminalId: "t1", cwd: "/home/user/b" });
+
+    // Not called yet (debounced)
+    expect(persistSession).not.toHaveBeenCalled();
+
+    // Advance past debounce window
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // Called exactly once (debounced)
+    expect(persistSession).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("calls persistSession (debounced) on sync-cwd event", async () => {
+    vi.useFakeTimers();
+    vi.mocked(persistSession).mockClear();
+
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnSyncCwd.mock.calls[0][0];
+    callback({
+      path: "/home/user/project",
+      terminalId: "t1",
+      groupId: "g1",
+      targets: ["t1"],
+    });
+
+    expect(persistSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(persistSession).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it("does NOT call markClaudeTerminal for non-Claude commands", () => {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -12,6 +12,7 @@ import {
   onTerminalCwdChanged,
   markClaudeTerminal,
 } from "@/lib/tauri-api";
+import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
 import { detectActivityFromCommand } from "@/lib/activity-detection";
 
@@ -19,7 +20,19 @@ import { detectActivityFromCommand } from "@/lib/activity-detection";
  * Hook that listens for sync events from the Tauri backend
  * and updates the appropriate stores.
  */
+/** Debounce delay for persisting CWD changes to settings.json (ms). */
+const CWD_PERSIST_DEBOUNCE_MS = 2000;
+
 export function useSyncEvents() {
+  const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const debouncedPersistCwd = useCallback(() => {
+    if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
+    cwdPersistTimerRef.current = setTimeout(() => {
+      persistSession();
+    }, CWD_PERSIST_DEBOUNCE_MS);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
@@ -57,6 +70,7 @@ export function useSyncEvents() {
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           cwd: data.cwd,
         });
+        debouncedPersistCwd();
       }),
     );
 
@@ -73,6 +87,7 @@ export function useSyncEvents() {
         for (const targetId of targetSet) {
           updateInstanceInfo(targetId, { cwd: data.path });
         }
+        debouncedPersistCwd();
       }),
     );
 
@@ -180,6 +195,7 @@ export function useSyncEvents() {
 
     return () => {
       cancelled = true;
+      if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
       for (const unlisten of unlisteners) {
         unlisten();
       }

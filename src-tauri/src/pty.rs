@@ -38,6 +38,40 @@ fn expand_env_in_path(path: &str) -> String {
     result
 }
 
+/// Check if a path is a Unix-style path (starts with `/`).
+fn is_unix_path(path: &str) -> bool {
+    path.starts_with('/')
+}
+
+/// Check if the command executable is `wsl` or `wsl.exe`.
+fn is_wsl_command(cmd_path: &str) -> bool {
+    let lower = cmd_path.to_lowercase();
+    let stem = std::path::Path::new(&lower)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    stem == "wsl"
+}
+
+/// Convert a `/mnt/X/...` WSL path back to a Windows path `X:\...`.
+/// Returns `None` if the path is not a `/mnt/X/...` pattern.
+fn mnt_path_to_windows(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/mnt/")?;
+    let bytes = rest.as_bytes();
+    if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
+        return None;
+    }
+    let drive = bytes[0].to_ascii_uppercase() as char;
+    let tail = if bytes.len() > 1 && bytes[1] == b'/' {
+        rest[1..].replace('/', "\\")
+    } else if bytes.len() == 1 {
+        "\\".to_string()
+    } else {
+        return None;
+    };
+    Some(format!("{drive}:{tail}"))
+}
+
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -115,9 +149,29 @@ where
     // Set starting directory if configured
     if !session.config.starting_directory.is_empty() {
         let dir = expand_env_in_path(&session.config.starting_directory);
-        let path = std::path::Path::new(&dir);
-        if path.is_dir() {
-            cmd.cwd(path);
+        if is_unix_path(&dir) && is_wsl_command(&cmd_path) {
+            // WSL terminal with Unix path: inject --cd flag before existing args
+            cmd = CommandBuilder::new(&cmd_path);
+            cmd.arg("--cd");
+            cmd.arg(&dir);
+            for arg in &args {
+                cmd.arg(arg);
+            }
+            // Re-apply env vars
+            for (key, value) in &all_env {
+                cmd.env(key, value);
+            }
+        } else {
+            // For non-WSL commands, convert /mnt/X/... back to Windows path
+            let effective_dir = if is_unix_path(&dir) {
+                mnt_path_to_windows(&dir).unwrap_or(dir)
+            } else {
+                dir
+            };
+            let path = std::path::Path::new(&effective_dir);
+            if path.is_dir() {
+                cmd.cwd(path);
+            }
         }
     }
 
@@ -352,9 +406,148 @@ mod tests {
     }
 
     #[test]
+    fn mnt_path_to_windows_converts_correctly() {
+        assert_eq!(
+            mnt_path_to_windows("/mnt/c/Users/test"),
+            Some("C:\\Users\\test".into())
+        );
+        assert_eq!(
+            mnt_path_to_windows("/mnt/d/Projects/app"),
+            Some("D:\\Projects\\app".into())
+        );
+        assert_eq!(mnt_path_to_windows("/mnt/c/"), Some("C:\\".into()));
+        assert_eq!(mnt_path_to_windows("/mnt/c"), Some("C:\\".into()));
+        // Not a /mnt/ path
+        assert_eq!(mnt_path_to_windows("/home/user"), None);
+        assert_eq!(mnt_path_to_windows("/tmp"), None);
+        assert_eq!(mnt_path_to_windows("C:\\Users"), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn spawn_pty_powershell_with_mnt_path_restores_cwd() {
+        // PowerShell with a /mnt/c/... path should convert back to C:\...
+        let temp_dir = std::env::temp_dir();
+        let temp_str = temp_dir.to_string_lossy().to_string();
+        // Convert Windows temp path to /mnt/ format
+        let bytes = temp_str.as_bytes();
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let tail = temp_str[2..].replace('\\', "/");
+        let mnt_path = format!("/mnt/{drive}{tail}");
+
+        let session = TerminalSession::new(
+            "test-ps-mnt".into(),
+            TerminalConfig {
+                profile: "PowerShell".into(),
+                command_line: "powershell.exe -NoLogo".into(),
+                startup_command: String::new(),
+                starting_directory: mnt_path,
+                cols: 80,
+                rows: 24,
+                sync_group: "test-group".into(),
+                env: vec![],
+            },
+        );
+        let (tx, rx) = mpsc::channel();
+
+        let handle = spawn_pty(&session, move |data| {
+            let _ = tx.send(data);
+        });
+
+        assert!(
+            handle.is_ok(),
+            "PTY spawn should succeed with /mnt/ path for PowerShell"
+        );
+        let handle = handle.unwrap();
+
+        let _ = handle.write(b"(Get-Location).Path\r\n");
+
+        let mut output = String::new();
+        for _ in 0..30 {
+            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
+                output.push_str(&String::from_utf8_lossy(&data));
+                if output.to_lowercase().contains(&temp_str.to_lowercase()) {
+                    break;
+                }
+            }
+        }
+        assert!(
+            output.to_lowercase().contains("temp"),
+            "PowerShell should start in converted temp dir. Got: {output}"
+        );
+
+        let _ = handle.write(b"exit\r\n");
+    }
+
+    #[test]
     fn expand_env_handles_unknown_var() {
         let result = expand_env_in_path("%NONEXISTENT_VAR_12345%");
         // Should not panic, returns the original
         assert_eq!(result, "%NONEXISTENT_VAR_12345%");
+    }
+
+    #[test]
+    fn is_unix_path_detects_unix_paths() {
+        assert!(is_unix_path("/home/user"));
+        assert!(is_unix_path("/tmp"));
+        assert!(!is_unix_path("C:\\Users\\test"));
+        assert!(!is_unix_path(""));
+        assert!(!is_unix_path("relative/path"));
+    }
+
+    #[test]
+    fn is_wsl_command_detects_wsl() {
+        assert!(is_wsl_command("wsl.exe"));
+        assert!(is_wsl_command("wsl"));
+        assert!(is_wsl_command("C:\\Windows\\System32\\wsl.exe"));
+        assert!(is_wsl_command("WSL.EXE"));
+        assert!(!is_wsl_command("powershell.exe"));
+        assert!(!is_wsl_command("cmd.exe"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn spawn_pty_wsl_with_unix_starting_directory() {
+        // WSL with a Unix path should use --cd flag
+        let session = TerminalSession::new(
+            "test-wsl-cd".into(),
+            TerminalConfig {
+                profile: "WSL".into(),
+                command_line: "wsl.exe".into(),
+                startup_command: String::new(),
+                starting_directory: "/tmp".into(),
+                cols: 80,
+                rows: 24,
+                sync_group: "test-group".into(),
+                env: vec![],
+            },
+        );
+        let (tx, rx) = mpsc::channel();
+
+        let handle = spawn_pty(&session, move |data| {
+            let _ = tx.send(data);
+        });
+
+        assert!(handle.is_ok(), "PTY spawn should succeed with WSL --cd");
+        let handle = handle.unwrap();
+
+        // Ask for current directory
+        let _ = handle.write(b"pwd\n");
+
+        let mut output = String::new();
+        for _ in 0..30 {
+            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
+                output.push_str(&String::from_utf8_lossy(&data));
+                if output.contains("/tmp") {
+                    break;
+                }
+            }
+        }
+        assert!(
+            output.contains("/tmp"),
+            "WSL should start in /tmp. Got: {output}"
+        );
+
+        let _ = handle.write(b"exit\n");
     }
 }
