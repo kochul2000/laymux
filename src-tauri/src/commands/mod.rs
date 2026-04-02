@@ -971,6 +971,7 @@ fn build_gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Build a `gh` CLI command that runs without a visible console window on Windows.
 fn gh_command(shell_prefix: &str) -> std::process::Command {
+    #[allow(unused_mut)]
     let mut cmd = build_gh_command(shell_prefix);
 
     #[cfg(target_os = "windows")]
