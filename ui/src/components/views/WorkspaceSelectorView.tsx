@@ -852,6 +852,7 @@ export function WorkspaceSelectorView() {
 
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);
+  const dropPositionRef = useRef<"top" | "bottom">("top");
 
   const handleDragStart = useCallback((e: React.DragEvent, wsId: string) => {
     dragIdRef.current = wsId;
@@ -870,6 +871,7 @@ export function WorkspaceSelectorView() {
     // Determine top/bottom by mouse Y relative to target midpoint (sort-order agnostic)
     const rect = e.currentTarget.getBoundingClientRect();
     const position = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+    dropPositionRef.current = position;
     setDropIndicator((prev) =>
       prev?.wsId === wsId && prev?.position === position ? prev : { wsId, position },
     );
@@ -884,10 +886,11 @@ export function WorkspaceSelectorView() {
   const handleDrop = useCallback(
     (e: React.DragEvent, toId: string) => {
       e.preventDefault();
+      const position = dropPositionRef.current;
       setDropIndicator(null);
       const fromId = dragIdRef.current;
       if (fromId !== null && fromId !== toId) {
-        reorderWorkspaces(fromId, toId);
+        reorderWorkspaces(fromId, toId, position);
       }
       dragIdRef.current = null;
     },

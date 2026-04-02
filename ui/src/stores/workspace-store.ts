@@ -72,7 +72,7 @@ interface WorkspaceState {
   duplicateWorkspace: (id: string) => void;
   removeWorkspace: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
-  reorderWorkspaces: (fromId: string, toId: string) => void;
+  reorderWorkspaces: (fromId: string, toId: string, position?: "top" | "bottom") => void;
 
   // Pane manipulation
   splitPane: (paneIndex: number, direction: "horizontal" | "vertical") => void;
@@ -167,7 +167,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }));
   },
 
-  reorderWorkspaces: (fromId, toId) => {
+  reorderWorkspaces: (fromId, toId, position = "top") => {
     const { workspaces } = get();
     if (fromId === toId) return;
     const fromIndex = workspaces.findIndex((ws) => ws.id === fromId);
@@ -176,7 +176,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     const newWorkspaces = [...workspaces];
     const [moved] = newWorkspaces.splice(fromIndex, 1);
-    newWorkspaces.splice(toIndex, 0, moved);
+    // After splice, toIndex may have shifted — recalculate based on toId
+    const insertIndex = newWorkspaces.findIndex((ws) => ws.id === toId);
+    newWorkspaces.splice(position === "bottom" ? insertIndex + 1 : insertIndex, 0, moved);
     set({ workspaces: newWorkspaces });
   },
 

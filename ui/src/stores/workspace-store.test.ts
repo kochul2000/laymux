@@ -361,6 +361,18 @@ describe("WorkspaceStore", () => {
       expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
     });
 
+    it("inserts after target when position is 'bottom'", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+      addWorkspace("WS3", layouts[0].id);
+
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      // Move first to after second (bottom of ids[1])
+      useWorkspaceStore.getState().reorderWorkspaces(ids[0], ids[1], "bottom");
+      const after = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      expect(after).toEqual([ids[1], ids[0], ids[2]]);
+    });
+
     it("preserves pane IDs after reorder", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);

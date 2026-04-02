@@ -978,12 +978,13 @@ describe("WorkspaceSelectorView", () => {
       const item1 = screen.getByTestId("workspace-item-ws-1");
       const item3 = screen.getByTestId("workspace-item-ws-3");
 
-      // Simulate drag ws-1 onto ws-3
+      // Simulate drag ws-1 onto ws-3 (jsdom getBoundingClientRect returns 0s,
+      // so clientY=0 < top=0 + height=0/2 is false → position="bottom")
       fireEvent.dragStart(item1, { dataTransfer: { setData: vi.fn(), effectAllowed: "" } });
       fireEvent.dragOver(item3, { dataTransfer: { dropEffect: "" }, preventDefault: vi.fn() });
       fireEvent.drop(item3, { dataTransfer: { getData: () => "ws-1" }, preventDefault: vi.fn() });
 
-      // ws-1 moved to ws-3's position: splice removes ws-1 → [ws-2, ws-3], then inserts at index 2 → [ws-2, ws-3, ws-1]
+      // position="bottom" → ws-1 inserted after ws-3: [ws-2, ws-3, ws-1]
       const workspaces = useWorkspaceStore.getState().workspaces;
       expect(workspaces).toHaveLength(3);
       expect(workspaces.map((w) => w.id)).toEqual(["ws-2", "ws-3", "ws-1"]);
