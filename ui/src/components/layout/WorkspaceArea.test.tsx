@@ -176,4 +176,28 @@ describe("WorkspaceArea", () => {
 
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
+
+  it("preserves pane DOM elements when workspaces are reordered", () => {
+    // Setup: create 2 workspaces with distinct pane IDs
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+    const wsIds = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+    expect(wsIds).toHaveLength(2);
+
+    render(<WorkspaceArea />);
+
+    // Find the active workspace's pane element before reorder
+    const paneBefore = screen.getByTestId("workspace-pane-0");
+    // Mark the DOM node so we can verify identity after reorder
+    (paneBefore as HTMLElement).dataset.marker = "identity-check";
+
+    // Reorder workspaces (swap order)
+    act(() => {
+      useWorkspaceStore.getState().reorderWorkspaces(wsIds[1], wsIds[0]);
+    });
+
+    // The same pane element should still be in the DOM (not remounted)
+    const paneAfter = screen.getByTestId("workspace-pane-0");
+    expect(paneAfter.dataset.marker).toBe("identity-check");
+  });
 });

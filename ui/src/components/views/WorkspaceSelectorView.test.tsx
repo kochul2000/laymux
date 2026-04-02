@@ -1237,10 +1237,10 @@ describe("WorkspaceSelectorView", () => {
       fireEvent.dragOver(item3, { dataTransfer: { dropEffect: "" }, preventDefault: vi.fn() });
       fireEvent.drop(item3, { dataTransfer: { getData: () => "ws-1" }, preventDefault: vi.fn() });
 
-      // position="bottom" → ws-1 inserted after ws-3: [ws-2, ws-3, ws-1]
-      const workspaces = useWorkspaceStore.getState().workspaces;
-      expect(workspaces).toHaveLength(3);
-      expect(workspaces.map((w) => w.id)).toEqual(["ws-2", "ws-3", "ws-1"]);
+      // position="bottom" → display order: [ws-2, ws-3, ws-1]
+      // workspaces array is NOT modified — only display order changes
+      const { workspaceDisplayOrder } = useWorkspaceStore.getState();
+      expect(workspaceDisplayOrder).toEqual(["ws-2", "ws-3", "ws-1"]);
     });
   });
 

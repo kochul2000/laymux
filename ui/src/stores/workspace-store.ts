@@ -65,6 +65,8 @@ interface WorkspaceState {
   layouts: Layout[];
   workspaces: Workspace[];
   activeWorkspaceId: string;
+  /** Display order for WorkspaceSelectorView. Empty = natural workspaces array order. */
+  workspaceDisplayOrder: string[];
 
   getActiveWorkspace: () => Workspace | undefined;
   setActiveWorkspace: (id: string) => void;
@@ -98,6 +100,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   layouts: [defaultLayout],
   workspaces: [defaultWorkspace],
   activeWorkspaceId: defaultWorkspace.id,
+  workspaceDisplayOrder: [] as string[],
 
   getActiveWorkspace: () => {
     const { workspaces, activeWorkspaceId } = get();
@@ -124,7 +127,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       panes: layout.panes.map(toWorkspacePane),
     };
 
-    set((state) => ({ workspaces: [...state.workspaces, ws] }));
+    set((state) => ({
+      workspaces: [...state.workspaces, ws],
+      workspaceDisplayOrder:
+        state.workspaceDisplayOrder.length > 0 ? [...state.workspaceDisplayOrder, ws.id] : [],
+    }));
   },
 
   duplicateWorkspace: (id) => {
@@ -145,7 +152,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       })),
     };
 
-    set((state) => ({ workspaces: [...state.workspaces, duplicate] }));
+    set((state) => ({
+      workspaces: [...state.workspaces, duplicate],
+      workspaceDisplayOrder:
+        state.workspaceDisplayOrder.length > 0
+          ? [...state.workspaceDisplayOrder, duplicate.id]
+          : [],
+    }));
   },
 
   removeWorkspace: (id) => {
@@ -155,7 +168,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const filtered = workspaces.filter((ws) => ws.id !== id);
     const newActive = activeWorkspaceId === id ? filtered[0].id : activeWorkspaceId;
 
-    set({ workspaces: filtered, activeWorkspaceId: newActive });
+    set((state) => ({
+      workspaces: filtered,
+      activeWorkspaceId: newActive,
+      workspaceDisplayOrder: state.workspaceDisplayOrder.filter((wsId) => wsId !== id),
+    }));
   },
 
   renameWorkspace: (id, name) => {
@@ -168,18 +185,19 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   reorderWorkspaces: (fromId, toId, position = "top") => {
-    const { workspaces } = get();
     if (fromId === toId) return;
-    const fromIndex = workspaces.findIndex((ws) => ws.id === fromId);
-    const toIndex = workspaces.findIndex((ws) => ws.id === toId);
-    if (fromIndex === -1 || toIndex === -1) return;
+    const { workspaces, workspaceDisplayOrder } = get();
+    // Materialise display order if empty (first reorder)
+    const order =
+      workspaceDisplayOrder.length > 0 ? [...workspaceDisplayOrder] : workspaces.map((ws) => ws.id);
+    const fromIdx = order.indexOf(fromId);
+    const toIdx = order.indexOf(toId);
+    if (fromIdx === -1 || toIdx === -1) return;
 
-    const newWorkspaces = [...workspaces];
-    const [moved] = newWorkspaces.splice(fromIndex, 1);
-    // After splice, toIndex may have shifted — recalculate based on toId
-    const insertIndex = newWorkspaces.findIndex((ws) => ws.id === toId);
-    newWorkspaces.splice(position === "bottom" ? insertIndex + 1 : insertIndex, 0, moved);
-    set({ workspaces: newWorkspaces });
+    order.splice(fromIdx, 1);
+    const insertIdx = order.indexOf(toId);
+    order.splice(position === "bottom" ? insertIdx + 1 : insertIdx, 0, fromId);
+    set({ workspaceDisplayOrder: order });
   },
 
   splitPane: (paneIndex, direction) => {

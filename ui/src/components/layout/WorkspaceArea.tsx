@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
@@ -58,99 +58,106 @@ export function WorkspaceArea() {
     <div ref={containerRef} data-testid="workspace-area" className="relative h-full w-full">
       {workspaces.map((ws) => {
         const isActive = ws.id === activeWorkspaceId;
-        return ws.panes.map((pane, i) => {
-          const isFocused = isActive && focusedPaneIndex === i && focusedDock === null;
-          const isHovered = hoveredPane === pane.id || (isActive && automationHoverIndex === i);
+        return (
+          <React.Fragment key={ws.id}>
+            {ws.panes.map((pane, i) => {
+              const isFocused = isActive && focusedPaneIndex === i && focusedDock === null;
+              const isHovered = hoveredPane === pane.id || (isActive && automationHoverIndex === i);
 
-          return (
-            <div
-              key={pane.id}
-              data-testid={isActive ? `workspace-pane-${i}` : undefined}
-              className="absolute overflow-hidden"
-              onMouseDown={() => {
-                if (!isActive) return;
-                setFocusedPane(i);
-                useDockStore.getState().setFocusedDock(null);
-              }}
-              onMouseEnter={() => isActive && handlePaneHoverActivity(pane.id)}
-              onMouseMove={() => isActive && handlePaneHoverActivity(pane.id)}
-              onMouseLeave={() => {
-                setHoveredPane(null);
-                if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-              }}
-              style={{
-                left: `${pane.x * 100}%`,
-                top: `${pane.y * 100}%`,
-                width: `${pane.w * 100}%`,
-                height: `${pane.h * 100}%`,
-                display: isActive ? undefined : "none",
-                borderRight: "2px solid var(--border)",
-                borderBottom: "2px solid var(--border)",
-              }}
-            >
-              {/* Focus indicator overlay — above content, like Dock */}
-              {isFocused && (
+              return (
                 <div
-                  data-testid="pane-focus-indicator"
-                  className="pointer-events-none absolute inset-0"
-                  style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
-                />
-              )}
-              {/* Browser iframe click capture overlay */}
-              {isActive && pane.view.type === "BrowserPreviewView" && !isFocused && (
-                <div data-testid={`pane-focus-overlay-${i}`} className="absolute inset-0 z-10" />
-              )}
-
-              <PaneControlBar
-                currentView={pane.view}
-                hovered={isActive && isHovered}
-                actions={{
-                  onChangeView: isActive ? (config) => setPaneView(i, config) : undefined,
-                  onSplitH: isActive ? () => splitPane(i, "horizontal") : undefined,
-                  onSplitV: isActive ? () => splitPane(i, "vertical") : undefined,
-                  onClear: isActive ? () => setPaneView(i, { type: "EmptyView" }) : undefined,
-                  onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
-                  onToggleCwdSend:
-                    isActive && pane.view.type === "TerminalView"
-                      ? () => {
-                          const profileName =
-                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
-                          const resolved = resolveSyncCwdForProfile(profileName, location);
-                          const current =
-                            (pane.view.cwdSend as boolean | undefined) ?? resolved.send;
-                          setPaneView(i, { ...pane.view, cwdSend: !current });
-                        }
-                      : undefined,
-                  onToggleCwdReceive:
-                    isActive && pane.view.type === "TerminalView"
-                      ? () => {
-                          const profileName =
-                            (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
-                          const resolved = resolveSyncCwdForProfile(profileName, location);
-                          const current =
-                            (pane.view.cwdReceive as boolean | undefined) ?? resolved.receive;
-                          setPaneView(i, { ...pane.view, cwdReceive: !current });
-                        }
-                      : undefined,
-                }}
-              >
-                <ViewRenderer
-                  viewType={pane.view.type}
-                  viewConfig={pane.view}
-                  onSelectView={isActive ? (config) => setPaneView(i, config) : undefined}
-                  workspaceName={ws.name}
-                  workspaceId={ws.id}
-                  paneId={pane.id}
-                  isFocused={isFocused}
-                  onKeyboardActivity={() => {
+                  key={pane.id}
+                  data-testid={isActive ? `workspace-pane-${i}` : undefined}
+                  className="absolute overflow-hidden"
+                  onMouseDown={() => {
+                    if (!isActive) return;
+                    setFocusedPane(i);
+                    useDockStore.getState().setFocusedDock(null);
+                  }}
+                  onMouseEnter={() => isActive && handlePaneHoverActivity(pane.id)}
+                  onMouseMove={() => isActive && handlePaneHoverActivity(pane.id)}
+                  onMouseLeave={() => {
                     setHoveredPane(null);
                     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
                   }}
-                />
-              </PaneControlBar>
-            </div>
-          );
-        });
+                  style={{
+                    left: `${pane.x * 100}%`,
+                    top: `${pane.y * 100}%`,
+                    width: `${pane.w * 100}%`,
+                    height: `${pane.h * 100}%`,
+                    display: isActive ? undefined : "none",
+                    borderRight: "2px solid var(--border)",
+                    borderBottom: "2px solid var(--border)",
+                  }}
+                >
+                  {/* Focus indicator overlay — above content, like Dock */}
+                  {isFocused && (
+                    <div
+                      data-testid="pane-focus-indicator"
+                      className="pointer-events-none absolute inset-0"
+                      style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
+                    />
+                  )}
+                  {/* Browser iframe click capture overlay */}
+                  {isActive && pane.view.type === "BrowserPreviewView" && !isFocused && (
+                    <div
+                      data-testid={`pane-focus-overlay-${i}`}
+                      className="absolute inset-0 z-10"
+                    />
+                  )}
+
+                  <PaneControlBar
+                    currentView={pane.view}
+                    hovered={isActive && isHovered}
+                    actions={{
+                      onChangeView: isActive ? (config) => setPaneView(i, config) : undefined,
+                      onSplitH: isActive ? () => splitPane(i, "horizontal") : undefined,
+                      onSplitV: isActive ? () => splitPane(i, "vertical") : undefined,
+                      onClear: isActive ? () => setPaneView(i, { type: "EmptyView" }) : undefined,
+                      onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
+                      onToggleCwdSend:
+                        isActive && pane.view.type === "TerminalView"
+                          ? () => {
+                              const profileName =
+                                (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
+                              const resolved = resolveSyncCwdForProfile(profileName, location);
+                              const current =
+                                (pane.view.cwdSend as boolean | undefined) ?? resolved.send;
+                              setPaneView(i, { ...pane.view, cwdSend: !current });
+                            }
+                          : undefined,
+                      onToggleCwdReceive:
+                        isActive && pane.view.type === "TerminalView"
+                          ? () => {
+                              const profileName =
+                                (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
+                              const resolved = resolveSyncCwdForProfile(profileName, location);
+                              const current =
+                                (pane.view.cwdReceive as boolean | undefined) ?? resolved.receive;
+                              setPaneView(i, { ...pane.view, cwdReceive: !current });
+                            }
+                          : undefined,
+                    }}
+                  >
+                    <ViewRenderer
+                      viewType={pane.view.type}
+                      viewConfig={pane.view}
+                      onSelectView={isActive ? (config) => setPaneView(i, config) : undefined}
+                      workspaceName={ws.name}
+                      workspaceId={ws.id}
+                      paneId={pane.id}
+                      isFocused={isFocused}
+                      onKeyboardActivity={() => {
+                        setHoveredPane(null);
+                        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                      }}
+                    />
+                  </PaneControlBar>
+                </div>
+              );
+            })}
+          </React.Fragment>
+        );
       })}
       <PaneBoundaryHandles containerWidth={size.w} containerHeight={size.h} />
     </div>

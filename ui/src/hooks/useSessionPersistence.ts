@@ -2,7 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { loadSettings, cleanTerminalOutputCache } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useSettingsStore, makeDefaultColorScheme, type WorkspaceSortOrder } from "@/stores/settings-store";
+import {
+  useSettingsStore,
+  makeDefaultColorScheme,
+  type WorkspaceSortOrder,
+} from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import type { ViewType, Layout, Workspace, DockPosition } from "@/stores/types";
 
@@ -136,6 +140,9 @@ export function useSessionPersistence() {
             layouts,
             workspaces,
             activeWorkspaceId: workspaces[0]?.id ?? "ws-default",
+            workspaceDisplayOrder: Array.isArray(rawSettings.workspaceDisplayOrder)
+              ? (rawSettings.workspaceDisplayOrder as string[])
+              : [],
           });
         }
 

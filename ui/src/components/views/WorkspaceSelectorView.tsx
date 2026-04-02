@@ -828,6 +828,7 @@ export function WorkspaceSelectorView() {
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
+  const workspaceDisplayOrder = useWorkspaceStore((s) => s.workspaceDisplayOrder);
   const layouts = useWorkspaceStore((s) => s.layouts);
   const renameLayout = useWorkspaceStore((s) => s.renameLayout);
   const removeLayout = useWorkspaceStore((s) => s.removeLayout);
@@ -874,23 +875,28 @@ export function WorkspaceSelectorView() {
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(() => {
-    if (workspaceSortOrder !== "notification") return workspaces;
-    // Pre-compute original indices for stable secondary sort (avoids indexOf reference issues)
-    const originalIndex = new Map<string, number>();
-    workspaces.forEach((ws, i) => originalIndex.set(ws.id, i));
-    // Pre-compute latest unread notification time per workspace (O(M))
-    const latestByWs = new Map<string, number>();
-    for (const n of notifications) {
-      if (n.readAt !== null) continue;
-      const prev = latestByWs.get(n.workspaceId) ?? 0;
-      if (n.createdAt > prev) latestByWs.set(n.workspaceId, n.createdAt);
+    if (workspaceSortOrder === "notification") {
+      const originalIndex = new Map<string, number>();
+      workspaces.forEach((ws, i) => originalIndex.set(ws.id, i));
+      const latestByWs = new Map<string, number>();
+      for (const n of notifications) {
+        if (n.readAt !== null) continue;
+        const prev = latestByWs.get(n.workspaceId) ?? 0;
+        if (n.createdAt > prev) latestByWs.set(n.workspaceId, n.createdAt);
+      }
+      return [...workspaces].sort((a, b) => {
+        const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
+        if (diff !== 0) return diff;
+        return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
+      });
     }
-    return [...workspaces].sort((a, b) => {
-      const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
-      if (diff !== 0) return diff;
-      return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
-    });
-  }, [workspaces, notifications, workspaceSortOrder]);
+    // Manual sort: use workspaceDisplayOrder if available
+    if (workspaceDisplayOrder.length === 0) return workspaces;
+    const orderMap = new Map(workspaceDisplayOrder.map((id, i) => [id, i]));
+    return [...workspaces].sort(
+      (a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity),
+    );
+  }, [workspaces, workspaceDisplayOrder, notifications, workspaceSortOrder]);
 
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);

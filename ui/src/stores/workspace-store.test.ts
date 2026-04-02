@@ -327,38 +327,35 @@ describe("WorkspaceStore", () => {
   });
 
   describe("reorderWorkspaces", () => {
-    it("reorders workspaces by moving an item by ID", () => {
+    it("updates workspaceDisplayOrder without touching workspaces array", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);
       addWorkspace("WS3", layouts[0].id);
 
-      const before = useWorkspaceStore.getState().workspaces;
-      expect(before).toHaveLength(3);
-      const ids = before.map((ws) => ws.id);
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      const wsRefBefore = useWorkspaceStore.getState().workspaces;
 
-      // Move last to first position
       useWorkspaceStore.getState().reorderWorkspaces(ids[2], ids[0]);
-      const after = useWorkspaceStore.getState().workspaces;
-      expect(after.map((ws) => ws.id)).toEqual([ids[2], ids[0], ids[1]]);
+
+      // workspaces array must be the SAME reference (untouched)
+      expect(useWorkspaceStore.getState().workspaces).toBe(wsRefBefore);
+      // display order reflects the move
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([ids[2], ids[0], ids[1]]);
     });
 
     it("does nothing for same from/to ID", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);
 
-      const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      useWorkspaceStore.getState().reorderWorkspaces(before[0], before[0]);
-      const after = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      expect(after).toEqual(before);
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      useWorkspaceStore.getState().reorderWorkspaces(ids[0], ids[0]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([]);
     });
 
     it("does nothing for non-existent IDs", () => {
-      const before = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      useWorkspaceStore.getState().reorderWorkspaces("nonexistent", before[0]);
-      expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
-
-      useWorkspaceStore.getState().reorderWorkspaces(before[0], "nonexistent");
-      expect(useWorkspaceStore.getState().workspaces.map((ws) => ws.id)).toEqual(before);
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      useWorkspaceStore.getState().reorderWorkspaces("nonexistent", ids[0]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([]);
     });
 
     it("inserts after target when position is 'bottom'", () => {
@@ -367,24 +364,36 @@ describe("WorkspaceStore", () => {
       addWorkspace("WS3", layouts[0].id);
 
       const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      // Move first to after second (bottom of ids[1])
       useWorkspaceStore.getState().reorderWorkspaces(ids[0], ids[1], "bottom");
-      const after = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
-      expect(after).toEqual([ids[1], ids[0], ids[2]]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([ids[1], ids[0], ids[2]]);
     });
 
-    it("preserves pane IDs after reorder", () => {
+    it("appends new workspace to display order when order is active", () => {
       const { addWorkspace, layouts } = useWorkspaceStore.getState();
       addWorkspace("WS2", layouts[0].id);
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
 
-      const before = useWorkspaceStore.getState().workspaces;
-      const paneIds0 = before[0].panes.map((p) => p.id);
-      const paneIds1 = before[1].panes.map((p) => p.id);
+      // Activate display order via a reorder
+      useWorkspaceStore.getState().reorderWorkspaces(ids[1], ids[0]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([ids[1], ids[0]]);
 
-      useWorkspaceStore.getState().reorderWorkspaces(before[1].id, before[0].id);
-      const after = useWorkspaceStore.getState().workspaces;
-      expect(after[0].panes.map((p) => p.id)).toEqual(paneIds1);
-      expect(after[1].panes.map((p) => p.id)).toEqual(paneIds0);
+      // Add WS3 — should appear at end of display order
+      addWorkspace("WS3", layouts[0].id);
+      const newId = useWorkspaceStore.getState().workspaces[2].id;
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([ids[1], ids[0], newId]);
+    });
+
+    it("removes workspace from display order on delete", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      // Activate display order
+      useWorkspaceStore.getState().reorderWorkspaces(ids[1], ids[0]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toHaveLength(2);
+
+      useWorkspaceStore.getState().removeWorkspace(ids[0]);
+      expect(useWorkspaceStore.getState().workspaceDisplayOrder).toEqual([ids[1]]);
     });
   });
 

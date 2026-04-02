@@ -54,6 +54,12 @@ const handlers: HandlerMap = {
       useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
       return ok({ renamed: p.id });
     },
+    reorder: (p) => {
+      useWorkspaceStore
+        .getState()
+        .reorderWorkspaces(p.fromId as string, p.toId as string, p.position as "top" | "bottom");
+      return ok({ reordered: true });
+    },
     getSummary: (p) => {
       const wsId = p.id as string;
       const { instances } = useTerminalStore.getState();

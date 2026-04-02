@@ -413,4 +413,25 @@ describe("useAutomationBridge hook", () => {
       expect.anything(),
     );
   });
+
+  it("reorders workspaces via automation API", () => {
+    // Create additional workspaces
+    const { addWorkspace, layouts } = useWorkspaceStore.getState();
+    addWorkspace("WS2", layouts[0].id);
+    addWorkspace("WS3", layouts[0].id);
+    const idsBefore = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+    expect(idsBefore).toHaveLength(3);
+
+    const result = handleAutomationRequest({
+      requestId: "reorder-1",
+      category: "action",
+      target: "workspaces",
+      method: "reorder",
+      params: { fromId: idsBefore[2], toId: idsBefore[0], position: "top" },
+    });
+    expect(result.success).toBe(true);
+
+    const { workspaceDisplayOrder } = useWorkspaceStore.getState();
+    expect(workspaceDisplayOrder).toEqual([idsBefore[2], idsBefore[0], idsBefore[1]]);
+  });
 });

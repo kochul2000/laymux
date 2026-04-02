@@ -242,6 +242,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/workspaces/active"),
     ("POST", "/api/v1/workspaces/active"),
     ("PUT", "/api/v1/workspaces/{id}"),
+    ("POST", "/api/v1/workspaces/reorder"),
     ("DELETE", "/api/v1/workspaces/{id}"),
     ("POST", "/api/v1/layouts/export"),
     ("GET", "/api/v1/grid"),
@@ -286,6 +287,7 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/workspaces", post(workspaces_create))
         .route("/api/v1/workspaces/active", get(workspaces_get_active))
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
+        .route("/api/v1/workspaces/reorder", post(workspaces_reorder))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
         .route("/api/v1/layouts/export", post(layouts_export))
@@ -394,6 +396,11 @@ async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/workspaces/{id}",
                 "description": "Rename a workspace.",
                 "body": { "name": "string — new name" }
+            },
+            {
+                "method": "POST", "path": "/api/v1/workspaces/reorder",
+                "description": "Reorder workspaces by moving one before/after another.",
+                "body": { "fromId": "string — workspace ID to move", "toId": "string — target workspace ID", "position": "string (optional) — 'top' (default) or 'bottom'" }
             },
             {
                 "method": "DELETE", "path": "/api/v1/workspaces/{id}",
@@ -806,6 +813,30 @@ async fn workspaces_delete(
         "workspaces",
         "remove",
         serde_json::json!({ "id": id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+async fn workspaces_reorder(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let from_id = body.get("fromId").and_then(|v| v.as_str()).unwrap_or("");
+    let to_id = body.get("toId").and_then(|v| v.as_str()).unwrap_or("");
+    let position = body
+        .get("position")
+        .and_then(|v| v.as_str())
+        .unwrap_or("top");
+    match bridge_request(
+        &state,
+        "action",
+        "workspaces",
+        "reorder",
+        serde_json::json!({ "fromId": from_id, "toId": to_id, "position": position }),
     )
     .await
     {

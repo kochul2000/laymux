@@ -141,6 +141,7 @@ async function persistSessionCore(): Promise<void> {
         };
       }),
     })),
+    workspaceDisplayOrder: wsState.workspaceDisplayOrder,
     workspaceSortOrder: settingsState.workspaceSortOrder,
     convenience: { ...settingsState.convenience },
     workspaceDisplay: { ...settingsState.workspaceDisplay },

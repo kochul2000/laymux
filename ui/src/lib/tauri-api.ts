@@ -170,6 +170,7 @@ export interface Settings {
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
+  workspaceDisplayOrder?: string[];
   workspaceSortOrder?: import("@/stores/settings-store").WorkspaceSortOrder;
   convenience: ConvenienceSettings;
   workspaceDisplay?: WorkspaceDisplaySettings;
