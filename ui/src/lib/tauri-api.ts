@@ -99,7 +99,7 @@ export interface WindowGeometry {
 }
 
 export async function saveWindowGeometry(geo: WindowGeometry): Promise<void> {
-  return invoke("save_window_geometry", geo);
+  return invoke("save_window_geometry", { ...geo });
 }
 
 export async function loadWindowGeometry(): Promise<WindowGeometry | null> {
