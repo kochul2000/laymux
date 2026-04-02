@@ -215,6 +215,66 @@ describe("IssueReporterView", () => {
     });
   });
 
+  it("focuses title input when isFocused becomes true", async () => {
+    const { rerender } = render(<IssueReporterView isFocused={false} />);
+    const titleInput = screen.getByTestId("issue-title");
+    expect(document.activeElement).not.toBe(titleInput);
+
+    rerender(<IssueReporterView isFocused={true} />);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(titleInput);
+    });
+  });
+
+  it("submits issue with Ctrl+Enter from title input", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+
+    render(<IssueReporterView isFocused={true} />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+        title: "Test issue",
+        body: "",
+        screenshotPath: "/tmp/screenshot.png",
+      });
+    });
+  });
+
+  it("submits issue with Ctrl+Enter from body textarea", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+
+    render(<IssueReporterView isFocused={true} />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.click(screen.getByTestId("issue-body"));
+    await user.type(screen.getByTestId("issue-body"), "Some description");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+        title: "Test issue",
+        body: "Some description",
+        screenshotPath: "/tmp/screenshot.png",
+      });
+    });
+  });
+
+  it("does not submit with Ctrl+Enter when title is empty", async () => {
+    const user = userEvent.setup();
+
+    render(<IssueReporterView isFocused={true} />);
+
+    await user.click(screen.getByTestId("issue-body"));
+    await user.keyboard("{Control>}{Enter}{/Control}");
+
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
   it("awaits shell open and handles errors gracefully", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");

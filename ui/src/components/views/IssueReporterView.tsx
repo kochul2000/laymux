@@ -3,7 +3,11 @@ import { useSettingsStore } from "@/stores/settings-store";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
-export function IssueReporterView() {
+interface IssueReporterViewProps {
+  isFocused?: boolean;
+}
+
+export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [screenshotPath, setScreenshotPath] = useState<string | null>(null);
@@ -11,12 +15,20 @@ export function IssueReporterView() {
   const [state, setState] = useState<SubmitState>("idle");
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
+  const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
 
   useEffect(() => {
     captureScreenshot();
   }, []);
+
+  // Auto-focus title input when view receives focus
+  useEffect(() => {
+    if (isFocused) {
+      titleRef.current?.focus();
+    }
+  }, [isFocused]);
 
   const captureScreenshot = async () => {
     setState("capturing");
@@ -53,6 +65,13 @@ export function IssueReporterView() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
   const handleNewReport = () => {
     setTitle("");
     setBody("");
@@ -75,6 +94,7 @@ export function IssueReporterView() {
     <div
       data-testid="issue-reporter-view"
       className="flex h-full flex-col"
+      onKeyDown={handleKeyDown}
       style={{
         color: "var(--text-primary)",
         background: "var(--bg-base)",
@@ -182,6 +202,7 @@ export function IssueReporterView() {
 
       {/* Title */}
       <input
+        ref={titleRef}
         data-testid="issue-title"
         type="text"
         value={title}
@@ -230,6 +251,11 @@ export function IssueReporterView() {
             : state === "success"
               ? "Submitted!"
               : "Submit Issue"}
+          {state !== "submitting" && state !== "success" && (
+            <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
+              Ctrl+Enter
+            </span>
+          )}
         </button>
 
         {(state === "success" || state === "error") && (

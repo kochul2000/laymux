@@ -94,7 +94,13 @@ function FocusableView({
     if (isFocused) ref.current?.focus();
   }, [isFocused]);
   return (
-    <div ref={ref} data-testid={testId} className="h-full" tabIndex={-1} style={{ outline: "none" }}>
+    <div
+      ref={ref}
+      data-testid={testId}
+      className="h-full"
+      tabIndex={-1}
+      style={{ outline: "none" }}
+    >
       {children}
     </div>
   );
@@ -141,7 +147,7 @@ export function ViewRenderer({
     case "IssueReporterView":
       return (
         <FocusableView testId="view-issue-reporter" isFocused={isFocused}>
-          <IssueReporterView />
+          <IssueReporterView isFocused={isFocused} />
         </FocusableView>
       );
     case "MemoView": {
