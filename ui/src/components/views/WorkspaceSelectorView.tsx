@@ -46,9 +46,13 @@ function CountBadge({ count, testId }: { count: number; testId?: string }) {
   );
 }
 
+interface DropIndicator {
+  wsId: string;
+  position: "top" | "bottom";
+}
+
 interface DragContext {
   enabled: boolean;
-  dragOverId: string | null;
   onDragStart: (e: React.DragEvent, wsId: string) => void;
   onDragOver: (e: React.DragEvent, wsId: string) => void;
   onDragLeave: () => void;
@@ -65,6 +69,7 @@ function WorkspaceItem({
   canClose,
   pathEllipsis,
   drag,
+  dropIndicator,
   onSelect,
   onClose,
   onDuplicate,
@@ -78,6 +83,7 @@ function WorkspaceItem({
   canClose: boolean;
   pathEllipsis: "start" | "end";
   drag: DragContext;
+  dropIndicator: DropIndicator | null;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
@@ -123,7 +129,14 @@ function WorkspaceItem({
             ? "rgba(255,255,255,0.03)"
             : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: drag.dragOverId === ws.id ? "2px solid var(--accent)" : "2px solid transparent",
+        borderTop:
+          dropIndicator?.wsId === ws.id && dropIndicator.position === "top"
+            ? "2px solid var(--accent)"
+            : "2px solid transparent",
+        borderBottom:
+          dropIndicator?.wsId === ws.id && dropIndicator.position === "bottom"
+            ? "2px solid var(--accent)"
+            : "2px solid transparent",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
       }}
@@ -788,10 +801,13 @@ function LayoutCard({
   );
 }
 
+// Stable empty map — avoids re-creating a new Map per render since port data is populated externally.
+const EMPTY_PORT_MAP = new Map<string, number[]>();
+
 export function WorkspaceSelectorView() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [notifBtnHovered, setNotifBtnHovered] = useState(false);
-  const [dragOverIndex, setDragOverIndex] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -815,7 +831,6 @@ export function WorkspaceSelectorView() {
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
   const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
-  const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(() => {
@@ -846,20 +861,34 @@ export function WorkspaceSelectorView() {
     e.dataTransfer.effectAllowed = "move";
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent, wsId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverIndex((prev) => (prev === wsId ? prev : wsId));
-  }, []);
+  const handleDragOver = useCallback(
+    (e: React.DragEvent, wsId: string) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const fromId = dragIdRef.current;
+      if (!fromId || fromId === wsId) {
+        setDropIndicator(null);
+        return;
+      }
+      // Show indicator above or below the target depending on drag direction
+      const fromIdx = workspaces.findIndex((ws) => ws.id === fromId);
+      const toIdx = workspaces.findIndex((ws) => ws.id === wsId);
+      const position = fromIdx < toIdx ? "bottom" : "top";
+      setDropIndicator((prev) =>
+        prev?.wsId === wsId && prev?.position === position ? prev : { wsId, position },
+      );
+    },
+    [workspaces],
+  );
 
   const handleDragLeave = useCallback(() => {
-    setDragOverIndex(null);
+    setDropIndicator(null);
   }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent, toId: string) => {
       e.preventDefault();
-      setDragOverIndex(null);
+      setDropIndicator(null);
       const fromId = dragIdRef.current;
       if (fromId !== null && fromId !== toId) {
         reorderWorkspaces(fromId, toId);
@@ -870,24 +899,24 @@ export function WorkspaceSelectorView() {
   );
 
   const handleDragEnd = useCallback(() => {
-    setDragOverIndex(null);
+    setDropIndicator(null);
     dragIdRef.current = null;
   }, []);
 
   const isManualSort = workspaceSortOrder === "manual";
 
-  // Single shared drag context object — avoids creating N objects per render
+  // Drag handlers are stable (useCallback) — this object only re-creates when sort mode
+  // or workspaces change. dropIndicator is passed separately to avoid re-creating on every dragOver.
   const dragContext: DragContext = useMemo(
     () => ({
       enabled: isManualSort,
-      dragOverId: dragOverIndex,
       onDragStart: handleDragStart,
       onDragOver: handleDragOver,
       onDragLeave: handleDragLeave,
       onDrop: handleDrop,
       onDragEnd: handleDragEnd,
     }),
-    [isManualSort, dragOverIndex, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd],
+    [isManualSort, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd],
   );
 
   const handleSelectWorkspace = (wsId: string) => {
@@ -993,7 +1022,7 @@ export function WorkspaceSelectorView() {
           const summary = computeWorkspaceSummary(
             ws.id,
             terminalInstances,
-            terminalPorts,
+            EMPTY_PORT_MAP,
             notifications,
             ws.name,
           );
@@ -1008,6 +1037,7 @@ export function WorkspaceSelectorView() {
               canClose={workspaces.length > 1}
               pathEllipsis={pathEllipsis}
               drag={dragContext}
+              dropIndicator={dropIndicator}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
