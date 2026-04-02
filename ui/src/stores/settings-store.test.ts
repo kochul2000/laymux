@@ -651,4 +651,37 @@ describe("settings-store", () => {
     useSettingsStore.getState().loadFromSettings({});
     expect(useSettingsStore.getState().issueReporter.shell).toBe("");
   });
+
+  // workspaceSortOrder
+  it("has default workspaceSortOrder of 'manual'", () => {
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  });
+
+  it("setWorkspaceSortOrder changes sort order", () => {
+    useSettingsStore.getState().setWorkspaceSortOrder("notification");
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("notification");
+
+    useSettingsStore.getState().setWorkspaceSortOrder("manual");
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  });
+
+  it("loadFromSettings loads workspaceSortOrder", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSortOrder: "notification",
+    });
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("notification");
+  });
+
+  it("loadFromSettings without workspaceSortOrder preserves default", () => {
+    useSettingsStore.getState().loadFromSettings({});
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  });
+
+  it("loadFromSettings ignores invalid workspaceSortOrder values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSortOrder: "invalid-value" as any,
+    });
+    // Should keep the default, not blindly accept the invalid value
+    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  });
 });
