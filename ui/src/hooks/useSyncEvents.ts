@@ -8,6 +8,8 @@ import {
   onLxNotify,
   onSetTabTitle,
   onCommandStatus,
+  onClaudeTerminalDetected,
+  markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { sendDesktopNotification } from "./useOsNotification";
 import { detectActivityFromCommand } from "@/lib/activity-detection";
@@ -30,6 +32,21 @@ export function useSyncEvents() {
         }
       });
     }
+
+    // claude-terminal-detected: backend PTY callback detected Claude Code in terminal title.
+    // This is the single source of truth — set activity so frontend display matches.
+    trackListener(
+      onClaudeTerminalDetected((terminalId) => {
+        if (cancelled) return;
+        const { updateInstanceInfo, instances } = useTerminalStore.getState();
+        const instance = instances.find((i) => i.id === terminalId);
+        if (instance) {
+          updateInstanceInfo(terminalId, {
+            activity: { type: "interactiveApp", name: "Claude" },
+          });
+        }
+      }),
+    );
 
     // sync-cwd: update CWD for all targeted terminals + source
     trackListener(
@@ -112,6 +129,12 @@ export function useSyncEvents() {
           const appActivity = detectActivityFromCommand(data.command);
           if (appActivity) {
             update.activity = appActivity;
+            // Notify backend so known_claude_terminals (single source of truth) is updated.
+            // This covers the case where the user typed "claude" but the title
+            // hasn't been set yet (PTY callback hasn't seen "Claude Code" title).
+            if (appActivity.name === "Claude") {
+              markClaudeTerminal(data.terminalId).catch(() => {});
+            }
           } else {
             update.activity = { type: "running" };
           }

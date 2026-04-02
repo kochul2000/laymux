@@ -17,6 +17,7 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { processOscInOutput } from "@/hooks/useOscHooks";
@@ -246,6 +247,12 @@ export function TerminalView({
         ...(detected ? { activity: detected } : {}),
       });
 
+      // Notify backend when Claude is detected from title (single source of truth).
+      // PTY callback usually detects first, but this covers edge cases.
+      if (detected?.name === "Claude") {
+        markClaudeTerminal(instanceId).catch(() => {});
+      }
+
       if (transition === "completed") {
         updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
         const message = getClaudeCompletionMessage(prevTitle, title);
@@ -375,6 +382,9 @@ export function TerminalView({
         const cmdActivity = cmdMatch ? detectActivityFromCommand(cmdMatch[1]) : undefined;
         if (cmdActivity) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: cmdActivity });
+          if (cmdActivity.name === "Claude") {
+            markClaudeTerminal(instanceId).catch(() => {});
+          }
         } else {
           const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
           if (inst?.activity?.type === "interactiveApp" && inst.activity.name !== "app") {
@@ -384,6 +394,9 @@ export function TerminalView({
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
               activity: detected ?? { type: "interactiveApp", name: "app" },
             });
+            if (detected?.name === "Claude") {
+              markClaudeTerminal(instanceId).catch(() => {});
+            }
           }
         }
       } else if (leaveAlt && !enterAlt && inAltScreen) {

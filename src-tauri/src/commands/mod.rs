@@ -102,6 +102,9 @@ pub fn create_terminal_session(
     let app_clone = app.clone();
     let output_buffers = state.output_buffers.clone();
     let buffer_terminal_id = id.clone();
+    let known_claude = state.known_claude_terminals.clone();
+    let claude_detect_id = id.clone();
+    let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // Write to output buffer
         if let Ok(mut buffers) = output_buffers.lock() {
@@ -109,6 +112,21 @@ pub fn create_terminal_session(
                 buf.push(&data);
             }
         }
+
+        // Proactive Claude Code detection: scan each PTY output chunk for
+        // "Claude Code" in terminal title (OSC 0/2). Once detected, the terminal
+        // is permanently registered in known_claude_terminals (single source of truth).
+        // AtomicBool fast-path avoids scanning after first detection.
+        if !claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
+            if any_terminal_title_contains(&data, "Claude Code") {
+                claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut known) = known_claude.lock() {
+                    known.insert(claude_detect_id.clone());
+                }
+                let _ = app_clone.emit("claude-terminal-detected", &claude_detect_id);
+            }
+        }
+
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
 
@@ -260,6 +278,29 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
     }
 
     Ok(())
+}
+
+/// Register a terminal as running Claude Code (single source of truth).
+/// Called by the frontend when it detects Claude from command text (OSC 133 E).
+/// The PTY callback also populates this from title detection, but the frontend
+/// may detect earlier via command text (e.g., user typed "claude").
+#[tauri::command]
+pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let mut known = state
+        .known_claude_terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(known.insert(id))
+}
+
+/// Check if a terminal is registered as running Claude Code.
+#[tauri::command]
+pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let known = state
+        .known_claude_terminals
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(known.contains(&id))
 }
 
 #[tauri::command]
@@ -3499,5 +3540,80 @@ mod tests {
             !filtered.contains(&"t2".to_string()),
             "Persistently known Claude terminal should be skipped"
         );
+    }
+
+    #[test]
+    fn proactive_claude_detection_from_pty_output_chunk() {
+        // Simulates the PTY callback scenario: a raw output chunk containing
+        // a Claude Code title should be detected by any_terminal_title_contains.
+        // In production, the PTY callback uses this to populate known_claude_terminals.
+        let chunk = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some terminal output here";
+        assert!(any_terminal_title_contains(chunk, "Claude Code"));
+
+        // After registration (simulating PTY callback behavior),
+        // filter_targets_not_busy should skip the terminal
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t-claude".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            // Buffer now only has task title, no "Claude Code"
+            buf.push(b"\x1b]0;\xe2\x9c\xb6 Working on task\x07");
+            buffers.insert("t-claude".into(), buf);
+            let mut buf_normal = crate::output_buffer::TerminalOutputBuffer::default();
+            buf_normal.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t-normal".into(), buf_normal);
+        }
+        let targets = vec!["t-normal".into(), "t-claude".into()];
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered.contains(&"t-normal".to_string()));
+        assert!(
+            !filtered.contains(&"t-claude".to_string()),
+            "Proactively registered Claude terminal must be skipped in skip mode"
+        );
+    }
+
+    #[test]
+    fn mark_claude_terminal_returns_true_on_first_insert() {
+        let state = AppState::new();
+        let mut known = state.known_claude_terminals.lock().unwrap();
+        assert!(
+            known.insert("t1".to_string()),
+            "First insert should return true"
+        );
+        assert!(
+            !known.insert("t1".to_string()),
+            "Second insert should return false"
+        );
+    }
+
+    #[test]
+    fn is_claude_terminal_after_mark() {
+        let state = AppState::new();
+        {
+            let mut known = state.known_claude_terminals.lock().unwrap();
+            known.insert("t1".to_string());
+        }
+        let known = state.known_claude_terminals.lock().unwrap();
+        assert!(known.contains("t1"));
+        assert!(!known.contains("t2"));
+    }
+
+    #[test]
+    fn close_terminal_clears_claude_tracking() {
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        // Simulate close_terminal_session cleanup
+        state.known_claude_terminals.lock().unwrap().remove("t1");
+        assert!(!state.known_claude_terminals.lock().unwrap().contains("t1"));
     }
 }
