@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useSettingsStore } from "@/stores/settings-store";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
@@ -59,6 +60,8 @@ export function IssueReporterView() {
     setState("idle");
   };
 
+  const ir = useSettingsStore((s) => s.issueReporter);
+
   const fieldStyle: React.CSSProperties = {
     background: "var(--bg-base)",
     color: "var(--text-primary)",
@@ -71,8 +74,12 @@ export function IssueReporterView() {
   return (
     <div
       data-testid="issue-reporter-view"
-      className="flex h-full flex-col p-5"
-      style={{ color: "var(--text-primary)" }}
+      className="flex h-full flex-col"
+      style={{
+        color: "var(--text-primary)",
+        background: "var(--bg-base)",
+        padding: `${ir.paddingTop}px ${ir.paddingRight}px ${ir.paddingBottom}px ${ir.paddingLeft}px`,
+      }}
     >
       {/* Header */}
       <div className="mb-4 flex items-center gap-2.5">

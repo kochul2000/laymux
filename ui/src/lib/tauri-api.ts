@@ -119,6 +119,10 @@ export interface ClaudeSettings {
 
 export interface IssueReporterSettings {
   shell: string;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
 }
 
 export interface MemoSettings {
