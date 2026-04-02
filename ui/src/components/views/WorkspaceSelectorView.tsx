@@ -249,10 +249,8 @@ function WorkspaceItem({
       {panes.length >= 1 ? (
         <div data-testid={`ws-row-2-${ws.id}`} className="mt-1 flex flex-col gap-0.5">
           {(() => {
-            const showMinimap = panes.length >= 2;
-            const minimapPanes = showMinimap
-              ? panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
-              : [];
+            const showMinimap = panes.length >= 1;
+            const minimapPanes = panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
             const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
             return panes.map((pane, paneIdx) => {
               const paneIndex = showMinimap ? paneIdx : -1;
