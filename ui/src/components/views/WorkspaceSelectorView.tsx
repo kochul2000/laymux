@@ -773,7 +773,9 @@ export function WorkspaceSelectorView() {
   };
 
   const handleCreateWithLayout = (layoutId: string) => {
-    addWorkspace(`Workspace ${workspaces.length + 1}`, layoutId);
+    const layout = layouts.find((l) => l.id === layoutId);
+    const baseName = layout?.name ?? "Workspace";
+    addWorkspace(`${baseName} ${workspaces.length + 1}`, layoutId);
     // Auto-switch to newly created workspace
     const newWs = useWorkspaceStore.getState().workspaces;
     const created = newWs[newWs.length - 1];
