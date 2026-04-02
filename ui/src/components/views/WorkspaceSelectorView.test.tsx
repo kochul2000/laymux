@@ -1256,6 +1256,41 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
+  it("shows lastCwd with defaultProfile fallback for panes without explicit profile", async () => {
+    // PowerShell pane without explicit profile (uses defaultProfile)
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "PowerShell", profiles: [] });
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-noexplicit",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: {
+                type: "TerminalView",
+                // No explicit profile — should use defaultProfile "PowerShell"
+                lastCwd: "/mnt/c/Users/kochul/Projects",
+              },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should convert /mnt/c/Users/kochul/Projects → C:\Users\kochul\Projects → ~/Projects
+      expect(screen.getByText("~/Projects")).toBeInTheDocument();
+    });
+  });
+
   it("displays PowerShell CWD as Windows path instead of /mnt/...", async () => {
     useWorkspaceStore.setState({
       workspaces: [

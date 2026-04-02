@@ -802,6 +802,7 @@ export function WorkspaceSelectorView() {
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
 
   // Collect all terminal IDs across all workspaces for backend summary fetch
   const allTerminalIds = useMemo(() => {
@@ -913,7 +914,7 @@ export function WorkspaceSelectorView() {
               if (p.view.lastCwd) {
                 return {
                   id: termId,
-                  profile: (p.view.profile as string) ?? "",
+                  profile: (p.view.profile as string) || defaultProfile,
                   title: "",
                   cwd: p.view.lastCwd as string,
                   branch: null,
