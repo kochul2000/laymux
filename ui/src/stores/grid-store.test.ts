@@ -17,8 +17,8 @@ describe("grid-store", () => {
     expect(useGridStore.getState().editMode).toBe(false);
   });
 
-  it("has no focused pane initially", () => {
-    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+  it("focuses first pane initially", () => {
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
   it("sets focused pane", () => {

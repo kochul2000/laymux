@@ -14,7 +14,7 @@ interface GridState {
 
 export const useGridStore = create<GridState>()((set) => ({
   editMode: false,
-  focusedPaneIndex: null,
+  focusedPaneIndex: 0,
   automationHoverIndex: null,
 
   toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),
