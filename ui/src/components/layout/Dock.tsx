@@ -42,7 +42,6 @@ export function Dock({
 }: DockProps) {
   const showIconBar = views.length > 1 && panes.length <= 1;
   const focusedDock = useDockStore((s) => s.focusedDock);
-  const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
