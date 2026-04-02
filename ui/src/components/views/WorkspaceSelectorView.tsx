@@ -55,7 +55,7 @@ interface DragContext {
   enabled: boolean;
   onDragStart: (e: React.DragEvent, wsId: string) => void;
   onDragOver: (e: React.DragEvent, wsId: string) => void;
-  onDragLeave: () => void;
+  onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, wsId: string) => void;
   onDragEnd: () => void;
 }
@@ -118,7 +118,7 @@ function WorkspaceItem({
       onMouseLeave={() => setHovered(false)}
       onDragStart={(e) => drag.onDragStart(e, ws.id)}
       onDragOver={(e) => drag.onDragOver(e, ws.id)}
-      onDragLeave={drag.onDragLeave}
+      onDragLeave={(e) => drag.onDragLeave(e)}
       onDrop={(e) => drag.onDrop(e, ws.id)}
       onDragEnd={drag.onDragEnd}
       className="relative mb-0.5 cursor-pointer rounded py-2"
@@ -129,14 +129,12 @@ function WorkspaceItem({
             ? "rgba(255,255,255,0.03)"
             : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop:
-          dropIndicator?.wsId === ws.id && dropIndicator.position === "top"
-            ? "2px solid var(--accent)"
-            : "2px solid transparent",
-        borderBottom:
-          dropIndicator?.wsId === ws.id && dropIndicator.position === "bottom"
-            ? "2px solid var(--accent)"
-            : "2px solid transparent",
+        boxShadow:
+          dropIndicator?.wsId === ws.id
+            ? dropIndicator.position === "top"
+              ? "inset 0 2px 0 0 var(--accent)"
+              : "inset 0 -2px 0 0 var(--accent)"
+            : "none",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
       }}
@@ -861,27 +859,25 @@ export function WorkspaceSelectorView() {
     e.dataTransfer.effectAllowed = "move";
   }, []);
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent, wsId: string) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      const fromId = dragIdRef.current;
-      if (!fromId || fromId === wsId) {
-        setDropIndicator(null);
-        return;
-      }
-      // Show indicator above or below the target depending on drag direction
-      const fromIdx = workspaces.findIndex((ws) => ws.id === fromId);
-      const toIdx = workspaces.findIndex((ws) => ws.id === wsId);
-      const position = fromIdx < toIdx ? "bottom" : "top";
-      setDropIndicator((prev) =>
-        prev?.wsId === wsId && prev?.position === position ? prev : { wsId, position },
-      );
-    },
-    [workspaces],
-  );
+  const handleDragOver = useCallback((e: React.DragEvent, wsId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const fromId = dragIdRef.current;
+    if (!fromId || fromId === wsId) {
+      setDropIndicator(null);
+      return;
+    }
+    // Determine top/bottom by mouse Y relative to target midpoint (sort-order agnostic)
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+    setDropIndicator((prev) =>
+      prev?.wsId === wsId && prev?.position === position ? prev : { wsId, position },
+    );
+  }, []);
 
-  const handleDragLeave = useCallback(() => {
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Ignore leave events when moving to a child element (prevents indicator flicker)
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setDropIndicator(null);
   }, []);
 
