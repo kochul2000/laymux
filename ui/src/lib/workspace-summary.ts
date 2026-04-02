@@ -7,6 +7,7 @@ export interface LastCommandInfo {
   command: string;
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
+  outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
 }
 
 export interface TerminalSummaryInfo {
@@ -155,6 +156,7 @@ export function computeWorkspaceSummaryFromBackend(
           command: s.lastCommand,
           exitCode: s.lastExitCode ?? undefined,
           timestamp: s.lastCommandAt,
+          outputActive: s.outputActive,
         };
       }
     }

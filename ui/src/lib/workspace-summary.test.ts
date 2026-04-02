@@ -545,6 +545,53 @@ describe("computeWorkspaceSummaryFromBackend", () => {
     const result = computeWorkspaceSummaryFromBackend("ws-1", summaries, []);
     expect(result.ports).toEqual([]);
   });
+
+  it("includes outputActive in terminal summaries", () => {
+    const summaries = [
+      makeBackendSummary({ id: "t1", outputActive: true }),
+      makeBackendSummary({ id: "t2", outputActive: false }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.terminalSummaries[0].outputActive).toBe(true);
+    expect(result.terminalSummaries[1].outputActive).toBe(false);
+  });
+
+  it("sets outputActive on workspace lastCommand from the source terminal", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "pytest",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+        outputActive: true,
+      }),
+      makeBackendSummary({
+        id: "t2",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 100,
+        outputActive: false,
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    // lastCommand should come from t1 (most recent) and carry its outputActive
+    expect(result.lastCommand?.command).toBe("pytest");
+    expect(result.lastCommand?.outputActive).toBe(true);
+  });
+
+  it("sets outputActive=false on workspace lastCommand when source terminal has no output", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "npm test",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+        outputActive: false,
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.lastCommand?.outputActive).toBe(false);
+  });
 });
 
 describe("formatRelativeTime", () => {

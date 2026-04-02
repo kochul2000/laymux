@@ -79,16 +79,20 @@ function WorkspaceItem({
   const cmdIcon = cmdInfo
     ? cmdInfo.exitCode === undefined
       ? "⏳"
-      : cmdInfo.exitCode === 0
-        ? "✓"
-        : "✗"
+      : cmdInfo.outputActive
+        ? "⏳"
+        : cmdInfo.exitCode === 0
+          ? "✓"
+          : "✗"
     : null;
   const cmdColor = cmdInfo
     ? cmdInfo.exitCode === undefined
       ? "var(--yellow)"
-      : cmdInfo.exitCode === 0
-        ? "var(--green)"
-        : "var(--red)"
+      : cmdInfo.outputActive
+        ? "var(--yellow)"
+        : cmdInfo.exitCode === 0
+          ? "var(--green)"
+          : "var(--red)"
     : undefined;
 
   return (
@@ -263,16 +267,20 @@ function WorkspaceItem({
                 const tCmdIcon = ts.lastCommand
                   ? ts.lastExitCode === undefined
                     ? "⏳"
-                    : ts.lastExitCode === 0
-                      ? "✓"
-                      : "✗"
+                    : ts.outputActive
+                      ? "⏳"
+                      : ts.lastExitCode === 0
+                        ? "✓"
+                        : "✗"
                   : null;
                 const tCmdColor = ts.lastCommand
                   ? ts.lastExitCode === undefined
                     ? "var(--yellow)"
-                    : ts.lastExitCode === 0
-                      ? "var(--green)"
-                      : "var(--red)"
+                    : ts.outputActive
+                      ? "var(--yellow)"
+                      : ts.lastExitCode === 0
+                        ? "var(--green)"
+                        : "var(--red)"
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
