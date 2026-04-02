@@ -1770,70 +1770,14 @@ pub fn get_terminal_summaries(
     terminal_ids: Vec<String>,
     state: State<Arc<AppState>>,
 ) -> Result<Vec<TerminalSummaryResponse>, String> {
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let buffers = state
-        .output_buffers
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let known_claude = state
-        .known_claude_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let notifications = state
-        .notifications
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-
-    let mut result = Vec::with_capacity(terminal_ids.len());
-
-    for tid in &terminal_ids {
-        let Some(session) = terminals.get(tid.as_str()) else {
-            continue;
-        };
-
-        // Detect activity from output buffer
-        let state_info = detect_terminal_state(buffers.get(tid.as_str()));
-
-        // Check Claude detection
-        let is_claude = known_claude.contains(tid.as_str());
-
-        // Filter notifications for this terminal
-        let term_notifs: Vec<&TerminalNotification> = notifications
-            .iter()
-            .filter(|n| n.terminal_id == *tid)
-            .collect();
-        let unread_count = term_notifs.iter().filter(|n| n.read_at.is_none()).count() as u32;
-        let latest_unread = term_notifs
-            .iter()
-            .filter(|n| n.read_at.is_none())
-            .max_by_key(|n| n.created_at)
-            .map(|n| (*n).clone());
-
-        result.push(TerminalSummaryResponse {
-            id: tid.clone(),
-            profile: session.config.profile.clone(),
-            title: session.title.clone(),
-            cwd: session.cwd.clone(),
-            branch: session.branch.clone(),
-            last_command: session.last_command.clone(),
-            last_exit_code: session.last_exit_code,
-            last_command_at: session.last_command_at,
-            command_running: session.command_running,
-            activity: state_info.activity,
-            output_active: state_info.output_active,
-            is_claude,
-            unread_notification_count: unread_count,
-            latest_notification: latest_unread,
-        });
-    }
-
-    Ok(result)
+    get_terminal_summaries_inner(&terminal_ids, &state)
 }
 
-/// Pure function version of `get_terminal_summaries` for testing (no Tauri State wrapper).
+/// Core implementation of `get_terminal_summaries` without Tauri State wrapper.
+/// Used by both the Tauri command and tests.
+///
+/// Lock order: terminals → output_buffers → known_claude_terminals → notifications
+/// (see `AppState` doc for the canonical ordering).
 pub fn get_terminal_summaries_inner(
     terminal_ids: &[String],
     state: &AppState,

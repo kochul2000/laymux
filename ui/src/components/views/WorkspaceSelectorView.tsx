@@ -11,6 +11,7 @@ import {
   formatActivity,
 } from "@/lib/workspace-summary";
 import { useBackendSummaries } from "@/hooks/useBackendSummaries";
+import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
@@ -805,6 +806,11 @@ export function WorkspaceSelectorView() {
   }, [workspaces]);
 
   const { summaries: backendSummaries, markRead } = useBackendSummaries(allTerminalIds);
+  const listeningPorts = usePortDetection();
+  const portNumbers = useMemo(
+    () => [...new Set(listeningPorts.map((p) => p.port))].sort((a, b) => a - b),
+    [listeningPorts],
+  );
 
   // Build a lookup map: terminalId → TerminalSummaryResponse
   const summaryMap = useMemo(() => {
@@ -882,7 +888,11 @@ export function WorkspaceSelectorView() {
             .filter((p) => p.view.type === "TerminalView")
             .map((p) => summaryMap.get(`terminal-${p.id}`))
             .filter(Boolean) as (typeof backendSummaries)[number][];
-          const summary = computeWorkspaceSummaryFromBackend(ws.id, wsTerminalSummaries);
+          const summary = computeWorkspaceSummaryFromBackend(
+            ws.id,
+            wsTerminalSummaries,
+            isActive ? portNumbers : [],
+          );
           return (
             <WorkspaceItem
               key={ws.id}

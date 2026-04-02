@@ -124,6 +124,7 @@ export function computeWorkspaceSummary(
 export function computeWorkspaceSummaryFromBackend(
   workspaceId: string,
   backendSummaries: TerminalSummaryResponse[],
+  ports: number[] = [],
 ): WorkspaceSummary {
   // Map backend summaries to TerminalSummaryInfo
   const terminalSummaries: TerminalSummaryInfo[] = backendSummaries.map((s) => ({
@@ -182,7 +183,7 @@ export function computeWorkspaceSummaryFromBackend(
     workspaceId,
     branch,
     cwd,
-    ports: [],
+    ports,
     unreadCount,
     latestNotification,
     hasUnread: unreadCount > 0,
