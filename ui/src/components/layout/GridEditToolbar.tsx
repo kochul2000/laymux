@@ -137,9 +137,12 @@ export function GridEditToolbar() {
             data-testid="export-overwrite-select"
             className={btnBase}
             style={{ ...btnStyle, cursor: "pointer", minWidth: 90 }}
-            value=""
+            defaultValue=""
             onChange={(e) => {
-              if (e.target.value) exportToLayout(e.target.value);
+              if (e.target.value) {
+                exportToLayout(e.target.value);
+                e.target.value = "";
+              }
             }}
           >
             <option value="" disabled>
