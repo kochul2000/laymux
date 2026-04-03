@@ -151,6 +151,46 @@ describe("processOscInOutput", () => {
     expect(call.path).toBe("//wsl.localhost/Ubuntu-22.04/home/user");
   });
 
+  it("skips notify actions when skipNotify is true", () => {
+    const notifyHooks: OscHook[] = [
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode === '0'",
+        run: "lx notify --level success 'Command completed'",
+      },
+      {
+        osc: 133,
+        param: "D",
+        run: "lx set-command-status --exit-code $exitCode",
+      },
+    ];
+    const output = "\x1b]133;D;0\x07";
+    processOscInOutput(output, notifyHooks, "t1", "g1", { skipNotify: true });
+
+    // notify should be skipped, but set-command-status should still fire
+    expect(mockHandleLxMessage).toHaveBeenCalledTimes(1);
+    const call = JSON.parse(mockHandleLxMessage.mock.calls[0][0]);
+    expect(call.action).toBe("set-command-status");
+  });
+
+  it("allows notify actions when skipNotify is false", () => {
+    const notifyHooks: OscHook[] = [
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode === '0'",
+        run: "lx notify --level success 'Command completed'",
+      },
+    ];
+    const output = "\x1b]133;D;0\x07";
+    processOscInOutput(output, notifyHooks, "t1", "g1", { skipNotify: false });
+
+    expect(mockHandleLxMessage).toHaveBeenCalledTimes(1);
+    const call = JSON.parse(mockHandleLxMessage.mock.calls[0][0]);
+    expect(call.action).toBe("notify");
+  });
+
   it("handles OSC 133 C (preexec) → set-command-status with command", () => {
     const preexecHooks: OscHook[] = [
       { osc: 133, param: "C", run: "lx set-command-status --command __preexec__" },
