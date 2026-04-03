@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { sortWorkspaces } from "@/lib/workspace-sort";
 import {
   computeWorkspaceSummary,
   abbreviatePath,
@@ -854,29 +855,10 @@ export function WorkspaceSelectorView() {
   const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
-  const sortedWorkspaces = useMemo(() => {
-    if (workspaceSortOrder === "notification") {
-      const originalIndex = new Map<string, number>();
-      workspaces.forEach((ws, i) => originalIndex.set(ws.id, i));
-      const latestByWs = new Map<string, number>();
-      for (const n of notifications) {
-        if (n.readAt !== null) continue;
-        const prev = latestByWs.get(n.workspaceId) ?? 0;
-        if (n.createdAt > prev) latestByWs.set(n.workspaceId, n.createdAt);
-      }
-      return [...workspaces].sort((a, b) => {
-        const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
-        if (diff !== 0) return diff;
-        return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
-      });
-    }
-    // Manual sort: use workspaceDisplayOrder if available
-    if (workspaceDisplayOrder.length === 0) return workspaces;
-    const orderMap = new Map(workspaceDisplayOrder.map((id, i) => [id, i]));
-    return [...workspaces].sort(
-      (a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity),
-    );
-  }, [workspaces, workspaceDisplayOrder, notifications, workspaceSortOrder]);
+  const sortedWorkspaces = useMemo(
+    () => sortWorkspaces(workspaces, workspaceSortOrder, workspaceDisplayOrder, notifications),
+    [workspaces, workspaceDisplayOrder, notifications, workspaceSortOrder],
+  );
 
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);

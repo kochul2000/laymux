@@ -5,6 +5,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { sortWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
@@ -155,8 +156,21 @@ export function useKeyboardShortcuts() {
 
       if (!e.ctrlKey) return;
 
-      const { workspaces, activeWorkspaceId, removeWorkspace, renameWorkspace } =
-        useWorkspaceStore.getState();
+      const {
+        workspaces: rawWorkspaces,
+        activeWorkspaceId,
+        workspaceDisplayOrder,
+        removeWorkspace,
+        renameWorkspace,
+      } = useWorkspaceStore.getState();
+      const { workspaceSortOrder } = useSettingsStore.getState();
+      const { notifications } = useNotificationStore.getState();
+      const workspaces = sortWorkspaces(
+        rawWorkspaces,
+        workspaceSortOrder,
+        workspaceDisplayOrder,
+        notifications,
+      );
 
       // Ctrl+Shift shortcuts (non-workspace: sidebar, notifications)
       if (e.shiftKey && !e.altKey) {

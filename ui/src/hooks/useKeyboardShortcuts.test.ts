@@ -62,6 +62,89 @@ describe("useKeyboardShortcuts", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(lastWs.id);
   });
 
+  // --- After DnD reorder, shortcuts follow display order ---
+  it("Ctrl+Alt+1 follows display order after reorder", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+    const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+    // Reorder: move WS3 (index 2) before Default (index 0)
+    useWorkspaceStore.getState().reorderWorkspaces(ids[2], ids[0]);
+    // Display order: [WS3, Default, WS2]
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("1", { ctrlKey: true, altKey: true });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]); // WS3
+  });
+
+  it("Ctrl+Alt+ArrowDown follows display order after reorder", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+    const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+    // Reorder: move WS3 (index 2) before Default (index 0)
+    useWorkspaceStore.getState().reorderWorkspaces(ids[2], ids[0]);
+    // Display order: [WS3, Default, WS2]
+    // Set active to WS3 (first in display order)
+    useWorkspaceStore.getState().setActiveWorkspace(ids[2]);
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+    // Next after WS3 in display order is Default
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+  });
+
+  // --- Notification sort order: shortcuts follow visual order ---
+  it("Ctrl+Alt+1 follows notification sort order", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+    const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+    // Switch to notification sort
+    useSettingsStore.getState().setWorkspaceSortOrder("notification");
+
+    // Add unread notification to WS3 (most recent)
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-1",
+      workspaceId: ids[2],
+      message: "test",
+      level: "info",
+    });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    // WS3 has the most recent notification, so it should be first
+    fireKey("1", { ctrlKey: true, altKey: true });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+  });
+
+  it("Ctrl+Alt+ArrowDown follows notification sort order", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+    const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+    useSettingsStore.getState().setWorkspaceSortOrder("notification");
+
+    // WS3 gets notification → becomes first in sort
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-1",
+      workspaceId: ids[2],
+      message: "test",
+      level: "info",
+    });
+
+    // Active = WS3 (first in notification order)
+    useWorkspaceStore.getState().setActiveWorkspace(ids[2]);
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+    // Next after WS3 in notification order = Default (no notifications, original index 0)
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+  });
+
   // --- Ctrl+Alt+ArrowDown/Up: next/previous workspace ---
   it("Ctrl+Alt+ArrowDown moves to next workspace", () => {
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");

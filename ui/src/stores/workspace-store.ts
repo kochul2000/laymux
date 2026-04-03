@@ -69,6 +69,8 @@ interface WorkspaceState {
   workspaceDisplayOrder: string[];
 
   getActiveWorkspace: () => Workspace | undefined;
+  /** Return workspaces sorted by display order (respects DnD reordering). */
+  getOrderedWorkspaces: () => Workspace[];
   setActiveWorkspace: (id: string) => void;
   addWorkspace: (name: string, layoutId: string) => void;
   duplicateWorkspace: (id: string) => void;
@@ -105,6 +107,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   getActiveWorkspace: () => {
     const { workspaces, activeWorkspaceId } = get();
     return workspaces.find((ws) => ws.id === activeWorkspaceId);
+  },
+
+  getOrderedWorkspaces: () => {
+    const { workspaces, workspaceDisplayOrder } = get();
+    if (workspaceDisplayOrder.length === 0) return workspaces;
+    const orderMap = new Map(workspaceDisplayOrder.map((id, i) => [id, i]));
+    return [...workspaces].sort(
+      (a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity),
+    );
   },
 
   setActiveWorkspace: (id) => {

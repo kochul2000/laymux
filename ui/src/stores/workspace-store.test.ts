@@ -397,6 +397,31 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  describe("getOrderedWorkspaces", () => {
+    it("returns workspaces in original order when no display order set", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+      addWorkspace("WS3", layouts[0].id);
+
+      const ordered = useWorkspaceStore.getState().getOrderedWorkspaces();
+      const raw = useWorkspaceStore.getState().workspaces;
+      expect(ordered.map((ws) => ws.id)).toEqual(raw.map((ws) => ws.id));
+    });
+
+    it("returns workspaces sorted by display order after reorder", () => {
+      const { addWorkspace, layouts } = useWorkspaceStore.getState();
+      addWorkspace("WS2", layouts[0].id);
+      addWorkspace("WS3", layouts[0].id);
+
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+      // Reorder: move last to first
+      useWorkspaceStore.getState().reorderWorkspaces(ids[2], ids[0]);
+
+      const ordered = useWorkspaceStore.getState().getOrderedWorkspaces();
+      expect(ordered.map((ws) => ws.id)).toEqual([ids[2], ids[0], ids[1]]);
+    });
+  });
+
   describe("Pane ID stability", () => {
     it("default workspace panes have an id", () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
