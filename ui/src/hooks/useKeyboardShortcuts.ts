@@ -55,6 +55,8 @@ function navigateByNotification(direction: "recent" | "oldest") {
 function isTextInputFocused(): boolean {
   const el = document.activeElement;
   if (!el) return false;
+  // Skip xterm.js helper textarea — it's always focused when a terminal is active
+  if (el instanceof HTMLElement && el.classList.contains("xterm-helper-textarea")) return false;
   const tag = el.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return true;
   if (

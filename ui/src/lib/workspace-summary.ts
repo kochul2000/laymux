@@ -70,6 +70,8 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     command: t.lastCommand!,
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
+    outputActive: t.outputActive,
+    activity: t.activity,
   };
 }
 

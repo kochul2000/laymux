@@ -176,8 +176,11 @@ test.describe("Keyboard Shortcuts - Delete Pane", () => {
     await page.getByTestId("pane-control-split-v").click();
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(2);
 
-    // Focus second pane and press Delete
-    await page.locator("[data-testid='workspace-pane-1']").click();
+    // Focus second pane via mousedown (sets focusedPaneIndex) then blur text inputs
+    await page.locator("[data-testid='workspace-pane-1']").dispatchEvent("mousedown");
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
     await page.keyboard.press("Delete");
 
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(1);
