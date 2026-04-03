@@ -152,6 +152,8 @@ export function TerminalView({
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
+      scrollback: 10000,
+      windowsPty: { backend: "conpty", buildNumber: 21376 },
     });
 
     const fitAddon = new FitAddon();
