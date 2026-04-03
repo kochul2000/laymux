@@ -236,6 +236,21 @@ describe("Workspace Store E2E", () => {
       expect(ws.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
     });
 
+    it("exportToLayout should work consecutively on the same layout", () => {
+      const layoutId = useWorkspaceStore.getState().layouts[0].id;
+
+      // First overwrite: split and export
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      useWorkspaceStore.getState().exportToLayout(layoutId);
+      expect(useWorkspaceStore.getState().layouts[0].panes.length).toBe(2);
+
+      // Second overwrite: split again and export same layout
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const result = useWorkspaceStore.getState().exportToLayout(layoutId);
+      expect(result).toBe(true);
+      expect(useWorkspaceStore.getState().layouts[0].panes.length).toBe(3);
+    });
+
     it("exportAsNewLayout should not affect other workspaces", () => {
       useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
       useWorkspaceStore.getState().splitPane(0, "vertical");

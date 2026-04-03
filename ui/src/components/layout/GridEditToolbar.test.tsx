@@ -95,4 +95,26 @@ describe("GridEditToolbar", () => {
 
     expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
   });
+
+  it("allows overwriting the same layout consecutively", async () => {
+    const user = userEvent.setup();
+    const exportToLayout = vi.spyOn(useWorkspaceStore.getState(), "exportToLayout");
+
+    render(<GridEditToolbar />);
+
+    // First overwrite
+    let select = screen.getByTestId("export-overwrite-select");
+    await user.selectOptions(select, "default-layout");
+    expect(exportToLayout).toHaveBeenCalledTimes(1);
+
+    // After selection, select should reset (key changes → new element)
+    select = screen.getByTestId("export-overwrite-select");
+    expect((select as HTMLSelectElement).value).toBe("");
+
+    // Second overwrite of the SAME layout should still work
+    await user.selectOptions(select, "default-layout");
+    expect(exportToLayout).toHaveBeenCalledTimes(2);
+
+    exportToLayout.mockRestore();
+  });
 });
