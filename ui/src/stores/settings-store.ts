@@ -356,7 +356,7 @@ export const defaultProfileDefaults: ProfileDefaults = {
   font: { ...DEFAULT_FONT },
   restoreCwd: true,
   restoreOutput: true,
-  maxOutputCacheKB: 2048,
+  maxOutputCacheKB: 256,
   syncCwd: "default",
 };
 

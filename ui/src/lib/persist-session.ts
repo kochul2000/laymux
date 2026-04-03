@@ -10,8 +10,8 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
-/** Default maximum serialized terminal output size to cache (2M chars). Overridden by profileDefaults.maxOutputCacheKB. */
-const DEFAULT_MAX_CACHE_CHARS = 2 * 1024 * 1024;
+/** Default maximum serialized terminal output size to cache (256KB). Overridden by profileDefaults.maxOutputCacheKB. */
+const DEFAULT_MAX_CACHE_CHARS = 256 * 1024;
 
 /** Get max cache chars from settings. */
 function getMaxCacheChars(): number {
