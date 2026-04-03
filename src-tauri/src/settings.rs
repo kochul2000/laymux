@@ -351,7 +351,7 @@ pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
     /// Whether to restore Claude Code sessions on app restart (default: true).
-    #[serde(default = "default_true_settings")]
+    #[serde(default = "default_restore_session")]
     pub restore_session: bool,
 }
 
@@ -364,7 +364,7 @@ impl Default for ClaudeSettings {
     }
 }
 
-fn default_true_settings() -> bool {
+fn default_restore_session() -> bool {
     true
 }
 

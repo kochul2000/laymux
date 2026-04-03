@@ -529,11 +529,17 @@ export function TerminalView({
           }
 
           if (cancelled) return;
-          // Determine startup command override for Claude session restore
+          // Determine startup command override for Claude session restore.
+          // Validate session ID format to prevent command injection.
+          const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
           const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
+          const safeSessionId =
+            lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
+              ? lastClaudeSession
+              : undefined;
           const startupOverride =
-            shouldRestoreClaudeSession && lastClaudeSession
-              ? `claude --resume ${lastClaudeSession}`
+            shouldRestoreClaudeSession && safeSessionId
+              ? `claude --resume ${safeSessionId}`
               : undefined;
 
           createTerminalSession(

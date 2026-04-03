@@ -1476,11 +1476,11 @@ function ClaudeSection() {
               <input
                 data-testid="claude-restore-session-toggle"
                 type="checkbox"
-                checked={claude.restoreSession !== false}
+                checked={claude.restoreSession}
                 onChange={(e) => updateClaude({ restoreSession: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {claude.restoreSession !== false ? "사용" : "사용 안함"}
+                {claude.restoreSession ? "사용" : "사용 안함"}
               </span>
             </label>
           </div>

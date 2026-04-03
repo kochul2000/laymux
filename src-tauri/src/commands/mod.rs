@@ -427,6 +427,16 @@ struct ClaudeSessionFile {
     started_at: u64,
 }
 
+/// Validate that a Claude session ID contains only safe characters
+/// (alphanumeric, hyphens, underscores). Prevents command injection when
+/// the ID is interpolated into `claude --resume <id>`.
+fn is_valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Resolve the Claude sessions directory path.
 fn resolve_claude_sessions_dir() -> std::path::PathBuf {
     #[cfg(windows)]
@@ -475,7 +485,7 @@ fn read_claude_session_files(dir: &std::path::Path) -> Vec<ClaudeSessionFile> {
                     .unwrap_or("")
                     .to_string();
                 let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
-                if !session_id.is_empty() {
+                if is_valid_session_id(&session_id) {
                     result.push(ClaudeSessionFile {
                         pid,
                         session_id,
@@ -575,10 +585,12 @@ fn build_parent_map(snapshot: &[(u32, u32)]) -> std::collections::HashMap<u32, V
 }
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
+/// When multiple sessions match, the most recently started one wins.
 fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &[u32]) -> Option<String> {
     sessions
         .iter()
-        .find(|s| pids.contains(&s.pid))
+        .filter(|s| pids.contains(&s.pid))
+        .max_by_key(|s| s.started_at)
         .map(|s| s.session_id.clone())
 }
 
@@ -4757,5 +4769,59 @@ mod tests {
     fn get_descendant_pids_includes_root() {
         let pids = get_descendant_pids(99999);
         assert!(pids.contains(&99999));
+    }
+
+    // -- Session ID validation tests --
+
+    #[test]
+    fn is_valid_session_id_accepts_safe_ids() {
+        assert!(is_valid_session_id("abc-123"));
+        assert!(is_valid_session_id("session_id_v2"));
+        assert!(is_valid_session_id("a1b2c3"));
+        assert!(is_valid_session_id("ABC-def_012"));
+    }
+
+    #[test]
+    fn is_valid_session_id_rejects_dangerous_ids() {
+        assert!(!is_valid_session_id(""));
+        assert!(!is_valid_session_id("id; rm -rf /"));
+        assert!(!is_valid_session_id("id && echo pwned"));
+        assert!(!is_valid_session_id("id | cat /etc/passwd"));
+        assert!(!is_valid_session_id("$(whoami)"));
+        assert!(!is_valid_session_id("id`whoami`"));
+        assert!(!is_valid_session_id("hello world"));
+        assert!(!is_valid_session_id("id\nnewline"));
+    }
+
+    #[test]
+    fn read_claude_session_files_rejects_invalid_session_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let content = r#"{"pid":1,"sessionId":"bad; rm -rf /","cwd":"/home","startedAt":1}"#;
+        std::fs::write(tmp.path().join("1.json"), content).unwrap();
+        let sessions = read_claude_session_files(tmp.path());
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn find_session_by_pids_picks_most_recent_on_multiple_matches() {
+        let sessions = vec![
+            ClaudeSessionFile {
+                pid: 100,
+                session_id: "old-session".into(),
+                cwd: "/a".into(),
+                started_at: 1,
+            },
+            ClaudeSessionFile {
+                pid: 200,
+                session_id: "new-session".into(),
+                cwd: "/b".into(),
+                started_at: 10,
+            },
+        ];
+        // Both PIDs match — should pick the most recent (started_at=10)
+        assert_eq!(
+            find_session_by_pids(&sessions, &[100, 200]),
+            Some("new-session".into())
+        );
     }
 }

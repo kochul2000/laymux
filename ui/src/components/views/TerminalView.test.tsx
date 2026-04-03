@@ -933,6 +933,32 @@ describe("TerminalView", () => {
       });
     });
 
+    it("rejects invalid session ID to prevent command injection", async () => {
+      render(
+        <TerminalView
+          instanceId="t-claude-inject"
+          paneId="pane-inject"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+          lastClaudeSession="bad; rm -rf /"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-claude-inject",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          "/home/user/project",
+          undefined,
+        );
+      });
+    });
+
     it("pushes restored content into scrollback with padding newlines", async () => {
       mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
 
