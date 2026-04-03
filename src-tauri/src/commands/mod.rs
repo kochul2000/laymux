@@ -38,6 +38,7 @@ pub fn create_terminal_session(
     sync_group: String,
     cwd_receive: Option<bool>,
     cwd: Option<String>,
+    startup_command_override: Option<String>,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -60,9 +61,13 @@ pub fn create_terminal_session(
     let command_line = matched_profile
         .map(|p| p.command_line.clone())
         .unwrap_or_default();
-    let startup_command = matched_profile
-        .map(|p| p.startup_command.clone())
-        .unwrap_or_default();
+    // Use startup_command_override if provided (e.g., "claude --resume <id>"),
+    // otherwise fall back to the profile's default startup command.
+    let startup_command = startup_command_override.unwrap_or_else(|| {
+        matched_profile
+            .map(|p| p.startup_command.clone())
+            .unwrap_or_default()
+    });
     let starting_directory = cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| {
         matched_profile
             .map(|p| p.starting_directory.clone())
@@ -343,6 +348,261 @@ pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<b
         .lock()
         .map_err(|e| format!("Lock error: {e}"))?;
     Ok(known.insert(id))
+}
+
+/// Resolve Claude Code session IDs for known Claude terminals.
+///
+/// Returns a map of terminal ID → Claude session ID by:
+/// 1. (Primary) PID tree matching: walk the process tree from the PTY child PID
+///    and match against `~/.claude/sessions/<pid>.json` files.
+/// 2. (Fallback) CWD + most-recent matching: compare the terminal's CWD with
+///    session file CWD, picking the most recently started session.
+#[tauri::command]
+pub fn get_claude_session_ids(
+    state: State<Arc<AppState>>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let known: Vec<String> = {
+        let k = state
+            .known_claude_terminals
+            .lock()
+            .map_err(|e| format!("Lock error: {e}"))?;
+        k.iter().cloned().collect()
+    };
+
+    if known.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    // Read session files from ~/.claude/sessions/
+    let sessions_dir = resolve_claude_sessions_dir();
+    let session_files = read_claude_session_files(&sessions_dir);
+
+    let mut result = std::collections::HashMap::new();
+
+    for terminal_id in &known {
+        // Get child PID from PTY handle
+        let child_pid = {
+            let ptys = state
+                .pty_handles
+                .lock()
+                .map_err(|e| format!("Lock error: {e}"))?;
+            ptys.get(terminal_id).and_then(|h| h.child_pid())
+        };
+
+        // Get terminal CWD for fallback
+        let terminal_cwd = {
+            let terminals = state
+                .terminals
+                .lock()
+                .map_err(|e| format!("Lock error: {e}"))?;
+            terminals.get(terminal_id).and_then(|s| s.cwd.clone())
+        };
+
+        // Strategy 1: PID tree matching
+        if let Some(pid) = child_pid {
+            let descendant_pids = get_descendant_pids(pid);
+            if let Some(session_id) = find_session_by_pids(&session_files, &descendant_pids) {
+                result.insert(terminal_id.clone(), session_id);
+                continue;
+            }
+        }
+
+        // Strategy 2: CWD + most-recent fallback
+        if let Some(ref cwd) = terminal_cwd {
+            if let Some(session_id) = find_session_by_cwd(&session_files, cwd) {
+                result.insert(terminal_id.clone(), session_id);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// A parsed Claude session file entry.
+#[derive(Debug, Clone)]
+struct ClaudeSessionFile {
+    pid: u32,
+    session_id: String,
+    cwd: String,
+    started_at: u64,
+}
+
+/// Resolve the Claude sessions directory path.
+fn resolve_claude_sessions_dir() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            return std::path::PathBuf::from(home)
+                .join(".claude")
+                .join("sessions");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join(".claude")
+                .join("sessions");
+        }
+    }
+    std::path::PathBuf::from(".claude").join("sessions")
+}
+
+/// Read and parse all Claude session files from the given directory.
+fn read_claude_session_files(dir: &std::path::Path) -> Vec<ClaudeSessionFile> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let pid = val.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let session_id = val
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let cwd = val
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
+                if !session_id.is_empty() {
+                    result.push(ClaudeSessionFile {
+                        pid,
+                        session_id,
+                        cwd,
+                        started_at,
+                    });
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Get all descendant PIDs of a given process (including the process itself).
+/// Uses platform-specific process enumeration.
+fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
+    let mut result = vec![root_pid];
+
+    #[cfg(windows)]
+    {
+        // Use Windows API to enumerate process tree
+        use std::collections::VecDeque;
+        if let Ok(snapshot) = create_process_snapshot() {
+            let parent_map = build_parent_map(&snapshot);
+            let mut queue = VecDeque::new();
+            queue.push_back(root_pid);
+            while let Some(pid) = queue.pop_front() {
+                if let Some(children) = parent_map.get(&pid) {
+                    for &child in children {
+                        if !result.contains(&child) {
+                            result.push(child);
+                            queue.push_back(child);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        // On Linux, walk /proc/<pid>/task/*/children recursively
+        use std::collections::VecDeque;
+        let mut queue = VecDeque::new();
+        queue.push_back(root_pid);
+        while let Some(pid) = queue.pop_front() {
+            let children_path = format!("/proc/{pid}/task/{pid}/children");
+            if let Ok(content) = std::fs::read_to_string(&children_path) {
+                for token in content.split_whitespace() {
+                    if let Ok(child_pid) = token.parse::<u32>() {
+                        if !result.contains(&child_pid) {
+                            result.push(child_pid);
+                            queue.push_back(child_pid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+#[cfg(windows)]
+fn create_process_snapshot() -> Result<Vec<(u32, u32)>, String> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return Err("Failed to create snapshot".into());
+        }
+        let mut entry: PROCESSENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+        let mut pairs = Vec::new();
+        if Process32First(snap, &mut entry) != 0 {
+            loop {
+                pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                if Process32Next(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        windows_sys::Win32::Foundation::CloseHandle(snap);
+        Ok(pairs)
+    }
+}
+
+#[cfg(windows)]
+fn build_parent_map(snapshot: &[(u32, u32)]) -> std::collections::HashMap<u32, Vec<u32>> {
+    let mut map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for &(pid, ppid) in snapshot {
+        map.entry(ppid).or_default().push(pid);
+    }
+    map
+}
+
+/// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
+fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &[u32]) -> Option<String> {
+    sessions
+        .iter()
+        .find(|s| pids.contains(&s.pid))
+        .map(|s| s.session_id.clone())
+}
+
+/// Find a Claude session ID by matching CWD (most recent session wins).
+fn find_session_by_cwd(sessions: &[ClaudeSessionFile], cwd: &str) -> Option<String> {
+    let normalized_cwd = normalize_path_for_comparison(cwd);
+    sessions
+        .iter()
+        .filter(|s| normalize_path_for_comparison(&s.cwd) == normalized_cwd)
+        .max_by_key(|s| s.started_at)
+        .map(|s| s.session_id.clone())
+}
+
+/// Normalize a path for comparison (lowercase on Windows, trim trailing slash).
+fn normalize_path_for_comparison(path: &str) -> String {
+    let p = path.trim_end_matches('/').trim_end_matches('\\');
+    #[cfg(windows)]
+    {
+        p.to_lowercase().replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        p.to_string()
+    }
 }
 
 /// Check if a terminal is registered as running Claude Code.
@@ -4396,5 +4656,106 @@ mod tests {
             extract_last_osc_payload(data, needle),
             Some("file://localhost/test".into())
         );
+    }
+
+    // -- Claude session file parsing tests --
+
+    #[test]
+    fn read_claude_session_files_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = read_claude_session_files(tmp.path());
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn read_claude_session_files_valid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let content = r#"{"pid":12345,"sessionId":"abc-123","cwd":"/home/user","startedAt":1000}"#;
+        std::fs::write(tmp.path().join("12345.json"), content).unwrap();
+        let sessions = read_claude_session_files(tmp.path());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].pid, 12345);
+        assert_eq!(sessions[0].session_id, "abc-123");
+        assert_eq!(sessions[0].cwd, "/home/user");
+        assert_eq!(sessions[0].started_at, 1000);
+    }
+
+    #[test]
+    fn read_claude_session_files_ignores_non_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("readme.txt"), "not json").unwrap();
+        let sessions = read_claude_session_files(tmp.path());
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn read_claude_session_files_ignores_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("bad.json"), "not valid json!").unwrap();
+        let sessions = read_claude_session_files(tmp.path());
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn find_session_by_pids_matches() {
+        let sessions = vec![
+            ClaudeSessionFile {
+                pid: 100,
+                session_id: "s1".into(),
+                cwd: "/a".into(),
+                started_at: 1,
+            },
+            ClaudeSessionFile {
+                pid: 200,
+                session_id: "s2".into(),
+                cwd: "/b".into(),
+                started_at: 2,
+            },
+        ];
+        assert_eq!(find_session_by_pids(&sessions, &[200]), Some("s2".into()));
+        assert_eq!(find_session_by_pids(&sessions, &[300]), None);
+    }
+
+    #[test]
+    fn find_session_by_cwd_picks_most_recent() {
+        let sessions = vec![
+            ClaudeSessionFile {
+                pid: 1,
+                session_id: "old".into(),
+                cwd: "/home/user".into(),
+                started_at: 100,
+            },
+            ClaudeSessionFile {
+                pid: 2,
+                session_id: "new".into(),
+                cwd: "/home/user".into(),
+                started_at: 200,
+            },
+            ClaudeSessionFile {
+                pid: 3,
+                session_id: "other".into(),
+                cwd: "/other".into(),
+                started_at: 300,
+            },
+        ];
+        assert_eq!(
+            find_session_by_cwd(&sessions, "/home/user"),
+            Some("new".into())
+        );
+        assert_eq!(find_session_by_cwd(&sessions, "/nonexistent"), None);
+    }
+
+    #[test]
+    fn normalize_path_for_comparison_trims_slashes() {
+        assert_eq!(
+            normalize_path_for_comparison("/home/user/"),
+            normalize_path_for_comparison("/home/user")
+        );
+    }
+
+    #[test]
+    fn get_descendant_pids_includes_root() {
+        let pids = get_descendant_pids(99999);
+        assert!(pids.contains(&99999));
     }
 }

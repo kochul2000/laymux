@@ -71,6 +71,8 @@ interface TerminalViewProps {
   onKeyboardActivity?: () => void;
   /** Last CWD from previous session, used for restore on startup. */
   lastCwd?: string;
+  /** Claude Code session ID from previous session, used for --resume on startup. */
+  lastClaudeSession?: string;
 }
 
 export function TerminalView({
@@ -84,6 +86,7 @@ export function TerminalView({
   isFocused = false,
   onKeyboardActivity,
   lastCwd,
+  lastClaudeSession,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -526,6 +529,13 @@ export function TerminalView({
           }
 
           if (cancelled) return;
+          // Determine startup command override for Claude session restore
+          const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
+          const startupOverride =
+            shouldRestoreClaudeSession && lastClaudeSession
+              ? `claude --resume ${lastClaudeSession}`
+              : undefined;
+
           createTerminalSession(
             instanceId,
             profile,
@@ -534,6 +544,7 @@ export function TerminalView({
             syncGroup,
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
+            startupOverride,
           ).catch((err) => {
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
             terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);

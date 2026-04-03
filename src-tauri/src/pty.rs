@@ -76,6 +76,9 @@ fn mnt_path_to_windows(path: &str) -> Option<String> {
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    /// PID of the direct child process spawned by the PTY.
+    /// Used for Claude Code session matching via process tree traversal.
+    child_pid: Option<u32>,
 }
 
 impl PtyHandle {
@@ -86,6 +89,11 @@ impl PtyHandle {
             .write_all(data)
             .map_err(|e| format!("Write error: {e}"))?;
         writer.flush().map_err(|e| format!("Flush error: {e}"))
+    }
+
+    /// Get the child process ID.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
     }
 
     /// Resize the PTY.
@@ -175,11 +183,15 @@ where
         }
     }
 
-    pair.slave
+    let child = pair
+        .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
-    // Drop slave — we only need master
+    let child_pid = child.process_id();
+
+    // Drop slave and child — we only need master
+    drop(child);
     drop(pair.slave);
 
     let writer = pair
@@ -195,6 +207,7 @@ where
     let handle = PtyHandle {
         writer: Arc::new(Mutex::new(writer)),
         master: Arc::new(Mutex::new(pair.master)),
+        child_pid,
     };
 
     // Spawn reader thread

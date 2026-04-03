@@ -347,10 +347,25 @@ pub enum ClaudeSyncCwdMode {
 /// Claude Code integration settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[derive(Default)]
 pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
+    /// Whether to restore Claude Code sessions on app restart (default: true).
+    #[serde(default = "default_true_settings")]
+    pub restore_session: bool,
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self {
+            sync_cwd: ClaudeSyncCwdMode::default(),
+            restore_session: true,
+        }
+    }
+}
+
+fn default_true_settings() -> bool {
+    true
 }
 
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
@@ -1098,12 +1113,29 @@ mod tests {
         let settings = Settings {
             claude: ClaudeSettings {
                 sync_cwd: ClaudeSyncCwdMode::Command,
+                restore_session: true,
             },
             ..Settings::default()
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.claude.sync_cwd, ClaudeSyncCwdMode::Command);
+        assert!(parsed.claude.restore_session);
+    }
+
+    #[test]
+    fn claude_restore_session_defaults_to_true() {
+        // When restoreSession is not specified in JSON, it should default to true
+        let json = r#"{"claude":{"syncCwd":"skip"}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert!(parsed.claude.restore_session);
+    }
+
+    #[test]
+    fn claude_restore_session_can_be_false() {
+        let json = r#"{"claude":{"syncCwd":"skip","restoreSession":false}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert!(!parsed.claude.restore_session);
     }
 
     #[test]

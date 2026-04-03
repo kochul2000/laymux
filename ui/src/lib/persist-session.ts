@@ -3,6 +3,7 @@ import {
   saveTerminalOutputCache,
   cleanTerminalOutputCache,
   getTerminalCwds,
+  getClaudeSessionIds,
   type Settings,
 } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -48,6 +49,9 @@ async function persistSessionCore(): Promise<void> {
   // Fetch CWDs from backend (single source of truth).
   // Falls back to empty map if backend is unreachable (e.g., during tests).
   const backendCwds = await getTerminalCwds().catch(() => ({}) as Record<string, string>);
+
+  // Fetch Claude session IDs for known Claude terminals.
+  const claudeSessionIds = await getClaudeSessionIds().catch(() => ({}) as Record<string, string>);
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
@@ -130,6 +134,8 @@ async function persistSessionCore(): Promise<void> {
           const termId = `terminal-${p.id}`;
           const cwd = backendCwds[termId];
           if (cwd) viewExtra.lastCwd = cwd;
+          const claudeSession = claudeSessionIds[termId];
+          if (claudeSession) viewExtra.lastClaudeSession = claudeSession;
         }
         return {
           id: p.id,
@@ -161,6 +167,8 @@ async function persistSessionCore(): Promise<void> {
           const termId = `terminal-${p.id}`;
           const cwd = backendCwds[termId];
           if (cwd) dockViewExtra.lastCwd = cwd;
+          const claudeSession = claudeSessionIds[termId];
+          if (claudeSession) dockViewExtra.lastClaudeSession = claudeSession;
         }
         return {
           id: p.id,

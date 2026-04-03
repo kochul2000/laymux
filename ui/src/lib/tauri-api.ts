@@ -24,6 +24,7 @@ export async function createTerminalSession(
   syncGroup: string,
   cwdReceive: boolean = true,
   cwd?: string,
+  startupCommandOverride?: string,
 ): Promise<TerminalSessionResult> {
   return invoke("create_terminal_session", {
     id,
@@ -33,6 +34,7 @@ export async function createTerminalSession(
     syncGroup,
     cwdReceive,
     cwd: cwd ?? null,
+    startupCommandOverride: startupCommandOverride ?? null,
   });
 }
 
@@ -115,6 +117,8 @@ export type ClaudeSyncCwdMode = "skip" | "command";
 
 export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
+  /** Whether to restore Claude Code sessions on app restart (default: true). */
+  restoreSession: boolean;
 }
 
 export interface IssueReporterSettings {
@@ -483,6 +487,12 @@ export async function markClaudeTerminal(id: string): Promise<boolean> {
 /** Check if a terminal is registered as Claude Code in the backend. */
 export async function isClaudeTerminal(id: string): Promise<boolean> {
   return invoke("is_claude_terminal", { id });
+}
+
+/** Resolve Claude Code session IDs for all known Claude terminals.
+ *  Returns a map of terminal_id → Claude session ID. */
+export async function getClaudeSessionIds(): Promise<Record<string, string>> {
+  return invoke("get_claude_session_ids");
 }
 
 // -- Terminal CWD (single source of truth in backend) --

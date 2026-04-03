@@ -20,6 +20,7 @@ vi.mock("@/lib/tauri-api", () => ({
   saveTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
   cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
+  getClaudeSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/terminal-serialize-registry", () => ({

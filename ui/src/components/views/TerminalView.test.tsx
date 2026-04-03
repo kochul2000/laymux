@@ -155,6 +155,7 @@ describe("TerminalView", () => {
         "grp",
         true,
         undefined,
+        undefined,
       );
     });
   });
@@ -817,6 +818,7 @@ describe("TerminalView", () => {
           "default",
           true,
           "/home/user/project",
+          undefined,
         );
       });
     });
@@ -842,6 +844,7 @@ describe("TerminalView", () => {
           24,
           "default",
           true,
+          undefined,
           undefined,
         );
       });
@@ -869,6 +872,62 @@ describe("TerminalView", () => {
           24,
           "default",
           true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
+    it("passes claude --resume as startupCommandOverride when lastClaudeSession is set", async () => {
+      render(
+        <TerminalView
+          instanceId="t-claude-restore"
+          paneId="pane-claude"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+          lastClaudeSession="abc123-session-id"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-claude-restore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          "/home/user/project",
+          "claude --resume abc123-session-id",
+        );
+      });
+    });
+
+    it("does not pass startupCommandOverride when restoreSession is false", async () => {
+      useSettingsStore.setState({
+        claude: { syncCwd: "skip", restoreSession: false },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-claude-norestore"
+          paneId="pane-claude-no"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="abc123-session-id"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-claude-norestore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          undefined,
           undefined,
         );
       });
@@ -943,6 +1002,7 @@ describe("TerminalView", () => {
           "default",
           false,
           undefined,
+          undefined,
         );
       });
     });
@@ -965,6 +1025,7 @@ describe("TerminalView", () => {
           24,
           "default",
           true,
+          undefined,
           undefined,
         );
       });

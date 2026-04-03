@@ -57,6 +57,7 @@ describe("tauri-api", () => {
         syncGroup: "default",
         cwdReceive: true,
         cwd: null,
+        startupCommandOverride: null,
       });
       expect(result).toEqual(mockResult);
     });
@@ -76,6 +77,7 @@ describe("tauri-api", () => {
         syncGroup: "",
         cwdReceive: false,
         cwd: null,
+        startupCommandOverride: null,
       });
     });
   });
