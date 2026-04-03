@@ -167,6 +167,9 @@ fn settings_round_trip_with_full_config() {
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         sync_cwd_defaults: None,
+        workspace_display_order: Vec::new(),
+        workspace_sort_order: None,
+        workspace_display: None,
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
