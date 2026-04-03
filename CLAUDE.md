@@ -5,3 +5,4 @@
 * **컴파일 에러 수정 시 테스트 우선**: 새 필드/기능 추가로 인해 기존 테스트가 컴파일 에러를 일으키면, 단순히 기본값(`None`, `0` 등)을 채워 넣어 컴파일만 통과시키지 말고, 해당 기능을 실제로 검증하는 e2e 테스트를 추가한다.
 * **마이그레이션 불필요**: 현재 내부 개발 단계이므로 설정 파일 경로 변경 등에 대한 마이그레이션 로직은 구현하지 않는다. 기존 데이터는 수동으로 처리한다.
 * **Automation API 포트 규칙**: 개발 중 스크린샷/API 호출은 반드시 dev 인스턴스(포트 19281+)를 사용한다. Release 빌드(포트 19280)는 사용자가 직접 사용하므로 절대 건드리지 않는다. dev discovery 파일: `%APPDATA%\laymux-dev\automation.json`에서 포트를 읽는다.
+* **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.

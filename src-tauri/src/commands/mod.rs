@@ -1002,7 +1002,7 @@ pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        crate::process::headless_command("cmd")
             .args(["/C", "start", "", &path.to_string_lossy()])
             .spawn()
             .map_err(|e| format!("Failed to open settings.json: {e}"))?;
@@ -1089,9 +1089,9 @@ fn split_shell_prefix(input: &str) -> Vec<String> {
 fn build_gh_command(shell_prefix: &str) -> std::process::Command {
     let parts = split_shell_prefix(shell_prefix);
     if parts.is_empty() {
-        std::process::Command::new("gh")
+        crate::process::headless_command("gh")
     } else {
-        let mut cmd = std::process::Command::new(&parts[0]);
+        let mut cmd = crate::process::headless_command(&parts[0]);
         for part in &parts[1..] {
             cmd.arg(part);
         }
@@ -1102,16 +1102,7 @@ fn build_gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Build a `gh` CLI command that runs without a visible console window on Windows.
 fn gh_command(shell_prefix: &str) -> std::process::Command {
-    #[allow(unused_mut)]
-    let mut cmd = build_gh_command(shell_prefix);
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    cmd
+    build_gh_command(shell_prefix)
 }
 
 /// Upload a screenshot to the GitHub repo via the contents API.
@@ -1238,7 +1229,7 @@ pub fn send_os_notification(title: String, body: String) -> Result<(), String> {
     // On Windows, uses tauri notification or powershell toast.
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("powershell")
+        let _ = crate::process::headless_command("powershell")
             .args([
                 "-Command",
                 &format!(
