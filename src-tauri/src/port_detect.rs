@@ -58,7 +58,13 @@ pub fn parse_netstat_output(output: &str) -> Vec<ListeningPort> {
 pub fn get_listening_ports() -> Vec<ListeningPort> {
     #[cfg(target_os = "windows")]
     {
-        match Command::new("netstat").args(["-ano", "-p", "TCP"]).output() {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW (0x08000000): prevents a console window from flashing on screen
+        match Command::new("netstat")
+            .args(["-ano", "-p", "TCP"])
+            .creation_flags(0x08000000)
+            .output()
+        {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 parse_netstat_output(&stdout)

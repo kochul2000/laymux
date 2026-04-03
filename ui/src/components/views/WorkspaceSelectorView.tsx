@@ -4,14 +4,14 @@ import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
-  computeWorkspaceSummaryFromBackend,
+  computeWorkspaceSummary,
   abbreviatePath,
   mntPathToWindows,
   formatCommand,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
-import { useBackendSummaries } from "@/hooks/useBackendSummaries";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
@@ -101,7 +101,7 @@ function WorkspaceItem({
   ws: { id: string; name: string };
   index: number;
   isActive: boolean;
-  summary: ReturnType<typeof computeWorkspaceSummaryFromBackend>;
+  summary: ReturnType<typeof computeWorkspaceSummary>;
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
@@ -843,36 +843,15 @@ export function WorkspaceSelectorView() {
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
   const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-
-  // Collect all terminal IDs across all workspaces for backend summary fetch
-  const allTerminalIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const ws of workspaces) {
-      for (const p of ws.panes) {
-        if (p.view.type === "TerminalView") {
-          ids.push(`terminal-${p.id}`);
-        }
-      }
-    }
-    return ids;
-  }, [workspaces]);
-
-  const { summaries: backendSummaries, markRead } = useBackendSummaries(allTerminalIds);
+  const terminalInstances = useTerminalStore((s) => s.instances);
   const listeningPorts = usePortDetection();
   const portNumbers = useMemo(
     () => [...new Set(listeningPorts.map((p) => p.port))].sort((a, b) => a - b),
     [listeningPorts],
   );
 
-  // Build a lookup map: terminalId → TerminalSummaryResponse
-  const summaryMap = useMemo(() => {
-    const map = new Map<string, (typeof backendSummaries)[number]>();
-    for (const s of backendSummaries) {
-      map.set(s.id, s);
-    }
-    return map;
-  }, [backendSummaries]);
+  // Build terminal ports map (empty for now — port detection doesn't map to terminals)
+  const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(() => {
@@ -975,7 +954,11 @@ export function WorkspaceSelectorView() {
         .find((ws) => ws.id === wsId)
         ?.panes.filter((p) => p.view.type === "TerminalView")
         .map((p) => `terminal-${p.id}`) ?? [];
-    if (wsTerminalIds.length > 0) markRead(wsTerminalIds);
+    if (wsTerminalIds.length > 0) {
+      import("@/lib/tauri-api").then(({ markNotificationsRead }) =>
+        markNotificationsRead(wsTerminalIds).catch(() => {}),
+      );
+    }
     setActiveWorkspace(wsId);
   };
 
@@ -1074,48 +1057,43 @@ export function WorkspaceSelectorView() {
       <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
         {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
-          // Filter backend summaries for this workspace's terminal panes.
-          // Fall back to lastCwd from settings when backend hasn't detected CWD yet
-          // (e.g., shell hasn't emitted OSC 7 after restart, or session not created yet).
-          const wsTerminalSummaries = ws.panes
+          // Compute summary from frontend stores (event-driven, no polling).
+          // Include lastCwd from settings as fallback for terminals that haven't
+          // emitted OSC 7 yet, or that don't have a session yet (early startup).
+          const wsTerminals = ws.panes
             .filter((p) => p.view.type === "TerminalView")
             .map((p) => {
               const termId = `terminal-${p.id}`;
-              const summary = summaryMap.get(termId);
-              if (summary) {
-                // Backend has summary but no CWD yet — use lastCwd from settings
-                if (!summary.cwd && p.view.lastCwd) {
-                  return { ...summary, cwd: p.view.lastCwd as string };
+              const inst = terminalInstances.find((t) => t.id === termId);
+              if (inst) {
+                // Instance exists but no CWD yet — use lastCwd from settings
+                if (!inst.cwd && p.view.lastCwd) {
+                  return { ...inst, cwd: p.view.lastCwd as string };
                 }
-                return summary;
+                return inst;
               }
-              // No backend summary yet (session not created) — synthesize minimal placeholder
-              if (p.view.lastCwd) {
-                return {
-                  id: termId,
-                  profile: (p.view.profile as string) || defaultProfile,
-                  title: "",
-                  cwd: p.view.lastCwd as string,
-                  branch: null,
-                  lastCommand: null,
-                  lastExitCode: null,
-                  lastCommandAt: null,
-                  commandRunning: false,
-                  activity: { type: "shell" as const },
-                  outputActive: false,
-                  isClaude: false,
-                  unreadNotificationCount: 0,
-                  latestNotification: null,
-                } satisfies (typeof backendSummaries)[number];
-              }
-              return undefined;
-            })
-            .filter(Boolean) as (typeof backendSummaries)[number][];
-          const summary = computeWorkspaceSummaryFromBackend(
+              // No instance yet (session not created) — synthesize placeholder
+              return {
+                id: termId,
+                profile: (p.view.profile as string) || "PowerShell",
+                syncGroup: ws.id,
+                workspaceId: ws.id,
+                label: (p.view.profile as string) || "Terminal",
+                cwd: (p.view.lastCwd as string) || undefined,
+                lastActivityAt: 0,
+                isFocused: false,
+              };
+            });
+          const summary = computeWorkspaceSummary(
             ws.id,
-            wsTerminalSummaries,
-            isActive ? portNumbers : [],
+            wsTerminals,
+            isActive ? terminalPorts : new Map(),
+            notifications,
           );
+          // Override ports for active workspace
+          if (isActive && portNumbers.length > 0) {
+            summary.ports = portNumbers;
+          }
           return (
             <WorkspaceItem
               key={ws.id}

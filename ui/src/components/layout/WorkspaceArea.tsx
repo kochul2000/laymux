@@ -26,6 +26,16 @@ export function WorkspaceArea() {
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Lazy mount: only render panes for workspaces that have been activated at least once.
+  // Prevents unnecessary TerminalView/WebGL initialization for never-visited workspaces,
+  // reducing GPU pressure at startup (fixes WebView2 GPU process crash).
+  // Track ever-activated workspace IDs. Uses React's "set state during render"
+  // pattern to grow the set monotonically without cascading effect renders.
+  const [mountedWsIds, setMountedWsIds] = useState(() => new Set([activeWorkspaceId]));
+  if (!mountedWsIds.has(activeWorkspaceId)) {
+    setMountedWsIds(new Set(mountedWsIds).add(activeWorkspaceId));
+  }
+
   const handlePaneHoverActivity = useCallback(
     (paneId: string) => {
       setHoveredPane(paneId);
@@ -58,6 +68,7 @@ export function WorkspaceArea() {
     <div ref={containerRef} data-testid="workspace-area" className="relative h-full w-full">
       {workspaces.map((ws) => {
         const isActive = ws.id === activeWorkspaceId;
+        if (!mountedWsIds.has(ws.id)) return null;
         return (
           <React.Fragment key={ws.id}>
             {ws.panes.map((pane, i) => {

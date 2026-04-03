@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TerminalView } from "./TerminalView";
+import { TerminalView, _resetWebglStagger } from "./TerminalView";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -63,6 +64,14 @@ vi.mock("@xterm/addon-web-links", () => ({
   },
 }));
 
+vi.mock("@xterm/addon-webgl", () => {
+  const WebglAddon = vi.fn().mockImplementation(() => ({
+    dispose: vi.fn(),
+    onContextLoss: vi.fn(),
+  }));
+  return { WebglAddon: WebglAddon };
+});
+
 const mockSerialize = vi.fn().mockReturnValue("serialized-data");
 vi.mock("@xterm/addon-serialize", () => ({
   SerializeAddon: class MockSerializeAddon {
@@ -117,6 +126,7 @@ describe("TerminalView", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     capturedKeyHandler = null;
     capturedLinkHandler = null;
+    _resetWebglStagger();
     vi.clearAllMocks();
   });
 
@@ -998,6 +1008,66 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockSetTerminalCwdReceive).toHaveBeenCalledWith("t-cwd3", false);
       });
+    });
+  });
+
+  describe("WebGL stagger", () => {
+    it("delays WebGL addon creation based on init counter", async () => {
+      vi.useFakeTimers();
+
+      render(<TerminalView instanceId="t-wgl1" profile="PowerShell" syncGroup="g" />);
+      render(<TerminalView instanceId="t-wgl2" profile="PowerShell" syncGroup="g" />);
+
+      // Advance past ResizeObserver setTimeout(0) + first WebGL setTimeout(0)
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      // Drain nested timers (ResizeObserver → WebGL init at delay 0)
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(WebglAddon).toHaveBeenCalledTimes(1);
+
+      // Second terminal: delay = 1 * 150 = 150ms
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(WebglAddon).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("cleans up WebGL timer on unmount before it fires", async () => {
+      vi.useFakeTimers();
+      _resetWebglStagger();
+
+      // First terminal gets delay=0, second gets delay=150
+      render(<TerminalView instanceId="t-bump" profile="PowerShell" syncGroup="g" />);
+      const { unmount } = render(
+        <TerminalView instanceId="t-wgl-cleanup" profile="PowerShell" syncGroup="g" />,
+      );
+
+      // Fire ResizeObserver callbacks + first WebGL (delay=0)
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      const callsBefore = WebglAddon.mock.calls.length;
+
+      // Unmount second terminal before its 150ms timer fires
+      unmount();
+
+      // Advance past the stagger delay
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // WebGL should NOT have been created for the unmounted terminal
+      expect(WebglAddon).toHaveBeenCalledTimes(callsBefore);
+
+      vi.useRealTimers();
     });
   });
 });
