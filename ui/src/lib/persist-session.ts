@@ -10,8 +10,14 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
-/** Maximum serialized terminal output size to cache (2M chars). Outputs exceeding this are truncated from the front, keeping recent lines. */
-const MAX_CACHE_CHARS = 2 * 1024 * 1024;
+/** Default maximum serialized terminal output size to cache (256KB). Overridden by profileDefaults.maxOutputCacheKB. */
+const DEFAULT_MAX_CACHE_CHARS = 256 * 1024;
+
+/** Get max cache chars from settings. */
+function getMaxCacheChars(): number {
+  const kb = useSettingsStore.getState().profileDefaults.maxOutputCacheKB;
+  return kb > 0 ? kb * 1024 : DEFAULT_MAX_CACHE_CHARS;
+}
 
 /** Truncate serialized output by dropping oldest lines until it fits within maxChars. */
 export function truncateFromEnd(data: string, maxChars: number): string {
@@ -204,8 +210,9 @@ export async function saveBeforeClose(): Promise<void> {
     try {
       let data = serializeFn();
       if (!data || data.length === 0) continue;
-      if (data.length > MAX_CACHE_CHARS) {
-        data = truncateFromEnd(data, MAX_CACHE_CHARS);
+      const maxChars = getMaxCacheChars();
+      if (data.length > maxChars) {
+        data = truncateFromEnd(data, maxChars);
       }
       if (data.length > 0) {
         cachePromises.push(saveTerminalOutputCache(paneId, data));

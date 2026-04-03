@@ -11,7 +11,7 @@ import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeome
 export function App() {
   useKeyboardShortcuts();
   useSyncEvents();
-  useSessionPersistence();
+  const { loaded } = useSessionPersistence();
   useAutomationBridge();
   useWindowGeometry();
 
@@ -50,6 +50,28 @@ export function App() {
       cleanupRef.current?.();
     };
   }, []);
+
+  if (!loaded) {
+    return (
+      <div
+        className="h-screen flex items-center justify-center"
+        data-testid="app-root"
+        style={{ background: "var(--bg, #1e1e2e)" }}
+      >
+        <div
+          style={{
+            color: "var(--text, #cdd6f4)",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: 14,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ marginBottom: 12, fontSize: 16 }}>Laymux</div>
+          <div style={{ opacity: 0.5 }}>Loading session...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen" data-testid="app-root">

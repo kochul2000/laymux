@@ -476,13 +476,11 @@ fn handle_lx_message_dispatch(
             // Normalize WSL UNC paths to Linux-native paths
             let normalized_path = normalize_wsl_path(&path);
 
-            // Skip if CWD hasn't actually changed for this terminal
-            if should_skip_sync_cwd(state, &terminal_id, &normalized_path) {
-                return Ok(LxResponse::ok(Some(format!(
-                    "sync-cwd {} skipped (unchanged)",
-                    normalized_path
-                ))));
-            }
+            // NOTE: We intentionally do NOT skip when the source terminal's CWD
+            // matches normalized_path. The backend PTY callback (proactive CWD
+            // detection) may have already updated session.cwd before this IPC
+            // arrives, so a naive "unchanged" check would suppress every
+            // propagation. Target-side dedup is handled by filter_targets_needing_cd.
 
             // Update stored CWD for the source terminal
             update_terminal_cwd(state, &terminal_id, &normalized_path);
@@ -1004,7 +1002,7 @@ pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        crate::process::headless_command("cmd")
             .args(["/C", "start", "", &path.to_string_lossy()])
             .spawn()
             .map_err(|e| format!("Failed to open settings.json: {e}"))?;
@@ -1091,9 +1089,9 @@ fn split_shell_prefix(input: &str) -> Vec<String> {
 fn build_gh_command(shell_prefix: &str) -> std::process::Command {
     let parts = split_shell_prefix(shell_prefix);
     if parts.is_empty() {
-        std::process::Command::new("gh")
+        crate::process::headless_command("gh")
     } else {
-        let mut cmd = std::process::Command::new(&parts[0]);
+        let mut cmd = crate::process::headless_command(&parts[0]);
         for part in &parts[1..] {
             cmd.arg(part);
         }
@@ -1104,16 +1102,7 @@ fn build_gh_command(shell_prefix: &str) -> std::process::Command {
 
 /// Build a `gh` CLI command that runs without a visible console window on Windows.
 fn gh_command(shell_prefix: &str) -> std::process::Command {
-    #[allow(unused_mut)]
-    let mut cmd = build_gh_command(shell_prefix);
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    cmd
+    build_gh_command(shell_prefix)
 }
 
 /// Upload a screenshot to the GitHub repo via the contents API.
@@ -1240,7 +1229,7 @@ pub fn send_os_notification(title: String, body: String) -> Result<(), String> {
     // On Windows, uses tauri notification or powershell toast.
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("powershell")
+        let _ = crate::process::headless_command("powershell")
             .args([
                 "-Command",
                 &format!(
@@ -1315,18 +1304,6 @@ fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool, String> {
     } else {
         Ok(false)
     }
-}
-
-/// Check if a sync-cwd should be skipped because the terminal already has the same CWD.
-fn should_skip_sync_cwd(state: &AppState, terminal_id: &str, normalized_path: &str) -> bool {
-    if let Ok(terminals) = state.terminals.lock() {
-        if let Some(session) = terminals.get(terminal_id) {
-            if let Some(ref cwd) = session.cwd {
-                return cwd == normalized_path;
-            }
-        }
-    }
-    false
 }
 
 /// Filter out terminals that have a command running.
@@ -2039,7 +2016,7 @@ fn build_cd_command(path: &str, profile: &str) -> String {
 
 /// Normalize CWD paths to a canonical Linux-native form.
 /// All Windows drive paths are converted to `/mnt/x/...` so that
-/// `should_skip_sync_cwd` can deduplicate OSC 7 and OSC 9;9 events.
+/// `filter_targets_needing_cd` can deduplicate OSC 7 and OSC 9;9 events.
 ///
 /// Examples:
 /// - `file://localhost/mnt/c/Users` → `/mnt/c/Users`
@@ -2699,33 +2676,38 @@ mod tests {
     }
 
     #[test]
-    fn sync_cwd_skips_when_cwd_unchanged() {
-        // If a terminal reports the same CWD it already has, no sync should happen
+    fn filter_targets_needing_cd_deduplicates_unchanged_cwd() {
+        // When source's CWD is already set (e.g., by proactive PTY detection),
+        // filter_targets_needing_cd should still filter targets that already
+        // have the same CWD — this is the target-side dedup mechanism.
         let state = AppState::new();
         {
             let mut terminals = state.terminals.lock().unwrap();
-            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
-            session.cwd = Some("/home/user/project".into());
-            terminals.insert("t1".into(), session);
+            let mut t1 = TerminalSession::new("t1".into(), TerminalConfig::default());
+            t1.cwd = Some("/home/user/project".into());
+            terminals.insert("t1".into(), t1);
+
+            // t2 already at same CWD → should be filtered out
+            let mut t2 = TerminalSession::new("t2".into(), TerminalConfig::default());
+            t2.cwd = Some("/home/user/project".into());
+            terminals.insert("t2".into(), t2);
+
+            // t3 at different CWD → should NOT be filtered out
+            let mut t3 = TerminalSession::new("t3".into(), TerminalConfig::default());
+            t3.cwd = Some("/home/user/other".into());
+            terminals.insert("t3".into(), t3);
+
+            // t4 no CWD → should NOT be filtered out
             terminals.insert(
-                "t2".into(),
-                TerminalSession::new("t2".into(), TerminalConfig::default()),
+                "t4".into(),
+                TerminalSession::new("t4".into(), TerminalConfig::default()),
             );
         }
-        {
-            let mut groups = state.sync_groups.lock().unwrap();
-            let mut group = crate::terminal::SyncGroup::new("g1".into());
-            group.add_terminal("t1".into());
-            group.add_terminal("t2".into());
-            groups.insert("g1".into(), group);
-        }
 
-        // same CWD → should be skipped
-        assert!(should_skip_sync_cwd(&state, "t1", "/home/user/project"));
-        // different CWD → should NOT be skipped
-        assert!(!should_skip_sync_cwd(&state, "t1", "/home/user/other"));
-        // unknown terminal → should NOT be skipped
-        assert!(!should_skip_sync_cwd(&state, "unknown", "/whatever"));
+        let targets = vec!["t2".into(), "t3".into(), "t4".into()];
+        let result = filter_targets_needing_cd(&state, &targets, "/home/user/project");
+        // t2 filtered (same CWD), t3 and t4 remain
+        assert_eq!(result, vec!["t3".to_string(), "t4".to_string()]);
     }
 
     #[test]
@@ -2777,7 +2759,7 @@ mod tests {
     #[test]
     fn normalize_osc7_and_osc99_produce_same_result() {
         // Critical: both OSC 7 and OSC 9;9 for the same cd must normalize identically
-        // so should_skip_sync_cwd deduplicates them
+        // so filter_targets_needing_cd deduplicates them
         let from_osc7 = normalize_wsl_path("file://localhost/mnt/c/Windows");
         let from_osc99 = normalize_wsl_path("C:/Windows");
         assert_eq!(from_osc7, from_osc99);

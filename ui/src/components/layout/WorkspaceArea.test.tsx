@@ -177,6 +177,70 @@ describe("WorkspaceArea", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
 
+  it("does not mount panes for never-visited workspaces", () => {
+    // Setup: create a second workspace (not yet activated)
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+
+    render(<WorkspaceArea />);
+
+    // Active workspace panes should render
+    expect(screen.getByTestId("workspace-pane-0")).toBeInTheDocument();
+
+    // Only the active workspace's panes should be rendered
+    const activePanes = screen.getAllByTestId(/^workspace-pane-/);
+    const activeWs = useWorkspaceStore.getState().workspaces[0];
+    expect(activePanes).toHaveLength(activeWs.panes.length);
+  });
+
+  it("mounts workspace panes when first activated", () => {
+    // Setup: create a second workspace
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+    const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
+
+    render(<WorkspaceArea />);
+
+    // Switch to WS2
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2Id);
+    });
+
+    // WS2 panes should now be visible
+    expect(screen.getByTestId("workspace-pane-0")).toBeInTheDocument();
+  });
+
+  it("keeps previously-visited workspace mounted after switching away", () => {
+    // Setup: create two workspaces
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+    const ws1Id = useWorkspaceStore.getState().workspaces[0].id;
+    const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
+
+    render(<WorkspaceArea />);
+
+    // Visit WS2
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2Id);
+    });
+
+    // Switch back to WS1
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws1Id);
+    });
+
+    // Both workspaces should have their pane divs in the DOM
+    // WS1 panes visible, WS2 panes hidden (display: none)
+    const allDivs = document.querySelectorAll(
+      "[data-testid='workspace-area'] > [class*='absolute']",
+    );
+    const hiddenDivs = Array.from(allDivs).filter(
+      (el) => (el as HTMLElement).style.display === "none",
+    );
+    // WS2 panes should be hidden but present
+    expect(hiddenDivs.length).toBeGreaterThan(0);
+  });
+
   it("preserves pane DOM elements when workspaces are reordered", () => {
     // Setup: create 2 workspaces with distinct pane IDs
     const store = useWorkspaceStore.getState();

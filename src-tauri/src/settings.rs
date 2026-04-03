@@ -551,6 +551,15 @@ pub struct Settings {
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd_defaults: Option<serde_json::Value>,
+    /// User-defined workspace display order (drag-and-drop). Opaque to backend.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_display_order: Vec<String>,
+    /// Workspace sort mode ("manual" | "notification"). Opaque to backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_sort_order: Option<String>,
+    /// Workspace display toggles (minimap, environment, etc.). Opaque to backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_display: Option<serde_json::Value>,
 }
 
 fn default_app_theme_id() -> String {
@@ -624,6 +633,9 @@ impl Default for Settings {
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             sync_cwd_defaults: None,
+            workspace_display_order: Vec::new(),
+            workspace_sort_order: None,
+            workspace_display: None,
         }
     }
 }
@@ -1324,22 +1336,16 @@ mod tests {
     #[test]
     fn view_order_and_app_theme_round_trip() {
         let json = r#"{
-            "viewOrder": ["TerminalView", "BrowserPreviewView"],
+            "viewOrder": ["TerminalView", "MemoView"],
             "appThemeId": "dracula"
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            settings.view_order,
-            vec!["TerminalView", "BrowserPreviewView"]
-        );
+        assert_eq!(settings.view_order, vec!["TerminalView", "MemoView"]);
         assert_eq!(settings.app_theme_id, "dracula");
 
         let serialized = serde_json::to_string_pretty(&settings).unwrap();
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(
-            reparsed.view_order,
-            vec!["TerminalView", "BrowserPreviewView"]
-        );
+        assert_eq!(reparsed.view_order, vec!["TerminalView", "MemoView"]);
         assert_eq!(reparsed.app_theme_id, "dracula");
     }
 
@@ -1598,5 +1604,43 @@ mod tests {
         let map: std::collections::HashMap<String, String> =
             serde_json::from_str(&content).unwrap();
         assert!(!map.contains_key("pane-1"));
+    }
+
+    #[test]
+    fn workspace_display_order_round_trip() {
+        let mut settings = Settings::default();
+        settings.workspace_display_order = vec!["ws-2".into(), "ws-1".into(), "ws-3".into()];
+        settings.workspace_sort_order = Some("manual".into());
+        settings.workspace_display =
+            Some(serde_json::json!({"minimap": true, "environment": false}));
+
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.workspace_display_order, vec!["ws-2", "ws-1", "ws-3"]);
+        assert_eq!(parsed.workspace_sort_order, Some("manual".into()));
+        assert_eq!(
+            parsed.workspace_display,
+            Some(serde_json::json!({"minimap": true, "environment": false}))
+        );
+    }
+
+    #[test]
+    fn workspace_display_order_absent_defaults_empty() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.workspace_display_order.is_empty());
+        assert!(settings.workspace_sort_order.is_none());
+        assert!(settings.workspace_display.is_none());
+    }
+
+    #[test]
+    fn workspace_display_order_skipped_when_empty() {
+        let settings = Settings::default();
+        let json = serde_json::to_string(&settings).unwrap();
+        // Empty vec should be skipped in serialization
+        assert!(!json.contains("workspaceDisplayOrder"));
+        assert!(!json.contains("workspaceSortOrder"));
+        assert!(!json.contains("workspaceDisplay"));
     }
 }

@@ -100,7 +100,7 @@ laymux/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── layout/  # AppLayout, Dock, WorkspaceArea, Grid
-│   │   │   └── views/   # TerminalView, BrowserPreview, Settings 등
+│   │   │   └── views/   # TerminalView, Settings, Memo 등
 │   │   ├── stores/      # Zustand 스토어
 │   │   ├── hooks/       # React 훅
 │   │   └── lib/         # 유틸리티 (OSC 파서, 색상 등)

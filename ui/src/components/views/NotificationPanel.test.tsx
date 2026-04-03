@@ -41,9 +41,12 @@ describe("NotificationPanel", () => {
   });
 
   it("shows unread indicator for unread notifications", () => {
+    // Use non-active workspace to avoid auto-dismiss
+    useWorkspaceStore.getState().addWorkspace("Other", "default-layout");
+    const otherWsId = useWorkspaceStore.getState().workspaces[1].id;
     useNotificationStore.getState().addNotification({
       terminalId: "t1",
-      workspaceId: "ws-default",
+      workspaceId: otherWsId,
       message: "Build complete",
     });
 
@@ -53,23 +56,26 @@ describe("NotificationPanel", () => {
   });
 
   it("marks notifications as read when mark-read button clicked", () => {
+    // Use non-active workspace to avoid auto-dismiss
+    useWorkspaceStore.getState().addWorkspace("Other", "default-layout");
+    const otherWsId = useWorkspaceStore.getState().workspaces[1].id;
     useNotificationStore.getState().addNotification({
       terminalId: "t1",
-      workspaceId: "ws-default",
+      workspaceId: otherWsId,
       message: "Build complete",
     });
     useNotificationStore.getState().addNotification({
       terminalId: "t1",
-      workspaceId: "ws-default",
+      workspaceId: otherWsId,
       message: "Deploy done",
     });
 
     render(<NotificationPanel />);
 
-    const markReadBtn = screen.getByTestId("mark-read-ws-default");
+    const markReadBtn = screen.getByTestId(`mark-read-${otherWsId}`);
     fireEvent.click(markReadBtn);
 
-    expect(useNotificationStore.getState().getUnreadCount("ws-default")).toBe(0);
+    expect(useNotificationStore.getState().getUnreadCount(otherWsId)).toBe(0);
   });
 
   it("orders notifications by most recent first", () => {

@@ -84,8 +84,13 @@ describe("App", () => {
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
   });
 
-  it("renders the workspace area", () => {
+  it("shows loading screen then renders workspace area after settings load", async () => {
     render(<App />);
+    // Initially shows loading screen
+    expect(screen.getByTestId("app-root")).toBeInTheDocument();
+
+    // After settings load (async), workspace area appears
+    await screen.findByTestId("workspace-area", {}, { timeout: 3000 });
     expect(screen.getByTestId("workspace-area")).toBeInTheDocument();
   });
 });

@@ -58,6 +58,16 @@ function resolveWorkspaceId(terminalId: string): string {
   return activeWorkspaceId;
 }
 
+// Stagger WebGL context creation to prevent WebView2 GPU process crash.
+// Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
+let webglInitCount = 0;
+const WEBGL_STAGGER_MS = 150;
+
+/** Reset the stagger counter (for tests). */
+export function _resetWebglStagger(): void {
+  webglInitCount = 0;
+}
+
 interface TerminalViewProps {
   instanceId: string;
   paneId?: string;
@@ -142,6 +152,8 @@ export function TerminalView({
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
+      scrollback: 10000,
+      windowsPty: { backend: "conpty", buildNumber: 21376 },
     });
 
     const fitAddon = new FitAddon();
@@ -463,6 +475,7 @@ export function TerminalView({
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
     let sessionCreated = false;
+    let webglTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0 && !sessionCreated) {
@@ -473,13 +486,19 @@ export function TerminalView({
         }
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
-        try {
-          const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
-          terminal.loadAddon(webgl);
-          webgl.onContextLoss(() => webgl.dispose());
-        } catch {
-          // WebGL not available — fall back to default renderer
-        }
+        // Stagger creation to prevent simultaneous GPU context init crash.
+        const delay = webglInitCount * WEBGL_STAGGER_MS;
+        webglInitCount++;
+        webglTimer = setTimeout(() => {
+          if (cancelled) return;
+          try {
+            const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
+            terminal.loadAddon(webgl);
+            webgl.onContextLoss(() => webgl.dispose());
+          } catch {
+            // WebGL not available — fall back to default renderer
+          }
+        }, delay);
         // Load SerializeAddon for session persistence
         const serializeAddon = new SerializeAddon();
         terminal.loadAddon(serializeAddon);
@@ -502,30 +521,9 @@ export function TerminalView({
         const shouldRestoreOutput =
           profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
 
-        (async () => {
-          if (cancelled) return;
-          // Restore cached terminal output from previous session
-          if (shouldRestoreOutput && paneId) {
-            try {
-              const cached = await loadTerminalOutputCache(paneId);
-              if (cancelled) return;
-              if (cached && cached.length > 0) {
-                terminal.write(cached);
-                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
-                // Push restored content into scrollback so shell init
-                // clear-screen sequences don't destroy it
-                terminal.write("\r\n".repeat(terminal.rows));
-              }
-            } catch (err) {
-              // "Cache not found" is expected for new panes — log anything else
-              const msg = err instanceof Error ? err.message : String(err);
-              if (!msg.startsWith("Cache not found:")) {
-                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
-              }
-            }
-          }
-
-          if (cancelled) return;
+        // Start PTY session immediately (don't wait for cache restore).
+        // Cache restore runs in parallel so the shell starts booting ASAP.
+        if (!cancelled) {
           createTerminalSession(
             instanceId,
             profile,
@@ -538,7 +536,26 @@ export function TerminalView({
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
             terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
           });
-        })();
+        }
+
+        // Restore cached terminal output in parallel (non-blocking).
+        if (shouldRestoreOutput && paneId) {
+          loadTerminalOutputCache(paneId)
+            .then((cached) => {
+              if (cancelled || !cached || cached.length === 0) return;
+              terminal.write(cached);
+              terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
+              // Push restored content into scrollback so shell init
+              // clear-screen sequences don't destroy it
+              terminal.write("\r\n".repeat(terminal.rows));
+            })
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.startsWith("Cache not found:")) {
+                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
+              }
+            });
+        }
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
@@ -549,6 +566,7 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      if (webglTimer !== undefined) clearTimeout(webglTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);

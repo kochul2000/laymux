@@ -17,6 +17,8 @@ vi.mock("@/lib/tauri-api", () => ({
   setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: vi.fn().mockResolvedValue(undefined),
+  loadTerminalOutputCache: vi.fn().mockRejectedValue(new Error("Cache not found: mock")),
+  markClaudeTerminal: vi.fn().mockResolvedValue(false),
 }));
 
 import { AppLayout } from "./AppLayout";
