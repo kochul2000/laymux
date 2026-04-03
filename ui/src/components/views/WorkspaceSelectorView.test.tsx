@@ -515,6 +515,88 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
+  it("displays running indicator when command failed but activity is interactiveApp", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "gh pr view 3237",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should show running (hourglass) instead of failure (cross) because interactive app is still running
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+    });
+  });
+
+  it("displays running indicator when command failed but activity is running", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "cargo build",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+      activity: { type: "running" },
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should show running (hourglass) instead of failure because process is still running
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+    });
+  });
+
   it("shows terminal count badge when terminals exist", async () => {
     useWorkspaceStore.setState({
       workspaces: [
