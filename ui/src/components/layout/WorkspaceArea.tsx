@@ -109,14 +109,6 @@ export function WorkspaceArea() {
                       style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
                     />
                   )}
-                  {/* Browser iframe click capture overlay */}
-                  {isActive && pane.view.type === "BrowserPreviewView" && !isFocused && (
-                    <div
-                      data-testid={`pane-focus-overlay-${i}`}
-                      className="absolute inset-0 z-10"
-                    />
-                  )}
-
                   <PaneControlBar
                     currentView={pane.view}
                     hovered={isActive && isHovered}

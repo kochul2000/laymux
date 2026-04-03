@@ -1386,7 +1386,7 @@ describe("Complex Workspace Layout Scenarios", () => {
           panes: [
             { x: 0, y: 0, w: 1, h: 0.6, viewType: "TerminalView" },
             { x: 0, y: 0.6, w: 0.5, h: 0.4, viewType: "TerminalView" },
-            { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: "BrowserPreviewView" },
+            { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: "TerminalView" },
           ],
         },
       ],
@@ -1398,7 +1398,7 @@ describe("Complex Workspace Layout Scenarios", () => {
           panes: [
             { id: "p1", x: 0, y: 0, w: 1, h: 0.6, view: { type: "TerminalView" } },
             { id: "p2", x: 0, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
-            { id: "p3", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "BrowserPreviewView" } },
+            { id: "p3", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "TerminalView" } },
           ],
         },
       ],

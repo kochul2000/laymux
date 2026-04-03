@@ -407,8 +407,8 @@ describe("useSessionPersistence", () => {
               y: 0,
               w: 0.5,
               h: 1,
-              viewType: "BrowserPreviewView",
-              viewConfig: { type: "BrowserPreviewView", url: "http://localhost:3000" },
+              viewType: "MemoView",
+              viewConfig: { type: "MemoView" },
             },
           ],
         },
@@ -445,8 +445,7 @@ describe("useSessionPersistence", () => {
       profile: "WSL",
     });
     expect(wsState.layouts[0].panes[1].viewConfig).toEqual({
-      type: "BrowserPreviewView",
-      url: "http://localhost:3000",
+      type: "MemoView",
     });
   });
 

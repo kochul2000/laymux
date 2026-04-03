@@ -99,7 +99,7 @@ fn settings_round_trip_with_full_config() {
                     y: 0.5,
                     w: 0.5,
                     h: 0.5,
-                    view_type: "BrowserPreviewView".into(),
+                    view_type: "TerminalView".into(),
                     view_config: None,
                 },
             ],
@@ -138,8 +138,8 @@ fn settings_round_trip_with_full_config() {
                     w: 0.5,
                     h: 0.5,
                     view: WorkspacePaneView {
-                        view_type: "BrowserPreviewView".into(),
-                        extra: serde_json::json!({"url": "http://localhost:3000"}),
+                        view_type: "TerminalView".into(),
+                        extra: serde_json::json!({"profile": "Ubuntu", "syncGroup": "Project A"}),
                     },
                 },
             ],
@@ -354,7 +354,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         y: 0.5,
                         w: 0.5,
                         h: 0.5,
-                        view_type: "BrowserPreviewView".into(),
+                        view_type: "TerminalView".into(),
                         view_config: None,
                     },
                 ],
@@ -1465,7 +1465,7 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
                 "panes": [
                     { "x": 0.0, "y": 0.0, "w": 1.0, "h": 0.6, "viewType": "TerminalView" },
                     { "x": 0.0, "y": 0.6, "w": 0.5, "h": 0.4, "viewType": "TerminalView" },
-                    { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "viewType": "BrowserPreviewView" }
+                    { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "viewType": "TerminalView" }
                 ]
             }
         ],
@@ -1477,7 +1477,7 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
                 "panes": [
                     { "x": 0.0, "y": 0.0, "w": 1.0, "h": 0.6, "view": { "type": "TerminalView", "profile": "WSL", "syncGroup": "프로젝트A" } },
                     { "x": 0.0, "y": 0.6, "w": 0.5, "h": 0.4, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "프로젝트A" } },
-                    { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "view": { "type": "BrowserPreviewView", "url": "http://localhost:3000" } }
+                    { "x": 0.5, "y": 0.6, "w": 0.5, "h": 0.4, "view": { "type": "TerminalView", "profile": "PowerShell", "syncGroup": "프로젝트A" } }
                 ]
             }
         ]
@@ -1530,12 +1530,12 @@ fn e2e_full_settings_load_create_sessions_and_groups() {
         }
     }
 
-    // Verify: 2 terminal sessions, 1 sync group with 2 members
-    assert_eq!(state.terminals.lock().unwrap().len(), 2);
+    // Verify: 3 terminal sessions, 1 sync group with 3 members
+    assert_eq!(state.terminals.lock().unwrap().len(), 3);
     let groups = state.sync_groups.lock().unwrap();
     assert_eq!(groups.len(), 1);
     assert!(groups.contains_key("프로젝트A"));
-    assert_eq!(groups["프로젝트A"].terminal_ids.len(), 2);
+    assert_eq!(groups["프로젝트A"].terminal_ids.len(), 3);
 }
 
 // ============================================================================
@@ -1794,10 +1794,9 @@ fn layout_pane_view_config_round_trip() {
                 y: 0.0,
                 w: 0.5,
                 h: 1.0,
-                view_type: "BrowserPreviewView".into(),
+                view_type: "MemoView".into(),
                 view_config: Some(serde_json::json!({
-                    "type": "BrowserPreviewView",
-                    "url": "http://localhost:3000"
+                    "type": "MemoView"
                 })),
             },
         ],
@@ -1812,10 +1811,9 @@ fn layout_pane_view_config_round_trip() {
     assert_eq!(terminal_config["profile"], "WSL");
     assert_eq!(terminal_config["syncGroup"], "project-a");
 
-    // BrowserPreviewView config preserved
-    let browser_config = parsed.panes[1].view_config.as_ref().unwrap();
-    assert_eq!(browser_config["type"], "BrowserPreviewView");
-    assert_eq!(browser_config["url"], "http://localhost:3000");
+    // MemoView config preserved
+    let memo_config = parsed.panes[1].view_config.as_ref().unwrap();
+    assert_eq!(memo_config["type"], "MemoView");
 }
 
 #[test]
@@ -1847,8 +1845,8 @@ fn layout_pane_view_config_present_in_json() {
             },
             {
                 "x": 0.0, "y": 0.5, "w": 1.0, "h": 0.5,
-                "viewType": "BrowserPreviewView",
-                "viewConfig": { "type": "BrowserPreviewView", "url": "http://localhost:8080" }
+                "viewType": "MemoView",
+                "viewConfig": { "type": "MemoView" }
             }
         ]
     }"#;
@@ -1861,9 +1859,8 @@ fn layout_pane_view_config_present_in_json() {
     assert_eq!(cfg0["cwdSend"], true);
 
     let p1 = &layout.panes[1];
-    assert_eq!(p1.view_type, "BrowserPreviewView");
-    let cfg1 = p1.view_config.as_ref().unwrap();
-    assert_eq!(cfg1["url"], "http://localhost:8080");
+    assert_eq!(p1.view_type, "MemoView");
+    assert!(p1.view_config.is_some());
 }
 
 #[test]

@@ -1336,22 +1336,16 @@ mod tests {
     #[test]
     fn view_order_and_app_theme_round_trip() {
         let json = r#"{
-            "viewOrder": ["TerminalView", "BrowserPreviewView"],
+            "viewOrder": ["TerminalView", "MemoView"],
             "appThemeId": "dracula"
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            settings.view_order,
-            vec!["TerminalView", "BrowserPreviewView"]
-        );
+        assert_eq!(settings.view_order, vec!["TerminalView", "MemoView"]);
         assert_eq!(settings.app_theme_id, "dracula");
 
         let serialized = serde_json::to_string_pretty(&settings).unwrap();
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(
-            reparsed.view_order,
-            vec!["TerminalView", "BrowserPreviewView"]
-        );
+        assert_eq!(reparsed.view_order, vec!["TerminalView", "MemoView"]);
         assert_eq!(reparsed.app_theme_id, "dracula");
     }
 

@@ -70,7 +70,7 @@ export const TAURI_MOCK_SCRIPT = `
                 panes: [
                   { x: 0, y: 0, w: 1, h: 0.6, viewType: 'TerminalView' },
                   { x: 0, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
-                  { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'BrowserPreviewView' },
+                  { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
                 ],
               },
             ],

@@ -31,14 +31,14 @@ test.describe("EmptyView", () => {
     await expect(emptyView).toContainText("Select a view");
   });
 
-  test("empty view has terminal and browser preview options", async ({ appPage: page }) => {
+  test("empty view has terminal and memo options", async ({ appPage: page }) => {
     await hoverPane(page, 0);
     await page.getByTestId("pane-control-split-v").click();
 
     const emptyView = page.locator("[data-testid='workspace-pane-1'] [data-testid='empty-view']");
-    // Terminal profiles (PowerShell, WSL) and Browser Preview
+    // Terminal profiles (PowerShell, WSL) and Memo
     await expect(emptyView.getByTestId("empty-view-terminal-PowerShell")).toBeVisible();
-    await expect(emptyView.getByTestId("empty-view-browser")).toBeVisible();
+    await expect(emptyView.getByTestId("empty-view-memo")).toBeVisible();
   });
 
   test("clicking terminal option in EmptyView switches to TerminalView", async ({
@@ -57,57 +57,16 @@ test.describe("EmptyView", () => {
     ).toBeVisible();
   });
 
-  test("clicking Browser Preview in EmptyView switches to BrowserPreviewView", async ({
-    appPage: page,
-  }) => {
+  test("clicking Memo in EmptyView switches to MemoView", async ({ appPage: page }) => {
     await hoverPane(page, 0);
     await page.getByTestId("pane-control-split-v").click();
 
     const emptyView = page.locator("[data-testid='workspace-pane-1'] [data-testid='empty-view']");
-    await emptyView.getByText("Browser Preview").click();
+    await emptyView.getByTestId("empty-view-memo").click();
 
     await expect(
-      page.locator("[data-testid='workspace-pane-1'] [data-testid='browser-preview']"),
+      page.locator("[data-testid='workspace-pane-1'] [data-testid='view-memo']"),
     ).toBeVisible();
-  });
-});
-
-test.describe("BrowserPreviewView", () => {
-  test.beforeEach(async ({ appPage: page }) => {
-    // Switch the first pane to BrowserPreview via pane control bar
-    await hoverPane(page, 0);
-    await page.getByTestId("pane-control-view-select").selectOption("BrowserPreviewView");
-  });
-
-  test("renders with URL bar and placeholder", async ({ appPage: page }) => {
-    await expect(page.getByTestId("browser-preview")).toBeVisible();
-    await expect(page.getByTestId("browser-url-input")).toBeVisible();
-    // Default URL is about:blank, which shows placeholder instead of iframe
-    await expect(page.getByText("Enter a URL to preview")).toBeVisible();
-  });
-
-  test("has back, forward, and reload buttons", async ({ appPage: page }) => {
-    await expect(page.getByTestId("browser-back-btn")).toBeVisible();
-    await expect(page.getByTestId("browser-forward-btn")).toBeVisible();
-    await expect(page.getByTestId("browser-reload-btn")).toBeVisible();
-  });
-
-  test("URL input has default value", async ({ appPage: page }) => {
-    const urlInput = page.getByTestId("browser-url-input");
-    const value = await urlInput.inputValue();
-    expect(value).toBeTruthy(); // Should have some default URL
-  });
-
-  test("typing URL and pressing Enter navigates", async ({ appPage: page }) => {
-    const urlInput = page.getByTestId("browser-url-input");
-    await urlInput.fill("http://localhost:3000");
-    await urlInput.press("Enter");
-
-    // After navigating away from about:blank, iframe should appear
-    const iframe = page.getByTestId("browser-iframe");
-    await expect(iframe).toBeVisible();
-    const src = await iframe.getAttribute("src");
-    expect(src).toBe("http://localhost:3000");
   });
 });
 

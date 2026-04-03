@@ -16,7 +16,6 @@ Laymux is a desktop IDE designed around terminal workflows. It provides a flexib
 - **Terminal-first** — Full PTY terminals (xterm.js + portable-pty) with WSL and PowerShell profile support.
 - **SyncGroup** — Synchronize CWD, git branch, and other state across terminals in the same group.
 - **OSC Hooks** — React to terminal escape sequences (OSC 7, OSC 133) to trigger IDE actions like directory sync and failure notifications.
-- **Browser Preview** — Embedded WebView for live previewing web apps.
 - **Automation API** — HTTP REST API on `localhost:19280` for programmatic control by external tools (CI, AI agents, scripts).
 - **IDE CLI** — `ide` command available inside terminals for sync, notifications, and inter-terminal communication.
 - **Notification System** — Per-workspace unread badges, alert rings, and OS-native notifications.
@@ -100,7 +99,7 @@ laymux/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── layout/  # AppLayout, Dock, WorkspaceArea, Grid
-│   │   │   └── views/   # TerminalView, BrowserPreview, Settings, etc.
+│   │   │   └── views/   # TerminalView, Settings, Memo, etc.
 │   │   ├── stores/      # Zustand stores
 │   │   ├── hooks/       # React hooks
 │   │   └── lib/         # Utilities (OSC parser, colors, etc.)

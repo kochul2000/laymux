@@ -720,7 +720,7 @@ describe("WorkspaceSelectorView", () => {
               h: 0.4,
               view: { type: "TerminalView", profile: "PowerShell" },
             },
-            { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "BrowserPreviewView" } },
+            { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "MemoView" } },
           ],
         },
       ],

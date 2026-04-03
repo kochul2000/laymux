@@ -96,8 +96,8 @@ test.describe("View Switcher", () => {
 
   test("changing view type in dropdown switches the view", async ({ appPage: page }) => {
     await hoverPane(page, 0);
-    await page.getByTestId("pane-control-view-select").selectOption("BrowserPreviewView");
-    await expect(page.getByTestId("browser-preview")).toBeVisible();
+    await page.getByTestId("pane-control-view-select").selectOption("MemoView");
+    await expect(page.getByTestId("view-memo")).toBeVisible();
   });
 });
 
