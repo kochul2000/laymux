@@ -17,7 +17,7 @@ export function processOscInOutput(
   hooks: OscHook[],
   terminalId: string,
   groupId: string,
-  options?: { skipSyncCwd?: boolean },
+  options?: { skipSyncCwd?: boolean; skipNotify?: boolean },
 ): void {
   if (hooks.length === 0) return;
 
@@ -72,6 +72,7 @@ export function processOscInOutput(
       const message = buildLxMessage(parsed, terminalId, groupId);
       if (message) {
         if (options?.skipSyncCwd && message.action === "sync-cwd") continue;
+        if (options?.skipNotify && message.action === "notify") continue;
         handleLxMessage(JSON.stringify(message)).catch(() => {});
       }
     }
