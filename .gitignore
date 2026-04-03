@@ -24,6 +24,9 @@ Thumbs.db
 # Tauri
 WixTools/
 
+# Playwright
+test-results/
+
 # Screenshots (automation debug)
 .screenshots/
 
