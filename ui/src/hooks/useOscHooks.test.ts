@@ -151,7 +151,7 @@ describe("processOscInOutput", () => {
     expect(call.path).toBe("//wsl.localhost/Ubuntu-22.04/home/user");
   });
 
-  it("skips notify actions when skipNotify is true", () => {
+  it("suppresses notify when notifyGate is unarmed (no user command yet)", () => {
     const notifyHooks: OscHook[] = [
       {
         osc: 133,
@@ -165,17 +165,26 @@ describe("processOscInOutput", () => {
         run: "lx set-command-status --exit-code $exitCode",
       },
     ];
+    const gate = { armed: false };
+    // Shell-init: OSC 133;D arrives without prior C/E
     const output = "\x1b]133;D;0\x07";
-    processOscInOutput(output, notifyHooks, "t1", "g1", { skipNotify: true });
+    processOscInOutput(output, notifyHooks, "t1", "g1", { notifyGate: gate });
 
     // notify should be skipped, but set-command-status should still fire
     expect(mockHandleLxMessage).toHaveBeenCalledTimes(1);
     const call = JSON.parse(mockHandleLxMessage.mock.calls[0][0]);
     expect(call.action).toBe("set-command-status");
+    // Gate remains unarmed — D alone doesn't arm it
+    expect(gate.armed).toBe(false);
   });
 
-  it("allows notify actions when skipNotify is false", () => {
+  it("arms notifyGate on OSC 133;C and then allows notify on D", () => {
     const notifyHooks: OscHook[] = [
+      {
+        osc: 133,
+        param: "C",
+        run: "lx set-command-status --command __preexec__",
+      },
       {
         osc: 133,
         param: "D",
@@ -183,12 +192,77 @@ describe("processOscInOutput", () => {
         run: "lx notify --level success 'Command completed'",
       },
     ];
-    const output = "\x1b]133;D;0\x07";
-    processOscInOutput(output, notifyHooks, "t1", "g1", { skipNotify: false });
+    const gate = { armed: false };
 
+    // User executes a command: C arrives first
+    processOscInOutput("\x1b]133;C\x07", notifyHooks, "t1", "g1", { notifyGate: gate });
+    expect(gate.armed).toBe(true);
+
+    vi.clearAllMocks();
+
+    // Then D arrives — notify should now fire
+    processOscInOutput("\x1b]133;D;0\x07", notifyHooks, "t1", "g1", { notifyGate: gate });
     expect(mockHandleLxMessage).toHaveBeenCalledTimes(1);
     const call = JSON.parse(mockHandleLxMessage.mock.calls[0][0]);
     expect(call.action).toBe("notify");
+  });
+
+  it("arms notifyGate on OSC 133;E and then allows notify on D", () => {
+    const notifyHooks: OscHook[] = [
+      {
+        osc: 133,
+        param: "E",
+        run: 'lx set-command-status --command "$command"',
+      },
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode === '0'",
+        run: "lx notify --level success 'Command completed'",
+      },
+    ];
+    const gate = { armed: false };
+
+    // User command text reported via E
+    processOscInOutput("\x1b]133;E;echo hello\x07", notifyHooks, "t1", "g1", {
+      notifyGate: gate,
+    });
+    expect(gate.armed).toBe(true);
+
+    vi.clearAllMocks();
+
+    // D arrives — notify should fire
+    processOscInOutput("\x1b]133;D;0\x07", notifyHooks, "t1", "g1", { notifyGate: gate });
+    expect(mockHandleLxMessage).toHaveBeenCalledTimes(1);
+    const call = JSON.parse(mockHandleLxMessage.mock.calls[0][0]);
+    expect(call.action).toBe("notify");
+  });
+
+  it("arms notifyGate within same output chunk containing C and D", () => {
+    const notifyHooks: OscHook[] = [
+      {
+        osc: 133,
+        param: "C",
+        run: "lx set-command-status --command __preexec__",
+      },
+      {
+        osc: 133,
+        param: "D",
+        when: "exitCode === '0'",
+        run: "lx notify --level success 'Command completed'",
+      },
+    ];
+    const gate = { armed: false };
+
+    // Both C and D in the same chunk (fast command)
+    processOscInOutput("\x1b]133;C\x07\x1b]133;D;0\x07", notifyHooks, "t1", "g1", {
+      notifyGate: gate,
+    });
+
+    // C arms the gate, then D's notify fires in the same pass
+    expect(gate.armed).toBe(true);
+    const calls = mockHandleLxMessage.mock.calls.map((c) => JSON.parse(c[0]));
+    expect(calls.some((c: { action: string }) => c.action === "notify")).toBe(true);
   });
 
   it("handles OSC 133 C (preexec) → set-command-status with command", () => {

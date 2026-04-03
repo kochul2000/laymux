@@ -20,7 +20,7 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { processOscInOutput } from "@/hooks/useOscHooks";
+import { processOscInOutput, type NotifyGate } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
@@ -44,9 +44,6 @@ import {
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
-
-/** Duration to suppress notifications after terminal creation (ms). */
-const STARTUP_NOTIFICATION_SUPPRESS_MS = 3000;
 
 /** Resolve the workspace ID for a terminal instance (for notifications). */
 function resolveWorkspaceId(terminalId: string): string {
@@ -270,7 +267,7 @@ export function TerminalView({
 
       if (transition === "completed") {
         updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
-        if (!startupSuppress) {
+        if (notifyGate.armed) {
           const message = getClaudeCompletionMessage(prevTitle, title);
           const wsId = resolveWorkspaceId(instanceId);
           useNotificationStore.getState().addNotification({
@@ -290,12 +287,10 @@ export function TerminalView({
       }
     });
 
-    // Suppress notifications during startup to prevent alarm flood from
-    // shell-init OSC sequences (see issue #111).
-    let startupSuppress = true;
-    const startupTimer = setTimeout(() => {
-      startupSuppress = false;
-    }, STARTUP_NOTIFICATION_SUPPRESS_MS);
+    // Gate notifications until the first user command is observed (OSC 133;C/E).
+    // Shell-init OSC 133;D sequences arrive before any C/E, so they are
+    // suppressed automatically without an arbitrary timeout (see issue #111).
+    const notifyGate: NotifyGate = { armed: false };
 
     // Build hooks list
     const hooks: OscHook[] = [
@@ -327,7 +322,7 @@ export function TerminalView({
       });
       const wsId = resolveWorkspaceId(instanceId);
       const cmdDesc = inst.lastCommand || "Command";
-      if (!startupSuppress) {
+      if (notifyGate.armed) {
         useNotificationStore.getState().addNotification({
           terminalId: instanceId,
           workspaceId: wsId,
@@ -351,7 +346,7 @@ export function TerminalView({
       const text = streamDecoder.decode(data, { stream: true });
       processOscInOutput(text, hooks, instanceId, syncGroupRef.current, {
         skipSyncCwd: !cwdSendRef.current,
-        skipNotify: startupSuppress,
+        notifyGate,
       });
 
       // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
@@ -372,7 +367,7 @@ export function TerminalView({
               lastExitCode: 0,
               lastCommandAt: Date.now(),
             });
-            if (!startupSuppress) {
+            if (notifyGate.armed) {
               const message = getClaudeCompletionMessage(prevTitle, rawTitle);
               const wsId = resolveWorkspaceId(instanceId);
               useNotificationStore.getState().addNotification({
@@ -583,7 +578,6 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
-      clearTimeout(startupTimer);
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
