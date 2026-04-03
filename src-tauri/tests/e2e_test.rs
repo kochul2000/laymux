@@ -84,6 +84,7 @@ fn settings_round_trip_with_full_config() {
                     w: 1.0,
                     h: 0.5,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.0,
@@ -91,6 +92,7 @@ fn settings_round_trip_with_full_config() {
                     w: 0.5,
                     h: 0.5,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -98,6 +100,7 @@ fn settings_round_trip_with_full_config() {
                     w: 0.5,
                     h: 0.5,
                     view_type: "BrowserPreviewView".into(),
+                    view_config: None,
                 },
             ],
         }],
@@ -290,6 +293,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                     w: 1.0,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 }],
             },
             Layout {
@@ -302,6 +306,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 1.0,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -309,6 +314,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 1.0,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                 ],
             },
@@ -322,6 +328,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -329,6 +336,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.0,
@@ -336,6 +344,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -343,6 +352,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "BrowserPreviewView".into(),
+                        view_config: None,
                     },
                 ],
             },
@@ -400,6 +410,7 @@ fn settings_pane_boundary_values() {
                 w: 0.0,
                 h: 0.0,
                 view_type: "EmptyView".into(),
+                view_config: None,
             },
             LayoutPane {
                 x: 1.0,
@@ -407,6 +418,7 @@ fn settings_pane_boundary_values() {
                 w: 1.0,
                 h: 1.0,
                 view_type: "TerminalView".into(),
+                view_config: None,
             },
             LayoutPane {
                 x: 0.333333,
@@ -414,6 +426,7 @@ fn settings_pane_boundary_values() {
                 w: 0.333334,
                 h: 0.333334,
                 view_type: "TerminalView".into(),
+                view_config: None,
             },
         ],
     };
@@ -1392,6 +1405,7 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     w: 0.5,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -1399,6 +1413,7 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     w: 0.5,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
             ],
         }],
@@ -1750,6 +1765,190 @@ fn settings_duplicate_profile_names() {
     assert_eq!(settings.profiles.len(), 2);
     assert_eq!(settings.profiles[0].command_line, "wsl.exe -d Ubuntu");
     assert_eq!(settings.profiles[1].command_line, "wsl.exe -d Debian");
+}
+
+#[test]
+fn layout_pane_view_config_round_trip() {
+    // LayoutPane with full view_config should survive serialization round-trip
+    let layout = Layout {
+        id: "with-config".into(),
+        name: "With Config".into(),
+        panes: vec![
+            LayoutPane {
+                x: 0.0,
+                y: 0.0,
+                w: 0.5,
+                h: 1.0,
+                view_type: "TerminalView".into(),
+                view_config: Some(serde_json::json!({
+                    "type": "TerminalView",
+                    "profile": "WSL",
+                    "syncGroup": "project-a"
+                })),
+            },
+            LayoutPane {
+                x: 0.5,
+                y: 0.0,
+                w: 0.5,
+                h: 1.0,
+                view_type: "BrowserPreviewView".into(),
+                view_config: Some(serde_json::json!({
+                    "type": "BrowserPreviewView",
+                    "url": "http://localhost:3000"
+                })),
+            },
+        ],
+    };
+
+    let json = serde_json::to_string_pretty(&layout).unwrap();
+    let parsed: Layout = serde_json::from_str(&json).unwrap();
+
+    // TerminalView config preserved
+    let terminal_config = parsed.panes[0].view_config.as_ref().unwrap();
+    assert_eq!(terminal_config["type"], "TerminalView");
+    assert_eq!(terminal_config["profile"], "WSL");
+    assert_eq!(terminal_config["syncGroup"], "project-a");
+
+    // BrowserPreviewView config preserved
+    let browser_config = parsed.panes[1].view_config.as_ref().unwrap();
+    assert_eq!(browser_config["type"], "BrowserPreviewView");
+    assert_eq!(browser_config["url"], "http://localhost:3000");
+}
+
+#[test]
+fn layout_pane_view_config_backward_compat_deserialization() {
+    // Old JSON without viewConfig should deserialize with view_config = None
+    let json = r#"{
+        "id": "old-layout",
+        "name": "Old Layout",
+        "panes": [
+            { "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "viewType": "TerminalView" }
+        ]
+    }"#;
+    let layout: Layout = serde_json::from_str(json).unwrap();
+    assert!(layout.panes[0].view_config.is_none());
+    assert_eq!(layout.panes[0].view_type, "TerminalView");
+}
+
+#[test]
+fn layout_pane_view_config_present_in_json() {
+    // JSON with viewConfig should deserialize correctly
+    let json = r#"{
+        "id": "new-layout",
+        "name": "New Layout",
+        "panes": [
+            {
+                "x": 0.0, "y": 0.0, "w": 1.0, "h": 0.5,
+                "viewType": "TerminalView",
+                "viewConfig": { "type": "TerminalView", "profile": "PowerShell", "cwdSend": true }
+            },
+            {
+                "x": 0.0, "y": 0.5, "w": 1.0, "h": 0.5,
+                "viewType": "BrowserPreviewView",
+                "viewConfig": { "type": "BrowserPreviewView", "url": "http://localhost:8080" }
+            }
+        ]
+    }"#;
+    let layout: Layout = serde_json::from_str(json).unwrap();
+
+    let p0 = &layout.panes[0];
+    assert_eq!(p0.view_type, "TerminalView");
+    let cfg0 = p0.view_config.as_ref().unwrap();
+    assert_eq!(cfg0["profile"], "PowerShell");
+    assert_eq!(cfg0["cwdSend"], true);
+
+    let p1 = &layout.panes[1];
+    assert_eq!(p1.view_type, "BrowserPreviewView");
+    let cfg1 = p1.view_config.as_ref().unwrap();
+    assert_eq!(cfg1["url"], "http://localhost:8080");
+}
+
+#[test]
+fn layout_pane_view_config_none_omitted_in_serialization() {
+    // view_config: None should not appear in serialized JSON (skip_serializing_if)
+    let pane = LayoutPane {
+        x: 0.0,
+        y: 0.0,
+        w: 1.0,
+        h: 1.0,
+        view_type: "TerminalView".into(),
+        view_config: None,
+    };
+    let json = serde_json::to_string(&pane).unwrap();
+    assert!(
+        !json.contains("viewConfig"),
+        "viewConfig: None should be omitted from JSON"
+    );
+
+    // With view_config: Some, it should appear
+    let pane_with_config = LayoutPane {
+        x: 0.0,
+        y: 0.0,
+        w: 1.0,
+        h: 1.0,
+        view_type: "TerminalView".into(),
+        view_config: Some(serde_json::json!({"type": "TerminalView", "profile": "WSL"})),
+    };
+    let json_with = serde_json::to_string(&pane_with_config).unwrap();
+    assert!(
+        json_with.contains("viewConfig"),
+        "viewConfig: Some should be present in JSON"
+    );
+}
+
+#[test]
+fn settings_full_round_trip_with_layout_view_config() {
+    // Full settings with layouts containing view_config should round-trip
+    let settings = Settings {
+        layouts: vec![Layout {
+            id: "rich-layout".into(),
+            name: "Rich Layout".into(),
+            panes: vec![
+                LayoutPane {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                    view_config: Some(serde_json::json!({
+                        "type": "TerminalView",
+                        "profile": "WSL",
+                        "syncGroup": "dev",
+                        "cwdSend": true,
+                        "cwdReceive": true
+                    })),
+                },
+                LayoutPane {
+                    x: 0.5,
+                    y: 0.0,
+                    w: 0.5,
+                    h: 1.0,
+                    view_type: "TerminalView".into(),
+                    view_config: None, // No config — bare viewType only
+                },
+            ],
+        }],
+        ..Settings::default()
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let json = serde_json::to_string_pretty(&settings).unwrap();
+    fs::write(&path, &json).unwrap();
+
+    let loaded: Settings = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(loaded.layouts.len(), 1);
+
+    let panes = &loaded.layouts[0].panes;
+    // First pane: rich config preserved
+    let cfg = panes[0].view_config.as_ref().unwrap();
+    assert_eq!(cfg["profile"], "WSL");
+    assert_eq!(cfg["syncGroup"], "dev");
+    assert_eq!(cfg["cwdSend"], true);
+    assert_eq!(cfg["cwdReceive"], true);
+
+    // Second pane: no config
+    assert!(panes[1].view_config.is_none());
 }
 
 #[test]

@@ -101,7 +101,7 @@ function WorkspaceItem({
   ws: { id: string; name: string };
   index: number;
   isActive: boolean;
-  summary: ReturnType<typeof computeWorkspaceSummary>;
+  summary: ReturnType<typeof computeWorkspaceSummaryFromBackend>;
   panes: WorkspacePane[];
   canClose: boolean;
   pathEllipsis: "start" | "end";
