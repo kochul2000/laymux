@@ -17,6 +17,7 @@ import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
+import { persistSession } from "@/lib/persist-session";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -901,6 +902,7 @@ export function WorkspaceSelectorView() {
       const fromId = dragIdRef.current;
       if (fromId !== null && fromId !== toId) {
         reorderWorkspaces(fromId, toId, position);
+        persistSession();
       }
       dragIdRef.current = null;
     },
@@ -1036,7 +1038,7 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Workspace list */}
-      <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
+      <div className="flex flex-1 flex-col overflow-y-auto px-1.5 py-0.5">
         {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
           // Compute summary from frontend stores (event-driven, no polling).
@@ -1103,6 +1105,39 @@ export function WorkspaceSelectorView() {
             />
           );
         })}
+        {/* Drop zone: empty area below the last workspace item → append to end */}
+        {dragContext.enabled && (
+          <div
+            className="min-h-[40px] flex-1"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              const lastWs = sortedWorkspaces[sortedWorkspaces.length - 1];
+              if (!lastWs || dragIdRef.current === lastWs.id) {
+                setDropIndicator(null);
+                return;
+              }
+              dropPositionRef.current = "bottom";
+              setDropIndicator((prev) =>
+                prev?.wsId === lastWs.id && prev?.position === "bottom"
+                  ? prev
+                  : { wsId: lastWs.id, position: "bottom" },
+              );
+            }}
+            onDragLeave={() => setDropIndicator(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropIndicator(null);
+              const lastWs = sortedWorkspaces[sortedWorkspaces.length - 1];
+              const fromId = dragIdRef.current;
+              if (fromId && lastWs && fromId !== lastWs.id) {
+                reorderWorkspaces(fromId, lastWs.id, "bottom");
+                persistSession();
+              }
+              dragIdRef.current = null;
+            }}
+          />
+        )}
       </div>
 
       {/* #6: Show Notifications — improved contrast, unread count, hover */}
