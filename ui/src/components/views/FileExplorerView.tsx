@@ -84,7 +84,25 @@ export function FileExplorerView({
 
     async function init() {
       try {
-        await createTerminalSession(instanceId, profile, 200, 50, syncGroup, cwdReceive, lastCwd);
+        try {
+          await createTerminalSession(instanceId, profile, 200, 50, syncGroup, cwdReceive, lastCwd);
+        } catch (createErr) {
+          // Session may already exist from a previous HMR mount — close and retry
+          if (String(createErr).includes("already exists")) {
+            await closeTerminalSession(instanceId).catch(() => {});
+            await createTerminalSession(
+              instanceId,
+              profile,
+              200,
+              50,
+              syncGroup,
+              cwdReceive,
+              lastCwd,
+            );
+          } else {
+            throw createErr;
+          }
+        }
         if (disposed) {
           await closeTerminalSession(instanceId).catch(() => {});
           return;
