@@ -7,6 +7,8 @@
   --text-primary: #cdd6f4;
   --text-secondary: #a6adc8;
   --accent: #89b4fa;
+  --accent-50: rgba(137, 180, 250, 0.5);
+  --accent-20: rgba(137, 180, 250, 0.2);
   --green: #a6e3a1;
   --red: #f38ba8;
   --border: #313244;

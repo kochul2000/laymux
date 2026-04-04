@@ -346,6 +346,24 @@ export function FileExplorerView({
     item?.scrollIntoView({ block: "nearest" });
   }, []);
 
+  // --- Mouse back/forward buttons (button 3 = back, button 4 = forward) ---
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button === 3) {
+        e.preventDefault();
+        if (mode.type === "viewing") {
+          closeViewer();
+        } else {
+          goBack();
+        }
+      } else if (e.button === 4) {
+        e.preventDefault();
+        goForward();
+      }
+    },
+    [mode.type, goBack, goForward, closeViewer],
+  );
+
   // --- Keyboard handler ---
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -354,18 +372,6 @@ export function FileExplorerView({
           e.preventDefault();
           closeViewer();
         }
-        return;
-      }
-
-      // Alt+Left/Right for back/forward
-      if (e.altKey && e.key === "ArrowLeft") {
-        e.preventDefault();
-        goBack();
-        return;
-      }
-      if (e.altKey && e.key === "ArrowRight") {
-        e.preventDefault();
-        goForward();
         return;
       }
 
@@ -444,8 +450,6 @@ export function FileExplorerView({
       closeViewer,
       copySelectedPaths,
       scrollToIndex,
-      goBack,
-      goForward,
       navigateToDir,
     ],
   );
@@ -517,6 +521,7 @@ export function FileExplorerView({
         tabIndex={-1}
         style={{ outline: "none" }}
         onKeyDown={handleKeyDown}
+        onMouseDown={handleMouseDown}
       >
         {/* Viewer title bar */}
         <div
@@ -533,7 +538,7 @@ export function FileExplorerView({
           </span>
           <button
             onClick={closeViewer}
-            className="ml-2 px-1 text-xs hover:opacity-80"
+            className="ml-2 mr-1 px-1 text-xs hover:opacity-80"
             style={{ color: "var(--text-secondary)" }}
             data-testid="file-explorer-viewer-close"
           >
@@ -605,6 +610,7 @@ export function FileExplorerView({
       tabIndex={-1}
       style={{ outline: "none" }}
       onKeyDown={handleKeyDown}
+      onMouseDown={handleMouseDown}
       onContextMenu={handleContextMenu}
     >
       {/* Path bar with back/forward buttons */}
@@ -680,9 +686,9 @@ export function FileExplorerView({
                   i === focusIndex && selectedIndices.has(i)
                     ? "var(--accent)"
                     : selectedIndices.has(i)
-                      ? "color-mix(in srgb, var(--accent) 50%, transparent)"
+                      ? "var(--accent-50)"
                       : i === focusIndex
-                        ? "color-mix(in srgb, var(--accent) 20%, transparent)"
+                        ? "var(--accent-20)"
                         : "transparent",
                 color:
                   selectedIndices.has(i) && i === focusIndex

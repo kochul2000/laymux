@@ -449,7 +449,7 @@ describe("FileExplorerView", () => {
     expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
   });
 
-  it("Alt+Left goes back, Alt+Right goes forward", async () => {
+  it("mouse back button goes back, forward button goes forward", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -464,16 +464,16 @@ describe("FileExplorerView", () => {
     const view = screen.getByTestId("file-explorer-view");
     vi.mocked(listDirectory).mockClear();
 
-    // Alt+Left = back
-    fireEvent.keyDown(view, { key: "ArrowLeft", altKey: true });
+    // Mouse button 3 = back
+    fireEvent.mouseDown(view, { button: 3 });
     await act(async () => {
       await vi.runAllTimersAsync();
     });
     expect(listDirectory).toHaveBeenCalledWith("/home/user");
 
     vi.mocked(listDirectory).mockClear();
-    // Alt+Right = forward
-    fireEvent.keyDown(view, { key: "ArrowRight", altKey: true });
+    // Mouse button 4 = forward
+    fireEvent.mouseDown(view, { button: 4 });
     await act(async () => {
       await vi.runAllTimersAsync();
     });
