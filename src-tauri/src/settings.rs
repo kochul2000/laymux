@@ -588,7 +588,7 @@ pub struct FileExplorerSettings {
 }
 
 fn default_ls_command() -> String {
-    "ls -F".into()
+    "ls".into()
 }
 
 impl Default for FileExplorerSettings {
@@ -1878,7 +1878,7 @@ mod tests {
     fn file_explorer_settings_default() {
         let settings = Settings::default();
         assert_eq!(settings.file_explorer.shell_profile, "");
-        assert_eq!(settings.file_explorer.ls_command, "ls -F");
+        assert_eq!(settings.file_explorer.ls_command, "ls");
         assert_eq!(settings.file_explorer.padding_top, 8);
         assert_eq!(settings.file_explorer.font_family, "");
         assert_eq!(settings.file_explorer.font_size, 13);
@@ -1916,7 +1916,7 @@ mod tests {
     fn file_explorer_settings_default_when_absent() {
         let json = r#"{}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.file_explorer.ls_command, "ls -F");
+        assert_eq!(settings.file_explorer.ls_command, "ls");
         assert_eq!(settings.file_explorer.font_size, 13);
     }
 }

@@ -10,7 +10,13 @@ import {
   readFileForViewer,
 } from "@/lib/tauri-api";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { parseLsOutput, stripAnsi, type FileEntry } from "@/lib/file-explorer-parse";
+import {
+  parseLsOutput,
+  stripAnsi,
+  shellEscape,
+  joinPath,
+  type FileEntry,
+} from "@/lib/file-explorer-parse";
 import { TerminalView } from "./TerminalView";
 
 export interface FileExplorerViewProps {
@@ -62,7 +68,6 @@ export function FileExplorerView({
   // Track whether shell session is alive
   const shellAliveRef = useRef(false);
   const outputBufferRef = useRef("");
-  const generationRef = useRef(0);
   // Pending listing refresh while in viewer mode
   const pendingRefreshRef = useRef(false);
 
@@ -84,7 +89,7 @@ export function FileExplorerView({
         // Listen for output
         unlistenOutput = await onTerminalOutput(instanceId, (data) => {
           const text = new TextDecoder().decode(data);
-          handleShellOutput(text);
+          handleShellOutputRef.current(text);
         });
 
         // Listen for CWD changes from sync system
@@ -115,39 +120,32 @@ export function FileExplorerView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, syncGroup, cwdReceive]);
 
-  // --- Shell output handling ---
-  const handleShellOutput = useCallback(
-    (text: string) => {
-      outputBufferRef.current += text;
-      const stripped = stripAnsi(outputBufferRef.current);
-      const sentinelIdx = stripped.indexOf(LS_SENTINEL);
-      if (sentinelIdx !== -1) {
-        // Extract content before sentinel
-        const lsOutput = stripped.substring(0, sentinelIdx);
-        outputBufferRef.current = "";
+  // --- Shell output handling (ref to avoid stale closure in useEffect) ---
+  const handleShellOutputRef = useRef((_text: string) => {});
+  handleShellOutputRef.current = (text: string) => {
+    outputBufferRef.current += text;
+    const stripped = stripAnsi(outputBufferRef.current);
+    // Match sentinel only at start of a line (avoids matching the command echo)
+    const sentinelIdx = stripped.indexOf("\n" + LS_SENTINEL);
+    if (sentinelIdx !== -1) {
+      const lsOutput = stripped.substring(0, sentinelIdx);
+      outputBufferRef.current = "";
 
-        // Find the actual ls output (skip the command echo line)
-        const lines = lsOutput.split("\n");
-        // Skip first line (command echo) if it contains our sentinel command
-        const startIdx = lines.findIndex(
-          (l) => !l.includes(settings.lsCommand) && !l.includes(LS_SENTINEL),
-        );
-        const cleanOutput = startIdx >= 0 ? lines.slice(startIdx).join("\n") : lsOutput;
+      // Skip the first line (command echo from PTY)
+      const lines = lsOutput.split("\n");
+      const cleanOutput = lines.slice(1).join("\n");
 
-        const parsed = parseLsOutput(cleanOutput);
-        setEntries(parsed);
-        setLoading(false);
-        setFocusIndex(0);
-        setSelectedIndices(new Set());
-      }
-    },
-    [settings.lsCommand],
-  );
+      const parsed = parseLsOutput(cleanOutput);
+      setEntries(parsed);
+      setLoading(false);
+      setFocusIndex(0);
+      setSelectedIndices(new Set());
+    }
+  };
 
   // --- Refresh listing ---
   const refreshListing = useCallback(() => {
     if (!shellAliveRef.current) return;
-    generationRef.current += 1;
     outputBufferRef.current = "";
     setLoading(true);
     const cmd = `${settings.lsCommand}; echo "${LS_SENTINEL}"\n`;
@@ -198,8 +196,7 @@ export function FileExplorerView({
       .map((i) => {
         const entry = entries[i];
         if (!entry) return "";
-        const cwd = currentCwd.endsWith("/") ? currentCwd : currentCwd + "/";
-        return cwd + entry.name;
+        return joinPath(currentCwd, entry.name);
       })
       .filter(Boolean)
       .join("\n");
@@ -217,19 +214,16 @@ export function FileExplorerView({
   const navigateToDir = useCallback(
     (dirName: string) => {
       if (!shellAliveRef.current) return;
-      // Send cd command - the shell's OSC 7 will trigger CWD sync automatically
-      writeToTerminal(instanceId, `cd ${JSON.stringify(dirName)}\n`).catch(console.error);
-      // Give shell time to cd, then refresh
-      setTimeout(() => refreshListing(), 150);
+      // Send cd command - the shell's OSC 7 will trigger CWD sync via onTerminalCwdChanged
+      writeToTerminal(instanceId, `cd ${shellEscape(dirName)}\n`).catch(console.error);
     },
-    [instanceId, refreshListing],
+    [instanceId],
   );
 
   // --- Open file viewer ---
   const openFile = useCallback(
     async (entry: FileEntry) => {
-      const cwd = currentCwd.endsWith("/") ? currentCwd : currentCwd + "/";
-      const filePath = cwd + entry.name;
+      const filePath = joinPath(currentCwd, entry.name);
 
       // Check extension viewers setting
       const ext = entry.name.includes(".") ? "." + entry.name.split(".").pop()!.toLowerCase() : "";
@@ -483,7 +477,7 @@ export function FileExplorerView({
                 cwdReceive={false}
                 isFocused={isFocused}
                 lastCwd={currentCwd}
-                startupCommandOverride={`${mode.command} ${JSON.stringify(mode.filePath)}`}
+                startupCommandOverride={`${mode.command} ${shellEscape(mode.filePath)}`}
               />
             </div>
           ) : viewerContent?.kind === "image" ? (

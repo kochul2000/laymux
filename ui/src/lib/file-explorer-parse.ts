@@ -1,3 +1,15 @@
+/** Escape a string for safe use as a single-quoted shell argument. */
+export function shellEscape(s: string): string {
+  // Wrap in single quotes; escape embedded single quotes as '\''
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/** Join a base path and a child name, handling both / and \ separators. */
+export function joinPath(base: string, child: string): string {
+  const sep = base.includes("\\") ? "\\" : "/";
+  return base.endsWith(sep) ? base + child : base + sep + child;
+}
+
 /** Parsed file entry from ls output. */
 export interface FileEntry {
   /** File/directory name (without trailing indicator). */
@@ -14,7 +26,6 @@ export interface FileEntry {
 
 /** Strip ANSI escape sequences from text. */
 export function stripAnsi(text: string): string {
-   
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 }
 

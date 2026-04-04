@@ -1457,16 +1457,18 @@ pub fn read_file_for_viewer(
         return Ok(FileViewerContent::Binary { size });
     }
 
-    // Try reading as UTF-8 text
+    // Read only up to limit bytes (avoid loading entire large files into memory)
     let read_limit = std::cmp::min(size, limit) as usize;
-    let raw = std::fs::read(&path).map_err(|e| format!("Cannot read file: {e}"))?;
-    let (content_bytes, truncated) = if raw.len() > read_limit {
-        (&raw[..read_limit], true)
-    } else {
-        (raw.as_slice(), false)
-    };
+    let truncated = size > limit;
+    let mut buf = vec![0u8; read_limit];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(&path).map_err(|e| format!("Cannot open file: {e}"))?;
+        f.read_exact(&mut buf)
+            .map_err(|e| format!("Cannot read file: {e}"))?;
+    }
 
-    match std::str::from_utf8(content_bytes) {
+    match std::str::from_utf8(&buf) {
         Ok(text) => Ok(FileViewerContent::Text {
             content: text.to_string(),
             truncated,
@@ -1474,7 +1476,7 @@ pub fn read_file_for_viewer(
         Err(_) if is_text_ext => {
             // Lossy conversion for known text extensions
             Ok(FileViewerContent::Text {
-                content: String::from_utf8_lossy(content_bytes).into_owned(),
+                content: String::from_utf8_lossy(&buf).into_owned(),
                 truncated,
             })
         }

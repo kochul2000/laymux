@@ -1574,11 +1574,11 @@ function FileExplorerSection() {
         </SettingRow>
 
         {/* ls Command */}
-        <SettingRow label="ls Command" desc="디렉터리 목록을 가져오는 명령어. 기본: ls -F">
+        <SettingRow label="ls Command" desc="디렉터리 목록을 가져오는 명령어. 기본: ls">
           <FocusInput
             data-testid="fe-ls-command"
             className={inputCls}
-            placeholder="ls -F"
+            placeholder="ls"
             value={fe.lsCommand}
             onChange={(e) => updateFe({ lsCommand: e.target.value })}
           />

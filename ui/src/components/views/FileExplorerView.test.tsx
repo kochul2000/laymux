@@ -64,7 +64,7 @@ const defaultProps = {
 const lsSentinel = "___LXFE_END___";
 
 function simulateLsResponse(files: string) {
-  sendOutput(`ls -F; echo "${lsSentinel}"\n${files}\n${lsSentinel}\n`);
+  sendOutput(`ls; echo "${lsSentinel}"\n${files}\n${lsSentinel}\n`);
 }
 
 describe("FileExplorerView", () => {
