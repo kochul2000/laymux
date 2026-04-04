@@ -23,6 +23,7 @@ export function GridEditToolbar() {
 
   const [maximized, setMaximized] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
+  const [selectKey, setSelectKey] = useState(0);
 
   const flashSaved = useCallback(() => {
     setShowSaved(true);
@@ -143,6 +144,7 @@ export function GridEditToolbar() {
         </button>
         {layouts.length > 0 && (
           <select
+            key={selectKey}
             data-testid="export-overwrite-select"
             className={btnBase}
             style={{
@@ -156,7 +158,7 @@ export function GridEditToolbar() {
             onChange={(e) => {
               if (e.target.value) {
                 exportToLayout(e.target.value);
-                e.target.value = "";
+                setSelectKey((k) => k + 1);
                 flashSaved();
               }
             }}

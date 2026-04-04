@@ -116,6 +116,9 @@ export function useSessionPersistence() {
               w: p.w,
               h: p.h,
               viewType: p.viewType as ViewType,
+              ...(p.viewConfig
+                ? { viewConfig: { ...p.viewConfig, type: p.viewConfig.type as ViewType } }
+                : {}),
             })),
           }));
 

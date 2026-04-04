@@ -301,6 +301,78 @@ describe("useSyncEvents", () => {
     expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
   });
 
+  it("preserves interactiveApp activity when sub-command starts (OSC 133 E)", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    // Set terminal as Claude interactiveApp
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    // Claude runs a sub-command like "gh pr view 3237"
+    callback({ terminalId: "t1", command: "gh pr view 3237" });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    // Activity should remain interactiveApp, NOT "running"
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    // But lastCommand should still be recorded
+    expect(instance?.lastCommand).toBe("gh pr view 3237");
+  });
+
+  it("preserves interactiveApp activity when sub-command exits with error (OSC 133 D)", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    // Set terminal as Claude interactiveApp
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    // Claude's sub-command exits with error
+    callback({ terminalId: "t1", exitCode: 1 });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    // Activity should remain interactiveApp, NOT "shell"
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    // But exitCode should still be recorded
+    expect(instance?.lastExitCode).toBe(1);
+  });
+
+  it("transitions to shell when non-interactiveApp terminal receives exitCode", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    // Normal terminal with "running" activity
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "running" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", exitCode: 0 });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    // Normal terminal should transition to shell as before
+    expect(instance?.activity).toEqual({ type: "shell" });
+  });
+
   it("calls persistSession (debounced) on terminal-cwd-changed event", async () => {
     vi.useFakeTimers();
     vi.mocked(persistSession).mockClear();

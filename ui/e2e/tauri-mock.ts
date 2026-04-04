@@ -70,7 +70,7 @@ export const TAURI_MOCK_SCRIPT = `
                 panes: [
                   { x: 0, y: 0, w: 1, h: 0.6, viewType: 'TerminalView' },
                   { x: 0, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
-                  { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'BrowserPreviewView' },
+                  { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
                 ],
               },
             ],
@@ -80,7 +80,7 @@ export const TAURI_MOCK_SCRIPT = `
                 name: 'Default',
 
                 panes: [
-                  { x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'ws-default' } },
+                  { id: 'pane-e2e-1', x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'ws-default' } },
                 ],
               },
             ],
@@ -127,6 +127,23 @@ export const TAURI_MOCK_SCRIPT = `
 
         case 'get_git_branch':
           return Promise.resolve('main');
+
+        case 'load_terminal_output_cache':
+          // Return test cache data if configured, otherwise empty
+          return Promise.resolve(window.__testCacheData || '');
+
+        case 'save_terminal_output_cache':
+        case 'clean_terminal_output_cache':
+        case 'load_window_geometry':
+        case 'save_window_geometry':
+        case 'load_memo':
+        case 'mark_claude_terminal':
+        case 'mark_notifications_read':
+        case 'get_terminal_cwds':
+        case 'get_terminal_states':
+        case 'set_terminal_cwd_receive':
+        case 'update_terminal_sync_group':
+          return Promise.resolve(null);
 
         default:
           console.warn('[tauri-mock] Unknown command:', cmd, args);

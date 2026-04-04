@@ -23,7 +23,6 @@ const viewIcons: Record<ViewType, string> = {
   WorkspaceSelectorView: "\u229e",
   SettingsView: "\u2699",
   TerminalView: ">_",
-  BrowserPreviewView: "\u25ce",
   MemoView: "\u270e",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
@@ -86,8 +85,6 @@ export function Dock({
 
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
-  const hasIframe = activeView === "BrowserPreviewView";
-
   return (
     <div
       data-testid={`dock-${position}`}
@@ -126,9 +123,6 @@ export function Dock({
         </div>
       )}
       <div className="relative min-w-0 flex-1">
-        {hasIframe && !isFocused && (
-          <div data-testid={`dock-focus-overlay-${position}`} className="absolute inset-0 z-10" />
-        )}
         <PaneControlBar
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHovered}

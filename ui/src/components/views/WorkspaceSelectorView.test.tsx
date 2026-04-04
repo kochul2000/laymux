@@ -82,6 +82,29 @@ function buildSummariesFromStores(ids: string[]): TerminalSummaryResponse[] {
     .filter((s): s is TerminalSummaryResponse => s !== null);
 }
 
+/** Add a notification that bypasses auto-dismiss by temporarily switching away from the target workspace. */
+function addUnreadNotification(params: {
+  terminalId: string;
+  workspaceId: string;
+  message: string;
+}) {
+  const prev = useWorkspaceStore.getState().activeWorkspaceId;
+  if (prev === params.workspaceId) {
+    useWorkspaceStore.getState().addWorkspace("__temp__", "default-layout");
+    const tempId = useWorkspaceStore.getState().workspaces.find((w) => w.name === "__temp__")!.id;
+    useWorkspaceStore.getState().setActiveWorkspace(tempId);
+  }
+  useNotificationStore.getState().addNotification(params);
+  if (prev === params.workspaceId) {
+    useWorkspaceStore.getState().setActiveWorkspace(prev);
+    useWorkspaceStore
+      .getState()
+      .removeWorkspace(
+        useWorkspaceStore.getState().workspaces.find((w) => w.name === "__temp__")!.id,
+      );
+  }
+}
+
 describe("WorkspaceSelectorView", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -159,7 +182,7 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "test msg",
@@ -198,7 +221,7 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build done",
@@ -324,7 +347,7 @@ describe("WorkspaceSelectorView", () => {
       syncGroup: "Default",
       workspaceId: "ws-default",
     });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
@@ -515,6 +538,88 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
+  it("displays running indicator when command failed but activity is interactiveApp", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "gh pr view 3237",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should show running (hourglass) instead of failure (cross) because interactive app is still running
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+    });
+  });
+
+  it("displays running indicator when command failed but activity is running", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "cargo build",
+      lastExitCode: 1,
+      lastCommandAt: Date.now(),
+      activity: { type: "running" },
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      // Should show running (hourglass) instead of failure because process is still running
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+    });
+  });
+
   it("shows terminal count badge when terminals exist", async () => {
     useWorkspaceStore.setState({
       workspaces: [
@@ -697,7 +802,7 @@ describe("WorkspaceSelectorView", () => {
               h: 0.4,
               view: { type: "TerminalView", profile: "PowerShell" },
             },
-            { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "BrowserPreviewView" } },
+            { id: "pane-br", x: 0.5, y: 0.6, w: 0.5, h: 0.4, view: { type: "MemoView" } },
           ],
         },
       ],
@@ -997,7 +1102,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommandAt: Date.now(),
     });
     // Add notification only for terminal-p1
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "Build complete",
@@ -1041,7 +1146,7 @@ describe("WorkspaceSelectorView", () => {
       lastCommand: "npm test",
       lastCommandAt: Date.now(),
     });
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",
@@ -1079,7 +1184,7 @@ describe("WorkspaceSelectorView", () => {
       label: "WSL",
     });
     // No command but notification exists
-    useNotificationStore.getState().addNotification({
+    addUnreadNotification({
       terminalId: "terminal-p1",
       workspaceId: "ws-default",
       message: "alert",

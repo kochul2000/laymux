@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+
+use crate::process::headless_command;
 
 /// A detected listening port.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,7 +59,10 @@ pub fn parse_netstat_output(output: &str) -> Vec<ListeningPort> {
 pub fn get_listening_ports() -> Vec<ListeningPort> {
     #[cfg(target_os = "windows")]
     {
-        match Command::new("netstat").args(["-ano", "-p", "TCP"]).output() {
+        match headless_command("netstat")
+            .args(["-ano", "-p", "TCP"])
+            .output()
+        {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 parse_netstat_output(&stdout)
@@ -69,7 +73,7 @@ pub fn get_listening_ports() -> Vec<ListeningPort> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        match Command::new("ss").args(["-tlnp"]).output() {
+        match headless_command("ss").args(["-tlnp"]).output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 parse_ss_output(&stdout)

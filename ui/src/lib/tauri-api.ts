@@ -254,7 +254,14 @@ export interface FontSettings {
 export interface SettingsLayout {
   id: string;
   name: string;
-  panes: { x: number; y: number; w: number; h: number; viewType: string }[];
+  panes: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    viewType: string;
+    viewConfig?: { type: string; [key: string]: unknown };
+  }[];
 }
 
 export interface SettingsWorkspace {

@@ -1,4 +1,9 @@
 import { create } from "zustand";
+// Cross-store reads (getState snapshots) — direction: notification → {workspace, settings, grid}
+// Keep this unidirectional to avoid circular dependency issues.
+import { useWorkspaceStore } from "./workspace-store";
+import { useSettingsStore } from "./settings-store";
+import { useGridStore } from "./grid-store";
 
 export type NotificationLevel = "info" | "error" | "warning" | "success";
 
@@ -34,14 +39,23 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
   notifications: [],
 
   addNotification: ({ terminalId, workspaceId, message, level }) => {
+    const now = Date.now();
+    const dismissMode = useSettingsStore.getState().convenience.notificationDismiss;
+    const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+
+    const shouldAutoDismiss =
+      workspaceId === activeWsId &&
+      (dismissMode === "workspace" ||
+        (dismissMode === "paneFocus" && useGridStore.getState().focusedPaneIndex !== null));
+
     const notification: Notification = {
       id: `notif-${++notifId}`,
       terminalId,
       workspaceId,
       message,
       level: level ?? "info",
-      createdAt: Date.now(),
-      readAt: null,
+      createdAt: now,
+      readAt: shouldAutoDismiss ? now : null,
     };
     set((state) => ({
       notifications: [...state.notifications, notification],

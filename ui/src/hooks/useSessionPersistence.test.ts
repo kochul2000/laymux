@@ -375,6 +375,80 @@ describe("useSessionPersistence", () => {
     expect(convenience.scrollbarStyle).toBe("separate");
   });
 
+  it("restores layout viewConfig (overwritten layouts persist across restart)", async () => {
+    vi.mocked(loadSettings).mockResolvedValueOnce({
+      defaultProfile: "WSL",
+      profiles: [
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          colorScheme: "",
+          startingDirectory: "",
+          hidden: false,
+        },
+      ],
+      colorSchemes: [],
+      keybindings: [],
+      layouts: [
+        {
+          id: "layout-custom",
+          name: "Custom Layout",
+          panes: [
+            {
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              viewType: "TerminalView",
+              viewConfig: { type: "TerminalView", profile: "WSL" },
+            },
+            {
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              viewType: "MemoView",
+              viewConfig: { type: "MemoView" },
+            },
+          ],
+        },
+      ],
+      workspaces: [
+        {
+          id: "ws-1",
+          name: "WS",
+          panes: [{ x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+      docks: [],
+      convenience: {
+        smartPaste: true,
+        pasteImageDir: "",
+        hoverIdleSeconds: 2,
+        notificationDismiss: "workspace",
+        copyOnSelect: true,
+        pathEllipsis: "start",
+        scrollbarStyle: "overlay",
+      },
+      claude: { syncCwd: "skip" },
+    } as any);
+
+    renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const wsState = useWorkspaceStore.getState();
+    expect(wsState.layouts).toHaveLength(1);
+    expect(wsState.layouts[0].panes[0].viewConfig).toEqual({
+      type: "TerminalView",
+      profile: "WSL",
+    });
+    expect(wsState.layouts[0].panes[1].viewConfig).toEqual({
+      type: "MemoView",
+    });
+  });
+
   it("loads claude settings from backend", async () => {
     vi.mocked(loadSettings).mockResolvedValueOnce({
       defaultProfile: "WSL",

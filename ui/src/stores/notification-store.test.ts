@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useNotificationStore } from "./notification-store";
+import { useWorkspaceStore } from "./workspace-store";
+import { useSettingsStore } from "./settings-store";
+import { useGridStore } from "./grid-store";
 
 describe("NotificationStore", () => {
   beforeEach(() => {
@@ -174,5 +177,91 @@ describe("NotificationStore", () => {
     expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p1")).toBe(true);
     expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p2")).toBe(true);
     expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p3")).toBe(false);
+  });
+
+  describe("auto-dismiss for active workspace", () => {
+    it("marks notification as read immediately when added to the active workspace in workspace dismiss mode", () => {
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: activeWsId,
+        message: "shell started",
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0].readAt).not.toBeNull();
+    });
+
+    it("does NOT auto-dismiss when notification is for a different workspace", () => {
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: "ws-other",
+        message: "shell started",
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[0].readAt).toBeNull();
+    });
+
+    it("does NOT auto-dismiss when notificationDismiss is manual", () => {
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useSettingsStore.setState({
+        convenience: {
+          ...useSettingsStore.getState().convenience,
+          notificationDismiss: "manual",
+        },
+      });
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: activeWsId,
+        message: "shell started",
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[0].readAt).toBeNull();
+    });
+
+    it("auto-dismisses in paneFocus mode when a pane is focused", () => {
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useSettingsStore.setState({
+        convenience: {
+          ...useSettingsStore.getState().convenience,
+          notificationDismiss: "paneFocus",
+        },
+      });
+      useGridStore.setState({ focusedPaneIndex: 0 });
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: activeWsId,
+        message: "shell started",
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[0].readAt).not.toBeNull();
+    });
+
+    it("does NOT auto-dismiss in paneFocus mode when no pane is focused", () => {
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useSettingsStore.setState({
+        convenience: {
+          ...useSettingsStore.getState().convenience,
+          notificationDismiss: "paneFocus",
+        },
+      });
+      useGridStore.setState({ focusedPaneIndex: null });
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: activeWsId,
+        message: "shell started",
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[0].readAt).toBeNull();
+    });
   });
 });

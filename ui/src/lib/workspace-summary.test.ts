@@ -617,6 +617,36 @@ describe("computeWorkspaceSummaryFromBackend", () => {
     const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
     expect(result.lastCommand?.outputActive).toBe(false);
   });
+
+  it("includes activity in workspace lastCommand from the source terminal", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "gh pr view 3237",
+        lastExitCode: 1,
+        lastCommandAt: 200,
+        outputActive: false,
+        activity: { type: "interactiveApp", name: "Claude" },
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.lastCommand?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("includes activity in workspace lastCommand for running activity", () => {
+    const summaries = [
+      makeBackendSummary({
+        id: "t1",
+        lastCommand: "cargo build",
+        lastExitCode: 1,
+        lastCommandAt: 200,
+        outputActive: false,
+        activity: { type: "running" },
+      }),
+    ];
+    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
+    expect(result.lastCommand?.activity).toEqual({ type: "running" });
+  });
 });
 
 describe("formatRelativeTime", () => {

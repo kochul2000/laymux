@@ -1,60 +1,29 @@
 import { test, expect } from "./fixtures";
 
-test.describe("Grid Edit Mode", () => {
-  test("edit mode toggle button shows Edit OFF by default", async ({ appPage: page }) => {
-    const toggle = page.getByTestId("edit-mode-toggle");
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveText("Edit OFF");
-  });
+/**
+ * Grid edit tests use PaneControlBar (hover-based) for split/delete/view-switch.
+ * There is no global "edit mode toggle" — pane controls appear on hover.
+ */
 
-  test("clicking toggle switches to Edit ON and shows edit controls", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await expect(page.getByTestId("edit-mode-toggle")).toHaveText("Edit ON");
-
-    // All edit mode buttons should appear
-    await expect(page.getByTestId("split-horizontal-btn")).toBeVisible();
-    await expect(page.getByTestId("split-vertical-btn")).toBeVisible();
-    await expect(page.getByTestId("delete-pane-btn")).toBeVisible();
-    await expect(page.getByTestId("save-btn")).toBeVisible();
-    await expect(page.getByTestId("save-propagate-btn")).toBeVisible();
-    await expect(page.getByTestId("save-as-btn")).toBeVisible();
-    await expect(page.getByTestId("revert-btn")).toBeVisible();
-  });
-
-  test("edit controls hidden when mode is OFF", async ({ appPage: page }) => {
-    await expect(page.getByTestId("split-horizontal-btn")).not.toBeVisible();
-    await expect(page.getByTestId("split-vertical-btn")).not.toBeVisible();
-    await expect(page.getByTestId("delete-pane-btn")).not.toBeVisible();
-    await expect(page.getByTestId("save-btn")).not.toBeVisible();
-  });
-
-  test("toggle back to OFF hides edit controls", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await expect(page.getByTestId("split-horizontal-btn")).toBeVisible();
-
-    await page.getByTestId("edit-mode-toggle").click();
-    await expect(page.getByTestId("edit-mode-toggle")).toHaveText("Edit OFF");
-    await expect(page.getByTestId("split-horizontal-btn")).not.toBeVisible();
-  });
-});
+/** Helper: hover over pane to reveal PaneControlBar. */
+async function hoverPane(page: import("@playwright/test").Page, index: number) {
+  const pane = page.locator(`[data-testid='workspace-pane-${index}']`);
+  await pane.hover();
+  // Wait for the control bar to appear
+  await expect(pane.locator("[data-testid='pane-control-bar']")).toBeVisible({ timeout: 3000 });
+}
 
 test.describe("Pane Split", () => {
-  test("clicking pane in edit mode focuses it (shows outline)", async ({ appPage: page }) => {
-    // Enter edit mode
-    await page.getByTestId("edit-mode-toggle").click();
-
-    // Click the first pane
-    await page.locator("[data-testid='workspace-pane-0']").click();
-
-    // Pane should get an outline (accent color)
-    const style = await page.locator("[data-testid='workspace-pane-0']").getAttribute("style");
-    expect(style).toContain("outline");
+  test("hovering a pane shows control bar", async ({ appPage: page }) => {
+    await hoverPane(page, 0);
+    await expect(
+      page.locator("[data-testid='workspace-pane-0']").locator("[data-testid='pane-control-bar']"),
+    ).toBeVisible();
   });
 
   test("split horizontal creates 2 panes stacked vertically", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-horizontal-btn").click();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-h").click();
 
     const panes = page.locator("[data-testid^='workspace-pane-']");
     await expect(panes).toHaveCount(2);
@@ -68,9 +37,8 @@ test.describe("Pane Split", () => {
   });
 
   test("split vertical creates 2 panes side by side", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-v").click();
 
     const panes = page.locator("[data-testid^='workspace-pane-']");
     await expect(panes).toHaveCount(2);
@@ -84,21 +52,19 @@ test.describe("Pane Split", () => {
   });
 
   test("multiple splits create multiple panes", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-v").click();
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(2);
 
-    // Focus the first pane again and split horizontally
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-horizontal-btn").click();
+    // Hover first pane again and split horizontally
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-h").click();
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(3);
   });
 
   test("new panes default to EmptyView", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-v").click();
 
     // The new pane (pane 1) should contain an EmptyView
     await expect(
@@ -108,71 +74,47 @@ test.describe("Pane Split", () => {
 });
 
 test.describe("Pane Delete", () => {
-  test("delete button removes focused pane", async ({ appPage: page }) => {
+  test("delete button removes a pane", async ({ appPage: page }) => {
     // Split first to have 2 panes
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-v").click();
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(2);
 
-    // Focus and delete the second pane
-    await page.locator("[data-testid='workspace-pane-1']").click();
-    await page.getByTestId("delete-pane-btn").click();
+    // Hover second pane and delete it
+    await hoverPane(page, 1);
+    await page.getByTestId("pane-control-delete").click();
 
     await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(1);
   });
 });
 
-test.describe("View Switcher in Edit Mode", () => {
-  test("focused pane shows view type selector dropdown", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await expect(page.getByTestId("view-switcher-0")).toBeVisible();
+test.describe("View Switcher", () => {
+  test("pane control bar has view type selector", async ({ appPage: page }) => {
+    await hoverPane(page, 0);
+    await expect(page.getByTestId("pane-control-view-select")).toBeVisible();
   });
 
   test("changing view type in dropdown switches the view", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-
-    // Change to BrowserPreviewView
-    await page.getByTestId("view-switcher-0").selectOption("BrowserPreviewView");
-    await expect(page.getByTestId("browser-preview")).toBeVisible();
-  });
-
-  test("view switcher not visible when edit mode is OFF", async ({ appPage: page }) => {
-    await expect(page.locator("[data-testid='view-switcher-0']")).not.toBeVisible();
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-view-select").selectOption("MemoView");
+    await expect(page.getByTestId("view-memo")).toBeVisible();
   });
 });
 
-test.describe("Save Actions", () => {
-  test("revert restores layout to original state after split", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
-    await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(2);
-
-    await page.getByTestId("revert-btn").click();
-    await expect(page.locator("[data-testid^='workspace-pane-']")).toHaveCount(1);
-  });
-
-  test("save button does not throw (calls persistSession)", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    // Just verify the button is clickable without error
-    await page.getByTestId("save-btn").click();
-    // Page should still be functional
+test.describe("Layout Export", () => {
+  test("grid edit toolbar has export button", async ({ appPage: page }) => {
     await expect(page.getByTestId("grid-edit-toolbar")).toBeVisible();
+    await expect(page.getByTestId("export-new-btn")).toBeVisible();
   });
 
-  test("save-as prompts for layout name", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-
+  test("export-new prompts for layout name", async ({ appPage: page }) => {
     // Set up dialog handler before clicking
     page.on("dialog", async (dialog) => {
       expect(dialog.type()).toBe("prompt");
       await dialog.accept("My Custom Layout");
     });
 
-    await page.getByTestId("save-as-btn").click();
+    await page.getByTestId("export-new-btn").click();
 
     // Page should still be stable
     await expect(page.getByTestId("grid-edit-toolbar")).toBeVisible();
@@ -180,22 +122,15 @@ test.describe("Save Actions", () => {
 });
 
 test.describe("Boundary Handles", () => {
-  test("boundary handles appear between panes in edit mode", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
-    await page.locator("[data-testid='workspace-pane-0']").click();
-    await page.getByTestId("split-vertical-btn").click();
+  test("boundary handles appear between panes after split", async ({ appPage: page }) => {
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-split-v").click();
 
     const handles = page.locator("[data-testid^='boundary-handle-']");
     await expect(handles.first()).toBeVisible();
   });
 
-  test("no boundary handles in normal mode", async ({ appPage: page }) => {
-    const handles = page.locator("[data-testid^='boundary-handle-']");
-    await expect(handles).toHaveCount(0);
-  });
-
-  test("no boundary handles with single pane in edit mode", async ({ appPage: page }) => {
-    await page.getByTestId("edit-mode-toggle").click();
+  test("no boundary handles with single pane", async ({ appPage: page }) => {
     const handles = page.locator("[data-testid^='boundary-handle-']");
     await expect(handles).toHaveCount(0);
   });

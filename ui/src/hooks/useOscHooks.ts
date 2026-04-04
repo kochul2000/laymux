@@ -11,13 +11,18 @@ const OSC_REGEX = /\x1b\]\d+;.*?(?:\x07|\x1b\\)/g;
 /**
  * Process terminal output for OSC sequences and trigger matching hooks.
  * Called on each chunk of terminal output data.
+ *
+ * `notifyGate` controls notification suppression: when provided, notify
+ * actions are only dispatched after a user command has been observed
+ * (OSC 133;C or 133;E). This prevents shell-init OSC 133;D sequences
+ * from flooding notifications on startup (see issue #111).
  */
 export function processOscInOutput(
   output: string,
   hooks: OscHook[],
   terminalId: string,
   groupId: string,
-  options?: { skipSyncCwd?: boolean },
+  options?: { skipSyncCwd?: boolean; notifyGate?: NotifyGate },
 ): void {
   if (hooks.length === 0) return;
 
@@ -27,6 +32,17 @@ export function processOscInOutput(
   for (const oscStr of matches) {
     const event = parseOsc(oscStr);
     if (!event) continue;
+
+    // Track user command execution: OSC 133;C (preexec) or 133;E (command text)
+    // signals a real user command, which arms the notify gate.
+    if (
+      options?.notifyGate &&
+      !options.notifyGate.armed &&
+      event.code === 133 &&
+      (event.param === "C" || event.param === "E")
+    ) {
+      options.notifyGate.armed = true;
+    }
 
     const matched = matchHook(hooks, event);
     for (const hook of matched) {
@@ -72,10 +88,20 @@ export function processOscInOutput(
       const message = buildLxMessage(parsed, terminalId, groupId);
       if (message) {
         if (options?.skipSyncCwd && message.action === "sync-cwd") continue;
+        if (options?.notifyGate && !options.notifyGate.armed && message.action === "notify")
+          continue;
         handleLxMessage(JSON.stringify(message)).catch(() => {});
       }
     }
   }
+}
+
+/**
+ * Mutable gate object: notify actions are suppressed until `armed` becomes true.
+ * OSC 133;C/E (user command execution) arms the gate automatically.
+ */
+export interface NotifyGate {
+  armed: boolean;
 }
 
 /**

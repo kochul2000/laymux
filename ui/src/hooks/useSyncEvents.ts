@@ -163,7 +163,12 @@ export function useSyncEvents() {
               markClaudeTerminal(data.terminalId).catch(() => {});
             }
           } else {
-            update.activity = { type: "running" };
+            const instance = useTerminalStore
+              .getState()
+              .instances.find((i) => i.id === data.terminalId);
+            if (!instance?.activity || instance.activity.type !== "interactiveApp") {
+              update.activity = { type: "running" };
+            }
           }
         } else if (data.command === "__preexec__") {
           // Preexec marker from OSC 133 C — don't overwrite lastCommand
@@ -178,8 +183,14 @@ export function useSyncEvents() {
         if (data.exitCode !== undefined) {
           update.lastExitCode = data.exitCode;
           update.lastCommandAt = Date.now();
-          // Command finished → shell prompt
-          update.activity = { type: "shell" };
+          // Command finished → shell prompt (but preserve interactiveApp state
+          // so sub-command exit codes don't override Claude/vim/etc. activity)
+          const instance = useTerminalStore
+            .getState()
+            .instances.find((i) => i.id === data.terminalId);
+          if (!instance?.activity || instance.activity.type !== "interactiveApp") {
+            update.activity = { type: "shell" };
+          }
         }
         useTerminalStore.getState().updateInstanceInfo(
           data.terminalId,

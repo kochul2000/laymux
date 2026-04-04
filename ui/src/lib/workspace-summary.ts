@@ -8,6 +8,7 @@ export interface LastCommandInfo {
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
+  activity?: TerminalActivityInfo; // terminal activity state (shell/running/interactiveApp)
 }
 
 export interface TerminalSummaryInfo {
@@ -69,6 +70,8 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     command: t.lastCommand!,
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
+    outputActive: t.outputActive,
+    activity: t.activity,
   };
 }
 
@@ -157,6 +160,7 @@ export function computeWorkspaceSummaryFromBackend(
           exitCode: s.lastExitCode ?? undefined,
           timestamp: s.lastCommandAt,
           outputActive: s.outputActive,
+          activity: s.activity as TerminalActivityInfo,
         };
       }
     }

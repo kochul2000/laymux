@@ -126,14 +126,6 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   }
 
   options.push({
-    key: "browser",
-    label: "Browser Preview",
-    category: "browser",
-    config: { type: "BrowserPreviewView" },
-    testId: "empty-view-browser",
-  });
-
-  options.push({
     key: "memo",
     label: "Memo",
     category: "tool",
@@ -220,7 +212,7 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    const position = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+    const position: "top" | "bottom" = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
     const info = { index: idx, position };
     dropPositionRef.current = info;
     setDropInfo((prev) => (prev?.index === idx && prev?.position === position ? prev : info));

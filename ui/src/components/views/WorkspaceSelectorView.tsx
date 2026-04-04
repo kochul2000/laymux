@@ -3,19 +3,22 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { sortWorkspaces } from "@/lib/workspace-sort";
 import {
-  computeWorkspaceSummaryFromBackend,
+  computeWorkspaceSummary,
   abbreviatePath,
   mntPathToWindows,
   formatCommand,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
-import { useBackendSummaries } from "@/hooks/useBackendSummaries";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
+import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import { persistSession } from "@/lib/persist-session";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -37,17 +40,29 @@ function shortLabel(label: string): string {
   return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
 }
 
-/** Determine command status icon based on exit code and output activity. */
-function getCommandIcon(exitCode: number | undefined, outputActive?: boolean): string {
+/** Determine command status icon based on exit code, output activity, and terminal activity. */
+function getCommandIcon(
+  exitCode: number | undefined,
+  outputActive?: boolean,
+  activity?: TerminalActivityInfo,
+): string {
   if (exitCode === undefined) return "⏳";
   if (outputActive) return "⏳";
+  // If terminal activity indicates something is still running, override error display
+  if (activity?.type === "running" || activity?.type === "interactiveApp") return "⏳";
   return exitCode === 0 ? "✓" : "✗";
 }
 
-/** Determine command status color based on exit code and output activity. */
-function getCommandColor(exitCode: number | undefined, outputActive?: boolean): string {
+/** Determine command status color based on exit code, output activity, and terminal activity. */
+function getCommandColor(
+  exitCode: number | undefined,
+  outputActive?: boolean,
+  activity?: TerminalActivityInfo,
+): string {
   if (exitCode === undefined) return "var(--yellow)";
   if (outputActive) return "var(--yellow)";
+  // If terminal activity indicates something is still running, override error display
+  if (activity?.type === "running" || activity?.type === "interactiveApp") return "var(--yellow)";
   return exitCode === 0 ? "var(--green)" : "var(--red)";
 }
 
@@ -116,8 +131,12 @@ function WorkspaceItem({
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
 
   const cmdInfo = summary.lastCommand;
-  const cmdIcon = cmdInfo ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive) : null;
-  const cmdColor = cmdInfo ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive) : undefined;
+  const cmdIcon = cmdInfo
+    ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity)
+    : null;
+  const cmdColor = cmdInfo
+    ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity)
+    : undefined;
 
   return (
     <div
@@ -301,10 +320,10 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdIcon = ts.lastCommand
-                  ? getCommandIcon(ts.lastExitCode, ts.outputActive)
+                  ? getCommandIcon(ts.lastExitCode, ts.outputActive, ts.activity)
                   : null;
                 const tCmdColor = ts.lastCommand
-                  ? getCommandColor(ts.lastExitCode, ts.outputActive)
+                  ? getCommandColor(ts.lastExitCode, ts.outputActive, ts.activity)
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
@@ -429,80 +448,6 @@ function WorkspaceItem({
                           }}
                         />
                       ) : null}
-                    </div>
-                  </div>
-                );
-              }
-              if (pane.view.type === "BrowserPreviewView") {
-                const url = (pane.view.url as string) ?? "";
-                const shortUrl = url.replace(/^https?:\/\//, "");
-                return (
-                  <div
-                    key={pane.id}
-                    className="flex items-center gap-1.5 truncate text-[11px]"
-                    style={{
-                      paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
-                      ...(isFocusedPane
-                        ? {
-                            background: "rgba(137,180,250,0.12)",
-                            borderRadius: 3,
-                            filter: "brightness(1.3)",
-                          }
-                        : {}),
-                    }}
-                  >
-                    {showMinimap && wsDisplay.minimap && (
-                      <span
-                        className="shrink-0"
-                        data-testid={`pane-minimap-browser-${pane.id}`}
-                        style={{ opacity: isFocusedPane ? 1 : 0.5 }}
-                      >
-                        <PaneMinimap
-                          panes={minimapPanes}
-                          highlightIndex={paneIndex}
-                          width={18}
-                          height={12}
-                        />
-                      </span>
-                    )}
-                    <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      {wsDisplay.environment && (
-                        <span
-                          className="shrink-0 font-medium"
-                          style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}
-                        >
-                          {shortLabel("Browser")}
-                        </span>
-                      )}
-                      {wsDisplay.activity && (
-                        <span
-                          className="shrink-0 rounded px-1 text-[9px]"
-                          style={{
-                            color: "var(--cyan, #94e2d5)",
-                            background: "rgba(255,255,255,0.04)",
-                            minWidth: 52,
-                            textAlign: "center",
-                            display: "inline-block",
-                            opacity: isActive ? 1 : 0.7,
-                          }}
-                        >
-                          preview
-                        </span>
-                      )}
-                      {wsDisplay.path && shortUrl && (
-                        <>
-                          <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
-                          <span
-                            className="truncate"
-                            style={{
-                              color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                              opacity: isActive ? 0.7 : 0.5,
-                            }}
-                          >
-                            {shortUrl}
-                          </span>
-                        </>
-                      )}
                     </div>
                   </div>
                 );
@@ -843,61 +788,21 @@ export function WorkspaceSelectorView() {
   const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
   const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-
-  // Collect all terminal IDs across all workspaces for backend summary fetch
-  const allTerminalIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const ws of workspaces) {
-      for (const p of ws.panes) {
-        if (p.view.type === "TerminalView") {
-          ids.push(`terminal-${p.id}`);
-        }
-      }
-    }
-    return ids;
-  }, [workspaces]);
-
-  const { summaries: backendSummaries, markRead } = useBackendSummaries(allTerminalIds);
+  const terminalInstances = useTerminalStore((s) => s.instances);
   const listeningPorts = usePortDetection();
   const portNumbers = useMemo(
     () => [...new Set(listeningPorts.map((p) => p.port))].sort((a, b) => a - b),
     [listeningPorts],
   );
 
-  // Build a lookup map: terminalId → TerminalSummaryResponse
-  const summaryMap = useMemo(() => {
-    const map = new Map<string, (typeof backendSummaries)[number]>();
-    for (const s of backendSummaries) {
-      map.set(s.id, s);
-    }
-    return map;
-  }, [backendSummaries]);
+  // Build terminal ports map (empty for now — port detection doesn't map to terminals)
+  const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
-  const sortedWorkspaces = useMemo(() => {
-    if (workspaceSortOrder === "notification") {
-      const originalIndex = new Map<string, number>();
-      workspaces.forEach((ws, i) => originalIndex.set(ws.id, i));
-      const latestByWs = new Map<string, number>();
-      for (const n of notifications) {
-        if (n.readAt !== null) continue;
-        const prev = latestByWs.get(n.workspaceId) ?? 0;
-        if (n.createdAt > prev) latestByWs.set(n.workspaceId, n.createdAt);
-      }
-      return [...workspaces].sort((a, b) => {
-        const diff = (latestByWs.get(b.id) ?? 0) - (latestByWs.get(a.id) ?? 0);
-        if (diff !== 0) return diff;
-        return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
-      });
-    }
-    // Manual sort: use workspaceDisplayOrder if available
-    if (workspaceDisplayOrder.length === 0) return workspaces;
-    const orderMap = new Map(workspaceDisplayOrder.map((id, i) => [id, i]));
-    return [...workspaces].sort(
-      (a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity),
-    );
-  }, [workspaces, workspaceDisplayOrder, notifications, workspaceSortOrder]);
+  const sortedWorkspaces = useMemo(
+    () => sortWorkspaces(workspaces, workspaceSortOrder, workspaceDisplayOrder, notifications),
+    [workspaces, workspaceDisplayOrder, notifications, workspaceSortOrder],
+  );
 
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);
@@ -940,6 +845,7 @@ export function WorkspaceSelectorView() {
       const fromId = dragIdRef.current;
       if (fromId !== null && fromId !== toId) {
         reorderWorkspaces(fromId, toId, position);
+        persistSession();
       }
       dragIdRef.current = null;
     },
@@ -975,7 +881,11 @@ export function WorkspaceSelectorView() {
         .find((ws) => ws.id === wsId)
         ?.panes.filter((p) => p.view.type === "TerminalView")
         .map((p) => `terminal-${p.id}`) ?? [];
-    if (wsTerminalIds.length > 0) markRead(wsTerminalIds);
+    if (wsTerminalIds.length > 0) {
+      import("@/lib/tauri-api").then(({ markNotificationsRead }) =>
+        markNotificationsRead(wsTerminalIds).catch(() => {}),
+      );
+    }
     setActiveWorkspace(wsId);
   };
 
@@ -1071,51 +981,46 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Workspace list */}
-      <div className="flex-1 overflow-y-auto px-1.5 py-0.5">
+      <div className="flex flex-1 flex-col overflow-y-auto px-1.5 py-0.5">
         {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
-          // Filter backend summaries for this workspace's terminal panes.
-          // Fall back to lastCwd from settings when backend hasn't detected CWD yet
-          // (e.g., shell hasn't emitted OSC 7 after restart, or session not created yet).
-          const wsTerminalSummaries = ws.panes
+          // Compute summary from frontend stores (event-driven, no polling).
+          // Include lastCwd from settings as fallback for terminals that haven't
+          // emitted OSC 7 yet, or that don't have a session yet (early startup).
+          const wsTerminals = ws.panes
             .filter((p) => p.view.type === "TerminalView")
             .map((p) => {
               const termId = `terminal-${p.id}`;
-              const summary = summaryMap.get(termId);
-              if (summary) {
-                // Backend has summary but no CWD yet — use lastCwd from settings
-                if (!summary.cwd && p.view.lastCwd) {
-                  return { ...summary, cwd: p.view.lastCwd as string };
+              const inst = terminalInstances.find((t) => t.id === termId);
+              if (inst) {
+                // Instance exists but no CWD yet — use lastCwd from settings
+                if (!inst.cwd && p.view.lastCwd) {
+                  return { ...inst, cwd: p.view.lastCwd as string };
                 }
-                return summary;
+                return inst;
               }
-              // No backend summary yet (session not created) — synthesize minimal placeholder
-              if (p.view.lastCwd) {
-                return {
-                  id: termId,
-                  profile: (p.view.profile as string) || defaultProfile,
-                  title: "",
-                  cwd: p.view.lastCwd as string,
-                  branch: null,
-                  lastCommand: null,
-                  lastExitCode: null,
-                  lastCommandAt: null,
-                  commandRunning: false,
-                  activity: { type: "shell" as const },
-                  outputActive: false,
-                  isClaude: false,
-                  unreadNotificationCount: 0,
-                  latestNotification: null,
-                } satisfies (typeof backendSummaries)[number];
-              }
-              return undefined;
-            })
-            .filter(Boolean) as (typeof backendSummaries)[number][];
-          const summary = computeWorkspaceSummaryFromBackend(
+              // No instance yet (session not created) — synthesize placeholder
+              return {
+                id: termId,
+                profile: (p.view.profile as string) || "PowerShell",
+                syncGroup: ws.id,
+                workspaceId: ws.id,
+                label: (p.view.profile as string) || "Terminal",
+                cwd: (p.view.lastCwd as string) || undefined,
+                lastActivityAt: 0,
+                isFocused: false,
+              };
+            });
+          const summary = computeWorkspaceSummary(
             ws.id,
-            wsTerminalSummaries,
-            isActive ? portNumbers : [],
+            wsTerminals,
+            isActive ? terminalPorts : new Map(),
+            notifications,
           );
+          // Override ports for active workspace
+          if (isActive && portNumbers.length > 0) {
+            summary.ports = portNumbers;
+          }
           return (
             <WorkspaceItem
               key={ws.id}
@@ -1143,6 +1048,39 @@ export function WorkspaceSelectorView() {
             />
           );
         })}
+        {/* Drop zone: empty area below the last workspace item → append to end */}
+        {dragContext.enabled && (
+          <div
+            className="min-h-[40px] flex-1"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              const lastWs = sortedWorkspaces[sortedWorkspaces.length - 1];
+              if (!lastWs || dragIdRef.current === lastWs.id) {
+                setDropIndicator(null);
+                return;
+              }
+              dropPositionRef.current = "bottom";
+              setDropIndicator((prev) =>
+                prev?.wsId === lastWs.id && prev?.position === "bottom"
+                  ? prev
+                  : { wsId: lastWs.id, position: "bottom" },
+              );
+            }}
+            onDragLeave={() => setDropIndicator(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropIndicator(null);
+              const lastWs = sortedWorkspaces[sortedWorkspaces.length - 1];
+              const fromId = dragIdRef.current;
+              if (fromId && lastWs && fromId !== lastWs.id) {
+                reorderWorkspaces(fromId, lastWs.id, "bottom");
+                persistSession();
+              }
+              dragIdRef.current = null;
+            }}
+          />
+        )}
       </div>
 
       {/* #6: Show Notifications — improved contrast, unread count, hover */}

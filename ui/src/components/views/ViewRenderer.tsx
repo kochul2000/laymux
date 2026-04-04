@@ -5,7 +5,6 @@ import { resolveSyncCwd } from "@/lib/sync-cwd-config";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { TerminalView } from "./TerminalView";
-import { BrowserPreviewView } from "./BrowserPreviewView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
@@ -160,12 +159,6 @@ export function ViewRenderer({
         </div>
       );
     }
-    case "BrowserPreviewView":
-      return (
-        <FocusableView testId="view-browser-preview" isFocused={isFocused}>
-          <BrowserPreviewView url={(viewConfig?.url as string) ?? undefined} />
-        </FocusableView>
-      );
     case "EmptyView":
     case null:
     default:

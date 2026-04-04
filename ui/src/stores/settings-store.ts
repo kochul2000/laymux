@@ -125,6 +125,8 @@ export interface ProfileDefaults {
   font: FontSettings;
   restoreCwd: boolean;
   restoreOutput: boolean;
+  /** Maximum terminal output cache size in KB (per terminal). Default: 2048 (2MB). */
+  maxOutputCacheKB: number;
   syncCwd: SyncCwdConfig;
 }
 
@@ -354,6 +356,7 @@ export const defaultProfileDefaults: ProfileDefaults = {
   font: { ...DEFAULT_FONT },
   restoreCwd: true,
   restoreOutput: true,
+  maxOutputCacheKB: 256,
   syncCwd: "default",
 };
 

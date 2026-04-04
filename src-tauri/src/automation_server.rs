@@ -442,7 +442,7 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "PUT", "path": "/api/v1/panes/{index}/view",
                 "description": "Change the view type of a pane.",
-                "body": { "type": "\"TerminalView\" | \"BrowserPreviewView\" | \"EmptyView\"", "profile": "(optional) string", "url": "(optional) string" }
+                "body": { "type": "\"TerminalView\" | \"EmptyView\"", "profile": "(optional) string" }
             },
             {
                 "method": "GET", "path": "/api/v1/docks",

@@ -52,11 +52,6 @@ describe("EmptyView", () => {
     }
   });
 
-  it("shows browser preview button", () => {
-    render(<EmptyView />);
-    expect(screen.getByTestId("empty-view-browser")).toBeInTheDocument();
-  });
-
   it("calls onSelectView when terminal button clicked", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -67,15 +62,6 @@ describe("EmptyView", () => {
       await user.click(screen.getByTestId(`empty-view-terminal-${profiles[0].name}`));
       expect(onSelect).toHaveBeenCalledWith({ type: "TerminalView", profile: profiles[0].name });
     }
-  });
-
-  it("calls onSelectView when browser button clicked", async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    render(<EmptyView onSelectView={onSelect} />);
-
-    await user.click(screen.getByTestId("empty-view-browser"));
-    expect(onSelect).toHaveBeenCalledWith({ type: "BrowserPreviewView" });
   });
 
   it("supports keyboard number shortcuts when focused", async () => {
@@ -99,14 +85,14 @@ describe("EmptyView", () => {
     render(<EmptyView context="pane" />);
     expect(screen.getByTestId("empty-view-workspace-selector")).toBeInTheDocument();
     expect(screen.getByTestId("empty-view-settings")).toBeInTheDocument();
-    expect(screen.getByTestId("empty-view-browser")).toBeInTheDocument();
+    expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
   });
 
   it("shows shortcut number badges on each option", () => {
     render(<EmptyView />);
     // Should have number badges (1, 2, etc.)
     const profiles = useSettingsStore.getState().profiles.filter((p) => !p.hidden);
-    // profiles + browser = total options
+    // profiles + memo = total options
     const totalOptions = profiles.length + 1;
     for (let i = 1; i <= totalOptions && i <= 9; i++) {
       expect(screen.getByText(String(i))).toBeInTheDocument();
@@ -140,16 +126,16 @@ describe("EmptyView", () => {
   });
 
   it("respects stored viewOrder", () => {
-    // Set custom order: browser first
-    useSettingsStore.setState({ viewOrder: ["browser", "settings", "ws-selector"] });
+    // Set custom order: memo first
+    useSettingsStore.setState({ viewOrder: ["memo", "settings", "ws-selector"] });
     render(<EmptyView />);
 
     const buttons = screen.getAllByRole("button");
-    // First clickable button should be Browser Preview
+    // First clickable button should be Memo
     const labels = buttons.map((b) => b.textContent);
-    const browserIdx = labels.findIndex((l) => l?.includes("Browser Preview"));
+    const memoIdx = labels.findIndex((l) => l?.includes("Memo"));
     const wslIdx = labels.findIndex((l) => l?.includes("WSL"));
-    // Browser should come before WSL since it's first in custom order
-    expect(browserIdx).toBeLessThan(wslIdx);
+    // Memo should come before WSL since it's first in custom order
+    expect(memoIdx).toBeLessThan(wslIdx);
   });
 });

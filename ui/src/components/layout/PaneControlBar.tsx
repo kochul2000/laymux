@@ -142,7 +142,6 @@ function ViewSelect({
           {p.name}
         </option>
       ))}
-      <option value="BrowserPreviewView">Browser</option>
       <option value="MemoView">Memo</option>
       <option value="IssueReporterView">Issue Reporter</option>
     </select>

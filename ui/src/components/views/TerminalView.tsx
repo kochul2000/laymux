@@ -20,7 +20,7 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { processOscInOutput } from "@/hooks/useOscHooks";
+import { processOscInOutput, type NotifyGate } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
@@ -56,6 +56,16 @@ function resolveWorkspaceId(terminalId: string): string {
     if (ws) return ws.id;
   }
   return activeWorkspaceId;
+}
+
+// Stagger WebGL context creation to prevent WebView2 GPU process crash.
+// Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
+let webglInitCount = 0;
+const WEBGL_STAGGER_MS = 150;
+
+/** Reset the stagger counter (for tests). */
+export function _resetWebglStagger(): void {
+  webglInitCount = 0;
 }
 
 interface TerminalViewProps {
@@ -145,6 +155,8 @@ export function TerminalView({
       customGlyphs: true,
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
+      scrollback: 10000,
+      windowsPty: { backend: "conpty", buildNumber: 21376 },
     });
 
     const fitAddon = new FitAddon();
@@ -258,14 +270,16 @@ export function TerminalView({
 
       if (transition === "completed") {
         updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
-        const message = getClaudeCompletionMessage(prevTitle, title);
-        const wsId = resolveWorkspaceId(instanceId);
-        useNotificationStore.getState().addNotification({
-          terminalId: instanceId,
-          workspaceId: wsId,
-          message,
-          level: "success",
-        });
+        if (notifyGate.armed) {
+          const message = getClaudeCompletionMessage(prevTitle, title);
+          const wsId = resolveWorkspaceId(instanceId);
+          useNotificationStore.getState().addNotification({
+            terminalId: instanceId,
+            workspaceId: wsId,
+            message,
+            level: "success",
+          });
+        }
       } else if (transition === "started") {
         const taskDesc = extractClaudeTaskDesc(title);
         updateInstanceInfo(instanceId, {
@@ -275,6 +289,11 @@ export function TerminalView({
         });
       }
     });
+
+    // Gate notifications until the first user command is observed (OSC 133;C/E).
+    // Shell-init OSC 133;D sequences arrive before any C/E, so they are
+    // suppressed automatically without an arbitrary timeout (see issue #111).
+    const notifyGate: NotifyGate = { armed: false };
 
     // Build hooks list
     const hooks: OscHook[] = [
@@ -306,12 +325,14 @@ export function TerminalView({
       });
       const wsId = resolveWorkspaceId(instanceId);
       const cmdDesc = inst.lastCommand || "Command";
-      useNotificationStore.getState().addNotification({
-        terminalId: instanceId,
-        workspaceId: wsId,
-        message: `${cmdDesc} completed`,
-        level: "success",
-      });
+      if (notifyGate.armed) {
+        useNotificationStore.getState().addNotification({
+          terminalId: instanceId,
+          workspaceId: wsId,
+          message: `${cmdDesc} completed`,
+          level: "success",
+        });
+      }
     });
 
     // Persistent TextDecoder with stream mode to handle UTF-8 characters
@@ -328,6 +349,7 @@ export function TerminalView({
       const text = streamDecoder.decode(data, { stream: true });
       processOscInOutput(text, hooks, instanceId, syncGroupRef.current, {
         skipSyncCwd: !cwdSendRef.current,
+        notifyGate,
       });
 
       // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
@@ -348,14 +370,16 @@ export function TerminalView({
               lastExitCode: 0,
               lastCommandAt: Date.now(),
             });
-            const message = getClaudeCompletionMessage(prevTitle, rawTitle);
-            const wsId = resolveWorkspaceId(instanceId);
-            useNotificationStore.getState().addNotification({
-              terminalId: instanceId,
-              workspaceId: wsId,
-              message,
-              level: "success",
-            });
+            if (notifyGate.armed) {
+              const message = getClaudeCompletionMessage(prevTitle, rawTitle);
+              const wsId = resolveWorkspaceId(instanceId);
+              useNotificationStore.getState().addNotification({
+                terminalId: instanceId,
+                workspaceId: wsId,
+                message,
+                level: "success",
+              });
+            }
           } else if (transition === "started") {
             const taskDesc = extractClaudeTaskDesc(rawTitle);
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
@@ -466,6 +490,7 @@ export function TerminalView({
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
     let sessionCreated = false;
+    let webglTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0 && !sessionCreated) {
@@ -476,13 +501,19 @@ export function TerminalView({
         }
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
-        try {
-          const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
-          terminal.loadAddon(webgl);
-          webgl.onContextLoss(() => webgl.dispose());
-        } catch {
-          // WebGL not available — fall back to default renderer
-        }
+        // Stagger creation to prevent simultaneous GPU context init crash.
+        const delay = webglInitCount * WEBGL_STAGGER_MS;
+        webglInitCount++;
+        webglTimer = setTimeout(() => {
+          if (cancelled) return;
+          try {
+            const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
+            terminal.loadAddon(webgl);
+            webgl.onContextLoss(() => webgl.dispose());
+          } catch {
+            // WebGL not available — fall back to default renderer
+          }
+        }, delay);
         // Load SerializeAddon for session persistence
         const serializeAddon = new SerializeAddon();
         terminal.loadAddon(serializeAddon);
@@ -505,43 +536,22 @@ export function TerminalView({
         const shouldRestoreOutput =
           profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
 
-        (async () => {
-          if (cancelled) return;
-          // Restore cached terminal output from previous session
-          if (shouldRestoreOutput && paneId) {
-            try {
-              const cached = await loadTerminalOutputCache(paneId);
-              if (cancelled) return;
-              if (cached && cached.length > 0) {
-                terminal.write(cached);
-                terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
-                // Push restored content into scrollback so shell init
-                // clear-screen sequences don't destroy it
-                terminal.write("\r\n".repeat(terminal.rows));
-              }
-            } catch (err) {
-              // "Cache not found" is expected for new panes — log anything else
-              const msg = err instanceof Error ? err.message : String(err);
-              if (!msg.startsWith("Cache not found:")) {
-                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
-              }
-            }
-          }
+        // Determine startup command override for Claude session restore.
+        // Validate session ID format to prevent command injection.
+        const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+        const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
+        const safeSessionId =
+          lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
+            ? lastClaudeSession
+            : undefined;
+        const startupOverride =
+          shouldRestoreClaudeSession && safeSessionId
+            ? `claude --resume ${safeSessionId}`
+            : undefined;
 
-          if (cancelled) return;
-          // Determine startup command override for Claude session restore.
-          // Validate session ID format to prevent command injection.
-          const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-          const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
-          const safeSessionId =
-            lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
-              ? lastClaudeSession
-              : undefined;
-          const startupOverride =
-            shouldRestoreClaudeSession && safeSessionId
-              ? `claude --resume ${safeSessionId}`
-              : undefined;
-
+        // Start PTY session immediately (don't wait for cache restore).
+        // Cache restore runs in parallel so the shell starts booting ASAP.
+        if (!cancelled) {
           createTerminalSession(
             instanceId,
             profile,
@@ -555,7 +565,26 @@ export function TerminalView({
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
             terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
           });
-        })();
+        }
+
+        // Restore cached terminal output in parallel (non-blocking).
+        if (shouldRestoreOutput && paneId) {
+          loadTerminalOutputCache(paneId)
+            .then((cached) => {
+              if (cancelled || !cached || cached.length === 0) return;
+              terminal.write(cached);
+              terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
+              // Push restored content into scrollback so shell init
+              // clear-screen sequences don't destroy it
+              terminal.write("\r\n".repeat(terminal.rows));
+            })
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.startsWith("Cache not found:")) {
+                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
+              }
+            });
+        }
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
       }
@@ -566,6 +595,7 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      if (webglTimer !== undefined) clearTimeout(webglTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);

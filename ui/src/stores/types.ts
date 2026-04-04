@@ -2,7 +2,6 @@ export type ViewType =
   | "WorkspaceSelectorView"
   | "SettingsView"
   | "TerminalView"
-  | "BrowserPreviewView"
   | "IssueReporterView"
   | "MemoView"
   | "EmptyView";

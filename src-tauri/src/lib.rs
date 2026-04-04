@@ -7,6 +7,7 @@ pub mod git_watcher;
 pub mod ipc_server;
 pub mod output_buffer;
 pub mod port_detect;
+pub mod process;
 pub mod pty;
 pub mod settings;
 pub mod state;
