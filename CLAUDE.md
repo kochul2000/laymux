@@ -6,4 +6,5 @@
 * **마이그레이션 불필요**: 현재 내부 개발 단계이므로 설정 파일 경로 변경 등에 대한 마이그레이션 로직은 구현하지 않는다. 기존 데이터는 수동으로 처리한다.
 * **Automation API 포트 규칙**: 개발 중 스크린샷/API 호출은 반드시 dev 인스턴스(포트 19281+)를 사용한다. Release 빌드(포트 19280)는 사용자가 직접 사용하므로 절대 건드리지 않는다. dev discovery 파일: `%APPDATA%\laymux-dev\automation.json`에서 포트를 읽는다.
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
+* **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
