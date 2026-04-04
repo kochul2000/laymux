@@ -41,6 +41,30 @@ vi.mock("./TerminalView", () => ({
   },
 }));
 
+// Mock FileExplorerView to capture props
+const fileExplorerProps: { cwdSend?: boolean; cwdReceive?: boolean; syncGroup?: string }[] = [];
+vi.mock("./FileExplorerView", () => ({
+  FileExplorerView: (props: {
+    instanceId: string;
+    cwdSend?: boolean;
+    cwdReceive?: boolean;
+    syncGroup: string;
+  }) => {
+    fileExplorerProps.push({
+      cwdSend: props.cwdSend,
+      cwdReceive: props.cwdReceive,
+      syncGroup: props.syncGroup,
+    });
+    return (
+      <div
+        data-testid="mock-file-explorer"
+        data-cwdsend={String(props.cwdSend)}
+        data-cwdreceive={String(props.cwdReceive)}
+      />
+    );
+  },
+}));
+
 import { ViewRenderer } from "./ViewRenderer";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -50,6 +74,7 @@ describe("ViewRenderer", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     terminalViewProps.length = 0;
+    fileExplorerProps.length = 0;
   });
 
   it("renders EmptyView for EmptyView type", () => {
@@ -137,6 +162,49 @@ describe("ViewRenderer", () => {
       />,
     );
     expect(onSelectView).not.toHaveBeenCalled();
+  });
+
+  it("FileExplorerView defaults cwdSend and cwdReceive to true regardless of location", () => {
+    render(
+      <ViewRenderer
+        viewType="FileExplorerView"
+        viewConfig={{ type: "FileExplorerView" }}
+        workspaceId="ws-1"
+        paneId="dp-1"
+        location="dock"
+      />,
+    );
+    const last = fileExplorerProps.at(-1);
+    expect(last?.cwdSend).toBe(true);
+    expect(last?.cwdReceive).toBe(true);
+  });
+
+  it("FileExplorerView defaults to true even without explicit location", () => {
+    render(
+      <ViewRenderer
+        viewType="FileExplorerView"
+        viewConfig={{ type: "FileExplorerView" }}
+        workspaceId="ws-1"
+        paneId="pane-1"
+      />,
+    );
+    const last = fileExplorerProps.at(-1);
+    expect(last?.cwdSend).toBe(true);
+    expect(last?.cwdReceive).toBe(true);
+  });
+
+  it("FileExplorerView respects explicit cwdReceive=false in viewConfig", () => {
+    render(
+      <ViewRenderer
+        viewType="FileExplorerView"
+        viewConfig={{ type: "FileExplorerView", cwdReceive: false }}
+        workspaceId="ws-1"
+        paneId="dp-2"
+        location="dock"
+      />,
+    );
+    const last = fileExplorerProps.at(-1);
+    expect(last?.cwdReceive).toBe(false);
   });
 
   it("uses paneId for stable terminal instanceId", () => {

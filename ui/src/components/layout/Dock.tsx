@@ -3,6 +3,7 @@ import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/sto
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useGridStore } from "@/stores/grid-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
@@ -263,6 +264,11 @@ function DockGrid({
               height: `${pane.h * 100}%`,
               borderRight: "2px solid var(--border)",
               borderBottom: "2px solid var(--border)",
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              useDockStore.getState().setFocusedDock(position, pane.id);
+              useGridStore.getState().setFocusedPane(null);
             }}
             onMouseEnter={() => handlePaneHoverActivity(pane.id)}
             onMouseMove={() => handlePaneHoverActivity(pane.id)}

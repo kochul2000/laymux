@@ -32,6 +32,7 @@ vi.mock("@/components/views/ViewRenderer", () => ({
 import { Dock } from "./Dock";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useGridStore } from "@/stores/grid-store";
 
 describe("Dock", () => {
   beforeEach(() => {
@@ -299,6 +300,42 @@ describe("Dock", () => {
     });
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("clicking a split pane sets focusedDockPaneId to that pane", () => {
+    useDockStore.getState().setFocusedDock("left", "dp-1");
+    render(
+      <Dock
+        position="left"
+        activeView={null}
+        views={[]}
+        panes={[
+          { id: "dp-1", view: { type: "WorkspaceSelectorView" }, x: 0, y: 0, w: 1, h: 0.5 },
+          { id: "dp-2", view: { type: "SettingsView" }, x: 0, y: 0.5, w: 1, h: 0.5 },
+        ]}
+      />,
+    );
+    // Click on the second pane
+    fireEvent.mouseDown(screen.getByTestId("dock-pane-dp-2"));
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useDockStore.getState().focusedDockPaneId).toBe("dp-2");
+  });
+
+  it("clicking a split pane clears workspace pane focus", () => {
+    useGridStore.getState().setFocusedPane(0);
+    render(
+      <Dock
+        position="left"
+        activeView={null}
+        views={[]}
+        panes={[
+          { id: "dp-1", view: { type: "WorkspaceSelectorView" }, x: 0, y: 0, w: 1, h: 0.5 },
+          { id: "dp-2", view: { type: "SettingsView" }, x: 0, y: 0.5, w: 1, h: 0.5 },
+        ]}
+      />,
+    );
+    fireEvent.mouseDown(screen.getByTestId("dock-pane-dp-1"));
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
   });
 
   it("calls onSplitPane with direction and paneId", () => {

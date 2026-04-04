@@ -260,6 +260,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/v1/docks/{position}/views"),
     ("POST", "/api/v1/docks/{position}/split"),
     ("DELETE", "/api/v1/docks/{position}/panes/{paneId}"),
+    ("PUT", "/api/v1/docks/{position}/panes/{paneId}/view"),
     ("GET", "/api/v1/terminals"),
     ("POST", "/api/v1/terminals/{id}/write"),
     ("GET", "/api/v1/terminals/{id}/output"),
@@ -317,6 +318,10 @@ pub fn build_router(state: ServerState) -> Router {
         .route(
             "/api/v1/docks/{position}/panes/{paneId}",
             delete(docks_remove_pane),
+        )
+        .route(
+            "/api/v1/docks/{position}/panes/{paneId}/view",
+            put(docks_set_pane_view),
         )
         .route("/api/v1/terminals", get(terminals_list))
         .route("/api/v1/terminals/{id}/write", post(terminal_write))
@@ -542,6 +547,11 @@ async fn api_docs() -> impl IntoResponse {
             {
                 "method": "DELETE", "path": "/api/v1/docks/{position}/panes/{paneId}",
                 "description": "Remove a pane from a dock. position: top|bottom|left|right."
+            },
+            {
+                "method": "PUT", "path": "/api/v1/docks/{position}/panes/{paneId}/view",
+                "description": "Set the view of a specific dock pane. position: top|bottom|left|right.",
+                "body": { "view": "object — { type: ViewType, cwdSend?: bool, cwdReceive?: bool, ... }" }
             },
             {
                 "method": "PUT", "path": "/api/v1/settings/app-theme",
@@ -1127,6 +1137,29 @@ async fn docks_remove_pane(
         "docks",
         "removeDockPane",
         serde_json::json!({ "position": position, "paneId": pane_id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+async fn docks_set_pane_view(
+    AxumState(state): AxumState<ServerState>,
+    Path((position, pane_id)): Path<(String, String)>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let view = body
+        .get("view")
+        .cloned()
+        .unwrap_or(serde_json::json!({"type": "EmptyView"}));
+    match bridge_request(
+        &state,
+        "action",
+        "docks",
+        "setDockPaneView",
+        serde_json::json!({ "position": position, "paneId": pane_id, "view": view }),
     )
     .await
     {
