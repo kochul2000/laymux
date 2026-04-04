@@ -74,7 +74,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   // Paragraph hover detection via textarea mouse position
   const [hoveredParagraph, setHoveredParagraph] = useState<number | null>(null);
-  const lineHeight = 13 * 1.6; // fontSize * lineHeight
+  const effectiveFontSize = memo.fontSize || 13;
+  const lineHeight = effectiveFontSize * 1.6; // fontSize * lineHeight
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
@@ -84,9 +85,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
       const rect = textarea.getBoundingClientRect();
       const y = e.clientY - rect.top + textarea.scrollTop - memo.paddingTop;
       const line = Math.floor(y / lineHeight);
-      const idx = paragraphs.findIndex(
-        (p) => line >= p.startLine && line <= p.endLine,
-      );
+      const idx = paragraphs.findIndex((p) => line >= p.startLine && line <= p.endLine);
       setHoveredParagraph(idx >= 0 ? idx : null);
     },
     [showParagraphOverlay, paragraphs, memo.paddingTop, lineHeight],
@@ -185,8 +184,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           style={{
             background: "var(--bg-base)",
             color: "var(--text-primary)",
-            fontFamily: "inherit",
-            fontSize: "13px",
+            fontFamily: memo.fontFamily || "inherit",
+            fontSize: `${effectiveFontSize}px`,
             lineHeight: "1.6",
             padding: `${memo.paddingTop}px ${memo.paddingRight}px ${memo.paddingBottom}px ${memo.paddingLeft}px`,
           }}
@@ -199,6 +198,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
             paddingRight={memo.paddingRight}
             hoveredIndex={hoveredParagraph}
             textareaRef={textareaRef}
+            fontSize={effectiveFontSize}
           />
         )}
       </div>
@@ -214,6 +214,7 @@ interface ParagraphOverlayProps {
   paddingRight: number;
   hoveredIndex: number | null;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  fontSize?: number;
 }
 
 function ParagraphOverlay({
@@ -222,9 +223,10 @@ function ParagraphOverlay({
   paddingRight,
   hoveredIndex,
   textareaRef,
+  fontSize = 13,
 }: ParagraphOverlayProps) {
   const [copied, setCopied] = useState<number | null>(null);
-  const lineHeight = 13 * 1.6; // fontSize * lineHeight
+  const lineHeight = fontSize * 1.6; // fontSize * lineHeight
 
   const handleCopy = (e: React.MouseEvent, index: number) => {
     e.preventDefault();

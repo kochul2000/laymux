@@ -219,8 +219,13 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Describe the issue..."
-        className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 text-xs leading-relaxed"
-        style={{ ...fieldStyle, minHeight: 80 }}
+        className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 leading-relaxed"
+        style={{
+          ...fieldStyle,
+          minHeight: 80,
+          fontFamily: ir.fontFamily || "inherit",
+          fontSize: `${ir.fontSize || 13}px`,
+        }}
       />
 
       {/* Submit bar */}

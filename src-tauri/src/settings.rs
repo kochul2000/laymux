@@ -435,6 +435,10 @@ fn default_view_padding() -> u32 {
     8
 }
 
+fn default_view_font_size() -> u16 {
+    13
+}
+
 /// Issue reporter settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -453,6 +457,12 @@ pub struct IssueReporterSettings {
     pub padding_bottom: u32,
     #[serde(default = "default_view_padding")]
     pub padding_left: u32,
+    /// Font family for issue reporter textarea. Empty string = inherit.
+    #[serde(default)]
+    pub font_family: String,
+    /// Font size for issue reporter textarea.
+    #[serde(default = "default_view_font_size")]
+    pub font_size: u16,
 }
 
 impl Default for IssueReporterSettings {
@@ -463,6 +473,8 @@ impl Default for IssueReporterSettings {
             padding_right: 8,
             padding_bottom: 8,
             padding_left: 8,
+            font_family: String::new(),
+            font_size: 13,
         }
     }
 }
@@ -511,6 +523,12 @@ pub struct MemoSettings {
     /// Double-click to select entire paragraph (requires paragraph_copy enabled).
     #[serde(default = "default_true")]
     pub dbl_click_paragraph_select: bool,
+    /// Font family for memo textarea. Empty string = inherit.
+    #[serde(default)]
+    pub font_family: String,
+    /// Font size for memo textarea.
+    #[serde(default = "default_view_font_size")]
+    pub font_size: u16,
 }
 
 impl Default for MemoSettings {
@@ -523,6 +541,8 @@ impl Default for MemoSettings {
             paragraph_copy: MemoParagraphCopySettings::default(),
             copy_on_select: false,
             dbl_click_paragraph_select: true,
+            font_family: String::new(),
+            font_size: 13,
         }
     }
 }
@@ -894,6 +914,52 @@ mod tests {
         let json = r#"{}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.issue_reporter.shell, "");
+    }
+
+    #[test]
+    fn memo_font_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.memo.font_family, "");
+        assert_eq!(settings.memo.font_size, 13);
+    }
+
+    #[test]
+    fn memo_font_settings_deserialize() {
+        let json = r#"{"memo": {"fontFamily": "Consolas", "fontSize": 16}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.memo.font_family, "Consolas");
+        assert_eq!(settings.memo.font_size, 16);
+    }
+
+    #[test]
+    fn memo_font_settings_default_when_absent() {
+        let json = r#"{"memo": {"paddingTop": 4}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.memo.font_family, "");
+        assert_eq!(settings.memo.font_size, 13);
+    }
+
+    #[test]
+    fn issue_reporter_font_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.issue_reporter.font_family, "");
+        assert_eq!(settings.issue_reporter.font_size, 13);
+    }
+
+    #[test]
+    fn issue_reporter_font_settings_deserialize() {
+        let json = r#"{"issueReporter": {"fontFamily": "Monaco", "fontSize": 14}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.issue_reporter.font_family, "Monaco");
+        assert_eq!(settings.issue_reporter.font_size, 14);
+    }
+
+    #[test]
+    fn issue_reporter_font_settings_default_when_absent() {
+        let json = r#"{"issueReporter": {"shell": "wsl"}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.issue_reporter.font_family, "");
+        assert_eq!(settings.issue_reporter.font_size, 13);
     }
 
     #[test]

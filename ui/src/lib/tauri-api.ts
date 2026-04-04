@@ -129,6 +129,8 @@ export interface IssueReporterSettings {
   paddingRight: number;
   paddingBottom: number;
   paddingLeft: number;
+  fontFamily: string;
+  fontSize: number;
 }
 
 export interface MemoParagraphCopySettings {
@@ -147,6 +149,8 @@ export interface MemoSettings {
   copyOnSelect: boolean;
   /** Double-click to select entire paragraph (requires paragraphCopy enabled). */
   dblClickParagraphSelect: boolean;
+  fontFamily: string;
+  fontSize: number;
 }
 
 export interface WorkspaceDisplaySettings {

@@ -1557,6 +1557,34 @@ function IssueReporterSection() {
           />
         </SettingRow>
 
+        {/* Font */}
+        <SettingRow label="Font Family" desc="텍스트 영역의 폰트. 비워두면 기본 폰트 상속.">
+          <FocusInput
+            data-testid="issue-reporter-font-family"
+            className={inputCls}
+            placeholder="예: Consolas, monospace"
+            value={issueReporter.fontFamily}
+            onChange={(e) => updateIssueReporter({ fontFamily: e.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow label="Font Size" desc="텍스트 영역의 폰트 크기 (px). 기본값: 13">
+          <input
+            data-testid="issue-reporter-font-size"
+            type="number"
+            min={8}
+            max={32}
+            className={inputCls}
+            style={{ width: 60 }}
+            value={issueReporter.fontSize}
+            onChange={(e) =>
+              updateIssueReporter({
+                fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)),
+              })
+            }
+          />
+        </SettingRow>
+
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1618,6 +1646,34 @@ function MemoSection() {
       <SectionTitle>Memo</SectionTitle>
 
       <div style={cardStyle} className="p-4">
+        {/* Font */}
+        <SettingRow label="Font Family" desc="메모 텍스트 영역의 폰트. 비워두면 기본 폰트 상속.">
+          <FocusInput
+            data-testid="memo-font-family"
+            className={inputCls}
+            placeholder="예: Consolas, monospace"
+            value={memo.fontFamily}
+            onChange={(e) => updateMemo({ fontFamily: e.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow label="Font Size" desc="메모 텍스트 영역의 폰트 크기 (px). 기본값: 13">
+          <input
+            data-testid="memo-font-size"
+            type="number"
+            min={8}
+            max={32}
+            className={inputCls}
+            style={{ width: 60 }}
+            value={memo.fontSize}
+            onChange={(e) =>
+              updateMemo({
+                fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)),
+              })
+            }
+          />
+        </SettingRow>
+
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">

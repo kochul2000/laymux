@@ -330,6 +330,8 @@ const DEFAULT_MEMO: MemoSettings = {
   paragraphCopy: { enabled: true, minBlankLines: 2 },
   copyOnSelect: false,
   dblClickParagraphSelect: true,
+  fontFamily: "",
+  fontSize: 13,
 };
 
 const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
@@ -338,6 +340,8 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   paddingRight: 8,
   paddingBottom: 8,
   paddingLeft: 8,
+  fontFamily: "",
+  fontSize: 13,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };

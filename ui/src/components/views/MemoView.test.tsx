@@ -361,4 +361,51 @@ describe("MemoView", () => {
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
   });
+
+  describe("font settings", () => {
+    it("applies custom fontFamily from settings", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontFamily: "Consolas" },
+      });
+      render(<MemoView memoKey="pane-1" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontFamily).toBe("Consolas");
+    });
+
+    it("uses inherit when fontFamily is empty", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontFamily: "" },
+      });
+      render(<MemoView memoKey="pane-1" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontFamily).toBe("inherit");
+    });
+
+    it("applies custom fontSize from settings", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontSize: 18 },
+      });
+      render(<MemoView memoKey="pane-1" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("18px");
+    });
+
+    it("defaults to 13px fontSize", async () => {
+      render(<MemoView memoKey="pane-1" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("13px");
+    });
+  });
 });

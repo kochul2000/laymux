@@ -305,4 +305,39 @@ describe("IssueReporterView", () => {
     warnSpy.mockRestore();
     windowOpenSpy.mockRestore();
   });
+
+  describe("font settings", () => {
+    it("applies custom fontFamily from settings to textarea", () => {
+      useSettingsStore.setState({
+        issueReporter: { ...useSettingsStore.getState().issueReporter, fontFamily: "Monaco" },
+      });
+      render(<IssueReporterView />);
+      const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
+      expect(textarea.style.fontFamily).toBe("Monaco");
+    });
+
+    it("uses inherit when fontFamily is empty", () => {
+      useSettingsStore.setState({
+        issueReporter: { ...useSettingsStore.getState().issueReporter, fontFamily: "" },
+      });
+      render(<IssueReporterView />);
+      const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
+      expect(textarea.style.fontFamily).toBe("inherit");
+    });
+
+    it("applies custom fontSize from settings to textarea", () => {
+      useSettingsStore.setState({
+        issueReporter: { ...useSettingsStore.getState().issueReporter, fontSize: 16 },
+      });
+      render(<IssueReporterView />);
+      const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("16px");
+    });
+
+    it("defaults to 13px fontSize", () => {
+      render(<IssueReporterView />);
+      const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("13px");
+    });
+  });
 });
