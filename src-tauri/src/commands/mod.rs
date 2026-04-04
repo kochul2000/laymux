@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -359,8 +360,9 @@ pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<b
 ///    session file CWD, picking the most recently started session.
 #[tauri::command]
 pub fn get_claude_session_ids(
+    session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
-) -> Result<std::collections::HashMap<String, String>, String> {
+) -> Result<HashMap<String, String>, String> {
     let known: Vec<String> = {
         let k = state
             .known_claude_terminals
@@ -370,14 +372,14 @@ pub fn get_claude_session_ids(
     };
 
     if known.is_empty() {
-        return Ok(std::collections::HashMap::new());
+        return Ok(HashMap::new());
     }
 
     // Read session files from ~/.claude/sessions/
     let sessions_dir = resolve_claude_sessions_dir();
-    let session_files = read_claude_session_files(&sessions_dir);
+    let session_files = read_claude_session_files(&sessions_dir, session_max_age_hours);
 
-    let mut result = std::collections::HashMap::new();
+    let mut result = HashMap::new();
 
     for terminal_id in &known {
         // Get child PID from PTY handle
@@ -410,6 +412,10 @@ pub fn get_claude_session_ids(
         // Strategy 2: CWD + most-recent fallback
         if let Some(ref cwd) = terminal_cwd {
             if let Some(session_id) = find_session_by_cwd(&session_files, cwd) {
+                eprintln!(
+                    "[claude-session] PID tree match failed for {terminal_id}, \
+                     using CWD fallback (cwd={cwd})"
+                );
                 result.insert(terminal_id.clone(), session_id);
             }
         }
@@ -459,11 +465,24 @@ fn resolve_claude_sessions_dir() -> std::path::PathBuf {
 }
 
 /// Read and parse all Claude session files from the given directory.
-fn read_claude_session_files(dir: &std::path::Path) -> Vec<ClaudeSessionFile> {
+/// If `max_age_hours` is Some, sessions older than the threshold are filtered out.
+fn read_claude_session_files(
+    dir: &std::path::Path,
+    max_age_hours: Option<u64>,
+) -> Vec<ClaudeSessionFile> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
+
+    // Compute the cutoff timestamp (seconds since epoch) if max_age_hours is set.
+    // 0 means "no filter" (accept all sessions regardless of age).
+    let cutoff = max_age_hours.filter(|&hours| hours > 0).and_then(|hours| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs().saturating_sub(hours * 3600))
+    });
 
     let mut result = Vec::new();
     for entry in entries.flatten() {
@@ -485,6 +504,14 @@ fn read_claude_session_files(dir: &std::path::Path) -> Vec<ClaudeSessionFile> {
                     .unwrap_or("")
                     .to_string();
                 let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                // Skip stale sessions
+                if let Some(min_ts) = cutoff {
+                    if started_at < min_ts {
+                        continue;
+                    }
+                }
+
                 if is_valid_session_id(&session_id) {
                     result.push(ClaudeSessionFile {
                         pid,
@@ -502,12 +529,14 @@ fn read_claude_session_files(dir: &std::path::Path) -> Vec<ClaudeSessionFile> {
 /// Get all descendant PIDs of a given process (including the process itself).
 /// Uses platform-specific process enumeration.
 fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
+    use std::collections::{HashSet, VecDeque};
+
     let mut result = vec![root_pid];
+    let mut seen = HashSet::new();
+    seen.insert(root_pid);
 
     #[cfg(windows)]
     {
-        // Use Windows API to enumerate process tree
-        use std::collections::VecDeque;
         if let Ok(snapshot) = create_process_snapshot() {
             let parent_map = build_parent_map(&snapshot);
             let mut queue = VecDeque::new();
@@ -515,7 +544,7 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
             while let Some(pid) = queue.pop_front() {
                 if let Some(children) = parent_map.get(&pid) {
                     for &child in children {
-                        if !result.contains(&child) {
+                        if seen.insert(child) {
                             result.push(child);
                             queue.push_back(child);
                         }
@@ -527,8 +556,6 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
 
     #[cfg(not(windows))]
     {
-        // On Linux, walk /proc/<pid>/task/*/children recursively
-        use std::collections::VecDeque;
         let mut queue = VecDeque::new();
         queue.push_back(root_pid);
         while let Some(pid) = queue.pop_front() {
@@ -536,7 +563,7 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
             if let Ok(content) = std::fs::read_to_string(&children_path) {
                 for token in content.split_whitespace() {
                     if let Ok(child_pid) = token.parse::<u32>() {
-                        if !result.contains(&child_pid) {
+                        if seen.insert(child_pid) {
                             result.push(child_pid);
                             queue.push_back(child_pid);
                         }
@@ -551,14 +578,28 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
 
 #[cfg(windows)]
 fn create_process_snapshot() -> Result<Vec<(u32, u32)>, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
     };
+
+    /// RAII guard that closes a Windows HANDLE on drop, preventing leaks on panic.
+    struct SnapshotGuard(windows_sys::Win32::Foundation::HANDLE);
+    impl Drop for SnapshotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        if snap == INVALID_HANDLE_VALUE {
             return Err("Failed to create snapshot".into());
         }
+        let _guard = SnapshotGuard(snap);
+
         let mut entry: PROCESSENTRY32 = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
         let mut pairs = Vec::new();
@@ -570,14 +611,13 @@ fn create_process_snapshot() -> Result<Vec<(u32, u32)>, String> {
                 }
             }
         }
-        windows_sys::Win32::Foundation::CloseHandle(snap);
         Ok(pairs)
     }
 }
 
 #[cfg(windows)]
-fn build_parent_map(snapshot: &[(u32, u32)]) -> std::collections::HashMap<u32, Vec<u32>> {
-    let mut map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+fn build_parent_map(snapshot: &[(u32, u32)]) -> HashMap<u32, Vec<u32>> {
+    let mut map: HashMap<u32, Vec<u32>> = HashMap::new();
     for &(pid, ppid) in snapshot {
         map.entry(ppid).or_default().push(pid);
     }
@@ -4675,7 +4715,7 @@ mod tests {
     #[test]
     fn read_claude_session_files_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let sessions = read_claude_session_files(tmp.path());
+        let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
     }
 
@@ -4684,7 +4724,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let content = r#"{"pid":12345,"sessionId":"abc-123","cwd":"/home/user","startedAt":1000}"#;
         std::fs::write(tmp.path().join("12345.json"), content).unwrap();
-        let sessions = read_claude_session_files(tmp.path());
+        let sessions = read_claude_session_files(tmp.path(), None);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].pid, 12345);
         assert_eq!(sessions[0].session_id, "abc-123");
@@ -4696,7 +4736,7 @@ mod tests {
     fn read_claude_session_files_ignores_non_json() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("readme.txt"), "not json").unwrap();
-        let sessions = read_claude_session_files(tmp.path());
+        let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
     }
 
@@ -4704,7 +4744,7 @@ mod tests {
     fn read_claude_session_files_ignores_invalid_json() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("bad.json"), "not valid json!").unwrap();
-        let sessions = read_claude_session_files(tmp.path());
+        let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
     }
 
@@ -4798,7 +4838,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let content = r#"{"pid":1,"sessionId":"bad; rm -rf /","cwd":"/home","startedAt":1}"#;
         std::fs::write(tmp.path().join("1.json"), content).unwrap();
-        let sessions = read_claude_session_files(tmp.path());
+        let sessions = read_claude_session_files(tmp.path(), None);
         assert!(sessions.is_empty());
     }
 
@@ -4823,5 +4863,81 @@ mod tests {
             find_session_by_pids(&sessions, &[100, 200]),
             Some("new-session".into())
         );
+    }
+
+    // -- Stale session filtering tests --
+
+    #[test]
+    fn read_claude_session_files_filters_stale_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Recent session (1 hour ago)
+        let recent = format!(
+            r#"{{"pid":1,"sessionId":"recent","cwd":"/a","startedAt":{}}}"#,
+            now - 3600
+        );
+        std::fs::write(tmp.path().join("1.json"), recent).unwrap();
+
+        // Stale session (48 hours ago)
+        let stale = format!(
+            r#"{{"pid":2,"sessionId":"stale","cwd":"/b","startedAt":{}}}"#,
+            now - 48 * 3600
+        );
+        std::fs::write(tmp.path().join("2.json"), stale).unwrap();
+
+        // With 24h max age, only the recent session should pass
+        let sessions = read_claude_session_files(tmp.path(), Some(24));
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "recent");
+    }
+
+    #[test]
+    fn read_claude_session_files_no_filter_when_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Old session (72 hours ago)
+        let old = format!(
+            r#"{{"pid":1,"sessionId":"old","cwd":"/a","startedAt":{}}}"#,
+            now - 72 * 3600
+        );
+        std::fs::write(tmp.path().join("1.json"), old).unwrap();
+
+        // No max age filter — session should be included
+        let sessions = read_claude_session_files(tmp.path(), None);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "old");
+    }
+
+    #[test]
+    fn read_claude_session_files_zero_hours_disables_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Very old session (30 days ago)
+        let old = format!(
+            r#"{{"pid":1,"sessionId":"ancient","cwd":"/a","startedAt":{}}}"#,
+            now - 30 * 24 * 3600
+        );
+        std::fs::write(tmp.path().join("1.json"), old).unwrap();
+
+        // 0 hours = disabled, but saturating_sub means cutoff = now,
+        // so we actually need to handle 0 as a special case.
+        // Let's verify current behavior: 0 * 3600 = 0, cutoff = now - 0 = now.
+        // startedAt < now → filtered out. That's NOT what we want.
+        // We should treat 0 as "no filter".
+        let sessions = read_claude_session_files(tmp.path(), Some(0));
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "ancient");
     }
 }

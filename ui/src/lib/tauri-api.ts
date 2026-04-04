@@ -119,6 +119,8 @@ export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
   /** Whether to restore Claude Code sessions on app restart (default: true). */
   restoreSession: boolean;
+  /** Maximum age (hours) for Claude session files. 0 = no limit. Default: 24. */
+  sessionMaxAgeHours: number;
 }
 
 export interface IssueReporterSettings {
@@ -490,9 +492,14 @@ export async function isClaudeTerminal(id: string): Promise<boolean> {
 }
 
 /** Resolve Claude Code session IDs for all known Claude terminals.
- *  Returns a map of terminal_id → Claude session ID. */
-export async function getClaudeSessionIds(): Promise<Record<string, string>> {
-  return invoke("get_claude_session_ids");
+ *  Returns a map of terminal_id → Claude session ID.
+ *  @param sessionMaxAgeHours - Max session age in hours. 0 disables the filter. */
+export async function getClaudeSessionIds(
+  sessionMaxAgeHours?: number,
+): Promise<Record<string, string>> {
+  return invoke("get_claude_session_ids", {
+    sessionMaxAgeHours: sessionMaxAgeHours ?? null,
+  });
 }
 
 // -- Terminal CWD (single source of truth in backend) --

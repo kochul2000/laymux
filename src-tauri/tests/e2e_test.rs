@@ -84,6 +84,7 @@ fn settings_round_trip_with_full_config() {
                     w: 1.0,
                     h: 0.5,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.0,
@@ -91,6 +92,7 @@ fn settings_round_trip_with_full_config() {
                     w: 0.5,
                     h: 0.5,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -98,6 +100,7 @@ fn settings_round_trip_with_full_config() {
                     w: 0.5,
                     h: 0.5,
                     view_type: "BrowserPreviewView".into(),
+                    view_config: None,
                 },
             ],
         }],
@@ -290,6 +293,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                     w: 1.0,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 }],
             },
             Layout {
@@ -302,6 +306,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 1.0,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -309,6 +314,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 1.0,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                 ],
             },
@@ -322,6 +328,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -329,6 +336,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.0,
@@ -336,6 +344,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "TerminalView".into(),
+                        view_config: None,
                     },
                     LayoutPane {
                         x: 0.5,
@@ -343,6 +352,7 @@ fn settings_multiple_layouts_multiple_workspaces() {
                         w: 0.5,
                         h: 0.5,
                         view_type: "BrowserPreviewView".into(),
+                        view_config: None,
                     },
                 ],
             },
@@ -400,6 +410,7 @@ fn settings_pane_boundary_values() {
                 w: 0.0,
                 h: 0.0,
                 view_type: "EmptyView".into(),
+                view_config: None,
             },
             LayoutPane {
                 x: 1.0,
@@ -407,6 +418,7 @@ fn settings_pane_boundary_values() {
                 w: 1.0,
                 h: 1.0,
                 view_type: "TerminalView".into(),
+                view_config: None,
             },
             LayoutPane {
                 x: 0.333333,
@@ -414,6 +426,7 @@ fn settings_pane_boundary_values() {
                 w: 0.333334,
                 h: 0.333334,
                 view_type: "TerminalView".into(),
+                view_config: None,
             },
         ],
     };
@@ -1392,6 +1405,7 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     w: 0.5,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
                 LayoutPane {
                     x: 0.5,
@@ -1399,6 +1413,7 @@ fn e2e_settings_with_layout_workspace_relationship() {
                     w: 0.5,
                     h: 1.0,
                     view_type: "TerminalView".into(),
+                    view_config: None,
                 },
             ],
         }],

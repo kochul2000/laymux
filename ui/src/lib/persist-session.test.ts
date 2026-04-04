@@ -387,6 +387,8 @@ describe("persistSession", () => {
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(savedArg.workspaces[0].panes[0].view.lastClaudeSession).toBe("session-abc-123");
     expect(getClaudeSessionIds).toHaveBeenCalledTimes(1);
+    // Verify sessionMaxAgeHours from settings is passed through
+    expect(getClaudeSessionIds).toHaveBeenCalledWith(24);
   });
 
   it("injects lastClaudeSession into dock TerminalView panes from backend", async () => {

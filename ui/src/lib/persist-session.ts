@@ -51,7 +51,11 @@ async function persistSessionCore(): Promise<void> {
   const backendCwds = await getTerminalCwds().catch(() => ({}) as Record<string, string>);
 
   // Fetch Claude session IDs for known Claude terminals.
-  const claudeSessionIds = await getClaudeSessionIds().catch(() => ({}) as Record<string, string>);
+  // Pass sessionMaxAgeHours from settings (0 = no limit).
+  const maxAge = settingsState.claude?.sessionMaxAgeHours;
+  const claudeSessionIds = await getClaudeSessionIds(maxAge).catch(
+    () => ({}) as Record<string, string>,
+  );
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
