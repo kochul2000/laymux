@@ -467,7 +467,30 @@ impl Default for IssueReporterSettings {
     }
 }
 
-/// MemoView settings (padding, etc.).
+/// Paragraph copy feature settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoParagraphCopySettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_min_blank_lines")]
+    pub min_blank_lines: u32,
+}
+
+fn default_min_blank_lines() -> u32 {
+    2
+}
+
+impl Default for MemoParagraphCopySettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_blank_lines: 2,
+        }
+    }
+}
+
+/// MemoView settings (padding, copy features, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoSettings {
@@ -479,6 +502,12 @@ pub struct MemoSettings {
     pub padding_bottom: u32,
     #[serde(default = "default_view_padding")]
     pub padding_left: u32,
+    /// Paragraph copy: show copy button on hover for paragraphs separated by N+ blank lines.
+    #[serde(default)]
+    pub paragraph_copy: MemoParagraphCopySettings,
+    /// Automatically copy selected text to clipboard (like terminal copyOnSelect).
+    #[serde(default)]
+    pub copy_on_select: bool,
 }
 
 impl Default for MemoSettings {
@@ -488,6 +517,8 @@ impl Default for MemoSettings {
             padding_right: 8,
             padding_bottom: 8,
             padding_left: 8,
+            paragraph_copy: MemoParagraphCopySettings::default(),
+            copy_on_select: false,
         }
     }
 }

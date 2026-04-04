@@ -1634,7 +1634,11 @@ function MemoSection() {
           <div className="min-w-0 flex-1">
             <div className="grid grid-cols-2 gap-2">
               {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
-                const key = `padding${dir}` as keyof typeof memo;
+                const key = `padding${dir}` as
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
@@ -1658,6 +1662,90 @@ function MemoSection() {
                 );
               })}
             </div>
+          </div>
+        </div>
+
+        {/* Paragraph Copy */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              단락 복사
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              N줄 이상 빈 줄로 구분된 단락에 복사 버튼 표시
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5">
+                <input
+                  data-testid="memo-paragraph-copy-enabled"
+                  type="checkbox"
+                  checked={memo.paragraphCopy.enabled}
+                  onChange={(e) =>
+                    updateMemo({
+                      paragraphCopy: { ...memo.paragraphCopy, enabled: e.target.checked },
+                    })
+                  }
+                />
+                <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                  활성화
+                </span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                  빈 줄 수
+                </span>
+                <input
+                  data-testid="memo-paragraph-copy-min-blank-lines"
+                  type="number"
+                  min={1}
+                  max={10}
+                  className={inputCls}
+                  style={{ width: 50 }}
+                  value={memo.paragraphCopy.minBlankLines}
+                  onChange={(e) =>
+                    updateMemo({
+                      paragraphCopy: {
+                        ...memo.paragraphCopy,
+                        minBlankLines: Math.max(1, Math.min(10, Number(e.target.value) || 1)),
+                      },
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Copy on Select */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              선택 시 복사
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              텍스트 드래그 선택 시 자동으로 클립보드에 복사
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex items-center gap-1.5">
+              <input
+                data-testid="memo-copy-on-select"
+                type="checkbox"
+                checked={memo.copyOnSelect}
+                onChange={(e) => updateMemo({ copyOnSelect: e.target.checked })}
+              />
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                활성화
+              </span>
+            </label>
           </div>
         </div>
       </div>

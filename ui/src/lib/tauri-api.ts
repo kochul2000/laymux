@@ -131,11 +131,20 @@ export interface IssueReporterSettings {
   paddingLeft: number;
 }
 
+export interface MemoParagraphCopySettings {
+  enabled: boolean;
+  minBlankLines: number;
+}
+
 export interface MemoSettings {
   paddingTop: number;
   paddingRight: number;
   paddingBottom: number;
   paddingLeft: number;
+  /** Paragraph copy feature: show copy button on hover for paragraphs separated by N+ blank lines. */
+  paragraphCopy: MemoParagraphCopySettings;
+  /** Automatically copy selected text to clipboard (like terminal copyOnSelect). */
+  copyOnSelect: boolean;
 }
 
 export interface WorkspaceDisplaySettings {

@@ -322,11 +322,13 @@ interface SettingsState {
 
 const defaultPadding: PaddingSettings = { top: 8, right: 8, bottom: 8, left: 8 };
 
-const DEFAULT_MEMO_PADDING: MemoSettings = {
+const DEFAULT_MEMO: MemoSettings = {
   paddingTop: 8,
   paddingRight: 8,
   paddingBottom: 8,
   paddingLeft: 8,
+  paragraphCopy: { enabled: true, minBlankLines: 2 },
+  copyOnSelect: false,
 };
 
 const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
@@ -673,7 +675,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
-  memo: { ...DEFAULT_MEMO_PADDING },
+  memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
   workspaceSortOrder: "manual" as WorkspaceSortOrder,
@@ -873,7 +875,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // Ensure memo settings have all fields (backwards compat)
     const memo = data.memo
-      ? { ...DEFAULT_MEMO_PADDING, ...(data.memo as Partial<MemoSettings>) }
+      ? { ...DEFAULT_MEMO, ...(data.memo as Partial<MemoSettings>) }
       : undefined;
     // Ensure syncCwdDefaults settings have all fields (backwards compat)
     const syncCwdDefaults = data.syncCwdDefaults
