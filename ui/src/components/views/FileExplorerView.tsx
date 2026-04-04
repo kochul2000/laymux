@@ -12,7 +12,7 @@ import {
 import { shellEscape, joinPath, parentPath } from "@/lib/file-explorer-parse";
 import { TerminalView } from "./TerminalView";
 
-export interface ExplorerViewProps {
+export interface FileExplorerViewProps {
   instanceId: string;
   paneId?: string;
   profile: string;
@@ -28,7 +28,7 @@ type ExplorerMode =
   | { type: "listing" }
   | { type: "viewing"; filePath: string; viewerType: "web" | "terminal"; command?: string };
 
-export function ExplorerView({
+export function FileExplorerView({
   instanceId,
   paneId,
   profile,
@@ -37,10 +37,10 @@ export function ExplorerView({
   cwdReceive = true,
   isFocused,
   lastCwd,
-}: ExplorerViewProps) {
+}: FileExplorerViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const settings = useSettingsStore((s) => s.explorer);
+  const settings = useSettingsStore((s) => s.fileExplorer);
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
@@ -100,7 +100,7 @@ export function ExplorerView({
       setFocusIndex(0);
       setSelectedIndices(new Set());
     } catch (err) {
-      console.error("Explorer: Failed to list directory", err);
+      console.error("FileExplorer: Failed to list directory", err);
       setEntries([]);
     } finally {
       setLoading(false);
@@ -501,7 +501,7 @@ export function ExplorerView({
     return (
       <div
         ref={containerRef}
-        data-testid="explorer-view"
+        data-testid="file-explorer-view"
         className="flex h-full w-full flex-col"
         tabIndex={-1}
         style={{ outline: "none" }}
@@ -515,7 +515,7 @@ export function ExplorerView({
             borderColor: "var(--border)",
             background: "var(--bg-surface)",
           }}
-          data-testid="explorer-viewer-titlebar"
+          data-testid="file-explorer-viewer-titlebar"
         >
           <span className="flex-1 text-xs truncate" style={{ color: "var(--text-primary)" }}>
             {mode.filePath}
@@ -524,7 +524,7 @@ export function ExplorerView({
             onClick={closeViewer}
             className="ml-2 px-1 text-xs hover:opacity-80"
             style={{ color: "var(--text-secondary)" }}
-            data-testid="explorer-viewer-close"
+            data-testid="file-explorer-viewer-close"
           >
             ✕
           </button>
@@ -533,7 +533,7 @@ export function ExplorerView({
         {/* Viewer content */}
         <div className="flex-1 overflow-auto" style={listStyle}>
           {mode.viewerType === "terminal" && mode.command ? (
-            <div className="h-full" data-testid="explorer-viewer-terminal">
+            <div className="h-full" data-testid="file-explorer-viewer-terminal">
               <TerminalView
                 instanceId={paneId ? `file-viewer-${paneId}` : `file-viewer-${instanceId}`}
                 profile={profile}
@@ -551,14 +551,14 @@ export function ExplorerView({
                 src={viewerContent.imageSrc}
                 alt={mode.filePath}
                 style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                data-testid="explorer-viewer-image"
+                data-testid="file-explorer-viewer-image"
               />
             </div>
           ) : viewerContent?.kind === "text" ? (
             <pre
               className="whitespace-pre-wrap break-words"
               style={{ color: "var(--text-primary)", margin: 0 }}
-              data-testid="explorer-viewer-text"
+              data-testid="file-explorer-viewer-text"
             >
               {viewerContent.content}
               {viewerContent.truncated && (
@@ -589,7 +589,7 @@ export function ExplorerView({
   return (
     <div
       ref={containerRef}
-      data-testid="explorer-view"
+      data-testid="file-explorer-view"
       className="flex h-full w-full flex-col"
       tabIndex={-1}
       style={{ outline: "none" }}
@@ -604,7 +604,7 @@ export function ExplorerView({
           borderColor: "var(--border)",
           background: "var(--bg-surface)",
         }}
-        data-testid="explorer-path-bar"
+        data-testid="file-explorer-path-bar"
       >
         <button
           onClick={goBack}
@@ -614,7 +614,7 @@ export function ExplorerView({
             color: canGoBack ? "var(--text-primary)" : "var(--text-secondary)",
             opacity: canGoBack ? 1 : 0.3,
           }}
-          data-testid="explorer-back"
+          data-testid="file-explorer-back"
           title="Back (Alt+Left)"
         >
           ←
@@ -627,7 +627,7 @@ export function ExplorerView({
             color: canGoForward ? "var(--text-primary)" : "var(--text-secondary)",
             opacity: canGoForward ? 1 : 0.3,
           }}
-          data-testid="explorer-forward"
+          data-testid="file-explorer-forward"
           title="Forward (Alt+Right)"
         >
           →
@@ -642,7 +642,7 @@ export function ExplorerView({
         ref={listRef}
         className="flex-1 overflow-auto"
         style={listStyle}
-        data-testid="explorer-list"
+        data-testid="file-explorer-list"
       >
         {loading ? (
           <div
@@ -682,7 +682,7 @@ export function ExplorerView({
                         ? "var(--green)"
                         : "var(--text-primary)",
               }}
-              data-testid={`explorer-item-${i}`}
+              data-testid={`file-explorer-item-${i}`}
               data-selected={selectedIndices.has(i)}
               data-focused={i === focusIndex}
               onClick={(e) => handleItemClick(i, e)}

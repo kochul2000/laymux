@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type {
   ClaudeSyncCwdMode,
   ClaudeSettings,
-  ExplorerSettings,
+  FileExplorerSettings,
   IssueReporterSettings,
   MemoSettings,
 } from "../lib/tauri-api";
@@ -269,7 +269,7 @@ interface SettingsState {
   claude: ClaudeSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
-  explorer: ExplorerSettings;
+  fileExplorer: FileExplorerSettings;
   syncCwdDefaults: SyncCwdDefaults;
   workspaceSortOrder: WorkspaceSortOrder;
 
@@ -281,7 +281,7 @@ interface SettingsState {
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
-  setExplorer: (data: Partial<ExplorerSettings>) => void;
+  setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
   setWorkspaceSortOrder: (order: WorkspaceSortOrder) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
@@ -316,7 +316,7 @@ interface SettingsState {
         | "claude"
         | "memo"
         | "issueReporter"
-        | "explorer"
+        | "fileExplorer"
         | "syncCwdDefaults"
         | "workspaceSortOrder"
       >
@@ -348,7 +348,7 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   fontSize: 13,
 };
 
-const DEFAULT_FILE_EXPLORER: ExplorerSettings = {
+const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
   shellProfile: "",
   paddingTop: 8,
   paddingRight: 8,
@@ -698,7 +698,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
-  explorer: { ...DEFAULT_FILE_EXPLORER },
+  fileExplorer: { ...DEFAULT_FILE_EXPLORER },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
   workspaceSortOrder: "manual" as WorkspaceSortOrder,
 
@@ -729,9 +729,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       issueReporter: { ...state.issueReporter, ...data },
     })),
 
-  setExplorer: (data) =>
+  setFileExplorer: (data) =>
     set((state) => ({
-      explorer: { ...state.explorer, ...data },
+      fileExplorer: { ...state.fileExplorer, ...data },
     })),
 
   setWorkspaceSortOrder: (order) => set({ workspaceSortOrder: order }),
@@ -904,9 +904,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const memo = data.memo
       ? { ...DEFAULT_MEMO, ...(data.memo as Partial<MemoSettings>) }
       : undefined;
-    // Ensure explorer settings have all fields (backwards compat)
-    const explorer = data.explorer
-      ? { ...DEFAULT_FILE_EXPLORER, ...(data.explorer as Partial<ExplorerSettings>) }
+    // Ensure fileExplorer settings have all fields (backwards compat)
+    const fileExplorer = data.fileExplorer
+      ? { ...DEFAULT_FILE_EXPLORER, ...(data.fileExplorer as Partial<FileExplorerSettings>) }
       : undefined;
     // Ensure syncCwdDefaults settings have all fields (backwards compat)
     const syncCwdDefaults = data.syncCwdDefaults
@@ -937,7 +937,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(claude ? { claude } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
-      ...(explorer ? { explorer } : {}),
+      ...(fileExplorer ? { fileExplorer } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
   },

@@ -555,10 +555,10 @@ pub struct ExtensionViewer {
     pub command: String,
 }
 
-/// ExplorerView settings.
+/// FileExplorerView settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ExplorerSettings {
+pub struct FileExplorerSettings {
     /// Shell profile name for background shell. Empty = use defaultProfile.
     #[serde(default)]
     pub shell_profile: String,
@@ -584,7 +584,7 @@ pub struct ExplorerSettings {
     pub extension_viewers: Vec<ExtensionViewer>,
 }
 
-impl Default for ExplorerSettings {
+impl Default for FileExplorerSettings {
     fn default() -> Self {
         Self {
             shell_profile: String::new(),
@@ -682,7 +682,7 @@ pub struct Settings {
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
     #[serde(default)]
-    pub explorer: ExplorerSettings,
+    pub file_explorer: FileExplorerSettings,
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd_defaults: Option<serde_json::Value>,
@@ -767,7 +767,7 @@ impl Default for Settings {
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
-            explorer: ExplorerSettings::default(),
+            file_explorer: FileExplorerSettings::default(),
             sync_cwd_defaults: None,
             workspace_display_order: Vec::new(),
             workspace_sort_order: None,
@@ -1867,19 +1867,19 @@ mod tests {
     }
 
     #[test]
-    fn explorer_settings_default() {
+    fn file_explorer_settings_default() {
         let settings = Settings::default();
-        assert_eq!(settings.explorer.shell_profile, "");
-        assert_eq!(settings.explorer.padding_top, 8);
-        assert_eq!(settings.explorer.font_family, "");
-        assert_eq!(settings.explorer.font_size, 13);
-        assert!(!settings.explorer.copy_on_select);
-        assert!(settings.explorer.extension_viewers.is_empty());
+        assert_eq!(settings.file_explorer.shell_profile, "");
+        assert_eq!(settings.file_explorer.padding_top, 8);
+        assert_eq!(settings.file_explorer.font_family, "");
+        assert_eq!(settings.file_explorer.font_size, 13);
+        assert!(!settings.file_explorer.copy_on_select);
+        assert!(settings.file_explorer.extension_viewers.is_empty());
     }
 
     #[test]
-    fn explorer_settings_deserialize() {
-        let json = r#"{"explorer": {
+    fn file_explorer_settings_deserialize() {
+        let json = r#"{"fileExplorer": {
             "shellProfile": "WSL",
             "fontFamily": "Consolas",
             "fontSize": 14,
@@ -1889,30 +1889,30 @@ mod tests {
             ]
         }}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.explorer.shell_profile, "WSL");
-        assert_eq!(settings.explorer.font_family, "Consolas");
-        assert_eq!(settings.explorer.font_size, 14);
-        assert!(settings.explorer.copy_on_select);
-        assert_eq!(settings.explorer.extension_viewers.len(), 1);
-        assert_eq!(settings.explorer.extension_viewers[0].command, "vi");
+        assert_eq!(settings.file_explorer.shell_profile, "WSL");
+        assert_eq!(settings.file_explorer.font_family, "Consolas");
+        assert_eq!(settings.file_explorer.font_size, 14);
+        assert!(settings.file_explorer.copy_on_select);
+        assert_eq!(settings.file_explorer.extension_viewers.len(), 1);
+        assert_eq!(settings.file_explorer.extension_viewers[0].command, "vi");
         assert_eq!(
-            settings.explorer.extension_viewers[0].extensions,
+            settings.file_explorer.extension_viewers[0].extensions,
             vec![".txt", ".log"]
         );
     }
 
     #[test]
-    fn explorer_settings_default_when_absent() {
+    fn file_explorer_settings_default_when_absent() {
         let json = r#"{}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.explorer.font_size, 13);
+        assert_eq!(settings.file_explorer.font_size, 13);
     }
 
     #[test]
-    fn explorer_settings_ignores_unknown_fields() {
+    fn file_explorer_settings_ignores_unknown_fields() {
         // Old settings.json with lsCommand should still deserialize fine
-        let json = r#"{"explorer": {"lsCommand": "ls -F", "fontSize": 15}}"#;
+        let json = r#"{"fileExplorer": {"lsCommand": "ls -F", "fontSize": 15}}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.explorer.font_size, 15);
+        assert_eq!(settings.file_explorer.font_size, 15);
     }
 }

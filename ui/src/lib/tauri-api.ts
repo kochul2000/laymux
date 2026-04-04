@@ -158,7 +158,7 @@ export interface ExtensionViewer {
   command: string;
 }
 
-export interface ExplorerSettings {
+export interface FileExplorerSettings {
   shellProfile: string;
   paddingTop: number;
   paddingRight: number;
@@ -220,7 +220,7 @@ export interface Settings {
   claude: ClaudeSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
-  explorer: ExplorerSettings;
+  fileExplorer: FileExplorerSettings;
 }
 
 export interface ColorScheme {

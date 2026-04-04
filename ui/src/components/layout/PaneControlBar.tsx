@@ -169,7 +169,7 @@ function BarContent({
         <ViewSelect currentView={currentView} onChange={actions.onChangeView} />
       )}
 
-      {(currentView.type === "TerminalView" || currentView.type === "ExplorerView") &&
+      {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
         actions.onToggleCwdSend &&
         (() => {
           const isOn = (currentView.cwdSend ?? true) as boolean;
@@ -198,7 +198,7 @@ function BarContent({
             </>
           );
         })()}
-      {(currentView.type === "TerminalView" || currentView.type === "ExplorerView") &&
+      {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
         actions.onToggleCwdReceive &&
         (() => {
           const isOn = (currentView.cwdReceive ?? true) as boolean;
