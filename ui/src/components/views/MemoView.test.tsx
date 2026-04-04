@@ -375,16 +375,19 @@ describe("MemoView", () => {
       expect(textarea.style.fontFamily).toBe("Consolas");
     });
 
-    it("uses inherit when fontFamily is empty", async () => {
+    it("inherits appFont when fontFamily/fontSize/fontWeight are empty/zero", async () => {
       useSettingsStore.setState({
-        memo: { ...useSettingsStore.getState().memo, fontFamily: "" },
+        memo: { ...useSettingsStore.getState().memo, fontFamily: "", fontSize: 0, fontWeight: "" },
+        appFont: { face: "Fira Code", size: 15, weight: "bold" },
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-      expect(textarea.style.fontFamily).toBe("inherit");
+      expect(textarea.style.fontFamily).toBe('"Fira Code"');
+      expect(textarea.style.fontSize).toBe("15px");
+      expect(textarea.style.fontWeight).toBe("bold");
     });
 
     it("applies custom fontSize from settings", async () => {
@@ -399,7 +402,11 @@ describe("MemoView", () => {
       expect(textarea.style.fontSize).toBe("18px");
     });
 
-    it("defaults to 13px fontSize", async () => {
+    it("defaults to appFont size when fontSize is 0", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontSize: 0 },
+        appFont: { face: "Cascadia Mono", size: 13, weight: "normal" },
+      });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
         await vi.runAllTimersAsync();

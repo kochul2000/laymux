@@ -63,6 +63,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   };
 
   const memo = useSettingsStore((s) => s.memo);
+  const appFont = useSettingsStore((s) => s.appFont);
 
   // Paragraph copy feature
   const paragraphs = useMemo(() => {
@@ -74,7 +75,9 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   // Paragraph hover detection via textarea mouse position
   const [hoveredParagraph, setHoveredParagraph] = useState<number | null>(null);
-  const effectiveFontSize = memo.fontSize || 13;
+  const effectiveFontSize = memo.fontSize || appFont.size;
+  const effectiveFontFamily = memo.fontFamily || appFont.face;
+  const effectiveFontWeight = memo.fontWeight || appFont.weight;
   const lineHeight = effectiveFontSize * 1.6; // fontSize * lineHeight
 
   const handleMouseMove = useCallback(
@@ -184,8 +187,9 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           style={{
             background: "var(--bg-base)",
             color: "var(--text-primary)",
-            fontFamily: memo.fontFamily || "inherit",
+            fontFamily: effectiveFontFamily,
             fontSize: `${effectiveFontSize}px`,
+            fontWeight: effectiveFontWeight,
             lineHeight: "1.6",
             padding: `${memo.paddingTop}px ${memo.paddingRight}px ${memo.paddingBottom}px ${memo.paddingLeft}px`,
           }}

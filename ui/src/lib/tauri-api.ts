@@ -131,6 +131,7 @@ export interface IssueReporterSettings {
   paddingLeft: number;
   fontFamily: string;
   fontSize: number;
+  fontWeight: string;
 }
 
 export interface MemoParagraphCopySettings {
@@ -151,6 +152,7 @@ export interface MemoSettings {
   dblClickParagraphSelect: boolean;
   fontFamily: string;
   fontSize: number;
+  fontWeight: string;
 }
 
 export interface WorkspaceDisplaySettings {
@@ -183,6 +185,7 @@ export interface Settings {
   profiles: Profile[];
   keybindings: Keybinding[];
   font?: FontSettings;
+  appFont?: FontSettings;
   defaultProfile: string;
   profileDefaults?: ProfileDefaults;
   syncCwdDefaults?: SyncCwdDefaults;

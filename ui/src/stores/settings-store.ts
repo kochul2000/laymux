@@ -268,6 +268,7 @@ interface SettingsState {
   claude: ClaudeSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
+  appFont: FontSettings;
   syncCwdDefaults: SyncCwdDefaults;
   workspaceSortOrder: WorkspaceSortOrder;
 
@@ -279,6 +280,7 @@ interface SettingsState {
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
+  setAppFont: (font: FontSettings) => void;
   setWorkspaceSortOrder: (order: WorkspaceSortOrder) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
@@ -313,6 +315,7 @@ interface SettingsState {
         | "claude"
         | "memo"
         | "issueReporter"
+        | "appFont"
         | "syncCwdDefaults"
         | "workspaceSortOrder"
       >
@@ -332,6 +335,7 @@ const DEFAULT_MEMO: MemoSettings = {
   dblClickParagraphSelect: true,
   fontFamily: "",
   fontSize: 13,
+  fontWeight: "",
 };
 
 const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
@@ -342,9 +346,13 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   paddingLeft: 8,
   fontFamily: "",
   fontSize: 13,
+  fontWeight: "",
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
+
+/** Default app font for non-terminal views (Memo, Issue Reporter, etc.). */
+export const DEFAULT_APP_FONT: FontSettings = { face: "Cascadia Mono", size: 13, weight: "normal" };
 
 /** Fallback profile name when defaultProfile is unset. */
 export const FALLBACK_PROFILE = "PowerShell";
@@ -682,6 +690,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
+  appFont: { ...DEFAULT_APP_FONT },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
   workspaceSortOrder: "manual" as WorkspaceSortOrder,
 
@@ -711,6 +720,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set((state) => ({
       issueReporter: { ...state.issueReporter, ...data },
     })),
+
+  setAppFont: (font) => set({ appFont: font }),
 
   setWorkspaceSortOrder: (order) => set({ workspaceSortOrder: order }),
 
@@ -874,6 +885,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...(data.claude as Partial<ClaudeSettings>),
         }
       : undefined;
+    // Ensure appFont has all fields (backwards compat)
+    const appFont = data.appFont
+      ? { ...DEFAULT_APP_FONT, ...data.appFont, weight: data.appFont.weight ?? "normal" }
+      : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
       ? { ...DEFAULT_ISSUE_REPORTER, ...(data.issueReporter as Partial<IssueReporterSettings>) }
@@ -911,6 +926,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(claude ? { claude } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
+      ...(appFont ? { appFont } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
   },
