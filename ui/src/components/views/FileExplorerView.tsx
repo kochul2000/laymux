@@ -8,6 +8,7 @@ import {
   onTerminalCwdChanged,
   clipboardWriteText,
   readFileForViewer,
+  handleLxMessage,
 } from "@/lib/tauri-api";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
@@ -24,6 +25,7 @@ export interface FileExplorerViewProps {
   paneId?: string;
   profile: string;
   syncGroup: string;
+  cwdSend?: boolean;
   cwdReceive?: boolean;
   workspaceId?: string;
   isFocused?: boolean;
@@ -42,6 +44,7 @@ export function FileExplorerView({
   paneId,
   profile,
   syncGroup,
+  cwdSend = true,
   cwdReceive = true,
   isFocused,
   lastCwd,
@@ -68,6 +71,8 @@ export function FileExplorerView({
   // Track whether shell session is alive
   const shellAliveRef = useRef(false);
   const outputBufferRef = useRef("");
+  const cwdSendRef = useRef(cwdSend);
+  cwdSendRef.current = cwdSend;
   // Pending listing refresh while in viewer mode
   const pendingRefreshRef = useRef(false);
 
@@ -97,6 +102,17 @@ export function FileExplorerView({
           if (data.terminalId === instanceId) {
             setCurrentCwd(data.cwd);
             refreshListing();
+            // Propagate CWD to sync group if cwdSend is on
+            if (cwdSendRef.current && syncGroup) {
+              handleLxMessage(
+                JSON.stringify({
+                  action: "sync-cwd",
+                  path: data.cwd,
+                  terminal_id: instanceId,
+                  group_id: syncGroup,
+                }),
+              ).catch(() => {});
+            }
           }
         });
 
@@ -214,7 +230,6 @@ export function FileExplorerView({
   const navigateToDir = useCallback(
     (dirName: string) => {
       if (!shellAliveRef.current) return;
-      // Send cd command - the shell's OSC 7 will trigger CWD sync via onTerminalCwdChanged
       writeToTerminal(instanceId, `cd ${shellEscape(dirName)}\n`).catch(console.error);
     },
     [instanceId],

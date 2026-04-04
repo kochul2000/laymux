@@ -33,6 +33,7 @@ vi.mock("@/lib/tauri-api", () => ({
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
+  handleLxMessage: vi.fn().mockResolvedValue({ success: true, error: null }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({

@@ -118,6 +118,7 @@ function FileExplorerViewWithSyncCwd({
     profileDefaultsSyncCwd,
     syncCwdDefaults,
   });
+  const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? resolvedDefaults.send;
   const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
 
   return (
@@ -126,6 +127,7 @@ function FileExplorerViewWithSyncCwd({
       paneId={paneId}
       profile={profileName}
       syncGroup={effectiveSyncGroup}
+      cwdSend={cwdSend}
       cwdReceive={cwdReceive}
       workspaceId={workspaceId}
       isFocused={isFocused}
