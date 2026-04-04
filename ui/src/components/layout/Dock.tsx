@@ -24,6 +24,7 @@ const viewIcons: Record<ViewType, string> = {
   SettingsView: "\u2699",
   TerminalView: ">_",
   MemoView: "\u270e",
+  FileExplorerView: "\ud83d\udcc2",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
 };
@@ -44,6 +45,7 @@ export function Dock({
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWsName = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
     return ws?.name ?? "";
@@ -138,7 +140,9 @@ export function Dock({
                     : undefined
                 : undefined,
             onToggleCwdSend:
-              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              singlePaneId &&
+              onSetPaneView &&
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -146,7 +150,9 @@ export function Dock({
                     })
                 : undefined,
             onToggleCwdReceive:
-              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              singlePaneId &&
+              onSetPaneView &&
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -159,6 +165,7 @@ export function Dock({
             viewType={activeView}
             viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
+            workspaceId={activeWorkspaceId}
             workspaceName={activeWsName}
             isFocused={isFocused}
             onSelectView={
@@ -200,6 +207,7 @@ function DockGrid({
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWsName = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
     return ws?.name ?? "";
@@ -279,7 +287,8 @@ function DockGrid({
                 onDelete:
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
-                  onSetPaneView && pane.view.type === "TerminalView"
+                  onSetPaneView &&
+                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
@@ -287,7 +296,8 @@ function DockGrid({
                         })
                     : undefined,
                 onToggleCwdReceive:
-                  onSetPaneView && pane.view.type === "TerminalView"
+                  onSetPaneView &&
+                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
@@ -300,6 +310,7 @@ function DockGrid({
                 viewType={pane.view.type}
                 viewConfig={pane.view}
                 paneId={pane.id}
+                workspaceId={activeWorkspaceId}
                 workspaceName={activeWsName}
                 isFocused={isPaneFocused}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}

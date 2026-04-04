@@ -134,6 +134,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "file-explorer",
+    label: "File Explorer",
+    category: "tool",
+    config: { type: "FileExplorerView" },
+    testId: "empty-view-file-explorer",
+  });
+
+  options.push({
     key: "issue-reporter",
     label: "Report Issue",
     category: "tool",

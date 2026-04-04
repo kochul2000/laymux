@@ -120,6 +120,8 @@ pub fn run() {
             commands::clean_terminal_output_cache,
             commands::save_window_geometry,
             commands::load_window_geometry,
+            commands::read_file_for_viewer,
+            commands::list_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -155,6 +155,28 @@ export interface MemoSettings {
   fontWeight: string;
 }
 
+export interface ExtensionViewer {
+  extensions: string[];
+  command: string;
+}
+
+export interface FileExplorerSettings {
+  shellProfile: string;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  fontFamily: string;
+  fontSize: number;
+  copyOnSelect: boolean;
+  extensionViewers: ExtensionViewer[];
+}
+
+export type FileViewerContent =
+  | { kind: "text"; content: string; truncated: boolean }
+  | { kind: "image"; dataUrl: string }
+  | { kind: "binary"; size: number };
+
 export interface WorkspaceDisplaySettings {
   minimap: boolean;
   environment: boolean;
@@ -201,6 +223,7 @@ export interface Settings {
   claude: ClaudeSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
+  fileExplorer: FileExplorerSettings;
 }
 
 export interface ColorScheme {
@@ -327,6 +350,28 @@ export async function smartPaste(imageDir: string, profile: string): Promise<Sma
 /** Write text to the system clipboard via Tauri backend. */
 export async function clipboardWriteText(text: string): Promise<void> {
   return invoke("clipboard_write_text", { text });
+}
+
+/** A single directory entry returned by the Rust backend. */
+export interface DirEntry {
+  name: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  isExecutable: boolean;
+  size: number;
+}
+
+/** List directory contents via Rust std::fs::read_dir. */
+export async function listDirectory(path: string, wslDistro?: string): Promise<DirEntry[]> {
+  return invoke("list_directory", { path, wslDistro: wslDistro ?? null });
+}
+
+/** Read a file and classify it for the file viewer. */
+export async function readFileForViewer(
+  path: string,
+  maxBytes?: number,
+): Promise<FileViewerContent> {
+  return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
 }
 
 /** Update whether a terminal accepts CWD sync from other terminals. */
