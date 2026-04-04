@@ -139,7 +139,9 @@ export function Dock({
                     : undefined
                 : undefined,
             onToggleCwdSend:
-              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              singlePaneId &&
+              onSetPaneView &&
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -147,7 +149,9 @@ export function Dock({
                     })
                 : undefined,
             onToggleCwdReceive:
-              singlePaneId && onSetPaneView && panes[0]?.view.type === "TerminalView"
+              singlePaneId &&
+              onSetPaneView &&
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -280,7 +284,8 @@ function DockGrid({
                 onDelete:
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
-                  onSetPaneView && pane.view.type === "TerminalView"
+                  onSetPaneView &&
+                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
@@ -288,7 +293,8 @@ function DockGrid({
                         })
                     : undefined,
                 onToggleCwdReceive:
-                  onSetPaneView && pane.view.type === "TerminalView"
+                  onSetPaneView &&
+                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
