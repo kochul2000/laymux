@@ -153,6 +153,29 @@ export interface MemoSettings {
   fontSize: number;
 }
 
+export interface ExtensionViewer {
+  extensions: string[];
+  command: string;
+}
+
+export interface FileExplorerSettings {
+  shellProfile: string;
+  lsCommand: string;
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  fontFamily: string;
+  fontSize: number;
+  copyOnSelect: boolean;
+  extensionViewers: ExtensionViewer[];
+}
+
+export type FileViewerContent =
+  | { kind: "text"; content: string; truncated: boolean }
+  | { kind: "image"; path: string }
+  | { kind: "binary"; size: number };
+
 export interface WorkspaceDisplaySettings {
   minimap: boolean;
   environment: boolean;
@@ -198,6 +221,7 @@ export interface Settings {
   claude: ClaudeSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
+  fileExplorer: FileExplorerSettings;
 }
 
 export interface ColorScheme {
@@ -324,6 +348,14 @@ export async function smartPaste(imageDir: string, profile: string): Promise<Sma
 /** Write text to the system clipboard via Tauri backend. */
 export async function clipboardWriteText(text: string): Promise<void> {
   return invoke("clipboard_write_text", { text });
+}
+
+/** Read a file and classify it for the file viewer. */
+export async function readFileForViewer(
+  path: string,
+  maxBytes?: number,
+): Promise<FileViewerContent> {
+  return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
 }
 
 /** Update whether a terminal accepts CWD sync from other terminals. */

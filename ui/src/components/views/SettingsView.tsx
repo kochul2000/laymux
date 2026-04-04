@@ -16,6 +16,7 @@ import {
   type ColorScheme,
   type Keybinding,
 } from "@/stores/settings-store";
+import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 
@@ -1528,6 +1529,221 @@ function ClaudeSection() {
 
 // -- Section: Issue Reporter --
 
+function FileExplorerSection() {
+  const storeFileExplorer = useSettingsStore((s) => s.fileExplorer);
+  const setFileExplorer = useSettingsStore((s) => s.setFileExplorer);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const [fe, setDraftFe] = useDraft("fileExplorer", storeFileExplorer, (v) => setFileExplorer(v));
+  const updateFe = (partial: Partial<FileExplorerSettings>) =>
+    setDraftFe((prev) => ({ ...prev, ...partial }));
+
+  const addViewer = () =>
+    updateFe({
+      extensionViewers: [...fe.extensionViewers, { extensions: [".txt"], command: "vi" }],
+    });
+  const removeViewer = (index: number) =>
+    updateFe({ extensionViewers: fe.extensionViewers.filter((_, i) => i !== index) });
+  const updateViewer = (index: number, partial: Partial<ExtensionViewer>) =>
+    updateFe({
+      extensionViewers: fe.extensionViewers.map((v, i) => (i === index ? { ...v, ...partial } : v)),
+    });
+
+  return (
+    <div>
+      <SectionTitle>File Explorer</SectionTitle>
+
+      <div style={cardStyle} className="p-4">
+        {/* Shell Profile */}
+        <SettingRow
+          label="Shell Profile"
+          desc="ls/cd 실행에 사용할 쉘 프로파일. 비우면 기본 프로파일 사용."
+        >
+          <FocusSelect
+            data-testid="fe-shell-profile"
+            className={inputCls}
+            value={fe.shellProfile}
+            onChange={(e) => updateFe({ shellProfile: e.target.value })}
+          >
+            <option value="">Default</option>
+            {profiles.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+
+        {/* ls Command */}
+        <SettingRow label="ls Command" desc="디렉터리 목록을 가져오는 명령어. 기본: ls -F">
+          <FocusInput
+            data-testid="fe-ls-command"
+            className={inputCls}
+            placeholder="ls -F"
+            value={fe.lsCommand}
+            onChange={(e) => updateFe({ lsCommand: e.target.value })}
+          />
+        </SettingRow>
+
+        {/* Font */}
+        <SettingRow label="Font Family" desc="파일 목록 영역의 폰트. 비워두면 기본 폰트 상속.">
+          <FocusInput
+            data-testid="fe-font-family"
+            className={inputCls}
+            placeholder="예: Consolas, monospace"
+            value={fe.fontFamily}
+            onChange={(e) => updateFe({ fontFamily: e.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow label="Font Size" desc="파일 목록 영역의 폰트 크기 (px). 기본값: 13">
+          <input
+            data-testid="fe-font-size"
+            type="number"
+            min={8}
+            max={32}
+            className={inputCls}
+            style={{ width: 60 }}
+            value={fe.fontSize}
+            onChange={(e) =>
+              updateFe({ fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)) })
+            }
+          />
+        </SettingRow>
+
+        {/* Padding */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Padding
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              파일 목록 영역의 안쪽 여백 (px)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+                const key = `padding${dir}` as
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
+                return (
+                  <label key={dir} className="flex items-center gap-1.5">
+                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      {dir}
+                    </span>
+                    <input
+                      data-testid={`fe-padding-${dir.toLowerCase()}`}
+                      type="number"
+                      min={0}
+                      max={64}
+                      className={inputCls}
+                      style={{ width: 60 }}
+                      value={fe[key]}
+                      onChange={(e) =>
+                        updateFe({
+                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Copy on Select */}
+        <SettingRow label="Copy on Select" desc="파일 선택 시 자동으로 경로를 클립보드에 복사.">
+          <label className="flex items-center gap-2">
+            <input
+              data-testid="fe-copy-on-select"
+              type="checkbox"
+              checked={fe.copyOnSelect}
+              onChange={(e) => updateFe({ copyOnSelect: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              활성화
+            </span>
+          </label>
+        </SettingRow>
+
+        {/* Extension Viewers */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Extension Viewers
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              확장자별 쉘 프로그램으로 파일 열기
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            {fe.extensionViewers.map((viewer, i) => (
+              <div key={i} className="flex items-center gap-2 mb-2">
+                <FocusInput
+                  data-testid={`fe-ext-viewer-ext-${i}`}
+                  className={inputCls}
+                  style={{ width: 120 }}
+                  placeholder=".txt,.log"
+                  value={viewer.extensions.join(",")}
+                  onChange={(e) =>
+                    updateViewer(i, {
+                      extensions: e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+                <FocusInput
+                  data-testid={`fe-ext-viewer-cmd-${i}`}
+                  className={inputCls}
+                  style={{ width: 120 }}
+                  placeholder="vi"
+                  value={viewer.command}
+                  onChange={(e) => updateViewer(i, { command: e.target.value })}
+                />
+                <button
+                  data-testid={`fe-ext-viewer-remove-${i}`}
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "var(--bg-overlay)",
+                    color: "var(--red)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onClick={() => removeViewer(i)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              data-testid="fe-ext-viewer-add"
+              className="text-xs px-2 py-1 rounded"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={addViewer}
+            >
+              + Add Viewer
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IssueReporterSection() {
   const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
   const setIssueReporter = useSettingsStore((s) => s.setIssueReporter);
@@ -2494,6 +2710,16 @@ export function SettingsView() {
             Memo
           </button>
           <button
+            data-testid="nav-fileExplorer"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("fileExplorer")}
+            onClick={() => setActiveNav("fileExplorer")}
+            onMouseEnter={() => setNavHover("fileExplorer")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            File Explorer
+          </button>
+          <button
             data-testid="nav-issueReporter"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("issueReporter")}
@@ -2592,6 +2818,7 @@ export function SettingsView() {
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "memo" && <MemoSection />}
+            {activeNav === "fileExplorer" && <FileExplorerSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
           </div>
 

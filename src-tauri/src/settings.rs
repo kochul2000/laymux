@@ -547,6 +547,67 @@ impl Default for MemoSettings {
     }
 }
 
+/// File extension → shell command viewer mapping.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionViewer {
+    pub extensions: Vec<String>,
+    pub command: String,
+}
+
+/// FileExplorerView settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileExplorerSettings {
+    /// Shell profile name for background shell. Empty = use defaultProfile.
+    #[serde(default)]
+    pub shell_profile: String,
+    /// Command to list directory contents.
+    #[serde(default = "default_ls_command")]
+    pub ls_command: String,
+    #[serde(default = "default_view_padding")]
+    pub padding_top: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_right: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_bottom: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_left: u32,
+    /// Font family. Empty string = inherit.
+    #[serde(default)]
+    pub font_family: String,
+    /// Font size.
+    #[serde(default = "default_view_font_size")]
+    pub font_size: u16,
+    /// Automatically copy selected file paths to clipboard.
+    #[serde(default)]
+    pub copy_on_select: bool,
+    /// Per-extension shell program viewers.
+    #[serde(default)]
+    pub extension_viewers: Vec<ExtensionViewer>,
+}
+
+fn default_ls_command() -> String {
+    "ls -F".into()
+}
+
+impl Default for FileExplorerSettings {
+    fn default() -> Self {
+        Self {
+            shell_profile: String::new(),
+            ls_command: default_ls_command(),
+            padding_top: 8,
+            padding_right: 8,
+            padding_bottom: 8,
+            padding_left: 8,
+            font_family: String::new(),
+            font_size: 13,
+            copy_on_select: false,
+            extension_viewers: Vec::new(),
+        }
+    }
+}
+
 /// Dock pane definition (persisted view config with position).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -628,6 +689,8 @@ pub struct Settings {
     pub memo: MemoSettings,
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
+    #[serde(default)]
+    pub file_explorer: FileExplorerSettings,
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd_defaults: Option<serde_json::Value>,
@@ -712,6 +775,7 @@ impl Default for Settings {
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
+            file_explorer: FileExplorerSettings::default(),
             sync_cwd_defaults: None,
             workspace_display_order: Vec::new(),
             workspace_sort_order: None,
@@ -1808,5 +1872,51 @@ mod tests {
         assert!(!json.contains("workspaceDisplayOrder"));
         assert!(!json.contains("workspaceSortOrder"));
         assert!(!json.contains("workspaceDisplay"));
+    }
+
+    #[test]
+    fn file_explorer_settings_default() {
+        let settings = Settings::default();
+        assert_eq!(settings.file_explorer.shell_profile, "");
+        assert_eq!(settings.file_explorer.ls_command, "ls -F");
+        assert_eq!(settings.file_explorer.padding_top, 8);
+        assert_eq!(settings.file_explorer.font_family, "");
+        assert_eq!(settings.file_explorer.font_size, 13);
+        assert!(!settings.file_explorer.copy_on_select);
+        assert!(settings.file_explorer.extension_viewers.is_empty());
+    }
+
+    #[test]
+    fn file_explorer_settings_deserialize() {
+        let json = r#"{"fileExplorer": {
+            "shellProfile": "WSL",
+            "lsCommand": "ls -la",
+            "fontFamily": "Consolas",
+            "fontSize": 14,
+            "copyOnSelect": true,
+            "extensionViewers": [
+                {"extensions": [".txt", ".log"], "command": "vi"}
+            ]
+        }}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.file_explorer.shell_profile, "WSL");
+        assert_eq!(settings.file_explorer.ls_command, "ls -la");
+        assert_eq!(settings.file_explorer.font_family, "Consolas");
+        assert_eq!(settings.file_explorer.font_size, 14);
+        assert!(settings.file_explorer.copy_on_select);
+        assert_eq!(settings.file_explorer.extension_viewers.len(), 1);
+        assert_eq!(settings.file_explorer.extension_viewers[0].command, "vi");
+        assert_eq!(
+            settings.file_explorer.extension_viewers[0].extensions,
+            vec![".txt", ".log"]
+        );
+    }
+
+    #[test]
+    fn file_explorer_settings_default_when_absent() {
+        let json = r#"{}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.file_explorer.ls_command, "ls -F");
+        assert_eq!(settings.file_explorer.font_size, 13);
     }
 }

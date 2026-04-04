@@ -8,6 +8,7 @@ import { TerminalView } from "./TerminalView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
+import { FileExplorerView } from "./FileExplorerView";
 
 export interface ViewRendererProps {
   viewType: ViewType | null;
@@ -76,6 +77,59 @@ function TerminalViewWithSyncCwd({
       onKeyboardActivity={onKeyboardActivity}
       lastCwd={lastCwd}
       lastClaudeSession={lastClaudeSession}
+    />
+  );
+}
+
+/** Wrapper that subscribes to sync-cwd settings for FileExplorerView instances. */
+function FileExplorerViewWithSyncCwd({
+  viewConfig,
+  workspaceId,
+  paneId,
+  isFocused,
+  location,
+}: {
+  viewConfig?: ViewInstanceConfig;
+  workspaceId?: string;
+  paneId?: string;
+  isFocused?: boolean;
+  location: TerminalLocation;
+}) {
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
+  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
+  const fileExplorerSettings = useSettingsStore((s) => s.fileExplorer);
+  const fallbackId = useId();
+
+  const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
+  const effectiveSyncGroup = configSyncGroup || workspaceId || "";
+  const instanceId = paneId ? `file-explorer-${paneId}` : `file-explorer-${fallbackId}`;
+  const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
+
+  // Use file explorer's shellProfile setting, or fall back to defaultProfile
+  const profileName = fileExplorerSettings.shellProfile || defaultProfile || FALLBACK_PROFILE;
+  const profileSyncCwd = useSettingsStore(
+    (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
+  );
+  const resolvedDefaults = resolveSyncCwd({
+    profileName,
+    location,
+    profileSyncCwd,
+    profileDefaultsSyncCwd,
+    syncCwdDefaults,
+  });
+  const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
+
+  return (
+    <FileExplorerView
+      instanceId={instanceId}
+      paneId={paneId}
+      profile={profileName}
+      syncGroup={effectiveSyncGroup}
+      cwdReceive={cwdReceive}
+      workspaceId={workspaceId}
+      isFocused={isFocused}
+      lastCwd={lastCwd}
     />
   );
 }
@@ -159,6 +213,18 @@ export function ViewRenderer({
         </div>
       );
     }
+    case "FileExplorerView":
+      return (
+        <div data-testid="view-file-explorer" className="h-full">
+          <FileExplorerViewWithSyncCwd
+            viewConfig={viewConfig}
+            workspaceId={workspaceId}
+            paneId={paneId}
+            isFocused={isFocused}
+            location={location}
+          />
+        </div>
+      );
     case "EmptyView":
     case null:
     default:

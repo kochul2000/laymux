@@ -83,6 +83,8 @@ interface TerminalViewProps {
   lastCwd?: string;
   /** Claude Code session ID from previous session, used for --resume on startup. */
   lastClaudeSession?: string;
+  /** Override the startup command (takes precedence over Claude session restore). */
+  startupCommandOverride?: string;
 }
 
 export function TerminalView({
@@ -97,6 +99,7 @@ export function TerminalView({
   onKeyboardActivity,
   lastCwd,
   lastClaudeSession,
+  startupCommandOverride,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -544,8 +547,9 @@ export function TerminalView({
           lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
             ? lastClaudeSession
             : undefined;
-        const startupOverride =
-          shouldRestoreClaudeSession && safeSessionId
+        const startupOverride = startupCommandOverride
+          ? startupCommandOverride
+          : shouldRestoreClaudeSession && safeSessionId
             ? `claude --resume ${safeSessionId}`
             : undefined;
 

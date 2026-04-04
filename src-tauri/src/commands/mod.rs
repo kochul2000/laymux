@@ -1375,6 +1375,113 @@ pub fn open_settings_file() -> Result<(), String> {
     Ok(())
 }
 
+/// Content type classification for file viewer.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum FileViewerContent {
+    /// Text file — content included inline.
+    Text { content: String, truncated: bool },
+    /// Image file — use convertFileSrc on the path.
+    Image { path: String },
+    /// Binary/unsupported — show info only.
+    Binary { size: u64 },
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico",
+];
+
+const TEXT_EXTENSIONS: &[&str] = &[
+    ".txt",
+    ".md",
+    ".json",
+    ".jsonc",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".rs",
+    ".py",
+    ".go",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".css",
+    ".scss",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".bat",
+    ".ps1",
+    ".log",
+    ".env",
+    ".gitignore",
+    ".editorconfig",
+    ".conf",
+    ".cfg",
+    ".ini",
+    ".csv",
+];
+
+/// Read a file and classify it for the file viewer.
+#[tauri::command]
+pub fn read_file_for_viewer(
+    path: String,
+    max_bytes: Option<usize>,
+) -> Result<FileViewerContent, String> {
+    let file_path = std::path::Path::new(&path);
+    let ext = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e.to_lowercase()))
+        .unwrap_or_default();
+
+    if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return Ok(FileViewerContent::Image { path });
+    }
+
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("Cannot stat file: {e}"))?;
+    let size = metadata.len();
+    let limit = max_bytes.unwrap_or(1_048_576) as u64; // 1MB default
+
+    // Treat known text extensions or small files as text
+    let is_text_ext = TEXT_EXTENSIONS.contains(&ext.as_str()) || ext.is_empty();
+    if !is_text_ext && size > limit {
+        return Ok(FileViewerContent::Binary { size });
+    }
+
+    // Try reading as UTF-8 text
+    let read_limit = std::cmp::min(size, limit) as usize;
+    let raw = std::fs::read(&path).map_err(|e| format!("Cannot read file: {e}"))?;
+    let (content_bytes, truncated) = if raw.len() > read_limit {
+        (&raw[..read_limit], true)
+    } else {
+        (raw.as_slice(), false)
+    };
+
+    match std::str::from_utf8(content_bytes) {
+        Ok(text) => Ok(FileViewerContent::Text {
+            content: text.to_string(),
+            truncated,
+        }),
+        Err(_) if is_text_ext => {
+            // Lossy conversion for known text extensions
+            Ok(FileViewerContent::Text {
+                content: String::from_utf8_lossy(content_bytes).into_owned(),
+                truncated,
+            })
+        }
+        Err(_) => Ok(FileViewerContent::Binary { size }),
+    }
+}
+
 /// Simple base64 encoder (no external crate needed).
 fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

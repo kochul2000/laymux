@@ -4,6 +4,7 @@ export type ViewType =
   | "TerminalView"
   | "IssueReporterView"
   | "MemoView"
+  | "FileExplorerView"
   | "EmptyView";
 
 export type DockPosition = "top" | "bottom" | "left" | "right";
