@@ -81,6 +81,8 @@ interface TerminalViewProps {
   onKeyboardActivity?: () => void;
   /** Last CWD from previous session, used for restore on startup. */
   lastCwd?: string;
+  /** Claude Code session ID from previous session, used for --resume on startup. */
+  lastClaudeSession?: string;
 }
 
 export function TerminalView({
@@ -94,6 +96,7 @@ export function TerminalView({
   isFocused = false,
   onKeyboardActivity,
   lastCwd,
+  lastClaudeSession,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -533,6 +536,19 @@ export function TerminalView({
         const shouldRestoreOutput =
           profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
 
+        // Determine startup command override for Claude session restore.
+        // Validate session ID format to prevent command injection.
+        const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+        const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
+        const safeSessionId =
+          lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
+            ? lastClaudeSession
+            : undefined;
+        const startupOverride =
+          shouldRestoreClaudeSession && safeSessionId
+            ? `claude --resume ${safeSessionId}`
+            : undefined;
+
         // Start PTY session immediately (don't wait for cache restore).
         // Cache restore runs in parallel so the shell starts booting ASAP.
         if (!cancelled) {
@@ -544,6 +560,7 @@ export function TerminalView({
             syncGroup,
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
+            startupOverride,
           ).catch((err) => {
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
             terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);

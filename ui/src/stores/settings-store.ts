@@ -672,7 +672,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     dockArrowNav: true,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
-  claude: { syncCwd: "skip" as ClaudeSyncCwdMode },
+  claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
   memo: { ...DEFAULT_MEMO_PADDING },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
@@ -860,7 +860,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
     const claude = data.claude
-      ? { syncCwd: "skip" as ClaudeSyncCwdMode, ...(data.claude as Partial<ClaudeSettings>) }
+      ? {
+          syncCwd: "skip" as ClaudeSyncCwdMode,
+          restoreSession: true,
+          sessionMaxAgeHours: 24,
+          ...(data.claude as Partial<ClaudeSettings>),
+        }
       : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter

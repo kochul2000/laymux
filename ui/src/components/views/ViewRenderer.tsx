@@ -48,6 +48,7 @@ function TerminalViewWithSyncCwd({
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
   const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
+  const lastClaudeSession = (viewConfig?.lastClaudeSession as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
   const profileSyncCwd = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
@@ -74,6 +75,7 @@ function TerminalViewWithSyncCwd({
       isFocused={isFocused}
       onKeyboardActivity={onKeyboardActivity}
       lastCwd={lastCwd}
+      lastClaudeSession={lastClaudeSession}
     />
   );
 }

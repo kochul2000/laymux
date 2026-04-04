@@ -1457,6 +1457,70 @@ function ClaudeSection() {
             </FocusSelect>
           </div>
         </div>
+
+        {/* Restore Session */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              세션 복원
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              앱 재시작 시 Claude Code 세션을 자동 복원
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                data-testid="claude-restore-session-toggle"
+                type="checkbox"
+                checked={claude.restoreSession}
+                onChange={(e) => updateClaude({ restoreSession: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {claude.restoreSession ? "사용" : "사용 안함"}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Session Max Age */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              세션 유효 기간
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              이 시간보다 오래된 세션 파일은 무시 (0 = 무제한)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <FocusInput
+                data-testid="claude-session-max-age-input"
+                className={inputCls}
+                type="number"
+                min={0}
+                style={{ width: 80 }}
+                value={claude.sessionMaxAgeHours}
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10);
+                  updateClaude({
+                    sessionMaxAgeHours: Number.isNaN(parsed) ? 24 : Math.max(0, parsed),
+                  });
+                }}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+                시간
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

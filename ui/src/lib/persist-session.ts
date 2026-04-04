@@ -3,6 +3,7 @@ import {
   saveTerminalOutputCache,
   cleanTerminalOutputCache,
   getTerminalCwds,
+  getClaudeSessionIds,
   type Settings,
 } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -51,9 +52,13 @@ async function persistSessionCore(): Promise<void> {
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
 
-  // Fetch CWDs from backend (single source of truth).
-  // Falls back to empty map if backend is unreachable (e.g., during tests).
-  const backendCwds = await getTerminalCwds().catch(() => ({}) as Record<string, string>);
+  // Fetch CWDs and Claude session IDs in parallel from backend.
+  // Both fall back to empty maps if backend is unreachable (e.g., during tests).
+  const maxAge = settingsState.claude?.sessionMaxAgeHours;
+  const [backendCwds, claudeSessionIds] = await Promise.all([
+    getTerminalCwds().catch(() => ({}) as Record<string, string>),
+    getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
+  ]);
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
@@ -136,6 +141,8 @@ async function persistSessionCore(): Promise<void> {
           const termId = `terminal-${p.id}`;
           const cwd = backendCwds[termId];
           if (cwd) viewExtra.lastCwd = cwd;
+          const claudeSession = claudeSessionIds[termId];
+          if (claudeSession) viewExtra.lastClaudeSession = claudeSession;
         }
         return {
           id: p.id,
@@ -167,6 +174,8 @@ async function persistSessionCore(): Promise<void> {
           const termId = `terminal-${p.id}`;
           const cwd = backendCwds[termId];
           if (cwd) dockViewExtra.lastCwd = cwd;
+          const claudeSession = claudeSessionIds[termId];
+          if (claudeSession) dockViewExtra.lastClaudeSession = claudeSession;
         }
         return {
           id: p.id,

@@ -347,10 +347,35 @@ pub enum ClaudeSyncCwdMode {
 /// Claude Code integration settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[derive(Default)]
 pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
+    /// Whether to restore Claude Code sessions on app restart (default: true).
+    #[serde(default = "default_restore_session")]
+    pub restore_session: bool,
+    /// Maximum age (in hours) for Claude session files to be considered valid.
+    /// Sessions older than this are ignored during restore. Default: 24 hours.
+    /// Set to 0 to disable the age filter (accept all sessions).
+    #[serde(default = "default_session_max_age_hours")]
+    pub session_max_age_hours: u64,
+}
+
+impl Default for ClaudeSettings {
+    fn default() -> Self {
+        Self {
+            sync_cwd: ClaudeSyncCwdMode::default(),
+            restore_session: true,
+            session_max_age_hours: 24,
+        }
+    }
+}
+
+fn default_restore_session() -> bool {
+    true
+}
+
+fn default_session_max_age_hours() -> u64 {
+    24
 }
 
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
@@ -1110,12 +1135,52 @@ mod tests {
         let settings = Settings {
             claude: ClaudeSettings {
                 sync_cwd: ClaudeSyncCwdMode::Command,
+                restore_session: true,
+                session_max_age_hours: 24,
             },
             ..Settings::default()
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.claude.sync_cwd, ClaudeSyncCwdMode::Command);
+        assert!(parsed.claude.restore_session);
+        assert_eq!(parsed.claude.session_max_age_hours, 24);
+    }
+
+    #[test]
+    fn claude_restore_session_defaults_to_true() {
+        // When restoreSession is not specified in JSON, it should default to true
+        let json = r#"{"claude":{"syncCwd":"skip"}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert!(parsed.claude.restore_session);
+    }
+
+    #[test]
+    fn claude_restore_session_can_be_false() {
+        let json = r#"{"claude":{"syncCwd":"skip","restoreSession":false}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert!(!parsed.claude.restore_session);
+    }
+
+    #[test]
+    fn claude_session_max_age_defaults_to_24() {
+        let json = r#"{"claude":{"syncCwd":"skip"}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.claude.session_max_age_hours, 24);
+    }
+
+    #[test]
+    fn claude_session_max_age_can_be_customized() {
+        let json = r#"{"claude":{"syncCwd":"skip","sessionMaxAgeHours":48}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.claude.session_max_age_hours, 48);
+    }
+
+    #[test]
+    fn claude_session_max_age_zero_means_no_limit() {
+        let json = r#"{"claude":{"syncCwd":"skip","sessionMaxAgeHours":0}}"#;
+        let parsed: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.claude.session_max_age_hours, 0);
     }
 
     #[test]

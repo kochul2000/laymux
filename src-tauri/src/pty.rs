@@ -76,6 +76,11 @@ fn mnt_path_to_windows(path: &str) -> Option<String> {
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    /// PID of the direct child process spawned by the PTY (`None` if the
+    /// platform does not expose process IDs, e.g. serial connections).
+    /// Used for Claude Code session matching via process tree traversal.
+    /// Type matches `portable_pty::Child::process_id() -> Option<u32>`.
+    child_pid: Option<u32>,
 }
 
 impl PtyHandle {
@@ -86,6 +91,11 @@ impl PtyHandle {
             .write_all(data)
             .map_err(|e| format!("Write error: {e}"))?;
         writer.flush().map_err(|e| format!("Flush error: {e}"))
+    }
+
+    /// Get the child process ID.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
     }
 
     /// Resize the PTY.
@@ -175,11 +185,22 @@ where
         }
     }
 
-    pair.slave
+    let child = pair
+        .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
-    // Drop slave — we only need master
+    let child_pid = child.process_id();
+
+    // Spawn a background thread to wait for the child process.
+    // This prevents zombie processes on Unix (where unwait-ed children
+    // linger in the process table). On Windows, this closes the process
+    // handle cleanly after exit. The thread exits naturally when the
+    // shell terminates (e.g., via PTY master close → SIGHUP).
+    thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
     drop(pair.slave);
 
     let writer = pair
@@ -195,6 +216,7 @@ where
     let handle = PtyHandle {
         writer: Arc::new(Mutex::new(writer)),
         master: Arc::new(Mutex::new(pair.master)),
+        child_pid,
     };
 
     // Spawn reader thread

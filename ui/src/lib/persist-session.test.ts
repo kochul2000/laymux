@@ -20,6 +20,7 @@ vi.mock("@/lib/tauri-api", () => ({
   saveTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
   cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
+  getClaudeSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/terminal-serialize-registry", () => ({
@@ -39,6 +40,7 @@ import {
   saveTerminalOutputCache,
   cleanTerminalOutputCache,
   getTerminalCwds,
+  getClaudeSessionIds,
 } from "@/lib/tauri-api";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -369,6 +371,56 @@ describe("persistSession", () => {
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view.lastCwd).toBe("/tmp/dock-cwd");
+  });
+
+  it("injects lastClaudeSession into workspace TerminalView panes from backend", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "session-abc-123",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastClaudeSession).toBe("session-abc-123");
+    expect(getClaudeSessionIds).toHaveBeenCalledTimes(1);
+    // Verify sessionMaxAgeHours from settings is passed through
+    expect(getClaudeSessionIds).toHaveBeenCalledWith(24);
+  });
+
+  it("injects lastClaudeSession into dock TerminalView panes from backend", async () => {
+    const dockState = useDockStore.getState();
+    const dockPaneId = dockState.getDock("left")!.panes[0].id;
+    dockState.setDockPaneView("left", dockPaneId, {
+      type: "TerminalView",
+      profile: "WSL",
+    });
+
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${dockPaneId}`]: "dock-session-xyz",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock.panes[0].view.lastClaudeSession).toBe("dock-session-xyz");
+  });
+
+  it("does not inject lastClaudeSession for non-TerminalView panes", async () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
+
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      "terminal-some-id": "should-not-appear",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastClaudeSession).toBeUndefined();
   });
 
   it("does not inject lastCwd for non-TerminalView panes", async () => {
