@@ -265,6 +265,21 @@ describe("processOscInOutput", () => {
     expect(calls.some((c: { action: string }) => c.action === "notify")).toBe(true);
   });
 
+  it("clears fallbackTimer when OSC 133;C arms the gate", () => {
+    const hooks: OscHook[] = [
+      { osc: 133, param: "C", run: "lx set-command-status --command __preexec__" },
+    ];
+    const timer = setTimeout(() => {}, 10000);
+    const gate: { armed: boolean; fallbackTimer?: ReturnType<typeof setTimeout> } = {
+      armed: false,
+      fallbackTimer: timer,
+    };
+
+    processOscInOutput("\x1b]133;C\x07", hooks, "t1", "g1", { notifyGate: gate });
+    expect(gate.armed).toBe(true);
+    expect(gate.fallbackTimer).toBeUndefined();
+  });
+
   it("handles OSC 133 C (preexec) → set-command-status with command", () => {
     const preexecHooks: OscHook[] = [
       { osc: 133, param: "C", run: "lx set-command-status --command __preexec__" },
