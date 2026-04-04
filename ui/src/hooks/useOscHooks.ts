@@ -42,6 +42,10 @@ export function processOscInOutput(
       (event.param === "C" || event.param === "E")
     ) {
       options.notifyGate.armed = true;
+      if (options.notifyGate.fallbackTimer !== undefined) {
+        clearTimeout(options.notifyGate.fallbackTimer);
+        options.notifyGate.fallbackTimer = undefined;
+      }
     }
 
     const matched = matchHook(hooks, event);
@@ -98,10 +102,13 @@ export function processOscInOutput(
 
 /**
  * Mutable gate object: notify actions are suppressed until `armed` becomes true.
- * OSC 133;C/E (user command execution) arms the gate automatically.
+ * Armed by either:
+ * - OSC 133;C/E (user command execution) — immediate, cancels fallback timer
+ * - Fallback timer — for shells without preexec (e.g. PowerShell)
  */
 export interface NotifyGate {
   armed: boolean;
+  fallbackTimer?: ReturnType<typeof setTimeout>;
 }
 
 /**

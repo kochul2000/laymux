@@ -270,18 +270,43 @@ function StartupSection() {
 
 // -- Shared: Font fields (used by both Defaults and Profile) --
 
+function FontSection() {
+  const storeAppFont = useSettingsStore((s) => s.appFont);
+  const setAppFont = useSettingsStore((s) => s.setAppFont);
+  const monoFonts = useMonospacedFonts();
+  const [draftFont, setDraftFont] = useDraft("appFont", storeAppFont, setAppFont);
+
+  return (
+    <div>
+      <SectionTitle>Font</SectionTitle>
+      <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+        앱 기본 폰트. Memo, Issue Reporter 등 비터미널 뷰에서 상속됩니다. 터미널 폰트는 Profile
+        Defaults에서 설정합니다.
+      </p>
+      <FontFields
+        font={draftFont}
+        onChange={setDraftFont}
+        monoFonts={monoFonts}
+        faceDesc="Default font for non-terminal views"
+      />
+    </div>
+  );
+}
+
 function FontFields({
   font,
   onChange,
   defaults,
   showReset,
   monoFonts,
+  faceDesc,
 }: {
   font: FontSettings;
   onChange: (font: FontSettings) => void;
   defaults?: FontSettings;
   showReset?: boolean;
   monoFonts: string[];
+  faceDesc?: string;
 }) {
   const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
   const resetBtn =
@@ -310,7 +335,7 @@ function FontFields({
           </h4>
           {resetBtn}
         </div>
-        <SettingRow label="Font Face" desc="Monospaced font for terminals">
+        <SettingRow label="Font Face" desc={faceDesc ?? "Monospaced font for terminals"}>
           <FocusSelect
             data-testid="font-face-input"
             value={font.face}
@@ -1736,6 +1761,8 @@ function FileExplorerSection() {
 function IssueReporterSection() {
   const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
   const setIssueReporter = useSettingsStore((s) => s.setIssueReporter);
+  const appFont = useSettingsStore((s) => s.appFont);
+  const monoFonts = useMonospacedFonts();
   const [issueReporter, setDraftIssueReporter] = useDraft(
     "issueReporter",
     storeIssueReporter,
@@ -1744,9 +1771,32 @@ function IssueReporterSection() {
   const updateIssueReporter = (partial: Partial<typeof issueReporter>) =>
     setDraftIssueReporter((prev) => ({ ...prev, ...partial }));
 
+  // Adapt flat fontFamily/fontSize/fontWeight to FontSettings for FontFields
+  const irFont: FontSettings = {
+    face: issueReporter.fontFamily || appFont.face,
+    size: issueReporter.fontSize || appFont.size,
+    weight: issueReporter.fontWeight || appFont.weight,
+  };
+
   return (
     <div>
       <SectionTitle>Issue Reporter</SectionTitle>
+
+      {/* Font (inherits from App Font) */}
+      <FontFields
+        font={irFont}
+        onChange={(f) => {
+          updateIssueReporter({
+            fontFamily: f.face === appFont.face ? "" : f.face,
+            fontSize: f.size === appFont.size ? 0 : f.size,
+            fontWeight: f.weight === appFont.weight ? "" : f.weight,
+          });
+        }}
+        defaults={appFont}
+        showReset
+        monoFonts={monoFonts}
+        faceDesc="비워두면 앱 기본 폰트 상속"
+      />
 
       <div style={cardStyle} className="p-4">
         <SettingRow
@@ -1759,34 +1809,6 @@ function IssueReporterSection() {
             placeholder='예: wsl.exe -d "My Distro" --'
             value={issueReporter.shell}
             onChange={(e) => updateIssueReporter({ shell: e.target.value })}
-          />
-        </SettingRow>
-
-        {/* Font */}
-        <SettingRow label="Font Family" desc="텍스트 영역의 폰트. 비워두면 기본 폰트 상속.">
-          <FocusInput
-            data-testid="issue-reporter-font-family"
-            className={inputCls}
-            placeholder="예: Consolas, monospace"
-            value={issueReporter.fontFamily}
-            onChange={(e) => updateIssueReporter({ fontFamily: e.target.value })}
-          />
-        </SettingRow>
-
-        <SettingRow label="Font Size" desc="텍스트 영역의 폰트 크기 (px). 기본값: 13">
-          <input
-            data-testid="issue-reporter-font-size"
-            type="number"
-            min={8}
-            max={32}
-            className={inputCls}
-            style={{ width: 60 }}
-            value={issueReporter.fontSize}
-            onChange={(e) =>
-              updateIssueReporter({
-                fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)),
-              })
-            }
           />
         </SettingRow>
 
@@ -1842,43 +1864,40 @@ function IssueReporterSection() {
 function MemoSection() {
   const storeMemo = useSettingsStore((s) => s.memo);
   const setMemo = useSettingsStore((s) => s.setMemo);
+  const appFont = useSettingsStore((s) => s.appFont);
+  const monoFonts = useMonospacedFonts();
   const [memo, setDraftMemo] = useDraft("memo", storeMemo, (v) => setMemo(v));
   const updateMemo = (partial: Partial<typeof memo>) =>
     setDraftMemo((prev) => ({ ...prev, ...partial }));
+
+  // Adapt flat fontFamily/fontSize/fontWeight to FontSettings for FontFields
+  const memoFont: FontSettings = {
+    face: memo.fontFamily || appFont.face,
+    size: memo.fontSize || appFont.size,
+    weight: memo.fontWeight || appFont.weight,
+  };
 
   return (
     <div>
       <SectionTitle>Memo</SectionTitle>
 
+      {/* Font (inherits from App Font) */}
+      <FontFields
+        font={memoFont}
+        onChange={(f) => {
+          updateMemo({
+            fontFamily: f.face === appFont.face ? "" : f.face,
+            fontSize: f.size === appFont.size ? 0 : f.size,
+            fontWeight: f.weight === appFont.weight ? "" : f.weight,
+          });
+        }}
+        defaults={appFont}
+        showReset
+        monoFonts={monoFonts}
+        faceDesc="비워두면 앱 기본 폰트 상속"
+      />
+
       <div style={cardStyle} className="p-4">
-        {/* Font */}
-        <SettingRow label="Font Family" desc="메모 텍스트 영역의 폰트. 비워두면 기본 폰트 상속.">
-          <FocusInput
-            data-testid="memo-font-family"
-            className={inputCls}
-            placeholder="예: Consolas, monospace"
-            value={memo.fontFamily}
-            onChange={(e) => updateMemo({ fontFamily: e.target.value })}
-          />
-        </SettingRow>
-
-        <SettingRow label="Font Size" desc="메모 텍스트 영역의 폰트 크기 (px). 기본값: 13">
-          <input
-            data-testid="memo-font-size"
-            type="number"
-            min={8}
-            max={32}
-            className={inputCls}
-            style={{ width: 60 }}
-            value={memo.fontSize}
-            onChange={(e) =>
-              updateMemo({
-                fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)),
-              })
-            }
-          />
-        </SettingRow>
-
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2641,6 +2660,16 @@ export function SettingsView() {
             Startup
           </button>
           <button
+            data-testid="nav-font"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("font")}
+            onClick={() => setActiveNav("font")}
+            onMouseEnter={() => setNavHover("font")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Font
+          </button>
+          <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("colorSchemes")}
             onClick={() => setActiveNav("colorSchemes")}
@@ -2797,6 +2826,7 @@ export function SettingsView() {
         >
           <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
             {activeNav === "startup" && <StartupSection />}
+            {activeNav === "font" && <FontSection />}
             {activeNav === "defaults" && <DefaultsSection />}
             {activeNav.startsWith("profile-") && (
               <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />

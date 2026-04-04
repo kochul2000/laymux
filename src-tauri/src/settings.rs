@@ -457,12 +457,15 @@ pub struct IssueReporterSettings {
     pub padding_bottom: u32,
     #[serde(default = "default_view_padding")]
     pub padding_left: u32,
-    /// Font family for issue reporter textarea. Empty string = inherit.
+    /// Font family override. Empty string = inherit from app_font.
     #[serde(default)]
     pub font_family: String,
-    /// Font size for issue reporter textarea.
+    /// Font size override. 0 = inherit from app_font.
     #[serde(default = "default_view_font_size")]
     pub font_size: u16,
+    /// Font weight override. Empty string = inherit from app_font.
+    #[serde(default)]
+    pub font_weight: String,
 }
 
 impl Default for IssueReporterSettings {
@@ -475,6 +478,7 @@ impl Default for IssueReporterSettings {
             padding_left: 8,
             font_family: String::new(),
             font_size: 13,
+            font_weight: String::new(),
         }
     }
 }
@@ -523,12 +527,15 @@ pub struct MemoSettings {
     /// Double-click to select entire paragraph (requires paragraph_copy enabled).
     #[serde(default = "default_true")]
     pub dbl_click_paragraph_select: bool,
-    /// Font family for memo textarea. Empty string = inherit.
+    /// Font family override. Empty string = inherit from app_font.
     #[serde(default)]
     pub font_family: String,
-    /// Font size for memo textarea.
+    /// Font size override. 0 = inherit from app_font.
     #[serde(default = "default_view_font_size")]
     pub font_size: u16,
+    /// Font weight override. Empty string = inherit from app_font.
+    #[serde(default)]
+    pub font_weight: String,
 }
 
 impl Default for MemoSettings {
@@ -543,6 +550,7 @@ impl Default for MemoSettings {
             dbl_click_paragraph_select: true,
             font_family: String::new(),
             font_size: 13,
+            font_weight: String::new(),
         }
     }
 }
@@ -659,6 +667,9 @@ pub struct Settings {
     pub keybindings: Vec<Keybinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<FontSettings>,
+    /// App-wide default font for non-terminal views (Memo, Issue Reporter, etc.).
+    #[serde(default)]
+    pub app_font: FontSettings,
     #[serde(default = "default_profile")]
     pub default_profile: String,
     #[serde(default)]
@@ -723,6 +734,7 @@ impl Default for Settings {
             ],
             keybindings: Vec::new(),
             font: None,
+            app_font: FontSettings::default(),
             default_profile: default_profile(),
             profile_defaults: ProfileDefaults::default(),
             view_order: Vec::new(),

@@ -62,6 +62,7 @@ function resolveWorkspaceId(terminalId: string): string {
 // Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
 let webglInitCount = 0;
 const WEBGL_STAGGER_MS = 150;
+const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 /** Reset the stagger counter (for tests). */
 export function _resetWebglStagger(): void {
@@ -296,7 +297,13 @@ export function TerminalView({
     // Gate notifications until the first user command is observed (OSC 133;C/E).
     // Shell-init OSC 133;D sequences arrive before any C/E, so they are
     // suppressed automatically without an arbitrary timeout (see issue #111).
+    // Fallback timer arms the gate after 3s for shells without preexec (e.g.
+    // PowerShell which doesn't emit OSC 133;C/E). See issue #119.
     const notifyGate: NotifyGate = { armed: false };
+    notifyGate.fallbackTimer = setTimeout(() => {
+      notifyGate.armed = true;
+      notifyGate.fallbackTimer = undefined;
+    }, NOTIFY_GATE_FALLBACK_MS);
 
     // Build hooks list
     const hooks: OscHook[] = [
@@ -600,6 +607,7 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      if (notifyGate.fallbackTimer !== undefined) clearTimeout(notifyGate.fallbackTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);

@@ -70,6 +70,11 @@ fn settings_round_trip_with_full_config() {
             },
         ],
         font: None,
+        app_font: FontSettings {
+            face: "Consolas".into(),
+            size: 15,
+            weight: "semi-bold".into(),
+        },
         default_profile: "Ubuntu".into(),
         profile_defaults: ProfileDefaults::default(),
         view_order: vec![],

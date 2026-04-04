@@ -316,13 +316,21 @@ describe("IssueReporterView", () => {
       expect(textarea.style.fontFamily).toBe("Monaco");
     });
 
-    it("uses inherit when fontFamily is empty", () => {
+    it("inherits appFont when fontFamily/fontSize/fontWeight are empty/zero", () => {
       useSettingsStore.setState({
-        issueReporter: { ...useSettingsStore.getState().issueReporter, fontFamily: "" },
+        issueReporter: {
+          ...useSettingsStore.getState().issueReporter,
+          fontFamily: "",
+          fontSize: 0,
+          fontWeight: "",
+        },
+        appFont: { face: "Fira Code", size: 15, weight: "bold" },
       });
       render(<IssueReporterView />);
       const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
-      expect(textarea.style.fontFamily).toBe("inherit");
+      expect(textarea.style.fontFamily).toBe('"Fira Code"');
+      expect(textarea.style.fontSize).toBe("15px");
+      expect(textarea.style.fontWeight).toBe("bold");
     });
 
     it("applies custom fontSize from settings to textarea", () => {
@@ -334,7 +342,11 @@ describe("IssueReporterView", () => {
       expect(textarea.style.fontSize).toBe("16px");
     });
 
-    it("defaults to 13px fontSize", () => {
+    it("defaults to appFont size when fontSize is 0", () => {
+      useSettingsStore.setState({
+        issueReporter: { ...useSettingsStore.getState().issueReporter, fontSize: 0 },
+        appFont: { face: "Cascadia Mono", size: 13, weight: "normal" },
+      });
       render(<IssueReporterView />);
       const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("13px");
