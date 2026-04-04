@@ -120,7 +120,7 @@ export function WorkspaceArea() {
                       onDelete: isActive && ws.panes.length > 1 ? () => removePane(i) : undefined,
                       onToggleCwdSend:
                         isActive &&
-                        (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
+                        (pane.view.type === "TerminalView" || pane.view.type === "ExplorerView")
                           ? () => {
                               const profileName =
                                 (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;
@@ -132,7 +132,7 @@ export function WorkspaceArea() {
                           : undefined,
                       onToggleCwdReceive:
                         isActive &&
-                        (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
+                        (pane.view.type === "TerminalView" || pane.view.type === "ExplorerView")
                           ? () => {
                               const profileName =
                                 (pane.view.profile as string) || defaultProfile || FALLBACK_PROFILE;

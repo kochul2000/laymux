@@ -8,7 +8,7 @@ import { TerminalView } from "./TerminalView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
-import { FileExplorerView } from "./FileExplorerView";
+import { ExplorerView } from "./ExplorerView";
 
 export interface ViewRendererProps {
   viewType: ViewType | null;
@@ -81,8 +81,8 @@ function TerminalViewWithSyncCwd({
   );
 }
 
-/** Wrapper that subscribes to sync-cwd settings for FileExplorerView instances. */
-function FileExplorerViewWithSyncCwd({
+/** Wrapper that subscribes to sync-cwd settings for ExplorerView instances. */
+function ExplorerViewWithSyncCwd({
   viewConfig,
   workspaceId,
   paneId,
@@ -98,16 +98,16 @@ function FileExplorerViewWithSyncCwd({
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
   const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
-  const fileExplorerSettings = useSettingsStore((s) => s.fileExplorer);
+  const explorerSettings = useSettingsStore((s) => s.explorer);
   const fallbackId = useId();
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = paneId ? `file-explorer-${paneId}` : `file-explorer-${fallbackId}`;
+  const instanceId = paneId ? `explorer-${paneId}` : `explorer-${fallbackId}`;
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
 
   // Use file explorer's shellProfile setting, or fall back to defaultProfile
-  const profileName = fileExplorerSettings.shellProfile || defaultProfile || FALLBACK_PROFILE;
+  const profileName = explorerSettings.shellProfile || defaultProfile || FALLBACK_PROFILE;
   const profileSyncCwd = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
   );
@@ -122,7 +122,7 @@ function FileExplorerViewWithSyncCwd({
   const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
 
   return (
-    <FileExplorerView
+    <ExplorerView
       instanceId={instanceId}
       paneId={paneId}
       profile={profileName}
@@ -215,10 +215,10 @@ export function ViewRenderer({
         </div>
       );
     }
-    case "FileExplorerView":
+    case "ExplorerView":
       return (
-        <div data-testid="view-file-explorer" className="h-full">
-          <FileExplorerViewWithSyncCwd
+        <div data-testid="view-explorer" className="h-full">
+          <ExplorerViewWithSyncCwd
             viewConfig={viewConfig}
             workspaceId={workspaceId}
             paneId={paneId}

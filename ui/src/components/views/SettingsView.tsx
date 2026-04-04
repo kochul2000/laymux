@@ -16,7 +16,7 @@ import {
   type ColorScheme,
   type Keybinding,
 } from "@/stores/settings-store";
-import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
+import type { ExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 
@@ -1529,12 +1529,12 @@ function ClaudeSection() {
 
 // -- Section: Issue Reporter --
 
-function FileExplorerSection() {
-  const storeFileExplorer = useSettingsStore((s) => s.fileExplorer);
-  const setFileExplorer = useSettingsStore((s) => s.setFileExplorer);
+function ExplorerSection() {
+  const storeExplorer = useSettingsStore((s) => s.explorer);
+  const setExplorer = useSettingsStore((s) => s.setExplorer);
   const profiles = useSettingsStore((s) => s.profiles);
-  const [fe, setDraftFe] = useDraft("fileExplorer", storeFileExplorer, (v) => setFileExplorer(v));
-  const updateFe = (partial: Partial<FileExplorerSettings>) =>
+  const [fe, setDraftFe] = useDraft("explorer", storeExplorer, (v) => setExplorer(v));
+  const updateFe = (partial: Partial<ExplorerSettings>) =>
     setDraftFe((prev) => ({ ...prev, ...partial }));
 
   const addViewer = () =>
@@ -1550,7 +1550,7 @@ function FileExplorerSection() {
 
   return (
     <div>
-      <SectionTitle>File Explorer</SectionTitle>
+      <SectionTitle>Explorer</SectionTitle>
 
       <div style={cardStyle} className="p-4">
         {/* Shell Profile */}
@@ -2699,14 +2699,14 @@ export function SettingsView() {
             Memo
           </button>
           <button
-            data-testid="nav-fileExplorer"
+            data-testid="nav-explorer"
             className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("fileExplorer")}
-            onClick={() => setActiveNav("fileExplorer")}
-            onMouseEnter={() => setNavHover("fileExplorer")}
+            style={navBtnStyle("explorer")}
+            onClick={() => setActiveNav("explorer")}
+            onMouseEnter={() => setNavHover("explorer")}
             onMouseLeave={() => setNavHover(null)}
           >
-            File Explorer
+            Explorer
           </button>
           <button
             data-testid="nav-issueReporter"
@@ -2807,7 +2807,7 @@ export function SettingsView() {
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "memo" && <MemoSection />}
-            {activeNav === "fileExplorer" && <FileExplorerSection />}
+            {activeNav === "explorer" && <ExplorerSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
           </div>
 

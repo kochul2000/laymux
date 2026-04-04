@@ -151,7 +151,7 @@ Workspace (Independent)
 | `SettingsView` | Dock only (또는 모달) | 설정 화면 |
 | `TerminalView` | 자유 | WSL / PowerShell 실행 |
 | `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장 |
-| `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. 백그라운드 셸로 `ls` 실행, 파일 뷰어(텍스트/이미지/터미널) 지원 |
+| `ExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. 백그라운드 셸로 `ls` 실행, 파일 뷰어(텍스트/이미지/터미널) 지원 |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |
 
 ### 6.2 EmptyView

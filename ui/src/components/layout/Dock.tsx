@@ -24,7 +24,7 @@ const viewIcons: Record<ViewType, string> = {
   SettingsView: "\u2699",
   TerminalView: ">_",
   MemoView: "\u270e",
-  FileExplorerView: "\ud83d\udcc2",
+  ExplorerView: "\ud83d\udcc2",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
 };
@@ -141,7 +141,7 @@ export function Dock({
             onToggleCwdSend:
               singlePaneId &&
               onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "ExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -151,7 +151,7 @@ export function Dock({
             onToggleCwdReceive:
               singlePaneId &&
               onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
+              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "ExplorerView")
                 ? () =>
                     onSetPaneView(singlePaneId, {
                       ...panes[0].view,
@@ -285,7 +285,7 @@ function DockGrid({
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
                   onSetPaneView &&
-                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
+                  (pane.view.type === "TerminalView" || pane.view.type === "ExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
@@ -294,7 +294,7 @@ function DockGrid({
                     : undefined,
                 onToggleCwdReceive:
                   onSetPaneView &&
-                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
+                  (pane.view.type === "TerminalView" || pane.view.type === "ExplorerView")
                     ? () =>
                         onSetPaneView(pane.id, {
                           ...pane.view,
