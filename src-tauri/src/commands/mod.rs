@@ -1381,8 +1381,11 @@ pub fn open_settings_file() -> Result<(), String> {
 pub enum FileViewerContent {
     /// Text file — content included inline.
     Text { content: String, truncated: bool },
-    /// Image file — use convertFileSrc on the path.
-    Image { path: String },
+    /// Image file — inline data URL (base64).
+    Image {
+        #[serde(rename = "dataUrl")]
+        data_url: String,
+    },
     /// Binary/unsupported — show info only.
     Binary { size: u64 },
 }
@@ -1436,7 +1439,14 @@ pub fn read_file_for_viewer(
     path: String,
     max_bytes: Option<usize>,
 ) -> Result<FileViewerContent, String> {
-    let file_path = std::path::Path::new(&path);
+    // Resolve WSL paths on Windows
+    let distro = if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
+        get_default_wsl_distro()
+    } else {
+        None
+    };
+    let resolved = resolve_path_for_windows(&path, distro.as_deref());
+    let file_path = std::path::Path::new(&resolved);
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
@@ -1444,10 +1454,25 @@ pub fn read_file_for_viewer(
         .unwrap_or_default();
 
     if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-        return Ok(FileViewerContent::Image { path });
+        // Read image and return as data URL (convertFileSrc can't handle WSL UNC paths)
+        let bytes = std::fs::read(&resolved).map_err(|e| format!("Cannot read image: {e}"))?;
+        let mime = match ext.as_str() {
+            ".png" => "image/png",
+            ".jpg" | ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".svg" => "image/svg+xml",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".ico" => "image/x-icon",
+            _ => "application/octet-stream",
+        };
+        let b64 = base64_encode(&bytes);
+        return Ok(FileViewerContent::Image {
+            data_url: format!("data:{mime};base64,{b64}"),
+        });
     }
 
-    let metadata = std::fs::metadata(&path).map_err(|e| format!("Cannot stat file: {e}"))?;
+    let metadata = std::fs::metadata(&resolved).map_err(|e| format!("Cannot stat file: {e}"))?;
     let size = metadata.len();
     let limit = max_bytes.unwrap_or(1_048_576) as u64; // 1MB default
 
@@ -1463,7 +1488,7 @@ pub fn read_file_for_viewer(
     let mut buf = vec![0u8; read_limit];
     {
         use std::io::Read;
-        let mut f = std::fs::File::open(&path).map_err(|e| format!("Cannot open file: {e}"))?;
+        let mut f = std::fs::File::open(&resolved).map_err(|e| format!("Cannot open file: {e}"))?;
         f.read_exact(&mut buf)
             .map_err(|e| format!("Cannot read file: {e}"))?;
     }
@@ -1482,6 +1507,158 @@ pub fn read_file_for_viewer(
         }
         Err(_) => Ok(FileViewerContent::Binary { size }),
     }
+}
+
+/// A single directory entry returned by `list_directory`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntry {
+    pub name: String,
+    pub is_directory: bool,
+    pub is_symlink: bool,
+    pub is_executable: bool,
+    pub size: u64,
+}
+
+/// Convert a Linux-style CWD path to a Windows-accessible path.
+/// - `/mnt/c/Users/...` → `C:\Users\...` (WSL mount)
+/// - `/home/user/...` + distro → `\\wsl.localhost\Distro\home\user\...` (WSL native)
+/// - `C:\Users\...` → unchanged (already Windows)
+fn resolve_path_for_windows(path: &str, wsl_distro: Option<&str>) -> String {
+    // Already a Windows path
+    if path.len() >= 2 && path.as_bytes()[1] == b':' {
+        return path.to_string();
+    }
+    // UNC path
+    if path.starts_with("\\\\") {
+        return path.to_string();
+    }
+    // /mnt/x/... → X:\...
+    if path.starts_with("/mnt/") && path.len() >= 6 && path.as_bytes()[5].is_ascii_alphabetic() {
+        let drive = path.as_bytes()[5].to_ascii_uppercase() as char;
+        let rest = if path.len() > 6 { &path[6..] } else { "" };
+        return format!("{}:{}", drive, rest.replace('/', "\\"));
+    }
+    // Linux path with WSL distro → UNC
+    if let Some(distro) = wsl_distro {
+        return format!("\\\\wsl.localhost\\{}{}", distro, path.replace('/', "\\"));
+    }
+    // Fallback: try as-is (may fail on Windows)
+    path.to_string()
+}
+
+/// Detect the default WSL distro name (cached per-call; fast because wsl.exe is local).
+#[cfg(windows)]
+fn get_default_wsl_distro() -> Option<String> {
+    let output = crate::process::headless_command("wsl.exe")
+        .args(["--list", "--quiet"])
+        .output()
+        .ok()?;
+    // wsl.exe outputs UTF-16LE — decode it properly
+    let text = if output.stdout.len() >= 2 && output.stdout[0] == 0xFF && output.stdout[1] == 0xFE {
+        // UTF-16LE with BOM
+        let u16s: Vec<u16> = output.stdout[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&u16s)
+    } else {
+        // Try as UTF-16LE without BOM (common for wsl.exe)
+        let u16s: Vec<u16> = output
+            .stdout
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let decoded = String::from_utf16_lossy(&u16s);
+        // If decoding looks like gibberish, fall back to UTF-8
+        if decoded.chars().any(|c| c == '\0') {
+            String::from_utf8_lossy(&output.stdout).to_string()
+        } else {
+            decoded
+        }
+    };
+    // First non-empty line is the default distro
+    text.lines()
+        .map(|l| l.trim().trim_start_matches('\u{feff}').trim_matches('\0'))
+        .find(|l| !l.is_empty())
+        .map(|l| l.to_string())
+}
+
+#[cfg(not(windows))]
+fn get_default_wsl_distro() -> Option<String> {
+    None
+}
+
+/// List directory contents and return structured metadata for each entry.
+#[tauri::command]
+pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
+    // On Windows, resolve Linux paths to UNC paths
+    let distro = wsl_distro.or_else(|| {
+        // Auto-detect WSL distro if path looks like a Linux path
+        if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
+            get_default_wsl_distro()
+        } else {
+            None
+        }
+    });
+    let resolved = resolve_path_for_windows(&path, distro.as_deref());
+    let dir_path = std::path::Path::new(&resolved);
+    let entries = std::fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
+
+    let mut result = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue, // skip unreadable entries
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+
+        // Use symlink_metadata to detect symlinks (metadata follows symlinks)
+        let sym_meta = entry.path().symlink_metadata();
+        let is_symlink = sym_meta.as_ref().map(|m| m.is_symlink()).unwrap_or(false);
+
+        // Follow symlinks for the actual file type and size
+        let meta = entry.path().metadata();
+        let is_directory = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+
+        // Check executable bit (Unix only)
+        #[cfg(unix)]
+        let is_executable = {
+            use std::os::unix::fs::PermissionsExt;
+            meta.as_ref()
+                .map(|m| !m.is_dir() && (m.permissions().mode() & 0o111) != 0)
+                .unwrap_or(false)
+        };
+        #[cfg(not(unix))]
+        let is_executable = {
+            // On Windows, check common executable extensions
+            let ext = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            !is_directory && matches!(ext.as_str(), "exe" | "cmd" | "bat" | "ps1" | "com")
+        };
+
+        result.push(DirEntry {
+            name,
+            is_directory,
+            is_symlink,
+            is_executable,
+            size,
+        });
+    }
+
+    // Sort: directories first, then alphabetically (case-insensitive)
+    result.sort_by(|a, b| {
+        b.is_directory
+            .cmp(&a.is_directory)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(result)
 }
 
 /// Simple base64 encoder (no external crate needed).
@@ -5128,5 +5305,80 @@ mod tests {
         let sessions = read_claude_session_files(tmp.path(), Some(0));
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "ancient");
+    }
+
+    #[test]
+    fn resolve_path_for_windows_passthrough() {
+        assert_eq!(
+            resolve_path_for_windows("C:\\Users\\me", None),
+            "C:\\Users\\me"
+        );
+        assert_eq!(
+            resolve_path_for_windows("\\\\server\\share", None),
+            "\\\\server\\share"
+        );
+    }
+
+    #[test]
+    fn resolve_path_for_windows_mnt_to_drive() {
+        assert_eq!(
+            resolve_path_for_windows("/mnt/c/Users/me", None),
+            "C:\\Users\\me"
+        );
+        assert_eq!(resolve_path_for_windows("/mnt/d/data", None), "D:\\data");
+    }
+
+    #[test]
+    fn resolve_path_for_windows_wsl_unc() {
+        assert_eq!(
+            resolve_path_for_windows("/home/user", Some("Ubuntu-22.04")),
+            "\\\\wsl.localhost\\Ubuntu-22.04\\home\\user"
+        );
+    }
+
+    #[test]
+    #[test]
+    fn file_viewer_content_image_serializes_data_url() {
+        let content = FileViewerContent::Image {
+            data_url: "data:image/png;base64,abc".into(),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains("\"dataUrl\""));
+        assert!(json.contains("\"kind\":\"image\""));
+    }
+
+    fn list_directory_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = list_directory(dir.path().to_string_lossy().into_owned(), None).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn list_directory_mixed_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+        std::fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        std::fs::write(dir.path().join("another.rs"), "fn main() {}").unwrap();
+
+        let result = list_directory(dir.path().to_string_lossy().into_owned(), None).unwrap();
+        assert_eq!(result.len(), 3);
+
+        // Directories should come first
+        assert!(result[0].is_directory);
+        assert_eq!(result[0].name, "subdir");
+
+        // Files sorted alphabetically after directories
+        assert!(!result[1].is_directory);
+        assert!(!result[2].is_directory);
+        // "another.rs" < "file.txt" alphabetically
+        assert_eq!(result[1].name, "another.rs");
+        assert_eq!(result[2].name, "file.txt");
+        assert_eq!(result[2].size, 5); // "hello"
+    }
+
+    #[test]
+    fn list_directory_nonexistent_path() {
+        let result = list_directory("/this/path/does/not/exist/at/all".into(), None);
+        assert!(result.is_err());
     }
 }

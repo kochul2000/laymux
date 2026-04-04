@@ -1,57 +1,24 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FileExplorerView } from "./FileExplorerView";
-import {
-  createTerminalSession,
-  writeToTerminal,
-  closeTerminalSession,
-  clipboardWriteText,
-  readFileForViewer,
-} from "@/lib/tauri-api";
+import { clipboardWriteText, readFileForViewer, listDirectory } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 // --- Mocks ---
 
-let outputCallback: ((data: Uint8Array) => void) | null = null;
-let cwdCallback: ((data: { terminalId: string; cwd: string }) => void) | null = null;
-
 vi.mock("@/lib/tauri-api", () => ({
-  createTerminalSession: vi.fn().mockResolvedValue({ id: "test" }),
-  writeToTerminal: vi.fn().mockResolvedValue(undefined),
-  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
-  onTerminalOutput: vi.fn().mockImplementation((_id: string, cb: (data: Uint8Array) => void) => {
-    outputCallback = cb;
-    return Promise.resolve(vi.fn());
-  }),
-  onTerminalCwdChanged: vi
-    .fn()
-    .mockImplementation((cb: (data: { terminalId: string; cwd: string }) => void) => {
-      cwdCallback = cb;
-      return Promise.resolve(vi.fn());
-    }),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
+  listDirectory: vi.fn().mockResolvedValue([]),
   handleLxMessage: vi.fn().mockResolvedValue({ success: true, error: null }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
-  convertFileSrc: vi.fn((p: string) => `asset://${p}`),
 }));
-
-function sendOutput(text: string) {
-  if (outputCallback) {
-    outputCallback(new TextEncoder().encode(text));
-  }
-}
-
-function sendCwdChange(terminalId: string, cwd: string) {
-  if (cwdCallback) {
-    cwdCallback({ terminalId, cwd });
-  }
-}
 
 const defaultProps = {
   instanceId: "file-explorer-test-1",
@@ -62,23 +29,29 @@ const defaultProps = {
   lastCwd: "/home/user",
 };
 
-const lsSentinel = "___LXFE_END___";
+/** Mock directory entries for testing. */
+const mockDirEntries = [
+  { name: "subdir", isDirectory: true, isSymlink: false, isExecutable: false, size: 0 },
+  { name: "a.txt", isDirectory: false, isSymlink: false, isExecutable: false, size: 100 },
+  { name: "b.txt", isDirectory: false, isSymlink: false, isExecutable: false, size: 200 },
+  { name: "c.txt", isDirectory: false, isSymlink: false, isExecutable: false, size: 300 },
+];
 
-function simulateLsResponse(files: string) {
-  sendOutput(`ls; echo "${lsSentinel}"\n${files}\n${lsSentinel}\n`);
+function mockListDir(entries = mockDirEntries) {
+  vi.mocked(listDirectory).mockResolvedValue(entries);
 }
 
 describe("FileExplorerView", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    outputCallback = null;
-    cwdCallback = null;
-    vi.mocked(createTerminalSession).mockClear();
-    vi.mocked(writeToTerminal).mockClear();
-    vi.mocked(closeTerminalSession).mockClear();
     vi.mocked(clipboardWriteText).mockClear();
     vi.mocked(readFileForViewer).mockClear();
+    vi.mocked(listDirectory).mockClear();
+    mockListDir();
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalStore.setState({ instances: [] });
+    // jsdom doesn't implement scrollIntoView
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   afterEach(() => {
@@ -90,31 +63,6 @@ describe("FileExplorerView", () => {
     expect(screen.getByTestId("file-explorer-view")).toBeInTheDocument();
   });
 
-  it("creates background shell session on mount", async () => {
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-    expect(createTerminalSession).toHaveBeenCalledWith(
-      "file-explorer-test-1",
-      "WSL",
-      200,
-      50,
-      "ws-1",
-      true,
-      "/home/user",
-    );
-  });
-
-  it("closes shell session on unmount", async () => {
-    const { unmount } = render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-    unmount();
-    expect(closeTerminalSession).toHaveBeenCalledWith("file-explorer-test-1");
-  });
-
   it("shows path bar with current cwd", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
@@ -123,19 +71,19 @@ describe("FileExplorerView", () => {
     expect(screen.getByTestId("file-explorer-path-bar")).toHaveTextContent("/home/user");
   });
 
-  it("parses ls output and shows file entries", async () => {
+  it("calls listDirectory and shows entries", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
-    act(() => {
-      simulateLsResponse("dir1/\nfile.txt\nscript.sh*");
-    });
-
-    expect(screen.getByTestId("file-explorer-item-0")).toHaveTextContent("dir1/");
-    expect(screen.getByTestId("file-explorer-item-1")).toHaveTextContent("file.txt");
-    expect(screen.getByTestId("file-explorer-item-2")).toHaveTextContent("script.sh*");
+    expect(listDirectory).toHaveBeenCalledWith("/home/user");
+    // item-0 is "..", then actual entries
+    expect(screen.getByTestId("file-explorer-item-0")).toHaveTextContent("..");
+    expect(screen.getByTestId("file-explorer-item-1")).toHaveTextContent("subdir/");
+    expect(screen.getByTestId("file-explorer-item-2")).toHaveTextContent("a.txt");
+    expect(screen.getByTestId("file-explorer-item-3")).toHaveTextContent("b.txt");
+    expect(screen.getByTestId("file-explorer-item-4")).toHaveTextContent("c.txt");
   });
 
   it("click selects single item", async () => {
@@ -143,7 +91,6 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt"));
 
     fireEvent.click(screen.getByTestId("file-explorer-item-1"));
     expect(screen.getByTestId("file-explorer-item-1").dataset.selected).toBe("true");
@@ -155,7 +102,6 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt"));
 
     fireEvent.click(screen.getByTestId("file-explorer-item-0"));
     fireEvent.click(screen.getByTestId("file-explorer-item-2"), { ctrlKey: true });
@@ -169,7 +115,6 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt\nd.txt"));
 
     fireEvent.click(screen.getByTestId("file-explorer-item-1"));
     fireEvent.click(screen.getByTestId("file-explorer-item-3"), { shiftKey: true });
@@ -184,7 +129,6 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt"));
 
     const view = screen.getByTestId("file-explorer-view");
     fireEvent.keyDown(view, { key: "ArrowDown" });
@@ -197,10 +141,8 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt"));
 
     const view = screen.getByTestId("file-explorer-view");
-    // Move down first, then up
     fireEvent.keyDown(view, { key: "ArrowDown" });
     fireEvent.keyDown(view, { key: "ArrowDown" });
     fireEvent.keyDown(view, { key: "ArrowUp" });
@@ -212,29 +154,10 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("subdir/\nfile.txt"));
-    vi.mocked(writeToTerminal).mockClear();
+    vi.mocked(listDirectory).mockClear();
 
     const view = screen.getByTestId("file-explorer-view");
-    // Focus is on index 0 (subdir/), press Enter
-    fireEvent.keyDown(view, { key: "Enter" });
-
-    // Should send cd command
-    expect(writeToTerminal).toHaveBeenCalledWith(
-      "file-explorer-test-1",
-      expect.stringContaining("cd"),
-    );
-  });
-
-  it("Enter activates file (opens viewer)", async () => {
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-    act(() => simulateLsResponse("subdir/\nfile.txt"));
-
-    const view = screen.getByTestId("file-explorer-view");
-    // Move to file.txt (index 1)
+    // Focus is on index 0 (..); move to index 1 (subdir), press Enter
     fireEvent.keyDown(view, { key: "ArrowDown" });
     fireEvent.keyDown(view, { key: "Enter" });
 
@@ -242,9 +165,28 @@ describe("FileExplorerView", () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/file.txt");
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
+  });
+
+  it("Enter activates file (opens viewer)", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    const view = screen.getByTestId("file-explorer-view");
+    // Move to a.txt (index 2: past ".." and "subdir")
+    fireEvent.keyDown(view, { key: "ArrowDown" });
+    fireEvent.keyDown(view, { key: "ArrowDown" });
+    fireEvent.keyDown(view, { key: "Enter" });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
     expect(screen.getByTestId("file-explorer-viewer-titlebar")).toHaveTextContent(
-      "/home/user/file.txt",
+      "/home/user/a.txt",
     );
   });
 
@@ -253,14 +195,15 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("subdir/\nfile.txt"));
-    vi.mocked(writeToTerminal).mockClear();
+    vi.mocked(listDirectory).mockClear();
 
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0"));
-    expect(writeToTerminal).toHaveBeenCalledWith(
-      "file-explorer-test-1",
-      expect.stringContaining("cd"),
-    );
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1")); // subdir (index 1, after "..")
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
   });
 
   it("double-click file opens viewer", async () => {
@@ -268,9 +211,8 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("subdir/\nfile.txt"));
 
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt (index 2)
 
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -285,10 +227,9 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt\nc.txt"));
 
-    fireEvent.click(screen.getByTestId("file-explorer-item-0"));
-    fireEvent.click(screen.getByTestId("file-explorer-item-2"), { ctrlKey: true });
+    fireEvent.click(screen.getByTestId("file-explorer-item-2")); // a.txt (index 2)
+    fireEvent.click(screen.getByTestId("file-explorer-item-4"), { ctrlKey: true }); // c.txt (index 4)
 
     const view = screen.getByTestId("file-explorer-view");
     fireEvent.keyDown(view, { key: "c", ctrlKey: true });
@@ -301,9 +242,8 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt\nb.txt"));
 
-    fireEvent.click(screen.getByTestId("file-explorer-item-0"));
+    fireEvent.click(screen.getByTestId("file-explorer-item-2")); // a.txt (index 2)
     vi.mocked(clipboardWriteText).mockClear();
 
     const view = screen.getByTestId("file-explorer-view");
@@ -312,23 +252,31 @@ describe("FileExplorerView", () => {
     expect(clipboardWriteText).toHaveBeenCalledWith("/home/user/a.txt");
   });
 
-  it("sync-cwd event refreshes listing", async () => {
+  it("syncGroup CWD change from terminal store refreshes listing", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("a.txt"));
-    vi.mocked(writeToTerminal).mockClear();
+    vi.mocked(listDirectory).mockClear();
 
+    // Simulate a terminal in the same syncGroup updating its CWD
     act(() => {
-      sendCwdChange("file-explorer-test-1", "/home/user/other");
+      useTerminalStore.getState().registerInstance({
+        id: "terminal-1",
+        profile: "WSL",
+        syncGroup: "ws-1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("terminal-1", {
+        cwd: "/home/user/other",
+      });
     });
 
-    // Should trigger a new ls command
-    expect(writeToTerminal).toHaveBeenCalledWith(
-      "file-explorer-test-1",
-      expect.stringContaining("ls"),
-    );
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
   });
 
   it("viewer close button returns to listing", async () => {
@@ -336,17 +284,14 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("file.txt"));
 
-    // Open viewer
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0"));
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
     expect(screen.getByTestId("file-explorer-viewer-titlebar")).toBeInTheDocument();
 
-    // Close viewer
     fireEvent.click(screen.getByTestId("file-explorer-viewer-close"));
     expect(screen.getByTestId("file-explorer-list")).toBeInTheDocument();
   });
@@ -356,10 +301,8 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("file.txt"));
 
-    // Open viewer
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0"));
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
     await act(async () => {
       await vi.runAllTimersAsync();
     });
@@ -379,9 +322,8 @@ describe("FileExplorerView", () => {
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("readme.txt"));
 
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0"));
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
     await act(async () => {
       await vi.runAllTimersAsync();
     });
@@ -392,19 +334,156 @@ describe("FileExplorerView", () => {
   it("web viewer shows image", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "image",
-      path: "/home/user/photo.png",
+      dataUrl: "data:image/png;base64,abc123",
     });
+    mockListDir([
+      { name: "photo.png", isDirectory: false, isSymlink: false, isExecutable: false, size: 5000 },
+    ]);
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
-    act(() => simulateLsResponse("photo.png"));
 
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0"));
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1")); // photo.png (after "..")
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
     expect(screen.getByTestId("file-explorer-viewer-image")).toBeInTheDocument();
+  });
+
+  it("shows empty state when no CWD available", async () => {
+    render(<FileExplorerView {...defaultProps} lastCwd="" />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // No CWD → should not be stuck at Loading
+    expect(screen.getByTestId("file-explorer-list")).toBeInTheDocument();
+  });
+
+  it("shows .. entry at top of file list", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // First item should be ".."
+    expect(screen.getByTestId("file-explorer-item-0")).toHaveTextContent("..");
+    // Original first entry (subdir) is now at index 1
+    expect(screen.getByTestId("file-explorer-item-1")).toHaveTextContent("subdir/");
+  });
+
+  it("double-click .. navigates to parent directory", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-0")); // ".."
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home");
+  });
+
+  it("back button navigates to previous directory", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Navigate to subdir (double-click item-1 which is subdir after ".." at 0)
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    vi.mocked(listDirectory).mockClear();
+    // Click back button
+    fireEvent.click(screen.getByTestId("file-explorer-back"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home/user");
+  });
+
+  it("forward button navigates after going back", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Navigate to subdir
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Go back
+    fireEvent.click(screen.getByTestId("file-explorer-back"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    vi.mocked(listDirectory).mockClear();
+    // Go forward
+    fireEvent.click(screen.getByTestId("file-explorer-forward"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
+  });
+
+  it("Alt+Left goes back, Alt+Right goes forward", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Navigate to subdir
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    const view = screen.getByTestId("file-explorer-view");
+    vi.mocked(listDirectory).mockClear();
+
+    // Alt+Left = back
+    fireEvent.keyDown(view, { key: "ArrowLeft", altKey: true });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(listDirectory).toHaveBeenCalledWith("/home/user");
+
+    vi.mocked(listDirectory).mockClear();
+    // Alt+Right = forward
+    fireEvent.keyDown(view, { key: "ArrowRight", altKey: true });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
+  });
+
+  it("Backspace navigates to parent", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    const view = screen.getByTestId("file-explorer-view");
+    fireEvent.keyDown(view, { key: "Backspace" });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home");
   });
 });

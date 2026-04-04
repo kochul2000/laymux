@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLsOutput, stripAnsi, shellEscape, joinPath } from "./file-explorer-parse";
+import { shellEscape, joinPath, parentPath } from "./file-explorer-parse";
 
 describe("shellEscape", () => {
   it("wraps simple string in single quotes", () => {
@@ -44,91 +44,28 @@ describe("joinPath", () => {
   });
 });
 
-describe("stripAnsi", () => {
-  it("strips CSI sequences", () => {
-    expect(stripAnsi("\x1b[32mhello\x1b[0m")).toBe("hello");
+describe("parentPath", () => {
+  it("returns parent of unix path", () => {
+    expect(parentPath("/home/user/project")).toBe("/home/user");
   });
 
-  it("strips OSC sequences", () => {
-    expect(stripAnsi("\x1b]0;title\x07text")).toBe("text");
+  it("returns root for single-level path", () => {
+    expect(parentPath("/home")).toBe("/");
   });
 
-  it("passes through plain text", () => {
-    expect(stripAnsi("plain text")).toBe("plain text");
-  });
-});
-
-describe("parseLsOutput", () => {
-  it("parses basic ls -F output", () => {
-    const output = "dir1/\nfile.txt\nscript.sh*\nlink@\n";
-    const entries = parseLsOutput(output);
-    expect(entries).toHaveLength(4);
-
-    expect(entries[0]).toEqual({
-      name: "dir1",
-      isDirectory: true,
-      isSymlink: false,
-      isExecutable: false,
-      rawLine: "dir1/",
-    });
-    expect(entries[1]).toEqual({
-      name: "file.txt",
-      isDirectory: false,
-      isSymlink: false,
-      isExecutable: false,
-      rawLine: "file.txt",
-    });
-    expect(entries[2]).toEqual({
-      name: "script.sh",
-      isDirectory: false,
-      isSymlink: false,
-      isExecutable: true,
-      rawLine: "script.sh*",
-    });
-    expect(entries[3]).toEqual({
-      name: "link",
-      isDirectory: false,
-      isSymlink: true,
-      isExecutable: false,
-      rawLine: "link@",
-    });
+  it("returns root for root", () => {
+    expect(parentPath("/")).toBe("/");
   });
 
-  it("skips empty lines", () => {
-    const output = "\nfile.txt\n\n";
-    const entries = parseLsOutput(output);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].name).toBe("file.txt");
+  it("handles trailing slash", () => {
+    expect(parentPath("/home/user/")).toBe("/home");
   });
 
-  it("skips total header from ls -l", () => {
-    const output = "total 42\nfile.txt\n";
-    const entries = parseLsOutput(output);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].name).toBe("file.txt");
+  it("returns empty for empty input", () => {
+    expect(parentPath("")).toBe("");
   });
 
-  it("strips ANSI colors before parsing", () => {
-    const output = "\x1b[34mdir/\x1b[0m\n\x1b[32mfile.txt\x1b[0m\n";
-    const entries = parseLsOutput(output);
-    expect(entries).toHaveLength(2);
-    expect(entries[0].name).toBe("dir");
-    expect(entries[0].isDirectory).toBe(true);
-    expect(entries[1].name).toBe("file.txt");
-  });
-
-  it("handles .. directory", () => {
-    const output = "../\n./\nfile.txt\n";
-    const entries = parseLsOutput(output);
-    expect(entries).toHaveLength(3);
-    expect(entries[0].name).toBe("..");
-    expect(entries[0].isDirectory).toBe(true);
-    expect(entries[1].name).toBe(".");
-    expect(entries[1].isDirectory).toBe(true);
-  });
-
-  it("returns empty array for empty input", () => {
-    expect(parseLsOutput("")).toEqual([]);
-    expect(parseLsOutput("\n\n")).toEqual([]);
+  it("handles windows paths", () => {
+    expect(parentPath("C:\\Users\\me\\project")).toBe("C:\\Users\\me");
   });
 });

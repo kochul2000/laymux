@@ -350,7 +350,6 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
 
 const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
   shellProfile: "",
-  lsCommand: "ls",
   paddingTop: 8,
   paddingRight: 8,
   paddingBottom: 8,

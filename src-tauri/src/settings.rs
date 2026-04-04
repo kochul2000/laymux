@@ -562,9 +562,6 @@ pub struct FileExplorerSettings {
     /// Shell profile name for background shell. Empty = use defaultProfile.
     #[serde(default)]
     pub shell_profile: String,
-    /// Command to list directory contents.
-    #[serde(default = "default_ls_command")]
-    pub ls_command: String,
     #[serde(default = "default_view_padding")]
     pub padding_top: u32,
     #[serde(default = "default_view_padding")]
@@ -587,15 +584,10 @@ pub struct FileExplorerSettings {
     pub extension_viewers: Vec<ExtensionViewer>,
 }
 
-fn default_ls_command() -> String {
-    "ls".into()
-}
-
 impl Default for FileExplorerSettings {
     fn default() -> Self {
         Self {
             shell_profile: String::new(),
-            ls_command: default_ls_command(),
             padding_top: 8,
             padding_right: 8,
             padding_bottom: 8,
@@ -1878,7 +1870,6 @@ mod tests {
     fn file_explorer_settings_default() {
         let settings = Settings::default();
         assert_eq!(settings.file_explorer.shell_profile, "");
-        assert_eq!(settings.file_explorer.ls_command, "ls");
         assert_eq!(settings.file_explorer.padding_top, 8);
         assert_eq!(settings.file_explorer.font_family, "");
         assert_eq!(settings.file_explorer.font_size, 13);
@@ -1890,7 +1881,6 @@ mod tests {
     fn file_explorer_settings_deserialize() {
         let json = r#"{"fileExplorer": {
             "shellProfile": "WSL",
-            "lsCommand": "ls -la",
             "fontFamily": "Consolas",
             "fontSize": 14,
             "copyOnSelect": true,
@@ -1900,7 +1890,6 @@ mod tests {
         }}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.file_explorer.shell_profile, "WSL");
-        assert_eq!(settings.file_explorer.ls_command, "ls -la");
         assert_eq!(settings.file_explorer.font_family, "Consolas");
         assert_eq!(settings.file_explorer.font_size, 14);
         assert!(settings.file_explorer.copy_on_select);
@@ -1916,7 +1905,14 @@ mod tests {
     fn file_explorer_settings_default_when_absent() {
         let json = r#"{}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.file_explorer.ls_command, "ls");
         assert_eq!(settings.file_explorer.font_size, 13);
+    }
+
+    #[test]
+    fn file_explorer_settings_ignores_unknown_fields() {
+        // Old settings.json with lsCommand should still deserialize fine
+        let json = r#"{"fileExplorer": {"lsCommand": "ls -F", "fontSize": 15}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.file_explorer.font_size, 15);
     }
 }

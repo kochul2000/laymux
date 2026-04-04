@@ -1556,7 +1556,7 @@ function FileExplorerSection() {
         {/* Shell Profile */}
         <SettingRow
           label="Shell Profile"
-          desc="ls/cd 실행에 사용할 쉘 프로파일. 비우면 기본 프로파일 사용."
+          desc="CWD 동기화에 사용할 쉘 프로파일. 비우면 기본 프로파일 사용."
         >
           <FocusSelect
             data-testid="fe-shell-profile"
@@ -1571,17 +1571,6 @@ function FileExplorerSection() {
               </option>
             ))}
           </FocusSelect>
-        </SettingRow>
-
-        {/* ls Command */}
-        <SettingRow label="ls Command" desc="디렉터리 목록을 가져오는 명령어. 기본: ls">
-          <FocusInput
-            data-testid="fe-ls-command"
-            className={inputCls}
-            placeholder="ls"
-            value={fe.lsCommand}
-            onChange={(e) => updateFe({ lsCommand: e.target.value })}
-          />
         </SettingRow>
 
         {/* Font */}

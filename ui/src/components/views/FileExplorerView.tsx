@@ -1,23 +1,15 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import {
-  createTerminalSession,
-  writeToTerminal,
-  closeTerminalSession,
-  onTerminalOutput,
-  onTerminalCwdChanged,
   clipboardWriteText,
   readFileForViewer,
+  listDirectory,
   handleLxMessage,
+  type DirEntry,
 } from "@/lib/tauri-api";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import {
-  parseLsOutput,
-  stripAnsi,
-  shellEscape,
-  joinPath,
-  type FileEntry,
-} from "@/lib/file-explorer-parse";
+// convertFileSrc no longer needed — images are returned as data URLs
+import { shellEscape, joinPath, parentPath } from "@/lib/file-explorer-parse";
 import { TerminalView } from "./TerminalView";
 
 export interface FileExplorerViewProps {
@@ -31,9 +23,6 @@ export interface FileExplorerViewProps {
   isFocused?: boolean;
   lastCwd?: string;
 }
-
-/** Sentinel marker to detect end of ls output. */
-const LS_SENTINEL = "___LXFE_END___";
 
 type ExplorerMode =
   | { type: "listing" }
@@ -53,7 +42,7 @@ export function FileExplorerView({
   const listRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.fileExplorer);
 
-  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<ExplorerMode>({ type: "listing" });
@@ -68,123 +57,159 @@ export function FileExplorerView({
     truncated?: boolean;
   } | null>(null);
 
-  // Track whether shell session is alive
-  const shellAliveRef = useRef(false);
-  const outputBufferRef = useRef("");
-  const cwdSendRef = useRef(cwdSend);
-  cwdSendRef.current = cwdSend;
-  // Pending listing refresh while in viewer mode
+  // --- History stack for back/forward navigation ---
+  const [history, setHistory] = useState<string[]>(lastCwd ? [lastCwd] : []);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const canGoBack = historyIndex > 0;
+  const canGoForward = historyIndex < history.length - 1;
+
+  const currentCwdRef = useRef(currentCwd);
+  currentCwdRef.current = currentCwd;
   const pendingRefreshRef = useRef(false);
 
-  // --- Background shell lifecycle ---
-  useEffect(() => {
-    let unlistenOutput: (() => void) | null = null;
-    let unlistenCwd: (() => void) | null = null;
-    let disposed = false;
+  // --- Subscribe to syncGroup CWD from terminal store ---
+  const groupCwd = useTerminalStore((s) => {
+    if (!cwdReceive || !syncGroup) return undefined;
+    const groupTerminals = s.instances.filter((t) => t.syncGroup === syncGroup && t.cwd);
+    if (groupTerminals.length === 0) return undefined;
+    const latest = groupTerminals.reduce((a, b) => (a.lastActivityAt > b.lastActivityAt ? a : b));
+    return latest.cwd;
+  });
 
-    async function init() {
-      try {
-        try {
-          await createTerminalSession(instanceId, profile, 200, 50, syncGroup, cwdReceive, lastCwd);
-        } catch (createErr) {
-          // Session may already exist from a previous HMR mount — close and retry
-          if (String(createErr).includes("already exists")) {
-            await closeTerminalSession(instanceId).catch(() => {});
-            await createTerminalSession(
-              instanceId,
-              profile,
-              200,
-              50,
-              syncGroup,
-              cwdReceive,
-              lastCwd,
-            );
-          } else {
-            throw createErr;
-          }
-        }
-        if (disposed) {
-          await closeTerminalSession(instanceId).catch(() => {});
-          return;
-        }
-        shellAliveRef.current = true;
-
-        // Listen for output
-        unlistenOutput = await onTerminalOutput(instanceId, (data) => {
-          const text = new TextDecoder().decode(data);
-          handleShellOutputRef.current(text);
-        });
-
-        // Listen for CWD changes from sync system
-        unlistenCwd = await onTerminalCwdChanged((data) => {
-          if (data.terminalId === instanceId) {
-            setCurrentCwd(data.cwd);
-            refreshListing();
-            // Propagate CWD to sync group if cwdSend is on
-            if (cwdSendRef.current && syncGroup) {
-              handleLxMessage(
-                JSON.stringify({
-                  action: "sync-cwd",
-                  path: data.cwd,
-                  terminal_id: instanceId,
-                  group_id: syncGroup,
-                }),
-              ).catch(() => {});
-            }
-          }
-        });
-
-        // Initial ls
-        refreshListing();
-      } catch (err) {
-        console.error("FileExplorer: Failed to create shell session", err);
-        setLoading(false);
-      }
-    }
-
-    init();
-
-    return () => {
-      disposed = true;
-      shellAliveRef.current = false;
-      unlistenOutput?.();
-      unlistenCwd?.();
-      closeTerminalSession(instanceId).catch(() => {});
+  // --- Prepend ".." entry to file list ---
+  const displayEntries = useMemo(() => {
+    if (!currentCwd || currentCwd === "/") return entries;
+    const parentEntry: DirEntry = {
+      name: "..",
+      isDirectory: true,
+      isSymlink: false,
+      isExecutable: false,
+      size: 0,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId, profile, syncGroup, cwdReceive]);
+    return [parentEntry, ...entries];
+  }, [entries, currentCwd]);
 
-  // --- Shell output handling (ref to avoid stale closure in useEffect) ---
-  const handleShellOutputRef = useRef((_text: string) => {});
-  handleShellOutputRef.current = (text: string) => {
-    outputBufferRef.current += text;
-    const stripped = stripAnsi(outputBufferRef.current);
-    // Match sentinel only at start of a line (avoids matching the command echo)
-    const sentinelIdx = stripped.indexOf("\n" + LS_SENTINEL);
-    if (sentinelIdx !== -1) {
-      const lsOutput = stripped.substring(0, sentinelIdx);
-      outputBufferRef.current = "";
-
-      // Skip the first line (command echo from PTY)
-      const lines = lsOutput.split("\n");
-      const cleanOutput = lines.slice(1).join("\n");
-
-      const parsed = parseLsOutput(cleanOutput);
-      setEntries(parsed);
-      setLoading(false);
+  // --- Refresh listing via Rust backend ---
+  const refreshListing = useCallback(async (cwd?: string) => {
+    const targetCwd = cwd ?? currentCwdRef.current;
+    if (!targetCwd) return;
+    setLoading(true);
+    try {
+      const result = await listDirectory(targetCwd);
+      setEntries(result);
       setFocusIndex(0);
       setSelectedIndices(new Set());
+    } catch (err) {
+      console.error("FileExplorer: Failed to list directory", err);
+      setEntries([]);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
-  // --- Refresh listing ---
-  const refreshListing = useCallback(() => {
-    if (!shellAliveRef.current) return;
-    outputBufferRef.current = "";
-    setLoading(true);
-    const cmd = `${settings.lsCommand}; echo "${LS_SENTINEL}"\n`;
-    writeToTerminal(instanceId, cmd).catch(console.error);
-  }, [instanceId, settings.lsCommand]);
+  // --- Navigate to a new CWD (pushes to history) ---
+  const navigateTo = useCallback(
+    (newCwd: string) => {
+      setCurrentCwd(newCwd);
+      refreshListing(newCwd);
+
+      // Push to history: truncate forward stack, then push
+      setHistory((prev) => [...prev.slice(0, historyIndex + 1), newCwd]);
+      setHistoryIndex((prev) => prev + 1);
+
+      // Propagate CWD to sync group
+      if (cwdSend && syncGroup) {
+        handleLxMessage(
+          JSON.stringify({
+            action: "sync-cwd",
+            path: newCwd,
+            terminal_id: instanceId,
+            group_id: syncGroup,
+          }),
+        ).catch(() => {});
+      }
+    },
+    [cwdSend, syncGroup, instanceId, refreshListing, historyIndex],
+  );
+
+  // --- Navigate to directory (resolve ".." or child) ---
+  const navigateToDir = useCallback(
+    (dirName: string) => {
+      const newCwd =
+        dirName === ".."
+          ? parentPath(currentCwdRef.current)
+          : joinPath(currentCwdRef.current, dirName);
+      if (newCwd) navigateTo(newCwd);
+    },
+    [navigateTo],
+  );
+
+  // --- Go back/forward in history ---
+  const goBack = useCallback(() => {
+    if (!canGoBack) return;
+    const newIndex = historyIndex - 1;
+    const target = history[newIndex];
+    setHistoryIndex(newIndex);
+    setCurrentCwd(target);
+    refreshListing(target);
+    if (cwdSend && syncGroup) {
+      handleLxMessage(
+        JSON.stringify({
+          action: "sync-cwd",
+          path: target,
+          terminal_id: instanceId,
+          group_id: syncGroup,
+        }),
+      ).catch(() => {});
+    }
+  }, [canGoBack, historyIndex, history, refreshListing, cwdSend, syncGroup, instanceId]);
+
+  const goForward = useCallback(() => {
+    if (!canGoForward) return;
+    const newIndex = historyIndex + 1;
+    const target = history[newIndex];
+    setHistoryIndex(newIndex);
+    setCurrentCwd(target);
+    refreshListing(target);
+    if (cwdSend && syncGroup) {
+      handleLxMessage(
+        JSON.stringify({
+          action: "sync-cwd",
+          path: target,
+          terminal_id: instanceId,
+          group_id: syncGroup,
+        }),
+      ).catch(() => {});
+    }
+  }, [canGoForward, historyIndex, history, refreshListing, cwdSend, syncGroup, instanceId]);
+
+  // --- React to syncGroup CWD changes ---
+  useEffect(() => {
+    if (groupCwd && groupCwd !== currentCwdRef.current) {
+      setCurrentCwd(groupCwd);
+      refreshListing(groupCwd);
+      // Push external CWD change to history
+      setHistory((prev) => [...prev.slice(0, historyIndex + 1), groupCwd]);
+      setHistoryIndex((prev) => prev + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupCwd, refreshListing]);
+
+  // --- Initial listing ---
+  useEffect(() => {
+    const initialCwd = lastCwd || groupCwd;
+    if (initialCwd) {
+      setCurrentCwd(initialCwd);
+      refreshListing(initialCwd);
+      if (!history.length) {
+        setHistory([initialCwd]);
+        setHistoryIndex(0);
+      }
+    } else {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --- Focus management ---
   useEffect(() => {
@@ -228,14 +253,14 @@ export function FileExplorerView({
     const paths = [...selectedIndices]
       .sort((a, b) => a - b)
       .map((i) => {
-        const entry = entries[i];
-        if (!entry) return "";
+        const entry = displayEntries[i];
+        if (!entry || entry.name === "..") return "";
         return joinPath(currentCwd, entry.name);
       })
       .filter(Boolean)
       .join("\n");
     if (paths) clipboardWriteText(paths).catch(console.error);
-  }, [selectedIndices, entries, currentCwd]);
+  }, [selectedIndices, displayEntries, currentCwd]);
 
   // --- Copy on select ---
   useEffect(() => {
@@ -244,37 +269,21 @@ export function FileExplorerView({
     }
   }, [settings.copyOnSelect, selectedIndices, copySelectedPaths]);
 
-  // --- Navigate to directory ---
-  const navigateToDir = useCallback(
-    (dirName: string) => {
-      if (!shellAliveRef.current) return;
-      writeToTerminal(instanceId, `cd ${shellEscape(dirName)}\n`).catch(console.error);
-    },
-    [instanceId],
-  );
-
   // --- Open file viewer ---
   const openFile = useCallback(
-    async (entry: FileEntry) => {
+    async (entry: DirEntry) => {
       const filePath = joinPath(currentCwd, entry.name);
 
-      // Check extension viewers setting
       const ext = entry.name.includes(".") ? "." + entry.name.split(".").pop()!.toLowerCase() : "";
       const viewer = settings.extensionViewers.find((v) =>
         v.extensions.some((e) => e.toLowerCase() === ext),
       );
 
       if (viewer) {
-        setMode({
-          type: "viewing",
-          filePath,
-          viewerType: "terminal",
-          command: viewer.command,
-        });
+        setMode({ type: "viewing", filePath, viewerType: "terminal", command: viewer.command });
         return;
       }
 
-      // Default: web viewer
       setMode({ type: "viewing", filePath, viewerType: "web" });
       try {
         const content = await readFileForViewer(filePath);
@@ -285,18 +294,12 @@ export function FileExplorerView({
             truncated: content.truncated,
           });
         } else if (content.kind === "image") {
-          setViewerContent({
-            kind: "image",
-            imageSrc: convertFileSrc(content.path),
-          });
+          setViewerContent({ kind: "image", imageSrc: content.dataUrl });
         } else {
           setViewerContent({ kind: "binary", size: content.size });
         }
       } catch (err) {
-        setViewerContent({
-          kind: "text",
-          content: `Error reading file: ${err}`,
-        });
+        setViewerContent({ kind: "text", content: `Error reading file: ${err}` });
       }
     },
     [currentCwd, settings.extensionViewers],
@@ -304,7 +307,7 @@ export function FileExplorerView({
 
   // --- Handle item activation (double-click or Enter) ---
   const activateEntry = useCallback(
-    (entry: FileEntry) => {
+    (entry: DirEntry) => {
       if (entry.isDirectory) {
         navigateToDir(entry.name);
       } else {
@@ -343,7 +346,19 @@ export function FileExplorerView({
         return;
       }
 
-      const len = entries.length;
+      // Alt+Left/Right for back/forward
+      if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        goBack();
+        return;
+      }
+      if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        goForward();
+        return;
+      }
+
+      const len = displayEntries.length;
       if (!len) return;
 
       switch (e.key) {
@@ -385,7 +400,7 @@ export function FileExplorerView({
         }
         case "Enter": {
           e.preventDefault();
-          const entry = entries[focusIndex];
+          const entry = displayEntries[focusIndex];
           if (entry) activateEntry(entry);
           break;
         }
@@ -401,11 +416,16 @@ export function FileExplorerView({
           }
           break;
         }
+        case "Backspace": {
+          e.preventDefault();
+          navigateToDir("..");
+          break;
+        }
       }
     },
     [
       mode.type,
-      entries,
+      displayEntries,
       focusIndex,
       selectSingle,
       selectRange,
@@ -413,6 +433,9 @@ export function FileExplorerView({
       closeViewer,
       copySelectedPaths,
       scrollToIndex,
+      goBack,
+      goForward,
+      navigateToDir,
     ],
   );
 
@@ -433,10 +456,10 @@ export function FileExplorerView({
   // --- Item double-click ---
   const handleItemDoubleClick = useCallback(
     (index: number) => {
-      const entry = entries[index];
+      const entry = displayEntries[index];
       if (entry) activateEntry(entry);
     },
-    [entries, activateEntry],
+    [displayEntries, activateEntry],
   );
 
   // --- Right-click context menu ---
@@ -462,6 +485,15 @@ export function FileExplorerView({
     }),
     [settings],
   );
+
+  const navBtnStyle = {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    padding: "0 4px",
+    fontSize: 14,
+    lineHeight: 1,
+  };
 
   // ===== RENDER =====
 
@@ -564,9 +596,9 @@ export function FileExplorerView({
       onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
     >
-      {/* Path bar */}
+      {/* Path bar with back/forward buttons */}
       <div
-        className="flex items-center shrink-0 px-3 border-b"
+        className="flex items-center shrink-0 px-1 border-b"
         style={{
           height: 28,
           borderColor: "var(--border)",
@@ -574,7 +606,33 @@ export function FileExplorerView({
         }}
         data-testid="file-explorer-path-bar"
       >
-        <span className="text-xs truncate" style={{ color: "var(--text-primary)" }}>
+        <button
+          onClick={goBack}
+          disabled={!canGoBack}
+          style={{
+            ...navBtnStyle,
+            color: canGoBack ? "var(--text-primary)" : "var(--text-secondary)",
+            opacity: canGoBack ? 1 : 0.3,
+          }}
+          data-testid="file-explorer-back"
+          title="Back (Alt+Left)"
+        >
+          ←
+        </button>
+        <button
+          onClick={goForward}
+          disabled={!canGoForward}
+          style={{
+            ...navBtnStyle,
+            color: canGoForward ? "var(--text-primary)" : "var(--text-secondary)",
+            opacity: canGoForward ? 1 : 0.3,
+          }}
+          data-testid="file-explorer-forward"
+          title="Forward (Alt+Right)"
+        >
+          →
+        </button>
+        <span className="text-xs truncate ml-1" style={{ color: "var(--text-primary)" }}>
           {currentCwd || "..."}
         </span>
       </div>
@@ -593,7 +651,7 @@ export function FileExplorerView({
           >
             Loading...
           </div>
-        ) : entries.length === 0 ? (
+        ) : displayEntries.length === 0 ? (
           <div
             className="flex items-center justify-center h-full"
             style={{ color: "var(--text-secondary)" }}
@@ -601,7 +659,7 @@ export function FileExplorerView({
             Empty directory
           </div>
         ) : (
-          entries.map((entry, i) => (
+          displayEntries.map((entry, i) => (
             <div
               key={`${entry.name}-${i}`}
               className="flex items-center px-2 cursor-pointer select-none"
@@ -631,8 +689,13 @@ export function FileExplorerView({
               onDoubleClick={() => handleItemDoubleClick(i)}
             >
               <span className="truncate text-xs">
-                {entry.isDirectory ? "📁 " : entry.isSymlink ? "🔗 " : "📄 "}
-                {entry.rawLine}
+                {entry.name === ".."
+                  ? "📁 .."
+                  : entry.isDirectory
+                    ? `📁 ${entry.name}/`
+                    : entry.isSymlink
+                      ? `🔗 ${entry.name}`
+                      : `📄 ${entry.name}`}
               </span>
             </div>
           ))
