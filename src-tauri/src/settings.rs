@@ -508,6 +508,9 @@ pub struct MemoSettings {
     /// Automatically copy selected text to clipboard (like terminal copyOnSelect).
     #[serde(default)]
     pub copy_on_select: bool,
+    /// Double-click to select entire paragraph (requires paragraph_copy enabled).
+    #[serde(default = "default_true")]
+    pub dbl_click_paragraph_select: bool,
 }
 
 impl Default for MemoSettings {
@@ -519,6 +522,7 @@ impl Default for MemoSettings {
             padding_left: 8,
             paragraph_copy: MemoParagraphCopySettings::default(),
             copy_on_select: false,
+            dbl_click_paragraph_select: true,
         }
     }
 }

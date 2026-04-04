@@ -1,20 +1,14 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MemoView } from "./MemoView";
-import { loadMemo, saveMemo } from "@/lib/tauri-api";
+import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
-
-// Mock clipboard API
-Object.assign(navigator, {
-  clipboard: {
-    writeText: vi.fn().mockResolvedValue(undefined),
-  },
-});
 
 vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
   saveMemo: vi.fn().mockResolvedValue(undefined),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("MemoView", () => {
@@ -131,7 +125,7 @@ describe("MemoView", () => {
   });
 
   describe("paragraph copy feature", () => {
-    it("renders paragraph copy buttons when enabled and text has paragraphs", async () => {
+    it("renders paragraph overlay when enabled and text has paragraphs", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -187,6 +181,102 @@ describe("MemoView", () => {
 
       expect(screen.queryByTestId("paragraph-overlay")).not.toBeInTheDocument();
     });
+
+    it("overlay does not block textarea input (pointer-events-none)", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: true, minBlankLines: 2 },
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
+      render(<MemoView memoKey="pane-no-block" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      // Overlay should have pointer-events-none
+      const overlay = screen.getByTestId("paragraph-overlay");
+      expect(overlay.className).toContain("pointer-events-none");
+
+      // Textarea should still be interactable
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: "typed text" } });
+      expect(textarea.value).toBe("typed text");
+    });
+  });
+
+  describe("double-click paragraph select", () => {
+    it("selects entire paragraph on double-click when paragraphCopy is enabled", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: true, minBlankLines: 2 },
+          copyOnSelect: false,
+        },
+      });
+      // "abc" = line 0, "" = line 1, "" = line 2, "def\nggg" = lines 3-4
+      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
+      render(<MemoView memoKey="pane-dbl" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      // Place cursor in "def" (offset 6 = start of line 3)
+      textarea.setSelectionRange(6, 6);
+      fireEvent.doubleClick(textarea);
+
+      // Should select "def\nggg" (start=6, end=13 exclusive)
+      expect(textarea.selectionStart).toBe(6);
+      expect(textarea.selectionEnd).toBe(13);
+    });
+
+    it("copies paragraph on double-click when copyOnSelect is also enabled", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: true, minBlankLines: 2 },
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
+      render(<MemoView memoKey="pane-dbl-copy" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      textarea.setSelectionRange(6, 6);
+      fireEvent.doubleClick(textarea);
+
+      expect(clipboardWriteText).toHaveBeenCalledWith("def\nggg");
+    });
+
+    it("falls back to default behavior when paragraphCopy is disabled", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: false, minBlankLines: 2 },
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
+      render(<MemoView memoKey="pane-dbl-off" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      // double-click should not trigger paragraph selection
+      fireEvent.doubleClick(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
   });
 
   describe("copyOnSelect feature", () => {
@@ -214,7 +304,7 @@ describe("MemoView", () => {
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
     it("does not copy on mouseup when copyOnSelect is disabled", async () => {
@@ -237,11 +327,11 @@ describe("MemoView", () => {
       };
       vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
 
-      vi.mocked(navigator.clipboard.writeText).mockClear();
+      vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
-      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+      expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
     it("does not copy when no text is selected", async () => {
@@ -264,11 +354,11 @@ describe("MemoView", () => {
       };
       vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
 
-      vi.mocked(navigator.clipboard.writeText).mockClear();
+      vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
-      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+      expect(clipboardWriteText).not.toHaveBeenCalled();
     });
   });
 });

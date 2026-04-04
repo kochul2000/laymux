@@ -1721,6 +1721,34 @@ function MemoSection() {
           </div>
         </div>
 
+        {/* Double-click Paragraph Select */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              더블클릭 단락 선택
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              더블클릭 시 해당 단락 전체를 선택
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex items-center gap-1.5">
+              <input
+                data-testid="memo-dbl-click-paragraph-select"
+                type="checkbox"
+                checked={memo.dblClickParagraphSelect}
+                onChange={(e) => updateMemo({ dblClickParagraphSelect: e.target.checked })}
+              />
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                활성화
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Copy on Select */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">

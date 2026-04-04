@@ -329,6 +329,7 @@ const DEFAULT_MEMO: MemoSettings = {
   paddingLeft: 8,
   paragraphCopy: { enabled: true, minBlankLines: 2 },
   copyOnSelect: false,
+  dblClickParagraphSelect: true,
 };
 
 const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
