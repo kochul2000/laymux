@@ -64,7 +64,11 @@ pub fn create_terminal_session(
         .unwrap_or_default();
     // Use startup_command_override if provided (e.g., "claude --resume <id>"),
     // otherwise fall back to the profile's default startup command.
-    let startup_command = startup_command_override.unwrap_or_else(|| {
+    // Validate that the override matches "claude --resume <safe_id>" to prevent
+    // arbitrary command injection via Tauri IPC.
+    let validated_override =
+        startup_command_override.filter(|cmd| is_valid_startup_command_override(cmd));
+    let startup_command = validated_override.unwrap_or_else(|| {
         matched_profile
             .map(|p| p.startup_command.clone())
             .unwrap_or_default()
@@ -431,6 +435,13 @@ struct ClaudeSessionFile {
     session_id: String,
     cwd: String,
     started_at: u64,
+}
+
+/// Validate that a startup command override is a safe `claude --resume <id>` command.
+/// Returns `true` only if the command matches exactly `"claude --resume <valid_id>"`.
+fn is_valid_startup_command_override(cmd: &str) -> bool {
+    cmd.strip_prefix("claude --resume ")
+        .is_some_and(|id| is_valid_session_id(id))
 }
 
 /// Validate that a Claude session ID contains only safe characters
@@ -4886,6 +4897,38 @@ mod tests {
         assert!(!is_valid_session_id("id`whoami`"));
         assert!(!is_valid_session_id("hello world"));
         assert!(!is_valid_session_id("id\nnewline"));
+    }
+
+    // -- Startup command override validation tests --
+
+    #[test]
+    fn startup_command_override_accepts_valid_resume() {
+        assert!(is_valid_startup_command_override("claude --resume abc-123"));
+        assert!(is_valid_startup_command_override(
+            "claude --resume session_v2"
+        ));
+        assert!(is_valid_startup_command_override("claude --resume A1B2"));
+    }
+
+    #[test]
+    fn startup_command_override_rejects_arbitrary_commands() {
+        assert!(!is_valid_startup_command_override("rm -rf /"));
+        assert!(!is_valid_startup_command_override("echo pwned"));
+        assert!(!is_valid_startup_command_override(
+            "claude --resume bad; rm -rf /"
+        ));
+        assert!(!is_valid_startup_command_override(
+            "claude --resume $(whoami)"
+        ));
+        assert!(!is_valid_startup_command_override(
+            "claude --resume id && echo x"
+        ));
+        assert!(!is_valid_startup_command_override(""));
+        assert!(!is_valid_startup_command_override("claude --resume "));
+        assert!(!is_valid_startup_command_override("claude --resume"));
+        assert!(!is_valid_startup_command_override(
+            "not-claude --resume abc"
+        ));
     }
 
     #[test]
