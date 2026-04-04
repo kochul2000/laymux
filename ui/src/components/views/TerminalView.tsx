@@ -62,6 +62,7 @@ function resolveWorkspaceId(terminalId: string): string {
 // Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
 let webglInitCount = 0;
 const WEBGL_STAGGER_MS = 150;
+const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 /** Reset the stagger counter (for tests). */
 export function _resetWebglStagger(): void {
@@ -299,7 +300,7 @@ export function TerminalView({
     notifyGate.fallbackTimer = setTimeout(() => {
       notifyGate.armed = true;
       notifyGate.fallbackTimer = undefined;
-    }, 3000);
+    }, NOTIFY_GATE_FALLBACK_MS);
 
     // Build hooks list
     const hooks: OscHook[] = [
