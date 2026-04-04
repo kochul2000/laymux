@@ -1508,11 +1508,12 @@ function ClaudeSection() {
                 min={0}
                 style={{ width: 80 }}
                 value={claude.sessionMaxAgeHours}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10);
                   updateClaude({
-                    sessionMaxAgeHours: Math.max(0, parseInt(e.target.value, 10) || 0),
-                  })
-                }
+                    sessionMaxAgeHours: Number.isNaN(parsed) ? 24 : Math.max(0, parsed),
+                  });
+                }}
               />
               <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
                 시간

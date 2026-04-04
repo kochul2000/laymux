@@ -537,19 +537,26 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
 
     #[cfg(windows)]
     {
-        if let Ok(snapshot) = create_process_snapshot() {
-            let parent_map = build_parent_map(&snapshot);
-            let mut queue = VecDeque::new();
-            queue.push_back(root_pid);
-            while let Some(pid) = queue.pop_front() {
-                if let Some(children) = parent_map.get(&pid) {
-                    for &child in children {
-                        if seen.insert(child) {
-                            result.push(child);
-                            queue.push_back(child);
+        match create_process_snapshot() {
+            Ok(snapshot) => {
+                let parent_map = build_parent_map(&snapshot);
+                let mut queue = VecDeque::new();
+                queue.push_back(root_pid);
+                while let Some(pid) = queue.pop_front() {
+                    if let Some(children) = parent_map.get(&pid) {
+                        for &child in children {
+                            if seen.insert(child) {
+                                result.push(child);
+                                queue.push_back(child);
+                            }
                         }
                     }
                 }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[claude-session] Failed to create process snapshot for PID {root_pid}: {e}"
+                );
             }
         }
     }
@@ -560,14 +567,22 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
         queue.push_back(root_pid);
         while let Some(pid) = queue.pop_front() {
             let children_path = format!("/proc/{pid}/task/{pid}/children");
-            if let Ok(content) = std::fs::read_to_string(&children_path) {
-                for token in content.split_whitespace() {
-                    if let Ok(child_pid) = token.parse::<u32>() {
-                        if seen.insert(child_pid) {
-                            result.push(child_pid);
-                            queue.push_back(child_pid);
+            match std::fs::read_to_string(&children_path) {
+                Ok(content) => {
+                    for token in content.split_whitespace() {
+                        if let Ok(child_pid) = token.parse::<u32>() {
+                            if seen.insert(child_pid) {
+                                result.push(child_pid);
+                                queue.push_back(child_pid);
+                            }
                         }
                     }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[claude-session] Cannot read /proc children for PID {pid}: {e} \
+                         (kernel CONFIG_PROC_CHILDREN may be disabled, or PID exited)"
+                    );
                 }
             }
         }
@@ -644,12 +659,32 @@ fn find_session_by_cwd(sessions: &[ClaudeSessionFile], cwd: &str) -> Option<Stri
         .map(|s| s.session_id.clone())
 }
 
-/// Normalize a path for comparison (lowercase on Windows, trim trailing slash).
+/// Normalize a path for comparison.
+/// On Windows: lowercase, backslash→forward-slash, and convert WSL `/mnt/X/…` to `x:/…`
+/// so that cross-environment CWD comparison works (e.g., Claude running inside WSL
+/// reports `/mnt/c/Users/…` while the terminal CWD is `C:\Users\…`).
 fn normalize_path_for_comparison(path: &str) -> String {
     let p = path.trim_end_matches('/').trim_end_matches('\\');
     #[cfg(windows)]
     {
-        p.to_lowercase().replace('\\', "/")
+        let unified = p.to_lowercase().replace('\\', "/");
+        // Convert /mnt/x/... → x:/...
+        if let Some(rest) = unified.strip_prefix("/mnt/") {
+            let bytes = rest.as_bytes();
+            if !bytes.is_empty() && bytes[0].is_ascii_alphabetic() {
+                let drive = bytes[0] as char;
+                let tail = if bytes.len() > 1 && bytes[1] == b'/' {
+                    &rest[1..]
+                } else if bytes.len() == 1 {
+                    // /mnt/c → c: (no trailing slash, matches how C:\ normalizes)
+                    ""
+                } else {
+                    return unified;
+                };
+                return format!("{drive}:{tail}");
+            }
+        }
+        unified
     }
     #[cfg(not(windows))]
     {
@@ -4802,6 +4837,26 @@ mod tests {
         assert_eq!(
             normalize_path_for_comparison("/home/user/"),
             normalize_path_for_comparison("/home/user")
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn normalize_path_for_comparison_converts_wsl_mnt_paths() {
+        // /mnt/c/Users/test should match C:\Users\test
+        assert_eq!(
+            normalize_path_for_comparison("/mnt/c/Users/test"),
+            normalize_path_for_comparison("C:\\Users\\test")
+        );
+        // /mnt/d/Projects should match D:\Projects
+        assert_eq!(
+            normalize_path_for_comparison("/mnt/d/Projects"),
+            normalize_path_for_comparison("D:\\Projects")
+        );
+        // Single drive letter
+        assert_eq!(
+            normalize_path_for_comparison("/mnt/c"),
+            normalize_path_for_comparison("C:\\")
         );
     }
 
