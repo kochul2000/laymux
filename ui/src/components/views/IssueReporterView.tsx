@@ -80,6 +80,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   };
 
   const ir = useSettingsStore((s) => s.issueReporter);
+  const appFont = useSettingsStore((s) => s.appFont);
 
   const fieldStyle: React.CSSProperties = {
     background: "var(--bg-base)",
@@ -223,8 +224,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         style={{
           ...fieldStyle,
           minHeight: 80,
-          fontFamily: ir.fontFamily || "inherit",
-          fontSize: `${ir.fontSize || 13}px`,
+          fontFamily: ir.fontFamily || appFont.face,
+          fontSize: `${ir.fontSize || appFont.size}px`,
+          fontWeight: ir.fontWeight || appFont.weight,
         }}
       />
 

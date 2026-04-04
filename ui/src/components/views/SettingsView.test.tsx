@@ -41,7 +41,8 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
     await user.click(screen.getByTestId("nav-profile-defaults"));
-    expect(screen.getByText("Font")).toBeInTheDocument();
+    // "Font" appears in both nav sidebar and profile defaults section
+    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(2);
     const input = screen.getByTestId("font-face-input") as HTMLInputElement;
     expect(input.value).toBe("Cascadia Mono");
   });
@@ -261,8 +262,8 @@ describe("SettingsView", () => {
     const tabBar = screen.getByTestId("profile-tabs");
     await user.click(within(tabBar).getByText("Additional Settings"));
 
-    // Font fields
-    expect(screen.getByText("Font")).toBeInTheDocument();
+    // Font fields (multiple "Font" text: nav sidebar + profile section)
+    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
