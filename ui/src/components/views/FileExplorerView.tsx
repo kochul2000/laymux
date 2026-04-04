@@ -5,6 +5,7 @@ import {
   clipboardWriteText,
   readFileForViewer,
   listDirectory,
+  onTerminalCwdChanged,
   handleLxMessage,
   type DirEntry,
 } from "@/lib/tauri-api";
@@ -65,15 +66,16 @@ export function FileExplorerView({
 
   const currentCwdRef = useRef(currentCwd);
   currentCwdRef.current = currentCwd;
+  const historyIndexRef = useRef(historyIndex);
+  historyIndexRef.current = historyIndex;
   const pendingRefreshRef = useRef(false);
 
-  // --- Subscribe to syncGroup CWD from terminal store ---
-  const groupCwd = useTerminalStore((s) => {
-    if (!cwdReceive || !syncGroup) return undefined;
+  // --- Get initial CWD from syncGroup terminal store (one-time) ---
+  const initialGroupCwd = useTerminalStore((s) => {
+    if (!syncGroup) return undefined;
     const groupTerminals = s.instances.filter((t) => t.syncGroup === syncGroup && t.cwd);
     if (groupTerminals.length === 0) return undefined;
-    const latest = groupTerminals.reduce((a, b) => (a.lastActivityAt > b.lastActivityAt ? a : b));
-    return latest.cwd;
+    return groupTerminals[0].cwd;
   });
 
   // --- Prepend ".." entry to file list ---
@@ -183,21 +185,30 @@ export function FileExplorerView({
     }
   }, [canGoForward, historyIndex, history, refreshListing, cwdSend, syncGroup, instanceId]);
 
-  // --- React to syncGroup CWD changes ---
+  // --- Listen for CWD changes from syncGroup terminals ---
   useEffect(() => {
-    if (groupCwd && groupCwd !== currentCwdRef.current) {
-      setCurrentCwd(groupCwd);
-      refreshListing(groupCwd);
-      // Push external CWD change to history
-      setHistory((prev) => [...prev.slice(0, historyIndex + 1), groupCwd]);
+    if (!cwdReceive || !syncGroup) return;
+    let cancelled = false;
+    const promise = onTerminalCwdChanged((data) => {
+      if (cancelled) return;
+      // Check if the changed terminal belongs to our syncGroup
+      const terminal = useTerminalStore.getState().instances.find((t) => t.id === data.terminalId);
+      if (!terminal || terminal.syncGroup !== syncGroup) return;
+      if (data.cwd === currentCwdRef.current) return;
+      setCurrentCwd(data.cwd);
+      refreshListing(data.cwd);
+      setHistory((prev) => [...prev.slice(0, historyIndexRef.current + 1), data.cwd]);
       setHistoryIndex((prev) => prev + 1);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupCwd, refreshListing]);
+    });
+    return () => {
+      cancelled = true;
+      promise.then((unlisten) => unlisten());
+    };
+  }, [cwdReceive, syncGroup, refreshListing]);
 
   // --- Initial listing ---
   useEffect(() => {
-    const initialCwd = lastCwd || groupCwd;
+    const initialCwd = lastCwd || initialGroupCwd;
     if (initialCwd) {
       setCurrentCwd(initialCwd);
       refreshListing(initialCwd);

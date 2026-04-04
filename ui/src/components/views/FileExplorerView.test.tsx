@@ -7,12 +7,20 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 // --- Mocks ---
 
+let cwdCallback: ((data: { terminalId: string; cwd: string }) => void) | null = null;
+
 vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
   listDirectory: vi.fn().mockResolvedValue([]),
+  onTerminalCwdChanged: vi
+    .fn()
+    .mockImplementation((cb: (data: { terminalId: string; cwd: string }) => void) => {
+      cwdCallback = cb;
+      return Promise.resolve(vi.fn());
+    }),
   handleLxMessage: vi.fn().mockResolvedValue({ success: true, error: null }),
 }));
 
@@ -44,6 +52,7 @@ function mockListDir(entries = mockDirEntries) {
 describe("FileExplorerView", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    cwdCallback = null;
     vi.mocked(clipboardWriteText).mockClear();
     vi.mocked(readFileForViewer).mockClear();
     vi.mocked(listDirectory).mockClear();
@@ -252,24 +261,24 @@ describe("FileExplorerView", () => {
     expect(clipboardWriteText).toHaveBeenCalledWith("/home/user/a.txt");
   });
 
-  it("syncGroup CWD change from terminal store refreshes listing", async () => {
+  it("terminal CWD change event refreshes listing", async () => {
+    // Register a terminal in the syncGroup so the event handler can match it
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-1",
+      profile: "WSL",
+      syncGroup: "ws-1",
+      workspaceId: "ws-1",
+    });
+
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
     vi.mocked(listDirectory).mockClear();
 
-    // Simulate a terminal in the same syncGroup updating its CWD
+    // Simulate terminal CWD change event
     act(() => {
-      useTerminalStore.getState().registerInstance({
-        id: "terminal-1",
-        profile: "WSL",
-        syncGroup: "ws-1",
-        workspaceId: "ws-1",
-      });
-      useTerminalStore.getState().updateInstanceInfo("terminal-1", {
-        cwd: "/home/user/other",
-      });
+      cwdCallback?.({ terminalId: "terminal-1", cwd: "/home/user/other" });
     });
 
     await act(async () => {
