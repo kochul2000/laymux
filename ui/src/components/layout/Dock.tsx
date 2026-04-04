@@ -45,6 +45,7 @@ export function Dock({
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWsName = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
     return ws?.name ?? "";
@@ -164,6 +165,7 @@ export function Dock({
             viewType={activeView}
             viewConfig={panes[0]?.view}
             paneId={singlePaneId ?? `dock-${position}`}
+            workspaceId={activeWorkspaceId}
             workspaceName={activeWsName}
             isFocused={isFocused}
             onSelectView={
@@ -205,6 +207,7 @@ function DockGrid({
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWsName = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
     return ws?.name ?? "";
@@ -307,6 +310,7 @@ function DockGrid({
                 viewType={pane.view.type}
                 viewConfig={pane.view}
                 paneId={pane.id}
+                workspaceId={activeWorkspaceId}
                 workspaceName={activeWsName}
                 isFocused={isPaneFocused}
                 onSelectView={(config) => onSetPaneView?.(pane.id, config)}
