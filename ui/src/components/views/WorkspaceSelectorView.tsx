@@ -156,7 +156,7 @@ function WorkspaceItem({
         background: isActive
           ? "rgba(137,180,250,0.08)"
           : hovered
-            ? "rgba(255,255,255,0.03)"
+            ? "var(--active-bg)"
             : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
         boxShadow:
@@ -203,7 +203,7 @@ function WorkspaceItem({
               className="shrink-0 rounded px-1.5 text-[9px]"
               style={{
                 color: "var(--text-secondary)",
-                background: "rgba(255,255,255,0.06)",
+                background: "var(--hover-bg)",
                 opacity: 0.7,
               }}
             >
@@ -375,7 +375,7 @@ function WorkspaceItem({
                                 ? ts.activity?.name === "Claude"
                                   ? "rgba(217,119,87,0.15)"
                                   : "rgba(137,180,250,0.12)"
-                                : "rgba(255,255,255,0.04)",
+                                : "var(--active-bg)",
                             minWidth: 52,
                             textAlign: "center",
                             display: "inline-block",
@@ -951,7 +951,7 @@ export function WorkspaceSelectorView() {
           className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[9px]"
           style={{
             color: "var(--text-secondary)",
-            background: "rgba(255,255,255,0.04)",
+            background: "var(--active-bg)",
             border: "none",
             opacity: 0.7,
           }}
@@ -1093,7 +1093,7 @@ export function WorkspaceSelectorView() {
         style={{
           borderTop: "1px solid var(--border)",
           color: notifBtnHovered ? "var(--text-primary)" : "var(--text-secondary)",
-          background: notifBtnHovered ? "rgba(255,255,255,0.03)" : "var(--bg-surface)",
+          background: notifBtnHovered ? "var(--active-bg)" : "var(--bg-surface)",
           transition: "all 0.15s",
         }}
       >
