@@ -29,6 +29,13 @@
   --radius-sm: 2px;
   --radius-md: 3px;
   --radius-lg: 6px;
+
+  /* font-size */
+  --fs-2xs: 9px;
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
 }
 
 * {
