@@ -82,6 +82,15 @@ body {
   color: #fff;
 }
 
+/* Toolbar (28px header bar) */
+.ui-toolbar {
+  display: flex;
+  align-items: center;
+  height: var(--bar-h);
+  padding: 0 8px;
+  gap: 4px;
+}
+
 /* Separator */
 .ui-sep {
   width: 1px;
