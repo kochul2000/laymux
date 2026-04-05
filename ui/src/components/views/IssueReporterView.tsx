@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { FocusInput, inputStyle } from "@/components/ui/FormControls";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
@@ -81,15 +82,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
 
   const ir = useSettingsStore((s) => s.issueReporter);
   const appFont = useSettingsStore((s) => s.appFont);
-
-  const fieldStyle: React.CSSProperties = {
-    background: "var(--bg-base)",
-    color: "var(--text-primary)",
-    border: "1px solid var(--border)",
-    borderRadius: 3,
-    outline: "none",
-    colorScheme: "dark",
-  };
 
   return (
     <div
@@ -195,7 +187,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       )}
 
       {/* Title */}
-      <input
+      <FocusInput
         ref={titleRef}
         data-testid="issue-title"
         type="text"
@@ -203,7 +195,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Issue title"
         className="mb-3 w-full rounded px-3 py-2 text-xs"
-        style={fieldStyle}
       />
 
       {/* Body */}
@@ -215,7 +206,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         placeholder="Describe the issue..."
         className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 leading-relaxed"
         style={{
-          ...fieldStyle,
+          ...inputStyle,
           minHeight: 80,
           fontFamily: ir.fontFamily || appFont.face,
           fontSize: `${ir.fontSize || appFont.size}px`,
