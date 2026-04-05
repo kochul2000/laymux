@@ -121,10 +121,7 @@ export function GridEditToolbar() {
           draggable={false}
         />
 
-        <div
-          className="mx-1"
-          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
-        />
+        <div className="ui-sep" />
 
         <button
           data-testid="export-new-btn"
@@ -242,10 +239,7 @@ export function GridEditToolbar() {
           {layoutMode === "horizontal" ? "H" : "V"}
         </button>
 
-        <div
-          className="mx-1"
-          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
-        />
+        <div className="ui-sep" />
 
         <button
           data-testid="settings-gear-btn"
