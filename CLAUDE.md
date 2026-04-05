@@ -8,3 +8,8 @@
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
 * **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
+* **UI 코드 설계 원칙** (`ARCHITECTURE.md` §14 참조):
+  - **CSS 변수 우선**: 모든 공통 값(색상, 간격, 반경, 폰트 크기, hover overlay)은 `index.css` `:root`에 CSS 변수로 정의. 하드코딩된 매직 넘버 금지.
+  - **호버/인터랙션**: `onMouseEnter/Leave`에서 `style.background` 직접 조작 금지. CSS 호버 클래스(`.hover-bg` 등)를 사용.
+  - **공유 컴포넌트**: 재사용 UI 요소는 `components/ui/`에 배치. 3곳 이상 동일 패턴 반복 시 공통화.
+  - **스타일링**: Tailwind 유틸리티(레이아웃) + CSS 변수(테마 값) 하이브리드. 인라인 `style`은 동적/조건부 값에만 사용.
