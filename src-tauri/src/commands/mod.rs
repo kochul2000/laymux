@@ -55,6 +55,11 @@ pub fn create_terminal_session(
             env.push(("LX_AUTOMATION_PORT".to_string(), port.to_string()));
         }
     }
+    if let Ok(key_lock) = state.automation_key.lock() {
+        if let Some(ref key) = *key_lock {
+            env.push(("LX_AUTOMATION_KEY".to_string(), key.clone()));
+        }
+    }
 
     // Look up the profile's command_line, startup_command, and starting_directory from settings
     let settings = crate::settings::load_settings();
