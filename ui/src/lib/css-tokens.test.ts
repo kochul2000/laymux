@@ -77,3 +77,9 @@ describe("CSS utility classes — hover", () => {
     expect(cssContent).toMatch(/\.hover-bg-close:hover\s*\{/);
   });
 });
+
+describe("CSS utility classes — separator", () => {
+  it("defines .ui-sep class", () => {
+    expect(cssContent).toMatch(/\.ui-sep\s*\{/);
+  });
+});
