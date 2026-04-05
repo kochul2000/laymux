@@ -36,3 +36,12 @@ describe("CSS design tokens — dimensions", () => {
     expect(cssContent).toMatch(regex);
   });
 });
+
+describe("CSS design tokens — border-radius", () => {
+  const radiusTokens = ["--radius-sm", "--radius-md", "--radius-lg"];
+
+  it.each(radiusTokens)("defines %s in :root", (token) => {
+    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
+    expect(cssContent).toMatch(regex);
+  });
+});
