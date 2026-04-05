@@ -82,6 +82,14 @@ body {
   color: #fff;
 }
 
+/* Separator */
+.ui-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--separator-bg);
+}
+
 /* Hide scrollbars globally — content is still scrollable */
 ::-webkit-scrollbar {
   width: 0;
