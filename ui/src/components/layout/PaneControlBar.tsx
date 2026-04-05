@@ -64,22 +64,15 @@ function BarBtn({
       data-testid={testId}
       onClick={onClick}
       title={title}
-      className="flex shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[11px]"
+      className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[11px]"
       style={{
         height: BTN_H,
         minWidth: BTN_MIN_W,
-        background: "transparent",
         color: danger ? "var(--red)" : active ? "var(--accent)" : "var(--text-secondary)",
         border: "none",
         borderRadius: RADIUS,
-        transition: "background 0.1s",
+        transition: "background var(--transition-fast)",
         ...style,
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "transparent";
       }}
     >
       {children}
@@ -349,20 +342,15 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
       <button
         data-testid="pane-control-menu-btn"
         onClick={onExpand}
-        className="flex cursor-pointer items-center justify-center rounded"
+        className="hover-bg-strong flex cursor-pointer items-center justify-center rounded"
         style={{
           width: BTN_MIN_W,
           height: BTN_MIN_W,
-          background: "rgba(0,0,0,0.4)",
+          background: "var(--backdrop-light)",
           color: "var(--text-secondary)",
           border: `1px solid ${borderClr}`,
           borderRadius: RADIUS,
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "var(--bg-overlay)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.4)";
+          transition: "background var(--transition-fast)",
         }}
         title="Expand control bar"
       >
