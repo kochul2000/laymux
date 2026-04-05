@@ -225,7 +225,11 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     write_discovery_file(port, &key);
 
     eprintln!("Automation server listening on 0.0.0.0:{port}");
-    eprintln!("Automation API key: {}...{}", &key[..8], &key[key.len()-4..]);
+    eprintln!(
+        "Automation API key: {}...{}",
+        &key[..8],
+        &key[key.len() - 4..]
+    );
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -1578,6 +1582,7 @@ fn err_json(msg: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tower::ServiceExt; // for oneshot()
 
     #[test]
@@ -1697,14 +1702,8 @@ mod tests {
     /// Uses a dummy protected endpoint (no AppHandle/bridge needed).
     fn auth_test_router(key: &str) -> Router {
         let protected = Router::new()
-            .route(
-                "/api/v1/health",
-                get(|| async { StatusCode::OK }),
-            )
-            .route(
-                "/api/v1/protected",
-                get(|| async { StatusCode::OK }),
-            );
+            .route("/api/v1/health", get(|| async { StatusCode::OK }))
+            .route("/api/v1/protected", get(|| async { StatusCode::OK }));
 
         protected
             .layer(middleware::from_fn_with_state(
@@ -1761,6 +1760,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn discovery_file_contains_key() {
         write_discovery_file(19281, "secret-abc");
         let path = discovery_file_path();
@@ -1791,6 +1791,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn write_and_remove_discovery_file() {
         write_discovery_file(19280, "test-key-123");
         let path = discovery_file_path();

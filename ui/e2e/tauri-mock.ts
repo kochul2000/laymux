@@ -9,6 +9,13 @@ export const TAURI_MOCK_SCRIPT = `
   var callbacks = {};
   var eventListeners = {};
 
+  // Mock for @tauri-apps/api/event internals (used by _unlisten)
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: function(_event, _eventId) {
+      // no-op: event cleanup handled by invoke('plugin:event|unlisten')
+    }
+  };
+
   window.__TAURI_INTERNALS__ = {
     transformCallback: function(callback, once) {
       var id = ++cbId;
@@ -137,6 +144,7 @@ export const TAURI_MOCK_SCRIPT = `
         case 'load_window_geometry':
         case 'save_window_geometry':
         case 'load_memo':
+          return Promise.resolve('');
         case 'mark_claude_terminal':
         case 'mark_notifications_read':
         case 'get_terminal_cwds':

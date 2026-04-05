@@ -1932,6 +1932,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tempfile",
  "tokio",
+ "tower",
  "tower-http",
  "uuid",
  "windows-sys 0.59.0",
