@@ -257,7 +257,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             style={{
               background: "transparent",
               color: "var(--accent)",
-              border: "1px solid rgba(137,180,250,0.2)",
+              border: "1px solid var(--accent-20)",
               borderRadius: "var(--radius-md)",
             }}
           >

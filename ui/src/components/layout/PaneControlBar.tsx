@@ -34,10 +34,8 @@ interface PaneControlBarProps {
 const BAR_H = "var(--bar-h)";
 const BTN_H = "var(--btn-h)";
 const BTN_MIN_W = "var(--btn-min-w)";
-const RADIUS = 2; // border radius
-
 const barBg = "var(--bg-surface)";
-const barBgHover = "rgba(24,24,37,0.96)";
+const barBgHover = "var(--bar-bg-hover)";
 const borderClr = "var(--border)";
 const sepClr = "var(--separator-bg)";
 
@@ -411,7 +409,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
               backdropFilter: "blur(8px)",
               borderBottom: `1px solid ${sepClr}`,
               borderLeft: `1px solid ${sepClr}`,
-              borderRadius: `0 0 0 ${RADIUS + 2}px`,
+              borderRadius: "0 0 0 var(--radius-lg)",
             }}
           >
             <BarContent

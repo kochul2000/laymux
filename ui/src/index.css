@@ -9,6 +9,11 @@
   --accent: #89b4fa;
   --accent-50: rgba(137, 180, 250, 0.5);
   --accent-20: rgba(137, 180, 250, 0.2);
+  --accent-12: rgba(137, 180, 250, 0.12);
+  --accent-10: rgba(137, 180, 250, 0.1);
+  --accent-08: rgba(137, 180, 250, 0.08);
+  --accent-06: rgba(137, 180, 250, 0.06);
+  --orange-15: rgba(217, 119, 87, 0.15);
   --green: #a6e3a1;
   --red: #f38ba8;
   --border: #313244;
@@ -19,11 +24,13 @@
   --active-bg: rgba(255, 255, 255, 0.04);
   --backdrop-light: rgba(0, 0, 0, 0.3);
   --backdrop-heavy: rgba(0, 0, 0, 0.5);
+  --hover-bg-subtle: rgba(255, 255, 255, 0.03);
+  --bar-bg-hover: rgba(24, 24, 37, 0.96);
 
   /* dimensions */
   --bar-h: 28px;
   --btn-h: 22px;
-  --btn-min-w: 28px;
+  --btn-min-w: 22px;
 
   /* border-radius */
   --radius-sm: 2px;
@@ -79,7 +86,7 @@ body {
 }
 .hover-bg-close:hover {
   background: var(--red);
-  color: #fff;
+  color: var(--bg-base);
 }
 
 /* Toolbar (28px header bar) */
@@ -89,6 +96,11 @@ body {
   height: var(--bar-h);
   padding: 0 8px;
   gap: 4px;
+}
+
+/* Focus-visible for form controls */
+.ui-focus-ring:focus-visible {
+  border-color: var(--accent);
 }
 
 /* Separator */
