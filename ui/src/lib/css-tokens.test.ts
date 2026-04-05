@@ -63,3 +63,13 @@ describe("CSS design tokens — utility", () => {
     expect(cssContent).toMatch(regex);
   });
 });
+
+describe("CSS utility classes — hover", () => {
+  it("defines .hover-bg:hover class", () => {
+    expect(cssContent).toMatch(/\.hover-bg:hover\s*\{/);
+  });
+
+  it("defines .hover-bg-strong:hover class", () => {
+    expect(cssContent).toMatch(/\.hover-bg-strong:hover\s*\{/);
+  });
+});
