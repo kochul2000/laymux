@@ -162,13 +162,12 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   return (
     <div data-testid="memo-view" className="flex h-full w-full flex-col">
       <div
-        className="flex shrink-0 items-center px-3"
+        className="ui-toolbar shrink-0"
         style={{
-          height: 28,
           background: "var(--bg-surface)",
           borderBottom: "1px solid var(--border)",
           color: "var(--text-secondary)",
-          fontSize: 11,
+          fontSize: "var(--fs-sm)",
           fontWeight: 600,
         }}
       >
