@@ -31,6 +31,9 @@ pub struct AppState {
     pub automation_channels:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>,
     pub automation_port: Mutex<Option<u16>>,
+    /// Bearer token for Automation API authentication.
+    /// Generated on startup, written to discovery file.
+    pub automation_key: Mutex<Option<String>>,
     /// Terminals that recently received a propagated command (e.g., cd from sync-cwd).
     /// Used to suppress OSC echo loops. Entries expire after PROPAGATION_TIMEOUT.
     pub propagated_terminals: Mutex<HashMap<String, Instant>>,
@@ -57,6 +60,7 @@ impl AppState {
             output_buffers: Arc::new(Mutex::new(HashMap::new())),
             automation_channels: Mutex::new(HashMap::new()),
             automation_port: Mutex::new(None),
+            automation_key: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),

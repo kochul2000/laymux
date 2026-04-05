@@ -7,8 +7,11 @@ mod mcp;
 use std::io::{self, BufRead, BufReader, Write};
 
 fn main() {
-    let base_url = mcp::resolve_base_url();
-    eprintln!("laymux-mcp: connecting to {}", base_url);
+    let conn = mcp::resolve_connection();
+    eprintln!("laymux-mcp: connecting to {}", conn.base_url);
+    if conn.key.is_some() {
+        eprintln!("laymux-mcp: API key loaded from discovery");
+    }
 
     let stdin = io::stdin();
     let reader = BufReader::new(stdin.lock());
@@ -40,7 +43,7 @@ fn main() {
             }
         };
 
-        if let Some(resp) = mcp::handle_request(&req, &base_url) {
+        if let Some(resp) = mcp::handle_request(&req, &conn.base_url, conn.key.as_deref()) {
             let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
             let _ = stdout.flush();
         }

@@ -3,9 +3,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Path, Query, State as AxumState};
+use axum::extract::{Path, Query, Request, State as AxumState};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -158,8 +159,13 @@ pub fn automation_port() -> u16 {
     }
 }
 
-/// Write discovery file so external tools can find the automation port.
-pub fn write_discovery_file(port: u16) {
+/// Generate a random bearer token for API authentication.
+pub fn generate_automation_key() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// Write discovery file so external tools can find the automation port and key.
+pub fn write_discovery_file(port: u16, key: &str) {
     let path = discovery_file_path();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -168,6 +174,7 @@ pub fn write_discovery_file(port: u16) {
         "port": port,
         "pid": std::process::id(),
         "version": env!("CARGO_PKG_VERSION"),
+        "key": key,
     });
     let _ = std::fs::write(
         &path,
@@ -191,12 +198,14 @@ fn discovery_file_path() -> std::path::PathBuf {
 /// Start the automation HTTP server on a fixed port.
 /// Release = 19280, Dev = 19281. No fallback — fails if port is occupied.
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
+    let key = generate_automation_key();
+
     let server_state = ServerState {
         app_state: app_state.clone(),
         app_handle,
     };
 
-    let app = build_router(server_state);
+    let app = build_router(server_state, &key);
 
     let port = automation_port();
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -204,15 +213,19 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
         .await
         .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
 
-    // Store port in AppState
+    // Store port and key in AppState
     if let Ok(mut p) = app_state.automation_port.lock() {
         *p = Some(port);
     }
+    if let Ok(mut k) = app_state.automation_key.lock() {
+        *k = Some(key.clone());
+    }
 
-    // Write discovery file
-    write_discovery_file(port);
+    // Write discovery file (includes key)
+    write_discovery_file(port, &key);
 
     eprintln!("Automation server listening on 0.0.0.0:{port}");
+    eprintln!("Automation API key: {key}");
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -271,7 +284,49 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/ui/notifications"),
 ];
 
-pub fn build_router(state: ServerState) -> Router {
+/// Bearer token authentication middleware.
+/// Skips auth for GET /api/v1/health.
+async fn auth_middleware(
+    AxumState(expected_key): AxumState<String>,
+    req: Request,
+    next: Next,
+) -> Response {
+    // Allow health endpoint without auth
+    if req.uri().path() == "/api/v1/health" {
+        return next.run(req).await;
+    }
+
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    match auth_header {
+        Some(header) if header.starts_with("Bearer ") => {
+            let token = &header[7..];
+            if token == expected_key {
+                next.run(req).await
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(err_json("Invalid API key")),
+                )
+                    .into_response()
+            }
+        }
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            Json(err_json(
+                "Missing Authorization header. Use: Authorization: Bearer <key from automation.json>",
+            )),
+        )
+            .into_response(),
+    }
+}
+
+pub fn build_router(state: ServerState, key: &str) -> Router {
+    let key = key.to_string();
+
     Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
@@ -347,6 +402,7 @@ pub fn build_router(state: ServerState) -> Router {
             post(ui_toggle_notification_panel),
         )
         .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn_with_state(key, auth_middleware))
         .with_state(state)
 }
 
@@ -356,9 +412,10 @@ async fn api_docs() -> impl IntoResponse {
     Json(serde_json::json!({
         "name": "Laymux IDE Automation API",
         "version": "v1",
-        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). No authentication required.",
+        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). Requires Bearer token from discovery file.",
         "base_url": format!("http://127.0.0.1:{}/api/v1", automation_port()),
-        "discovery": format!("Fixed port: release={RELEASE_PORT}, dev={DEV_PORT}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals."),
+        "auth": "Bearer token required. Read 'key' from discovery file and send as: Authorization: Bearer <key>. GET /api/v1/health is exempt.",
+        "discovery": format!("Fixed port: release={RELEASE_PORT}, dev={DEV_PORT}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port, key, pid. Also LX_AUTOMATION_PORT env var in spawned terminals."),
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
@@ -1629,6 +1686,24 @@ mod tests {
     }
 
     #[test]
+    fn generate_automation_key_is_unique() {
+        let k1 = generate_automation_key();
+        let k2 = generate_automation_key();
+        assert_ne!(k1, k2);
+        assert!(!k1.is_empty());
+    }
+
+    #[test]
+    fn discovery_file_contains_key() {
+        write_discovery_file(19281, "secret-abc");
+        let path = discovery_file_path();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["key"], "secret-abc");
+        remove_discovery_file();
+    }
+
+    #[test]
     fn discovery_file_path_ends_with_automation_json() {
         let path = discovery_file_path();
         assert!(path.to_string_lossy().ends_with("automation.json"));
@@ -1650,12 +1725,13 @@ mod tests {
 
     #[test]
     fn write_and_remove_discovery_file() {
-        write_discovery_file(19280);
+        write_discovery_file(19280, "test-key-123");
         let path = discovery_file_path();
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["port"], 19280);
+        assert_eq!(parsed["key"], "test-key-123");
         assert!(parsed["pid"].as_u64().unwrap() > 0);
         remove_discovery_file();
         assert!(!path.exists());
