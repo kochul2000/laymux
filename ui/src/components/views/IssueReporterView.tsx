@@ -168,18 +168,11 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         )}
         <button
           onClick={captureScreenshot}
-          className="shrink-0 cursor-pointer rounded px-2.5 py-1 text-[10px] font-medium"
+          className="hover-bg shrink-0 cursor-pointer rounded px-2.5 py-1 text-[10px] font-medium"
           style={{
-            background: "transparent",
             color: "var(--accent)",
-            border: "1px solid rgba(137,180,250,0.2)",
+            border: "1px solid var(--accent-20)",
             borderRadius: 3,
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "rgba(137,180,250,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "transparent";
           }}
         >
           Recapture
