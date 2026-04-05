@@ -9,6 +9,7 @@ pub mod git_watcher;
 pub mod ipc_server;
 pub mod lock_ext;
 pub mod output_buffer;
+pub mod path_utils;
 pub mod port_detect;
 pub mod process;
 pub mod pty;
