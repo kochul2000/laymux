@@ -39,7 +39,7 @@ const RADIUS = 2; // border radius
 const barBg = "var(--bg-surface)";
 const barBgHover = "rgba(24,24,37,0.96)";
 const borderClr = "var(--border)";
-const sepClr = "rgba(255,255,255,0.08)";
+const sepClr = "var(--separator-bg)";
 
 // ─── Shared Button ───────────────────────────────────────
 function BarBtn({
