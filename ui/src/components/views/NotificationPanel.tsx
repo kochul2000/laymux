@@ -38,7 +38,7 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
       style={{ color: "var(--text-primary)" }}
     >
       <div
-        className="flex items-center justify-between px-3 py-2"
+        className="ui-toolbar justify-between"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
         <span className="text-sm font-medium">Notifications</span>
