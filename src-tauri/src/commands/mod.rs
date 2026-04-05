@@ -14,18 +14,6 @@ use crate::terminal::{
     TerminalActivity, TerminalConfig, TerminalNotification, TerminalSession, TerminalStateInfo,
 };
 
-/// How long a propagation flag remains valid before expiring.
-const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Maximum number of notifications to keep. When exceeded, oldest read notifications
-/// are evicted first. Unread notifications are never evicted by this limit.
-const MAX_NOTIFICATIONS: usize = 500;
-
-/// Number of bytes to scan from the end of a terminal output buffer when detecting
-/// activity state or Claude Code presence. 16KB covers terminal title sequences
-/// even when OSC 133 markers have scrolled out.
-const ACTIVITY_SCAN_BYTES: usize = 16384;
-
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Laymux.", name)
