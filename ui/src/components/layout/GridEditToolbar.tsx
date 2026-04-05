@@ -98,9 +98,9 @@ export function GridEditToolbar() {
   return (
     <div
       data-testid="grid-edit-toolbar"
-      className="flex items-center"
+      className="ui-toolbar"
       style={{
-        height: 28,
+        padding: 0,
         background: "var(--bg-surface)",
         borderBottom: "1px solid var(--border)",
       }}
