@@ -67,7 +67,7 @@ function EmptyViewCard({
         className="flex w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-left transition-all duration-100"
         style={{
           border: `1px solid ${hovered ? "var(--accent)" : "var(--border)"}`,
-          background: hovered ? "rgba(137,180,250,0.08)" : "var(--bg-surface)",
+          background: hovered ? "var(--accent-08)" : "var(--bg-surface)",
           color: "var(--text-primary)",
         }}
       >

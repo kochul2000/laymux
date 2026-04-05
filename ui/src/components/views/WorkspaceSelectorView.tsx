@@ -153,11 +153,7 @@ function WorkspaceItem({
       onDragEnd={drag.onDragEnd}
       className="relative mb-0.5 cursor-pointer rounded py-2"
       style={{
-        background: isActive
-          ? "rgba(137,180,250,0.08)"
-          : hovered
-            ? "var(--active-bg)"
-            : "transparent",
+        background: isActive ? "var(--accent-08)" : hovered ? "var(--active-bg)" : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
         boxShadow:
           dropIndicator?.wsId === ws.id
@@ -334,7 +330,7 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            background: "rgba(137,180,250,0.12)",
+                            background: "var(--accent-12)",
                             borderRadius: "var(--radius-md)",
                             filter: "brightness(1.3)",
                           }
@@ -373,8 +369,8 @@ function WorkspaceItem({
                             background:
                               ts.activity?.type === "interactiveApp"
                                 ? ts.activity?.name === "Claude"
-                                  ? "rgba(217,119,87,0.15)"
-                                  : "rgba(137,180,250,0.12)"
+                                  ? "var(--orange-15)"
+                                  : "var(--accent-12)"
                                 : "var(--active-bg)",
                             minWidth: 52,
                             textAlign: "center",
@@ -461,7 +457,7 @@ function WorkspaceItem({
                     paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                     ...(isFocusedPane
                       ? {
-                          background: "rgba(137,180,250,0.08)",
+                          background: "var(--accent-08)",
                           borderRadius: "var(--radius-md)",
                           color: "var(--text-primary)",
                         }
@@ -604,7 +600,7 @@ function LayoutCard({
       }}
       style={{
         border: `1px solid ${isDefault && hovered ? "var(--accent)" : hovered ? "var(--text-secondary)" : "transparent"}`,
-        background: hovered ? "rgba(137,180,250,0.08)" : "transparent",
+        background: hovered ? "var(--accent-08)" : "transparent",
         transition: "all 0.15s",
         opacity: hovered ? 1 : 0.85,
       }}
@@ -663,7 +659,7 @@ function LayoutCard({
               className="shrink-0 rounded-sm px-1 text-[8px] uppercase tracking-wider"
               style={{
                 color: "var(--accent)",
-                background: "rgba(137,180,250,0.12)",
+                background: "var(--accent-12)",
                 lineHeight: "14px",
               }}
             >

@@ -263,7 +263,7 @@ function FontFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -354,7 +354,7 @@ function AppearanceFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -494,7 +494,7 @@ function AdvancedFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -2199,7 +2199,7 @@ function KeybindingsSection() {
               <div
                 className="flex items-center gap-3 px-3 py-1.5"
                 style={{
-                  background: isEditing ? "rgba(137,180,250,0.06)" : "transparent",
+                  background: isEditing ? "var(--accent-06)" : "transparent",
                   borderLeft: isOverridden ? "2px solid var(--accent)" : "2px solid transparent",
                 }}
               >
@@ -2554,7 +2554,7 @@ export function SettingsView() {
       background: isActive
         ? "var(--bg-overlay)"
         : isHover
-          ? "rgba(255,255,255,0.03)"
+          ? "var(--hover-bg-subtle)"
           : "transparent",
       color: isActive ? "var(--accent)" : "var(--text-primary)",
       borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
