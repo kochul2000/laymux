@@ -88,7 +88,7 @@ function BarBtn({
 }
 
 function Sep() {
-  return <div className="mx-1" style={{ width: 1, height: 14, background: sepClr }} />;
+  return <div className="ui-sep" />;
 }
 
 // ─── View selector ──────────────────────────────────────
