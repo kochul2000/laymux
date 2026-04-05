@@ -83,3 +83,9 @@ describe("CSS utility classes — separator", () => {
     expect(cssContent).toMatch(/\.ui-sep\s*\{/);
   });
 });
+
+describe("CSS utility classes — toolbar", () => {
+  it("defines .ui-toolbar class", () => {
+    expect(cssContent).toMatch(/\.ui-toolbar\s*\{/);
+  });
+});
