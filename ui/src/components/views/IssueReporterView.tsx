@@ -118,7 +118,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         style={{
           background: "var(--bg-overlay)",
           border: "1px solid var(--border)",
-          borderRadius: 3,
+          borderRadius: "var(--radius-md)",
         }}
       >
         {screenshotPath ? (
@@ -164,7 +164,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           style={{
             color: "var(--accent)",
             border: "1px solid var(--accent-20)",
-            borderRadius: 3,
+            borderRadius: "var(--radius-md)",
           }}
         >
           Recapture
@@ -175,7 +175,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       {showPreview && screenshotDataUrl && (
         <div
           className="mb-4 overflow-hidden rounded"
-          style={{ border: "1px solid var(--border)", borderRadius: 3 }}
+          style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}
         >
           <img
             src={screenshotDataUrl}
@@ -220,7 +220,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         style={{
           background: "var(--bg-overlay)",
           border: "1px solid var(--border)",
-          borderRadius: 3,
+          borderRadius: "var(--radius-md)",
         }}
       >
         <button
@@ -232,7 +232,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             background: state === "success" ? "var(--green)" : "var(--accent)",
             color: "var(--bg-base)",
             border: "none",
-            borderRadius: 3,
+            borderRadius: "var(--radius-md)",
             opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
             transition: "opacity 0.15s",
           }}
@@ -258,7 +258,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               background: "transparent",
               color: "var(--accent)",
               border: "1px solid rgba(137,180,250,0.2)",
-              borderRadius: 3,
+              borderRadius: "var(--radius-md)",
             }}
           >
             New Report

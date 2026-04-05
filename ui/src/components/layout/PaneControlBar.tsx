@@ -70,7 +70,7 @@ function BarBtn({
         minWidth: BTN_MIN_W,
         color: danger ? "var(--red)" : active ? "var(--accent)" : "var(--text-secondary)",
         border: "none",
-        borderRadius: RADIUS,
+        borderRadius: "var(--radius-sm)",
         transition: "background var(--transition-fast)",
         ...style,
       }}
@@ -123,7 +123,7 @@ function ViewSelect({
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
         border: `1px solid ${sepClr}`,
-        borderRadius: RADIUS,
+        borderRadius: "var(--radius-sm)",
         outline: "none",
         maxWidth: 110,
         colorScheme: "dark",
@@ -349,7 +349,7 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
           background: "var(--backdrop-light)",
           color: "var(--text-secondary)",
           border: `1px solid ${borderClr}`,
-          borderRadius: RADIUS,
+          borderRadius: "var(--radius-sm)",
           transition: "background var(--transition-fast)",
         }}
         title="Expand control bar"
