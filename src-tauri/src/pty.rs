@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::lock_ext::MutexExt;
 use crate::terminal::TerminalSession;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
@@ -86,7 +87,7 @@ pub struct PtyHandle {
 impl PtyHandle {
     /// Write data (user input) to the PTY.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
-        let mut writer = self.writer.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let mut writer = self.writer.lock_or_err()?;
         writer
             .write_all(data)
             .map_err(|e| format!("Write error: {e}"))?;
@@ -100,7 +101,7 @@ impl PtyHandle {
 
     /// Resize the PTY.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let master = self.master.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let master = self.master.lock_or_err()?;
         master
             .resize(PtySize {
                 rows,
