@@ -6,12 +6,12 @@
 * **마이그레이션 불필요**: 현재 내부 개발 단계이므로 설정 파일 경로 변경 등에 대한 마이그레이션 로직은 구현하지 않는다. 기존 데이터는 수동으로 처리한다.
 * **Automation API 포트 규칙**: 고정 포트 — release=19280, dev=19281. 각 빌드 타입은 하나의 인스턴스만 실행 가능. 개발 중 스크린샷/API 호출은 반드시 dev 인스턴스(포트 19281)를 사용한다. Release 빌드(포트 19280)는 사용자가 직접 사용하므로 절대 건드리지 않는다. **Bearer 인증 필수**: dev discovery 파일(`%APPDATA%\laymux-dev\automation.json`)에서 `port`와 `key`를 읽어 모든 API 호출에 `Authorization: Bearer <key>` 헤더를 포함한다. Health 엔드포인트만 인증 없이 접근 가능.
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
-* **Rust 코드 설계 철학 준수**: ARCHITECTURE.md §14에 정의된 Rust 설계 원칙을 따른다. 핵심 규칙:
-  - 에러: `AppError` enum 사용, 프로덕션 코드에서 `unwrap()` 금지
-  - 락: `MutexExt::lock_or_err()` 사용, `state.rs` 문서화 순서 준수
-  - 상수: 이벤트명/환경변수명 등 매직 스트링은 `constants.rs`에 정의
+* **Rust 코드 설계 철학 준수**: ARCHITECTURE.md §14에 정의된 Rust 설계 원칙을 따른다. 아래 규칙 중 해당 모듈이 도입된 항목만 즉시 적용하고, 미도입 항목은 리팩토링 단계에서 순차 적용한다:
+  - 에러: `AppError` enum 사용 (도입 완료), 프로덕션 코드에서 `unwrap()` 금지
+  - 락: `MutexExt::lock_or_err()` 사용 (2단계에서 도입 예정), `state.rs` 문서화 순서 준수
+  - 상수: 이벤트명/환경변수명 등 매직 스트링은 `constants.rs`에 정의 (3단계에서 도입 예정)
   - 모듈: 파일 500줄 초과 시 분할 고려, `mod.rs`는 `pub use` 허브만
   - 커맨드: `#[tauri::command]`는 얇은 진입점, 핵심 로직은 `&AppState` 받는 내부 함수로 분리
-  - 로깅: `eprintln!()` 대신 `tracing` 매크로 사용
+  - 로깅: `eprintln!()` 대신 `tracing` 매크로 사용 (12단계에서 도입 예정)
 * **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
