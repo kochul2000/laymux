@@ -31,9 +31,9 @@ interface PaneControlBarProps {
 }
 
 // ─── Design tokens ───────────────────────────────────────
-const BAR_H = 28; // bar height in px
-const BTN_H = 22; // button height
-const BTN_MIN_W = 22; // icon-only button width
+const BAR_H = "var(--bar-h)";
+const BTN_H = "var(--btn-h)";
+const BTN_MIN_W = "var(--btn-min-w)";
 const RADIUS = 2; // border radius
 
 const barBg = "var(--bg-surface)";
