@@ -95,13 +95,6 @@ export function GridEditToolbar() {
     borderRadius: 2,
   };
 
-  const hoverIn = (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)";
-  };
-  const hoverOut = (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "transparent";
-  };
-
   return (
     <div
       data-testid="grid-edit-toolbar"
@@ -132,10 +125,8 @@ export function GridEditToolbar() {
               flashSaved();
             }
           }}
-          className={btnBase}
+          className={`${btnBase} hover-bg`}
           style={btnStyle}
-          onMouseEnter={hoverIn}
-          onMouseLeave={hoverOut}
         >
           Export New
         </button>
@@ -261,65 +252,42 @@ export function GridEditToolbar() {
         <button
           data-testid="window-minimize"
           onClick={handleMinimize}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
             fontSize: 10,
           }}
           title="Minimize"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
         >
           {"\uE921"}
         </button>
         <button
           data-testid="window-maximize"
           onClick={handleToggleMaximize}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
             fontSize: 10,
           }}
           title={maximized ? "Restore" : "Maximize"}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
         >
           {maximized ? "\uE923" : "\uE922"}
         </button>
         <button
           data-testid="window-close"
           onClick={handleClose}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg-close flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
             fontSize: 10,
           }}
           title="Close"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#c42b1c";
-            e.currentTarget.style.color = "#fff";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
         >
           {"\uE8BB"}
         </button>
