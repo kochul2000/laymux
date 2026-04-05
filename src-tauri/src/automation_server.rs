@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
+use crate::constants::*;
 use crate::lock_ext::MutexExt;
 
 use crate::state::AppState;
@@ -753,7 +754,7 @@ async fn bridge_request(
 
     state
         .app_handle
-        .emit("automation-request", &request)
+        .emit(EVENT_AUTOMATION_REQUEST, &request)
         .map_err(|e| {
             // Clean up channel on emit failure
             if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {

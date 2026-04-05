@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::automation_server::AutomationResponse;
 use crate::cli::{LxMessage, LxResponse};
+use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty;
@@ -151,7 +152,7 @@ pub fn create_terminal_session(
                 if let Ok(mut known) = known_claude.lock_or_err() {
                     known.insert(claude_detect_id.clone());
                 }
-                let _ = app_clone.emit("claude-terminal-detected", &claude_detect_id);
+                let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &claude_detect_id);
             }
         }
 
@@ -180,7 +181,7 @@ pub fn create_terminal_session(
             }
             if changed {
                 let _ = cwd_app.emit(
-                    "terminal-cwd-changed",
+                    EVENT_TERMINAL_CWD_CHANGED,
                     serde_json::json!({
                         "terminalId": cwd_terminal_id,
                         "cwd": normalized,
@@ -897,7 +898,7 @@ fn handle_lx_message_dispatch(
 
             // Emit sync-cwd event to frontend — only receiving targets, not all
             let _ = app.emit(
-                "sync-cwd",
+                EVENT_SYNC_CWD,
                 serde_json::json!({
                     "path": normalized_path,
                     "terminalId": terminal_id,
@@ -929,7 +930,7 @@ fn handle_lx_message_dispatch(
 
             // Emit sync-branch event to frontend for UI updates
             let _ = app.emit(
-                "sync-branch",
+                EVENT_SYNC_BRANCH,
                 serde_json::json!({
                     "branch": branch,
                     "terminalId": terminal_id,
@@ -982,7 +983,7 @@ fn handle_lx_message_dispatch(
             if let Some(ref lvl) = level {
                 payload["level"] = serde_json::json!(lvl);
             }
-            let _ = app.emit("lx-notify", payload);
+            let _ = app.emit(EVENT_LX_NOTIFY, payload);
 
             Ok(LxResponse::ok(Some(format!("notification: {}", message))))
         }
@@ -993,7 +994,7 @@ fn handle_lx_message_dispatch(
             }
 
             let _ = app.emit(
-                "set-tab-title",
+                EVENT_SET_TAB_TITLE,
                 serde_json::json!({
                     "title": title,
                     "terminalId": terminal_id,
@@ -1038,7 +1039,7 @@ fn handle_lx_message_dispatch(
         LxMessage::OpenFile { path, terminal_id } => {
             // Emit open-file event to frontend
             let _ = app.emit(
-                "open-file",
+                EVENT_OPEN_FILE,
                 serde_json::json!({
                     "path": path,
                     "terminalId": terminal_id,
@@ -1083,7 +1084,7 @@ fn handle_lx_message_dispatch(
             if let Some(code) = exit_code {
                 payload["exitCode"] = serde_json::json!(code);
             }
-            let _ = app.emit("command-status", payload);
+            let _ = app.emit(EVENT_COMMAND_STATUS, payload);
 
             let desc = match (&command, exit_code) {
                 (Some(cmd), Some(code)) => format!("command '{}' exit {}", cmd, code),
