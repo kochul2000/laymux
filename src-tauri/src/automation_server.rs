@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
+use crate::lock_ext::MutexExt;
+
 use crate::state::AppState;
 
 /// Shared state for the axum server.
@@ -214,10 +216,10 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
         .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
 
     // Store port and key in AppState
-    if let Ok(mut p) = app_state.automation_port.lock() {
+    if let Ok(mut p) = app_state.automation_port.lock_or_err() {
         *p = Some(port);
     }
-    if let Ok(mut k) = app_state.automation_key.lock() {
+    if let Ok(mut k) = app_state.automation_key.lock_or_err() {
         *k = Some(key.clone());
     }
 
@@ -636,7 +638,7 @@ async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     let port = state
         .app_state
         .automation_port
-        .lock()
+        .lock_or_err()
         .ok()
         .and_then(|p| *p)
         .unwrap_or(0);
@@ -652,7 +654,7 @@ async fn terminal_write(
     Path(id): Path<String>,
     Json(body): Json<WriteBody>,
 ) -> impl IntoResponse {
-    let ptys = match state.app_state.pty_handles.lock() {
+    let ptys = match state.app_state.pty_handles.lock_or_err() {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -680,7 +682,7 @@ async fn terminal_output(
     Query(query): Query<OutputQuery>,
 ) -> impl IntoResponse {
     let lines = query.lines.unwrap_or(100);
-    let buffers = match state.app_state.output_buffers.lock() {
+    let buffers = match state.app_state.output_buffers.lock_or_err() {
         Ok(b) => b,
         Err(_) => {
             return (
@@ -727,12 +729,16 @@ async fn bridge_request(
 
     // Store the channel
     {
-        let mut channels = state.app_state.automation_channels.lock().map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(err_json("Lock error")),
-            )
-        })?;
+        let mut channels = state
+            .app_state
+            .automation_channels
+            .lock_or_err()
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(err_json("Lock error")),
+                )
+            })?;
         channels.insert(request_id.clone(), tx);
     }
 
@@ -750,7 +756,7 @@ async fn bridge_request(
         .emit("automation-request", &request)
         .map_err(|e| {
             // Clean up channel on emit failure
-            if let Ok(mut channels) = state.app_state.automation_channels.lock() {
+            if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
                 channels.remove(&request_id);
             }
             (
@@ -764,7 +770,7 @@ async fn bridge_request(
         Ok(Ok(data)) => Ok(data),
         Ok(Err(_)) => {
             // Channel dropped without response — clean up orphaned entry
-            if let Ok(mut channels) = state.app_state.automation_channels.lock() {
+            if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
                 channels.remove(&request_id);
             }
             Err((
@@ -774,7 +780,7 @@ async fn bridge_request(
         }
         Err(_) => {
             // Timeout
-            if let Ok(mut channels) = state.app_state.automation_channels.lock() {
+            if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
                 channels.remove(&request_id);
             }
             Err((
