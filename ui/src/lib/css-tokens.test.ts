@@ -27,3 +27,12 @@ describe("CSS design tokens — hover overlay", () => {
     expect(cssContent).toMatch(regex);
   });
 });
+
+describe("CSS design tokens — dimensions", () => {
+  const dimensionTokens = ["--bar-h", "--btn-h", "--btn-min-w"];
+
+  it.each(dimensionTokens)("defines %s in :root", (token) => {
+    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
+    expect(cssContent).toMatch(regex);
+  });
+});
