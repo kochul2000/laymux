@@ -55,25 +55,6 @@ fn is_wsl_command(cmd_path: &str) -> bool {
     stem == "wsl"
 }
 
-/// Convert a `/mnt/X/...` WSL path back to a Windows path `X:\...`.
-/// Returns `None` if the path is not a `/mnt/X/...` pattern.
-fn mnt_path_to_windows(path: &str) -> Option<String> {
-    let rest = path.strip_prefix("/mnt/")?;
-    let bytes = rest.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
-        return None;
-    }
-    let drive = bytes[0].to_ascii_uppercase() as char;
-    let tail = if bytes.len() > 1 && bytes[1] == b'/' {
-        rest[1..].replace('/', "\\")
-    } else if bytes.len() == 1 {
-        "\\".to_string()
-    } else {
-        return None;
-    };
-    Some(format!("{drive}:{tail}"))
-}
-
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -176,7 +157,7 @@ where
         } else {
             // For non-WSL commands, convert /mnt/X/... back to Windows path
             let effective_dir = if is_unix_path(&dir) {
-                mnt_path_to_windows(&dir).unwrap_or(dir)
+                crate::path_utils::mnt_path_to_windows(&dir).unwrap_or(dir)
             } else {
                 dir
             };
@@ -432,19 +413,25 @@ mod tests {
     #[test]
     fn mnt_path_to_windows_converts_correctly() {
         assert_eq!(
-            mnt_path_to_windows("/mnt/c/Users/test"),
+            crate::path_utils::mnt_path_to_windows("/mnt/c/Users/test"),
             Some("C:\\Users\\test".into())
         );
         assert_eq!(
-            mnt_path_to_windows("/mnt/d/Projects/app"),
+            crate::path_utils::mnt_path_to_windows("/mnt/d/Projects/app"),
             Some("D:\\Projects\\app".into())
         );
-        assert_eq!(mnt_path_to_windows("/mnt/c/"), Some("C:\\".into()));
-        assert_eq!(mnt_path_to_windows("/mnt/c"), Some("C:\\".into()));
+        assert_eq!(
+            crate::path_utils::mnt_path_to_windows("/mnt/c/"),
+            Some("C:\\".into())
+        );
+        assert_eq!(
+            crate::path_utils::mnt_path_to_windows("/mnt/c"),
+            Some("C:\\".into())
+        );
         // Not a /mnt/ path
-        assert_eq!(mnt_path_to_windows("/home/user"), None);
-        assert_eq!(mnt_path_to_windows("/tmp"), None);
-        assert_eq!(mnt_path_to_windows("C:\\Users"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("/home/user"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("/tmp"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("C:\\Users"), None);
     }
 
     #[test]
