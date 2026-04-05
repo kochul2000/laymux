@@ -3,6 +3,7 @@ pub mod automation_server;
 pub mod cli;
 pub mod clipboard;
 pub mod commands;
+pub mod error;
 pub mod git_watcher;
 pub mod ipc_server;
 pub mod output_buffer;
