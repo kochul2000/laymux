@@ -23,7 +23,7 @@ import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/F
 
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
-  borderRadius: "6px",
+  borderRadius: "var(--radius-lg)",
   border: "1px solid var(--border)",
 };
 
@@ -2095,7 +2095,7 @@ const kbdStyle: React.CSSProperties = {
   background: "var(--bg-surface)",
   border: "1px solid var(--border)",
   borderBottom: "2px solid var(--border)",
-  borderRadius: 3,
+  borderRadius: "var(--radius-md)",
   padding: "2px 8px",
   fontFamily: "'Consolas', monospace",
   fontSize: 11,
@@ -2587,7 +2587,7 @@ export function SettingsView() {
               color: "var(--text-secondary)",
               background: "transparent",
               border: "1px solid var(--border)",
-              borderRadius: 3,
+              borderRadius: "var(--radius-md)",
               cursor: "pointer",
               opacity: 0.7,
             }}
@@ -2804,7 +2804,7 @@ export function SettingsView() {
                 border: "1px solid var(--border)",
                 cursor: dirty ? "pointer" : "default",
                 transition: "all 0.15s",
-                borderRadius: 4,
+                borderRadius: "var(--radius-md)",
                 opacity: dirty ? 1 : 0.4,
               }}
             >
@@ -2826,7 +2826,7 @@ export function SettingsView() {
                 border: "none",
                 cursor: dirty ? "pointer" : "default",
                 transition: "all 0.15s",
-                borderRadius: 4,
+                borderRadius: "var(--radius-md)",
                 opacity: dirty ? 1 : 0.4,
               }}
             >

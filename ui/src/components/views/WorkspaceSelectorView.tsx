@@ -335,7 +335,7 @@ function WorkspaceItem({
                       ...(isFocusedPane
                         ? {
                             background: "rgba(137,180,250,0.12)",
-                            borderRadius: 3,
+                            borderRadius: "var(--radius-md)",
                             filter: "brightness(1.3)",
                           }
                         : {}),
@@ -428,7 +428,7 @@ function WorkspaceItem({
                             border: ts.hasUnreadNotification
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid transparent",
-                            borderRadius: 3,
+                            borderRadius: "var(--radius-md)",
                             padding: "0 1px",
                             lineHeight: 1,
                           }}
@@ -462,7 +462,7 @@ function WorkspaceItem({
                     ...(isFocusedPane
                       ? {
                           background: "rgba(137,180,250,0.08)",
-                          borderRadius: 3,
+                          borderRadius: "var(--radius-md)",
                           color: "var(--text-primary)",
                         }
                       : {}),

@@ -92,7 +92,7 @@ export function GridEditToolbar() {
     border: "1px solid rgba(255,255,255,0.08)",
     color: "var(--text-secondary)",
     background: "transparent",
-    borderRadius: 2,
+    borderRadius: "var(--radius-sm)",
   };
 
   return (
