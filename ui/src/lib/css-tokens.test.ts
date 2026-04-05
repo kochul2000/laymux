@@ -72,4 +72,8 @@ describe("CSS utility classes — hover", () => {
   it("defines .hover-bg-strong:hover class", () => {
     expect(cssContent).toMatch(/\.hover-bg-strong:hover\s*\{/);
   });
+
+  it("defines .hover-bg-close:hover class", () => {
+    expect(cssContent).toMatch(/\.hover-bg-close:hover\s*\{/);
+  });
 });

@@ -77,6 +77,10 @@ body {
 .hover-bg-strong:hover {
   background: var(--hover-bg-strong);
 }
+.hover-bg-close:hover {
+  background: var(--red);
+  color: #fff;
+}
 
 /* Hide scrollbars globally — content is still scrollable */
 ::-webkit-scrollbar {
