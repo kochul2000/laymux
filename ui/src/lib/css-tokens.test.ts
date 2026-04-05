@@ -45,3 +45,12 @@ describe("CSS design tokens — border-radius", () => {
     expect(cssContent).toMatch(regex);
   });
 });
+
+describe("CSS design tokens — font-size", () => {
+  const fontTokens = ["--fs-2xs", "--fs-xs", "--fs-sm", "--fs-md", "--fs-lg"];
+
+  it.each(fontTokens)("defines %s in :root", (token) => {
+    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
+    expect(cssContent).toMatch(regex);
+  });
+});
