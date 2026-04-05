@@ -8,7 +8,7 @@
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
 * **Rust 코드 설계 철학 준수**: ARCHITECTURE.md §14에 정의된 Rust 설계 원칙을 따른다. 아래 규칙 중 해당 모듈이 도입된 항목만 즉시 적용하고, 미도입 항목은 리팩토링 단계에서 순차 적용한다:
   - 에러: `AppError` enum 사용 (도입 완료), 프로덕션 코드에서 `unwrap()` 금지
-  - 락: `MutexExt::lock_or_err()` 사용 (2단계에서 도입 예정), `state.rs` 문서화 순서 준수
+  - 락: `MutexExt::lock_or_err()` 사용 (도입 완료, 기존 코드 적용 진행 중), `state.rs` 문서화 순서 준수
   - 상수: 이벤트명/환경변수명 등 매직 스트링은 `constants.rs`에 정의 (3단계에서 도입 예정)
   - 모듈: 파일 500줄 초과 시 분할 고려, `mod.rs`는 `pub use` 허브만
   - 커맨드: `#[tauri::command]`는 얇은 진입점, 핵심 로직은 `&AppState` 받는 내부 함수로 분리
