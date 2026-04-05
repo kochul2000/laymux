@@ -85,7 +85,7 @@ export function GridEditToolbar() {
   const btnBase =
     "cursor-pointer rounded px-2 text-[11px] font-medium transition-colors duration-100";
 
-  const btnH = { height: 22 };
+  const btnH = { height: "var(--btn-h)" };
 
   const btnStyle: React.CSSProperties = {
     ...btnH,
