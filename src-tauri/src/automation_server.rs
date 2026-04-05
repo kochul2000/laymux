@@ -144,6 +144,20 @@ pub struct HealthResponse {
     pub port: u16,
 }
 
+/// Fixed automation port: release = 19280, dev = 19281.
+/// Only one instance of each build type can run at a time.
+pub const RELEASE_PORT: u16 = 19280;
+pub const DEV_PORT: u16 = 19281;
+
+/// Return the fixed automation port for this build type.
+pub fn automation_port() -> u16 {
+    if cfg!(debug_assertions) {
+        DEV_PORT
+    } else {
+        RELEASE_PORT
+    }
+}
+
 /// Write discovery file so external tools can find the automation port.
 pub fn write_discovery_file(port: u16) {
     let path = discovery_file_path();
@@ -174,8 +188,8 @@ fn discovery_file_path() -> std::path::PathBuf {
         .join("automation.json")
 }
 
-/// Start the automation HTTP server.
-/// Tries ports 19280..19289 then falls back to OS-assigned.
+/// Start the automation HTTP server on a fixed port.
+/// Release = 19280, Dev = 19281. No fallback — fails if port is occupied.
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
     let server_state = ServerState {
         app_state: app_state.clone(),
@@ -184,34 +198,13 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
 
     let app = build_router(server_state);
 
-    // Try preferred ports — bind to 0.0.0.0 so WSL2 can reach Windows host
-    let mut listener = None;
-    for port in 19280..=19289 {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        match TcpListener::bind(addr).await {
-            Ok(l) => {
-                listener = Some(l);
-                break;
-            }
-            Err(_) => continue,
-        }
-    }
+    let port = automation_port();
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
 
-    // Fallback to OS-assigned port
-    let listener = match listener {
-        Some(l) => l,
-        None => {
-            let addr = SocketAddr::from(([0, 0, 0, 0], 0));
-            TcpListener::bind(addr)
-                .await
-                .map_err(|e| format!("Failed to bind automation server: {e}"))?
-        }
-    };
-
-    let bound_port = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to get local addr: {e}"))?
-        .port();
+    let bound_port = port;
 
     // Store port in AppState
     if let Ok(mut port) = app_state.automation_port.lock() {
@@ -367,7 +360,7 @@ async fn api_docs() -> impl IntoResponse {
         "version": "v1",
         "description": "Programmatic control of Laymux IDE. All endpoints are localhost-only (127.0.0.1). No authentication required.",
         "base_url": "http://127.0.0.1:{port}/api/v1",
-        "discovery": "Port is written to %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals.",
+        "discovery": format!("Fixed port: release={RELEASE_PORT}, dev={DEV_PORT}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals."),
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
@@ -1623,6 +1616,18 @@ mod tests {
         let body: SplitPaneBody = serde_json::from_str(json).unwrap();
         assert_eq!(body.pane_index, 0);
         assert_eq!(body.direction, "vertical");
+    }
+
+    #[test]
+    fn automation_port_returns_dev_in_debug() {
+        // In test builds (debug_assertions=true), should return DEV_PORT
+        assert_eq!(automation_port(), DEV_PORT);
+        assert_eq!(automation_port(), 19281);
+    }
+
+    #[test]
+    fn port_constants_are_adjacent() {
+        assert_eq!(DEV_PORT, RELEASE_PORT + 1);
     }
 
     #[test]
