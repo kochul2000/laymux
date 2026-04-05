@@ -70,6 +70,14 @@ body {
   flex-direction: column;
 }
 
+/* Hover utility classes */
+.hover-bg:hover {
+  background: var(--hover-bg);
+}
+.hover-bg-strong:hover {
+  background: var(--hover-bg-strong);
+}
+
 /* Hide scrollbars globally — content is still scrollable */
 ::-webkit-scrollbar {
   width: 0;
