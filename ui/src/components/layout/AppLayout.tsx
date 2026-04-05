@@ -14,6 +14,77 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 
+function ModalOverlay({
+  testIdPrefix,
+  overlayTestId,
+  title,
+  onClose,
+  size,
+  position = "center",
+  zIndex = 9999,
+  children,
+}: {
+  testIdPrefix: string;
+  overlayTestId?: string;
+  title: string;
+  onClose: () => void;
+  size: string;
+  position?: "center" | "bottom";
+  zIndex?: number;
+  children: React.ReactNode;
+}) {
+  const alignClass =
+    position === "bottom" ? "flex items-end justify-center" : "flex items-center justify-center";
+  const backdrop = position === "bottom" ? "var(--backdrop-light)" : "var(--backdrop-heavy)";
+  const margin = position === "bottom" ? "mb-8" : "";
+
+  return createPortal(
+    <div
+      data-testid={overlayTestId ?? testIdPrefix}
+      className={`fixed inset-0 ${alignClass}`}
+      style={{ zIndex }}
+    >
+      <div
+        data-testid={`${testIdPrefix}-backdrop`}
+        className="absolute inset-0"
+        style={{ background: backdrop }}
+        onClick={onClose}
+      />
+      <div
+        className={`relative z-10 flex flex-col overflow-hidden rounded-lg shadow-2xl ${margin} ${size}`}
+        style={{
+          background: "var(--bg-surface, #181825)",
+          border: "1px solid var(--border, #333)",
+        }}
+      >
+        <div
+          className="flex items-center justify-between px-4 py-2"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            {title}
+          </span>
+          <button
+            data-testid={`${testIdPrefix}-close`}
+            onClick={onClose}
+            className="hover-bg-strong flex h-6 w-6 items-center justify-center rounded text-sm"
+            style={{
+              color: "var(--text-secondary)",
+              border: "none",
+              cursor: "pointer",
+            }}
+            title="Close"
+          >
+            &#10005;
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function DockResizeHandle({ position }: { position: DockPosition }) {
   const dragging = useRef(false);
 
@@ -270,108 +341,35 @@ export function AppLayout() {
       </div>
 
       {/* Notification Panel Overlay */}
-      {notificationPanelOpen &&
-        createPortal(
-          <div
-            data-testid="notification-panel-overlay"
-            className="fixed inset-0 flex items-end justify-center"
-            style={{ zIndex: 9998 }}
-          >
-            <div
-              data-testid="notification-panel-backdrop"
-              className="absolute inset-0"
-              style={{ background: "rgba(0,0,0,0.3)" }}
-              onClick={closeNotificationPanel}
-            />
-            <div
-              className="relative z-10 mb-8 flex w-[480px] flex-col overflow-hidden rounded-lg shadow-2xl"
-              style={{
-                background: "var(--bg-surface, #181825)",
-                border: "1px solid var(--border, #333)",
-                maxHeight: "60vh",
-              }}
-            >
-              <div
-                className="flex items-center justify-between px-4 py-2"
-                style={{ borderBottom: "1px solid var(--border)" }}
-              >
-                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                  Notifications
-                </span>
-                <button
-                  data-testid="notification-panel-close"
-                  onClick={closeNotificationPanel}
-                  className="flex h-6 w-6 items-center justify-center rounded text-sm"
-                  style={{
-                    color: "var(--text-secondary)",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                  title="Close"
-                >
-                  &#10005;
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <NotificationPanel workspaceId={activeWorkspaceId} />
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      {notificationPanelOpen && (
+        <ModalOverlay
+          testIdPrefix="notification-panel"
+          overlayTestId="notification-panel-overlay"
+          title="Notifications"
+          onClose={closeNotificationPanel}
+          size="w-[480px] max-h-[60vh]"
+          position="bottom"
+          zIndex={9998}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <NotificationPanel workspaceId={activeWorkspaceId} />
+          </div>
+        </ModalOverlay>
+      )}
 
       {/* Settings Modal — portaled to body to escape dock stacking contexts */}
-      {settingsModalOpen &&
-        createPortal(
-          <div
-            data-testid="settings-modal"
-            className="fixed inset-0 flex items-center justify-center"
-            style={{ zIndex: 9999 }}
-          >
-            <div
-              data-testid="settings-modal-backdrop"
-              className="absolute inset-0"
-              style={{ background: "rgba(0,0,0,0.5)" }}
-              onClick={closeSettingsModal}
-            />
-            <div
-              className="relative z-10 flex h-[85vh] w-[780px] flex-col overflow-hidden rounded-lg shadow-2xl"
-              style={{
-                background: "var(--bg-surface, #181825)",
-                border: "1px solid var(--border, #333)",
-              }}
-            >
-              {/* Modal title bar */}
-              <div
-                className="flex items-center justify-between px-4 py-2"
-                style={{ borderBottom: "1px solid var(--border)" }}
-              >
-                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                  Settings
-                </span>
-                <button
-                  data-testid="settings-modal-close"
-                  onClick={closeSettingsModal}
-                  className="flex h-6 w-6 items-center justify-center rounded text-sm"
-                  style={{
-                    color: "var(--text-secondary)",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                  title="Close"
-                >
-                  &#10005;
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                <SettingsView />
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      {settingsModalOpen && (
+        <ModalOverlay
+          testIdPrefix="settings-modal"
+          title="Settings"
+          onClose={closeSettingsModal}
+          size="w-[780px] h-[85vh]"
+        >
+          <div className="min-h-0 flex-1">
+            <SettingsView />
+          </div>
+        </ModalOverlay>
+      )}
     </div>
   );
 }
