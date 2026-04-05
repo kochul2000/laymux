@@ -28,6 +28,16 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock("./TerminalView", () => ({
+  TerminalView: (props: Record<string, unknown>) => (
+    <div
+      data-testid="mock-terminal-view"
+      data-startup-command={props.startupCommandOverride}
+      data-profile={props.profile}
+    />
+  ),
+}));
+
 const defaultProps = {
   instanceId: "file-explorer-test-1",
   profile: "WSL",
@@ -494,5 +504,157 @@ describe("FileExplorerView", () => {
     });
 
     expect(listDirectory).toHaveBeenCalledWith("/home");
+  });
+
+  it("opens file with terminal viewer when extensionViewers matches", async () => {
+    // Configure extensionViewers with vi for .txt files
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+      },
+    });
+
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Double-click the a.txt file (index 2: ..=0, subdir=1, a.txt=2)
+    const fileItem = screen.getByTestId("file-explorer-item-2");
+    fireEvent.doubleClick(fileItem);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Should show terminal viewer (mocked), NOT call readFileForViewer
+    expect(readFileForViewer).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mock-terminal-view")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute(
+      "data-startup-command",
+      "vi '/home/user/a.txt'",
+    );
+  });
+
+  it("opens file with web viewer when extensionViewers does not match", async () => {
+    // This test needs real timers for async readFileForViewer to resolve properly
+    vi.useRealTimers();
+
+    // Explicitly set mock to return text content (previous tests may have changed it)
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "file content",
+      truncated: false,
+    });
+
+    // No extensionViewers configured (default)
+    render(<FileExplorerView {...defaultProps} />);
+    // Wait for initial listDirectory
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Double-click the a.txt file (index 2: ..=0, subdir=1, a.txt=2)
+    const fileItem = screen.getByTestId("file-explorer-item-2");
+    await act(async () => {
+      fireEvent.doubleClick(fileItem);
+    });
+    // Wait for readFileForViewer promise to resolve and re-render
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Should use web viewer (readFileForViewer called)
+    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
+    expect(screen.getByTestId("file-explorer-viewer-text")).toBeInTheDocument();
+
+    // Restore fake timers for other tests
+    vi.useFakeTimers();
+  });
+
+  it("uses WSL profile for terminal viewer when CWD is a Unix path and current profile is not WSL", async () => {
+    // Set up: PowerShell default profile, WSL profile available, Unix CWD
+    useSettingsStore.setState({
+      profiles: [
+        {
+          name: "PowerShell",
+          commandLine: "powershell.exe -NoLogo",
+          startingDirectory: "",
+          startupCommand: "",
+          syncCwd: "default",
+        },
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          startingDirectory: "",
+          startupCommand: "",
+          syncCwd: "default",
+        },
+      ],
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+      },
+    });
+
+    // Render with PowerShell profile but Unix CWD
+    render(<FileExplorerView {...defaultProps} profile="PowerShell" lastCwd="/home/user" />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Double-click a.txt
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Should use WSL profile instead of PowerShell
+    const terminalView = screen.getByTestId("mock-terminal-view");
+    expect(terminalView).toHaveAttribute("data-profile", "WSL");
+  });
+
+  it("keeps current profile for terminal viewer when CWD is a Windows path", async () => {
+    useSettingsStore.setState({
+      profiles: [
+        {
+          name: "PowerShell",
+          commandLine: "powershell.exe -NoLogo",
+          startingDirectory: "",
+          startupCommand: "",
+          syncCwd: "default",
+        },
+        {
+          name: "WSL",
+          commandLine: "wsl.exe",
+          startingDirectory: "",
+          startupCommand: "",
+          syncCwd: "default",
+        },
+      ],
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+      },
+    });
+
+    mockListDir([
+      { name: "readme.txt", isDirectory: false, isSymlink: false, isExecutable: false, size: 100 },
+    ]);
+
+    render(<FileExplorerView {...defaultProps} profile="PowerShell" lastCwd="C:\\Users\\test" />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Double-click readme.txt (index 1: ..=0, readme.txt=1)
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Should keep PowerShell profile
+    const terminalView = screen.getByTestId("mock-terminal-view");
+    expect(terminalView).toHaveAttribute("data-profile", "PowerShell");
   });
 });

@@ -42,6 +42,7 @@ export function FileExplorerView({
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.fileExplorer);
+  const profiles = useSettingsStore((s) => s.profiles);
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
@@ -501,6 +502,19 @@ export function FileExplorerView({
     [settings],
   );
 
+  // When CWD is a Unix path and the current profile is not WSL,
+  // use a WSL profile for the viewer terminal so paths resolve correctly.
+  const viewerProfile = useMemo(() => {
+    const isUnixPath = currentCwd.startsWith("/");
+    if (!isUnixPath) return profile;
+    // Check if current profile is already WSL-like
+    const currentProfileConfig = profiles.find((p) => p.name === profile);
+    if (currentProfileConfig?.commandLine?.toLowerCase().includes("wsl")) return profile;
+    // Find a WSL profile
+    const wslProfile = profiles.find((p) => p.commandLine?.toLowerCase().includes("wsl"));
+    return wslProfile ? wslProfile.name : profile;
+  }, [currentCwd, profile, profiles]);
+
   const navBtnStyle = {
     background: "none",
     border: "none",
@@ -552,7 +566,7 @@ export function FileExplorerView({
             <div className="h-full" data-testid="file-explorer-viewer-terminal">
               <TerminalView
                 instanceId={paneId ? `file-viewer-${paneId}` : `file-viewer-${instanceId}`}
-                profile={profile}
+                profile={viewerProfile}
                 syncGroup=""
                 cwdSend={false}
                 cwdReceive={false}
