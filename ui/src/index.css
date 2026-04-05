@@ -36,6 +36,10 @@
   --fs-sm: 11px;
   --fs-md: 13px;
   --fs-lg: 15px;
+
+  /* utility */
+  --separator-bg: rgba(255, 255, 255, 0.08);
+  --transition-fast: 0.1s;
 }
 
 * {

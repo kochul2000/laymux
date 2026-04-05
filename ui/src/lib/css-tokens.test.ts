@@ -54,3 +54,12 @@ describe("CSS design tokens — font-size", () => {
     expect(cssContent).toMatch(regex);
   });
 });
+
+describe("CSS design tokens — utility", () => {
+  const utilityTokens = ["--separator-bg", "--transition-fast"];
+
+  it.each(utilityTokens)("defines %s in :root", (token) => {
+    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
+    expect(cssContent).toMatch(regex);
+  });
+});
