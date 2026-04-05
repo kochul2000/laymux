@@ -2098,7 +2098,7 @@ const kbdStyle: React.CSSProperties = {
   borderRadius: "var(--radius-md)",
   padding: "2px 8px",
   fontFamily: "'Consolas', monospace",
-  fontSize: 11,
+  fontSize: "var(--fs-sm)",
   color: "var(--text-primary)",
   whiteSpace: "nowrap" as const,
   display: "inline-block",
@@ -2231,7 +2231,7 @@ function KeybindingsSection() {
                       outline: "none",
                       minWidth: 120,
                       fontFamily: "'Consolas', monospace",
-                      fontSize: 11,
+                      fontSize: "var(--fs-sm)",
                     }}
                   >
                     {capturedKeys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
@@ -2315,7 +2315,7 @@ function KeybindingsSection() {
                   outline: "none",
                   minWidth: 120,
                   fontFamily: "'Consolas', monospace",
-                  fontSize: 11,
+                  fontSize: "var(--fs-sm)",
                 }}
               >
                 {kb.keys || <span style={{ opacity: 0.5 }}>Press keys...</span>}

@@ -257,7 +257,7 @@ export function GridEditToolbar() {
             color: "var(--text-secondary)",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title="Minimize"
         >
@@ -271,7 +271,7 @@ export function GridEditToolbar() {
             color: "var(--text-secondary)",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title={maximized ? "Restore" : "Maximize"}
         >
@@ -285,7 +285,7 @@ export function GridEditToolbar() {
             color: "var(--text-secondary)",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title="Close"
         >
