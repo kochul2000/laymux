@@ -204,17 +204,15 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
         .await
         .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
 
-    let bound_port = port;
-
     // Store port in AppState
-    if let Ok(mut port) = app_state.automation_port.lock() {
-        *port = Some(bound_port);
+    if let Ok(mut p) = app_state.automation_port.lock() {
+        *p = Some(port);
     }
 
     // Write discovery file
-    write_discovery_file(bound_port);
+    write_discovery_file(port);
 
-    eprintln!("Automation server listening on 0.0.0.0:{bound_port}");
+    eprintln!("Automation server listening on 0.0.0.0:{port}");
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -222,7 +220,7 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
         }
     });
 
-    Ok(bound_port)
+    Ok(port)
 }
 
 /// All registered routes as (method, path) pairs.
@@ -358,8 +356,8 @@ async fn api_docs() -> impl IntoResponse {
     Json(serde_json::json!({
         "name": "Laymux IDE Automation API",
         "version": "v1",
-        "description": "Programmatic control of Laymux IDE. All endpoints are localhost-only (127.0.0.1). No authentication required.",
-        "base_url": "http://127.0.0.1:{port}/api/v1",
+        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). No authentication required.",
+        "base_url": format!("http://127.0.0.1:{}/api/v1", automation_port()),
         "discovery": format!("Fixed port: release={RELEASE_PORT}, dev={DEV_PORT}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Also available via LX_AUTOMATION_PORT env var in spawned terminals."),
         "endpoints": [
             {
