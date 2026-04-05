@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::automation_server::AutomationResponse;
 use crate::cli::{LxMessage, LxResponse};
+use crate::lock_ext::MutexExt;
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty;
 use crate::state::AppState;
@@ -45,17 +46,17 @@ pub fn create_terminal_session(
 ) -> Result<TerminalSession, String> {
     // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
-    if let Ok(path_lock) = state.ipc_socket_path.lock() {
+    if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
         if let Some(ref socket_path) = *path_lock {
             env.push(("LX_SOCKET".to_string(), socket_path.clone()));
         }
     }
-    if let Ok(port_lock) = state.automation_port.lock() {
+    if let Ok(port_lock) = state.automation_port.lock_or_err() {
         if let Some(port) = *port_lock {
             env.push(("LX_AUTOMATION_PORT".to_string(), port.to_string()));
         }
     }
-    if let Ok(key_lock) = state.automation_key.lock() {
+    if let Ok(key_lock) = state.automation_key.lock_or_err() {
         if let Some(ref key) = *key_lock {
             env.push(("LX_AUTOMATION_KEY".to_string(), key.clone()));
         }
@@ -105,10 +106,7 @@ pub fn create_terminal_session(
 
     // Check for duplicate
     {
-        let terminals = state
-            .terminals
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let terminals = state.terminals.lock_or_err()?;
         if terminals.contains_key(&id) {
             return Err(format!("Session '{id}' already exists"));
         }
@@ -116,10 +114,7 @@ pub fn create_terminal_session(
 
     // Create output buffer for this terminal
     {
-        let mut buffers = state
-            .output_buffers
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut buffers = state.output_buffers.lock_or_err()?;
         buffers.insert(id.clone(), TerminalOutputBuffer::default());
     }
 
@@ -140,7 +135,7 @@ pub fn create_terminal_session(
         // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
 
         // Write to output buffer
-        if let Ok(mut buffers) = output_buffers.lock() {
+        if let Ok(mut buffers) = output_buffers.lock_or_err() {
             if let Some(buf) = buffers.get_mut(&buffer_terminal_id) {
                 buf.push(&data);
             }
@@ -153,7 +148,7 @@ pub fn create_terminal_session(
         if !claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
             if any_terminal_title_contains(&data, "Claude Code") {
                 claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Ok(mut known) = known_claude.lock() {
+                if let Ok(mut known) = known_claude.lock_or_err() {
                     known.insert(claude_detect_id.clone());
                 }
                 let _ = app_clone.emit("claude-terminal-detected", &claude_detect_id);
@@ -169,7 +164,7 @@ pub fn create_terminal_session(
         {
             let normalized = normalize_wsl_path(&raw_cwd);
             let mut changed = false;
-            if let Ok(mut terms) = terminals_for_cwd.lock() {
+            if let Ok(mut terms) = terminals_for_cwd.lock_or_err() {
                 if let Some(session) = terms.get_mut(&cwd_terminal_id) {
                     if session.cwd.as_deref() != Some(&normalized) {
                         // Extract WSL distro before normalization strips it
@@ -213,27 +208,18 @@ pub fn create_terminal_session(
     );
 
     {
-        let mut terminals = state
-            .terminals
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut terminals = state.terminals.lock_or_err()?;
         terminals.insert(id.clone(), session);
     }
 
     {
-        let mut ptys = state
-            .pty_handles
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut ptys = state.pty_handles.lock_or_err()?;
         ptys.insert(id.clone(), pty_handle);
     }
 
     // Register in sync group if non-empty
     if !sync_group.is_empty() {
-        let mut groups = state
-            .sync_groups
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut groups = state.sync_groups.lock_or_err()?;
         groups
             .entry(sync_group.clone())
             .or_insert_with(|| crate::terminal::SyncGroup::new(sync_group))
@@ -252,10 +238,7 @@ pub fn resize_terminal(
 ) -> Result<(), String> {
     // Update config
     {
-        let mut terminals = state
-            .terminals
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut terminals = state.terminals.lock_or_err()?;
         let session = terminals
             .get_mut(&id)
             .ok_or_else(|| format!("Session '{id}' not found"))?;
@@ -264,10 +247,7 @@ pub fn resize_terminal(
     }
 
     // Resize PTY
-    let ptys = state
-        .pty_handles
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let ptys = state.pty_handles.lock_or_err()?;
     if let Some(handle) = ptys.get(&id) {
         handle.resize(cols, rows)?;
     }
@@ -281,10 +261,7 @@ pub fn write_to_terminal(
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
-    let ptys = state
-        .pty_handles
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let ptys = state.pty_handles.lock_or_err()?;
 
     let handle = ptys
         .get(&id)
@@ -297,26 +274,17 @@ pub fn write_to_terminal(
 pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result<(), String> {
     // Remove PTY handle (drop closes the PTY)
     {
-        let mut ptys = state
-            .pty_handles
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut ptys = state.pty_handles.lock_or_err()?;
         ptys.remove(&id);
     }
 
     // Remove output buffer
     {
-        let mut buffers = state
-            .output_buffers
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut buffers = state.output_buffers.lock_or_err()?;
         buffers.remove(&id);
     }
 
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut terminals = state.terminals.lock_or_err()?;
 
     let session = terminals
         .remove(&id)
@@ -324,7 +292,7 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
-        if let Ok(mut groups) = state.sync_groups.lock() {
+        if let Ok(mut groups) = state.sync_groups.lock_or_err() {
             if let Some(group) = groups.get_mut(&session.config.sync_group) {
                 group.remove_terminal(&id);
                 if group.terminal_ids.is_empty() {
@@ -335,17 +303,17 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
     }
 
     // Clean up propagation flag
-    if let Ok(mut propagated) = state.propagated_terminals.lock() {
+    if let Ok(mut propagated) = state.propagated_terminals.lock_or_err() {
         propagated.remove(&id);
     }
 
     // Clean up Claude terminal tracking
-    if let Ok(mut known) = state.known_claude_terminals.lock() {
+    if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
         known.remove(&id);
     }
 
     // Clean up notifications for this terminal
-    if let Ok(mut notifs) = state.notifications.lock() {
+    if let Ok(mut notifs) = state.notifications.lock_or_err() {
         notifs.retain(|n| n.terminal_id != id);
     }
 
@@ -358,10 +326,7 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
 /// may detect earlier via command text (e.g., user typed "claude").
 #[tauri::command]
 pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
-    let mut known = state
-        .known_claude_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut known = state.known_claude_terminals.lock_or_err()?;
     Ok(known.insert(id))
 }
 
@@ -378,10 +343,7 @@ pub fn get_claude_session_ids(
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, String>, String> {
     let known: Vec<String> = {
-        let k = state
-            .known_claude_terminals
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
     };
 
@@ -398,19 +360,13 @@ pub fn get_claude_session_ids(
     for terminal_id in &known {
         // Get child PID from PTY handle
         let child_pid = {
-            let ptys = state
-                .pty_handles
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let ptys = state.pty_handles.lock_or_err()?;
             ptys.get(terminal_id).and_then(|h| h.child_pid())
         };
 
         // Get terminal CWD for fallback
         let terminal_cwd = {
-            let terminals = state
-                .terminals
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let terminals = state.terminals.lock_or_err()?;
             terminals.get(terminal_id).and_then(|s| s.cwd.clone())
         };
 
@@ -773,10 +729,7 @@ fn normalize_path_for_comparison(path: &str) -> String {
 /// Check if a terminal is registered as running Claude Code.
 #[tauri::command]
 pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
-    let known = state
-        .known_claude_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let known = state.known_claude_terminals.lock_or_err()?;
     Ok(known.contains(&id))
 }
 
@@ -785,10 +738,7 @@ pub fn get_sync_group_terminals(
     group_name: String,
     state: State<Arc<AppState>>,
 ) -> Result<Vec<String>, String> {
-    let groups = state
-        .sync_groups
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let groups = state.sync_groups.lock_or_err()?;
 
     Ok(groups
         .get(&group_name)
@@ -802,10 +752,7 @@ pub fn set_terminal_cwd_receive(
     receive: bool,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut terminals = state.terminals.lock_or_err()?;
     if let Some(session) = terminals.get_mut(&terminal_id) {
         session.cwd_receive = receive;
     }
@@ -818,10 +765,7 @@ pub fn update_terminal_sync_group(
     new_group: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
-    let mut groups = state
-        .sync_groups
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut groups = state.sync_groups.lock_or_err()?;
 
     // Remove from all existing groups
     let empty_groups: Vec<String> = groups
@@ -977,10 +921,7 @@ fn handle_lx_message_dispatch(
         } => {
             // Update stored branch for the source terminal (single source of truth)
             {
-                let mut terminals = state
-                    .terminals
-                    .lock()
-                    .map_err(|e| format!("Lock error: {e}"))?;
+                let mut terminals = state.terminals.lock_or_err()?;
                 if let Some(session) = terminals.get_mut(&terminal_id) {
                     session.branch = Some(branch.clone());
                 }
@@ -996,10 +937,7 @@ fn handle_lx_message_dispatch(
                 }),
             );
 
-            let groups = state
-                .sync_groups
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let groups = state.sync_groups.lock_or_err()?;
             let count = groups
                 .get(&group_id)
                 .map(|g| g.terminal_ids.len())
@@ -1030,7 +968,7 @@ fn handle_lx_message_dispatch(
                         .as_millis() as u64,
                     read_at: None,
                 };
-                if let Ok(mut notifs) = state.notifications.lock() {
+                if let Ok(mut notifs) = state.notifications.lock_or_err() {
                     notifs.push(notification);
                     evict_old_notifications(&mut notifs);
                 }
@@ -1049,10 +987,7 @@ fn handle_lx_message_dispatch(
             Ok(LxResponse::ok(Some(format!("notification: {}", message))))
         }
         LxMessage::SetTabTitle { title, terminal_id } => {
-            let mut terminals = state
-                .terminals
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let mut terminals = state.terminals.lock_or_err()?;
             if let Some(session) = terminals.get_mut(&terminal_id) {
                 session.title = title.clone();
             }
@@ -1068,10 +1003,7 @@ fn handle_lx_message_dispatch(
             Ok(LxResponse::ok(Some(format!("title set: {}", title))))
         }
         LxMessage::GetCwd { terminal_id } => {
-            let terminals = state
-                .terminals
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let terminals = state.terminals.lock_or_err()?;
             let cwd = terminals
                 .get(&terminal_id)
                 .and_then(|s| s.cwd.clone())
@@ -1079,10 +1011,7 @@ fn handle_lx_message_dispatch(
             Ok(LxResponse::ok(Some(cwd)))
         }
         LxMessage::GetBranch { terminal_id } => {
-            let terminals = state
-                .terminals
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let terminals = state.terminals.lock_or_err()?;
             let branch = terminals
                 .get(&terminal_id)
                 .and_then(|s| s.branch.clone())
@@ -1090,10 +1019,7 @@ fn handle_lx_message_dispatch(
             Ok(LxResponse::ok(Some(branch)))
         }
         LxMessage::SendCommand { command, group } => {
-            let groups = state
-                .sync_groups
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let groups = state.sync_groups.lock_or_err()?;
             let target_ids = groups
                 .get(&group)
                 .map(|g| g.terminal_ids.clone())
@@ -1132,10 +1058,7 @@ fn handle_lx_message_dispatch(
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
-                let mut terminals = state
-                    .terminals
-                    .lock()
-                    .map_err(|e| format!("Lock error: {e}"))?;
+                let mut terminals = state.terminals.lock_or_err()?;
                 if let Some(session) = terminals.get_mut(&terminal_id) {
                     if let Some(ref cmd) = command {
                         session.last_command = Some(cmd.clone());
@@ -1173,10 +1096,7 @@ fn handle_lx_message_dispatch(
         LxMessage::SetWslDistro { path, terminal_id } => {
             // Extract WSL distro name from UNC-style path (e.g., //wsl.localhost/Ubuntu-22.04/...)
             if let Some(distro) = extract_wsl_distro_from_path(&path) {
-                let mut terminals = state
-                    .terminals
-                    .lock()
-                    .map_err(|e| format!("Lock error: {e}"))?;
+                let mut terminals = state.terminals.lock_or_err()?;
                 if let Some(session) = terminals.get_mut(&terminal_id) {
                     session.wsl_distro = Some(distro.clone());
                 }
@@ -1197,20 +1117,14 @@ fn resolve_target_terminals(
     target_group: Option<&str>,
 ) -> Result<Vec<String>, String> {
     if all {
-        let terminals = state
-            .terminals
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let terminals = state.terminals.lock_or_err()?;
         Ok(terminals
             .keys()
             .filter(|id| id.as_str() != source_terminal_id)
             .cloned()
             .collect())
     } else if let Some(target) = target_group {
-        let groups = state
-            .sync_groups
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let groups = state.sync_groups.lock_or_err()?;
         Ok(groups
             .get(target)
             .map(|g| {
@@ -1222,10 +1136,7 @@ fn resolve_target_terminals(
             })
             .unwrap_or_default())
     } else {
-        let groups = state
-            .sync_groups
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let groups = state.sync_groups.lock_or_err()?;
         Ok(groups
             .get(group_id)
             .map(|g| {
@@ -1248,15 +1159,9 @@ fn write_to_group_terminals(
     _source_id: &str,
     command: &str,
 ) -> Result<(), String> {
-    let ptys = state
-        .pty_handles
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let ptys = state.pty_handles.lock_or_err()?;
 
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let terminals = state.terminals.lock_or_err()?;
 
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
@@ -1299,15 +1204,9 @@ fn write_cd_to_group_terminals(
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = find_wsl_distro(state, source_id);
 
-    let ptys = state
-        .pty_handles
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let ptys = state.pty_handles.lock_or_err()?;
 
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let terminals = state.terminals.lock_or_err()?;
 
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
@@ -1977,10 +1876,7 @@ pub fn automation_response(
         serde_json::from_str(&response_json).map_err(|e| format!("Parse error: {e}"))?;
 
     let tx = {
-        let mut channels = state
-            .automation_channels
-            .lock()
-            .map_err(|e| format!("Lock error: {e}"))?;
+        let mut channels = state.automation_channels.lock_or_err()?;
         channels.remove(&response.request_id)
     };
 
@@ -2006,10 +1902,7 @@ pub fn automation_response(
 /// the flag stays active for the full PROPAGATION_TIMEOUT so that multiple
 /// OSC sequences (e.g. OSC 7 + OSC 9;9 from WSL) are all suppressed.
 fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool, String> {
-    let propagated = state
-        .propagated_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let propagated = state.propagated_terminals.lock_or_err()?;
     if let Some(ts) = propagated.get(terminal_id) {
         Ok(ts.elapsed() < PROPAGATION_TIMEOUT)
     } else {
@@ -2024,7 +1917,7 @@ fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool, String> {
 ///
 /// Filter out terminals that have cwd_receive disabled.
 fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<String> {
-    if let Ok(terminals) = state.terminals.lock() {
+    if let Ok(terminals) = state.terminals.lock_or_err() {
         targets
             .iter()
             .filter(|id| terminals.get(id.as_str()).is_none_or(|s| s.cwd_receive))
@@ -2051,7 +1944,7 @@ fn filter_targets_not_busy(
 ) -> (Vec<String>, std::collections::HashSet<String>) {
     let mut claude_ids = std::collections::HashSet::new();
 
-    if let Ok(buffers) = state.output_buffers.lock() {
+    if let Ok(buffers) = state.output_buffers.lock_or_err() {
         let mut result = Vec::new();
         for id in targets {
             let buf = buffers.get(id.as_str());
@@ -2169,7 +2062,7 @@ fn is_claude_terminal_from_buffer(
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
 ) -> bool {
     // Prong 1: Check persistent tracking
-    if let Ok(known) = state.known_claude_terminals.lock() {
+    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
         if known.contains(terminal_id) {
             return true;
         }
@@ -2186,7 +2079,7 @@ fn is_claude_terminal_from_buffer(
 
     if any_terminal_title_contains(&recent, "Claude Code") {
         // Mark persistently for future calls
-        if let Ok(mut known) = state.known_claude_terminals.lock() {
+        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
             known.insert(terminal_id.to_string());
         }
         return true;
@@ -2394,8 +2287,8 @@ pub fn detect_all_terminal_states(
     state: &AppState,
 ) -> std::collections::HashMap<String, TerminalStateInfo> {
     let mut result = std::collections::HashMap::new();
-    if let Ok(buffers) = state.output_buffers.lock() {
-        if let Ok(terminals) = state.terminals.lock() {
+    if let Ok(buffers) = state.output_buffers.lock_or_err() {
+        if let Ok(terminals) = state.terminals.lock_or_err() {
             for id in terminals.keys() {
                 let info = detect_terminal_state(buffers.get(id));
                 result.insert(id.clone(), info);
@@ -2419,10 +2312,7 @@ pub fn get_terminal_states(
 pub fn get_terminal_cwds(
     state: State<Arc<AppState>>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let terminals = state.terminals.lock_or_err()?;
     let mut result = std::collections::HashMap::new();
     for (id, session) in terminals.iter() {
         if let Some(ref cwd) = session.cwd {
@@ -2474,22 +2364,10 @@ pub fn get_terminal_summaries_inner(
     terminal_ids: &[String],
     state: &AppState,
 ) -> Result<Vec<TerminalSummaryResponse>, String> {
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let buffers = state
-        .output_buffers
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let known_claude = state
-        .known_claude_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
-    let notifications = state
-        .notifications
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let terminals = state.terminals.lock_or_err()?;
+    let buffers = state.output_buffers.lock_or_err()?;
+    let known_claude = state.known_claude_terminals.lock_or_err()?;
+    let notifications = state.notifications.lock_or_err()?;
 
     let mut result = Vec::with_capacity(terminal_ids.len());
 
@@ -2542,7 +2420,7 @@ pub fn mark_notifications_read(
         .unwrap_or_default()
         .as_millis() as u64;
     let mut count = 0u32;
-    if let Ok(mut notifs) = state.notifications.lock() {
+    if let Ok(mut notifs) = state.notifications.lock_or_err() {
         for n in notifs.iter_mut() {
             if terminal_ids.contains(&n.terminal_id) && n.read_at.is_none() {
                 n.read_at = Some(now_ms);
@@ -2582,7 +2460,7 @@ fn filter_targets_needing_cd(
     targets: &[String],
     normalized_path: &str,
 ) -> Vec<String> {
-    if let Ok(terminals) = state.terminals.lock() {
+    if let Ok(terminals) = state.terminals.lock_or_err() {
         targets
             .iter()
             .filter(|id| {
@@ -2599,7 +2477,7 @@ fn filter_targets_needing_cd(
 
 /// Update the stored CWD for a terminal session.
 fn update_terminal_cwd(state: &AppState, terminal_id: &str, cwd: &str) {
-    if let Ok(mut terminals) = state.terminals.lock() {
+    if let Ok(mut terminals) = state.terminals.lock_or_err() {
         if let Some(session) = terminals.get_mut(terminal_id) {
             session.cwd = Some(cwd.to_string());
         }
@@ -2696,7 +2574,7 @@ fn extract_wsl_distro_from_path(path: &str) -> Option<String> {
 
 /// Look up the WSL distro name from any WSL terminal's stored distro info.
 fn find_wsl_distro(state: &AppState, source_id: &str) -> Option<String> {
-    let terminals = state.terminals.lock().ok()?;
+    let terminals = state.terminals.lock_or_err().ok()?;
     // First try the source terminal itself
     if let Some(session) = terminals.get(source_id) {
         if let Some(ref distro) = session.wsl_distro {
@@ -2794,10 +2672,7 @@ fn normalize_wsl_path(path: &str) -> String {
 
 /// Mark multiple terminals as having received a propagated command.
 fn mark_propagated(state: &AppState, terminal_ids: &[String]) -> Result<(), String> {
-    let mut propagated = state
-        .propagated_terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {e}"))?;
+    let mut propagated = state.propagated_terminals.lock_or_err()?;
     let now = Instant::now();
     for id in terminal_ids {
         propagated.insert(id.clone(), now);
@@ -2807,7 +2682,7 @@ fn mark_propagated(state: &AppState, terminal_ids: &[String]) -> Result<(), Stri
 
 /// Remove propagation entries older than PROPAGATION_TIMEOUT.
 fn cleanup_stale_propagations(state: &AppState) {
-    if let Ok(mut propagated) = state.propagated_terminals.lock() {
+    if let Ok(mut propagated) = state.propagated_terminals.lock_or_err() {
         propagated.retain(|_, ts| ts.elapsed() < PROPAGATION_TIMEOUT);
     }
 }
