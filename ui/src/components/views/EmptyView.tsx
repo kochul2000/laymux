@@ -75,7 +75,7 @@ function EmptyViewCard({
         <span
           className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold"
           style={{
-            background: hovered ? "var(--accent)" : "rgba(255,255,255,0.08)",
+            background: hovered ? "var(--accent)" : "var(--hover-bg-strong)",
             color: hovered ? "var(--bg-base)" : "var(--text-secondary)",
             transition: "all 0.1s",
           }}

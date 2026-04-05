@@ -89,7 +89,7 @@ export function GridEditToolbar() {
 
   const btnStyle: React.CSSProperties = {
     ...btnH,
-    border: "1px solid rgba(255,255,255,0.08)",
+    border: "1px solid var(--separator-bg)",
     color: "var(--text-secondary)",
     background: "transparent",
     borderRadius: "var(--radius-sm)",
