@@ -113,8 +113,10 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     // Write discovery file (includes key)
     write_discovery_file(port, &key);
 
-    eprintln!("Automation server listening on 0.0.0.0:{port}");
-    eprintln!(
+    tracing::info!(port, "Automation server listening on 0.0.0.0:{port}");
+    tracing::info!(
+        key_prefix = &key[..8],
+        key_suffix = &key[key.len() - 4..],
         "Automation API key: {}...{}",
         &key[..8],
         &key[key.len() - 4..]
@@ -122,7 +124,7 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
-            eprintln!("Automation server error: {e}");
+            tracing::error!(error = %e, "Automation server error");
         }
     });
 

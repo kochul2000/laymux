@@ -58,9 +58,10 @@ pub fn get_claude_session_ids(
         // Strategy 2: CWD + most-recent fallback
         if let Some(ref cwd) = terminal_cwd {
             if let Some(session_id) = find_session_by_cwd(&session_files, cwd) {
-                eprintln!(
-                    "[claude-session] PID tree match failed for {terminal_id}, \
-                     using CWD fallback (cwd={cwd})"
+                tracing::warn!(
+                    terminal_id,
+                    cwd,
+                    "PID tree match failed, using CWD fallback"
                 );
                 result.insert(terminal_id.clone(), session_id);
             }
@@ -267,8 +268,10 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "[claude-session] Failed to create process snapshot for PID {root_pid}: {e}"
+                tracing::warn!(
+                    root_pid,
+                    error = %e,
+                    "Failed to create process snapshot"
                 );
             }
         }
@@ -292,9 +295,10 @@ fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[claude-session] Cannot read /proc children for PID {pid}: {e} \
-                         (kernel CONFIG_PROC_CHILDREN may be disabled, or PID exited)"
+                    tracing::warn!(
+                        pid,
+                        error = %e,
+                        "Cannot read /proc children (CONFIG_PROC_CHILDREN may be disabled)"
                     );
                 }
             }

@@ -24,6 +24,15 @@ use tauri::image::Image;
 use tauri::Manager;
 
 pub fn run() {
+    // Initialize structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .with_target(false)
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
@@ -59,7 +68,7 @@ pub fn run() {
                         .replace(socket_path);
                 }
                 Err(e) => {
-                    eprintln!("Warning: IPC server failed to start: {e}");
+                    tracing::warn!(error = %e, "IPC server failed to start");
                 }
             }
 
@@ -67,7 +76,7 @@ pub fn run() {
             {
                 let paste_dir = clipboard::default_paste_image_dir();
                 if let Err(e) = clipboard::cleanup_old_paste_images(&paste_dir, 7) {
-                    eprintln!("Warning: paste image cleanup failed: {e}");
+                    tracing::warn!(error = %e, "Paste image cleanup failed");
                 }
             }
 
@@ -76,8 +85,8 @@ pub fn run() {
             let auto_state = app_state.clone();
             tauri::async_runtime::spawn(async move {
                 match automation_server::start(auto_state, app_handle).await {
-                    Ok(port) => eprintln!("Automation API ready on port {port}"),
-                    Err(e) => eprintln!("Warning: Automation server failed to start: {e}"),
+                    Ok(port) => tracing::info!(port, "Automation API ready"),
+                    Err(e) => tracing::warn!(error = %e, "Automation server failed to start"),
                 }
             });
 
