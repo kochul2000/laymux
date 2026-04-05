@@ -285,12 +285,17 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
 ];
 
 /// Bearer token authentication middleware.
-/// Skips auth for GET /api/v1/health.
+/// Skips auth for GET /api/v1/health and CORS preflight (OPTIONS).
 async fn auth_middleware(
     AxumState(expected_key): AxumState<String>,
     req: Request,
     next: Next,
 ) -> Response {
+    // Allow CORS preflight through (OPTIONS must pass before auth)
+    if req.method() == axum::http::Method::OPTIONS {
+        return next.run(req).await;
+    }
+
     // Allow health endpoint without auth
     if req.uri().path() == "/api/v1/health" {
         return next.run(req).await;
@@ -1579,6 +1584,7 @@ fn err_json(msg: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower::ServiceExt; // for oneshot()
 
     #[test]
     fn health_response_format() {
@@ -1691,6 +1697,73 @@ mod tests {
         let k2 = generate_automation_key();
         assert_ne!(k1, k2);
         assert!(!k1.is_empty());
+    }
+
+    /// Build a minimal router with auth middleware for testing.
+    /// Uses a dummy protected endpoint (no AppHandle/bridge needed).
+    fn auth_test_router(key: &str) -> Router {
+        let protected = Router::new()
+            .route(
+                "/api/v1/health",
+                get(|| async { StatusCode::OK }),
+            )
+            .route(
+                "/api/v1/protected",
+                get(|| async { StatusCode::OK }),
+            );
+
+        protected
+            .layer(CorsLayer::permissive())
+            .layer(middleware::from_fn_with_state(
+                key.to_string(),
+                auth_middleware,
+            ))
+    }
+
+    #[tokio::test]
+    async fn auth_health_no_token_returns_ok() {
+        let app = auth_test_router("secret-key");
+        let req = axum::http::Request::builder()
+            .uri("/api/v1/health")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_valid_token_returns_ok() {
+        let app = auth_test_router("secret-key");
+        let req = axum::http::Request::builder()
+            .uri("/api/v1/protected")
+            .header("Authorization", "Bearer secret-key")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_invalid_token_returns_401() {
+        let app = auth_test_router("secret-key");
+        let req = axum::http::Request::builder()
+            .uri("/api/v1/protected")
+            .header("Authorization", "Bearer wrong-key")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_missing_header_returns_401() {
+        let app = auth_test_router("secret-key");
+        let req = axum::http::Request::builder()
+            .uri("/api/v1/protected")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]

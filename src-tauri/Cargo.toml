@@ -28,6 +28,7 @@ windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_ToolHelp
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+tower = { version = "0.5", features = ["util"] }
 
 [lib]
 name = "laymux_lib"
