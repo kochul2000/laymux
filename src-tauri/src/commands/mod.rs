@@ -7,6 +7,7 @@ use crate::automation_server::AutomationResponse;
 use crate::cli::{LxMessage, LxResponse};
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
+use crate::osc;
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::path_utils;
 use crate::pty;
@@ -136,7 +137,7 @@ pub fn create_terminal_session(
         // is permanently registered in known_claude_terminals (single source of truth).
         // AtomicBool fast-path avoids scanning after first detection.
         if !claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
-            if any_terminal_title_contains(&data, "Claude Code") {
+            if osc::any_terminal_title_contains(&data, "Claude Code") {
                 claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(mut known) = known_claude.lock_or_err() {
                     known.insert(claude_detect_id.clone());
@@ -150,7 +151,7 @@ pub fn create_terminal_session(
         // This ensures CWD is always up-to-date even if the frontend hasn't processed
         // the OSC sequence yet (e.g., during rapid close after Claude Code exit).
         if let Some(raw_cwd) =
-            extract_last_osc7_cwd(&data).or_else(|| extract_last_osc9_9_cwd(&data))
+            osc::extract_last_osc7_cwd(&data).or_else(|| osc::extract_last_osc9_9_cwd(&data))
         {
             let normalized = path_utils::normalize_wsl_path(&raw_cwd);
             let mut changed = false;
@@ -1865,82 +1866,6 @@ fn filter_targets_not_busy(
     }
 }
 
-/// Check if ANY terminal title (OSC 0 or OSC 2) in the buffer data contains the given substring.
-/// Scans all title sequences, not just the last one.
-fn any_terminal_title_contains(data: &[u8], substring: &str) -> bool {
-    let needle_0: &[u8] = &[0x1b, b']', b'0', b';'];
-    let needle_2: &[u8] = &[0x1b, b']', b'2', b';'];
-
-    for needle in [needle_0, needle_2] {
-        let mut start = 0;
-        while start + needle.len() <= data.len() {
-            if let Some(found) = data[start..]
-                .windows(needle.len())
-                .position(|w| w == needle)
-            {
-                let abs_pos = start + found;
-                let title_start = abs_pos + needle.len();
-                if title_start < data.len() {
-                    let remaining = &data[title_start..];
-                    if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
-                        let title = String::from_utf8_lossy(&remaining[..end]);
-                        if title.contains(substring) {
-                            return true;
-                        }
-                    }
-                }
-                start = abs_pos + 1;
-            } else {
-                break;
-            }
-        }
-    }
-    false
-}
-
-/// Extract the payload of the last occurrence of an OSC sequence identified by `needle`.
-/// Scans for `needle` (e.g., `\x1b]7;`) and returns the text up to the BEL (`\x07`)
-/// or ST (`\x1b\\`) terminator. Returns `None` if no complete match is found.
-fn extract_last_osc_payload(data: &[u8], needle: &[u8]) -> Option<String> {
-    let mut last: Option<String> = None;
-    let mut start = 0;
-
-    while start + needle.len() <= data.len() {
-        if let Some(found) = data[start..]
-            .windows(needle.len())
-            .position(|w| w == needle)
-        {
-            let abs_pos = start + found;
-            let payload_start = abs_pos + needle.len();
-            if payload_start < data.len() {
-                let remaining = &data[payload_start..];
-                if let Some(end) = remaining.iter().position(|&b| b == 0x07 || b == 0x1b) {
-                    let payload = String::from_utf8_lossy(&remaining[..end]);
-                    if !payload.is_empty() {
-                        last = Some(payload.into_owned());
-                    }
-                }
-            }
-            start = abs_pos + 1;
-        } else {
-            break;
-        }
-    }
-    last
-}
-
-/// Extract CWD from the last OSC 7 sequence in PTY output data.
-/// Format: `\x1b]7;<url>\x07` or `\x1b]7;<url>\x1b\\`
-fn extract_last_osc7_cwd(data: &[u8]) -> Option<String> {
-    extract_last_osc_payload(data, &[0x1b, b']', b'7', b';'])
-}
-
-/// Extract CWD from the last OSC 9;9 sequence in PTY output data.
-/// Format: `\x1b]9;9;<path>\x07`
-fn extract_last_osc9_9_cwd(data: &[u8]) -> Option<String> {
-    extract_last_osc_payload(data, &[0x1b, b']', b'9', b';', b'9', b';'])
-}
-
 /// Check if a terminal is running Claude Code.
 /// Uses two-pronged detection:
 /// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
@@ -1969,7 +1894,7 @@ fn is_claude_terminal_from_buffer(
         return false;
     }
 
-    if any_terminal_title_contains(&recent, "Claude Code") {
+    if osc::any_terminal_title_contains(&recent, "Claude Code") {
         // Mark persistently for future calls
         if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
             known.insert(terminal_id.to_string());
@@ -1990,7 +1915,7 @@ fn is_claude_idle_from_buffer(buffer: Option<&crate::output_buffer::TerminalOutp
     if recent.is_empty() {
         return false;
     }
-    if let Some(title) = extract_last_terminal_title(&recent) {
+    if let Some(title) = osc::extract_last_terminal_title(&recent) {
         // ✳ is U+2733, encoded as \xe2\x9c\xb3 in UTF-8
         title.starts_with('\u{2733}')
     } else {
@@ -2013,8 +1938,8 @@ fn is_terminal_at_prompt_from_buffer(
 
     // Find the last OSC 133;C (preexec) and OSC 133;D (exit code) positions.
     // OSC format: \x1b]133;C\x07  or  \x1b]133;D;N\x07
-    let last_c = find_last_osc_133(&recent, b"C");
-    let last_d = find_last_osc_133(&recent, b"D");
+    let last_c = osc::find_last_osc_133(&recent, b"C");
+    let last_d = osc::find_last_osc_133(&recent, b"D");
 
     match (last_c, last_d) {
         (Some(c_pos), Some(d_pos)) => d_pos > c_pos, // D after C = at prompt
@@ -2022,28 +1947,6 @@ fn is_terminal_at_prompt_from_buffer(
         (Some(_), None) => false,                    // Only C = command running
         (None, None) => true,                        // No markers = assume at prompt
     }
-}
-
-/// Find the last occurrence of an OSC 133 sequence with a given param (e.g., "C" or "D").
-fn find_last_osc_133(data: &[u8], param: &[u8]) -> Option<usize> {
-    // Search for \x1b]133;{param} pattern
-    let mut needle = vec![0x1b, b']', b'1', b'3', b'3', b';'];
-    needle.extend_from_slice(param);
-
-    let mut pos = None;
-    let mut start = 0;
-    while start + needle.len() <= data.len() {
-        if let Some(found) = data[start..]
-            .windows(needle.len())
-            .position(|w| w == needle.as_slice())
-        {
-            pos = Some(start + found);
-            start = start + found + 1;
-        } else {
-            break;
-        }
-    }
-    pos
 }
 
 /// Detect the activity state of a terminal from its output buffer.
@@ -2097,58 +2000,13 @@ const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
 
 /// Detect if a known interactive app is running based on the terminal title.
 fn detect_interactive_app(data: &[u8]) -> Option<String> {
-    let title = extract_last_terminal_title(data)?;
+    let title = osc::extract_last_terminal_title(data)?;
     for &(pattern, name) in INTERACTIVE_APP_PATTERNS {
         if title.contains(pattern) {
             return Some(name.to_string());
         }
     }
     None
-}
-
-/// Extract the last terminal title from OSC 0 or OSC 2 sequences in the output.
-/// Format: ESC ] 0 ; title BEL  or  ESC ] 2 ; title BEL
-fn extract_last_terminal_title(data: &[u8]) -> Option<String> {
-    // Search backwards for the last OSC 0; or OSC 2;
-    let mut best_pos = None;
-    let mut best_code = 0u8;
-
-    // OSC 0; → \x1b]0;
-    let needle_0: &[u8] = &[0x1b, b']', b'0', b';'];
-    let needle_2: &[u8] = &[0x1b, b']', b'2', b';'];
-
-    for needle in [needle_0, needle_2] {
-        let mut start = 0;
-        while start + needle.len() <= data.len() {
-            if let Some(found) = data[start..]
-                .windows(needle.len())
-                .position(|w| w == needle)
-            {
-                let abs_pos = start + found;
-                if best_pos.is_none_or(|bp| abs_pos > bp) {
-                    best_pos = Some(abs_pos);
-                    best_code = needle[2]; // '0' or '2'
-                }
-                start = abs_pos + 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    let pos = best_pos?;
-    let title_start = pos + 4; // skip ESC ] N ;
-    if title_start >= data.len() {
-        return None;
-    }
-
-    // Find BEL (\x07) or ST (\x1b\\) terminator
-    let remaining = &data[title_start..];
-    let end = remaining.iter().position(|&b| b == 0x07 || b == 0x1b)?;
-    let title_bytes = &remaining[..end];
-    let _ = best_code; // suppress unused warning
-
-    String::from_utf8_lossy(title_bytes).to_string().into()
 }
 
 /// Detect full terminal state (activity + output freshness) for a single terminal.
@@ -3309,7 +3167,7 @@ mod tests {
     fn extract_title_osc0() {
         let data = b"some output\x1b]0;my title\x07more output";
         assert_eq!(
-            extract_last_terminal_title(data),
+            osc::extract_last_terminal_title(data),
             Some("my title".to_string())
         );
     }
@@ -3318,7 +3176,7 @@ mod tests {
     fn extract_title_osc2() {
         let data = b"\x1b]2;window title\x07";
         assert_eq!(
-            extract_last_terminal_title(data),
+            osc::extract_last_terminal_title(data),
             Some("window title".to_string())
         );
     }
@@ -3327,7 +3185,7 @@ mod tests {
     fn extract_title_last_wins() {
         let data = b"\x1b]0;first\x07middle\x1b]0;second\x07end";
         assert_eq!(
-            extract_last_terminal_title(data),
+            osc::extract_last_terminal_title(data),
             Some("second".to_string())
         );
     }
@@ -3335,7 +3193,7 @@ mod tests {
     #[test]
     fn extract_title_none_when_missing() {
         let data = b"no osc sequences here";
-        assert_eq!(extract_last_terminal_title(data), None);
+        assert_eq!(osc::extract_last_terminal_title(data), None);
     }
 
     #[test]
@@ -4030,31 +3888,31 @@ mod tests {
         // Claude Code set title first, then changed to task description
         let data =
             b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07";
-        assert!(any_terminal_title_contains(data, "Claude Code"));
+        assert!(osc::any_terminal_title_contains(data, "Claude Code"));
     }
 
     #[test]
     fn any_title_contains_finds_claude_in_last_title() {
         let data = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07";
-        assert!(any_terminal_title_contains(data, "Claude Code"));
+        assert!(osc::any_terminal_title_contains(data, "Claude Code"));
     }
 
     #[test]
     fn any_title_contains_false_when_no_claude() {
         let data = b"\x1b]0;bash\x07output\x1b]0;vim\x07";
-        assert!(!any_terminal_title_contains(data, "Claude Code"));
+        assert!(!osc::any_terminal_title_contains(data, "Claude Code"));
     }
 
     #[test]
     fn any_title_contains_checks_osc2_titles() {
         // OSC 2 (window title) should also be scanned
         let data = b"\x1b]2;\xe2\x9c\xb3 Claude Code\x07\x1b]0;task desc\x07";
-        assert!(any_terminal_title_contains(data, "Claude Code"));
+        assert!(osc::any_terminal_title_contains(data, "Claude Code"));
     }
 
     #[test]
     fn any_title_contains_empty_data() {
-        assert!(!any_terminal_title_contains(b"", "Claude Code"));
+        assert!(!osc::any_terminal_title_contains(b"", "Claude Code"));
     }
 
     // --- is_claude_terminal_from_buffer with persistent tracking ---
@@ -4187,7 +4045,7 @@ mod tests {
         // a Claude Code title should be detected by any_terminal_title_contains.
         // In production, the PTY callback uses this to populate known_claude_terminals.
         let chunk = b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some terminal output here";
-        assert!(any_terminal_title_contains(chunk, "Claude Code"));
+        assert!(osc::any_terminal_title_contains(chunk, "Claude Code"));
 
         // After registration (simulating PTY callback behavior),
         // filter_targets_not_busy should skip the terminal
@@ -4249,7 +4107,7 @@ mod tests {
     fn extract_osc7_cwd_bel_terminator() {
         let data = b"\x1b]7;file://localhost/home/user\x07";
         assert_eq!(
-            extract_last_osc7_cwd(data),
+            osc::extract_last_osc7_cwd(data),
             Some("file://localhost/home/user".into())
         );
     }
@@ -4258,7 +4116,7 @@ mod tests {
     fn extract_osc7_cwd_st_terminator() {
         let data = b"\x1b]7;file://localhost/C:/Users/test\x1b\\";
         assert_eq!(
-            extract_last_osc7_cwd(data),
+            osc::extract_last_osc7_cwd(data),
             Some("file://localhost/C:/Users/test".into())
         );
     }
@@ -4267,7 +4125,7 @@ mod tests {
     fn extract_osc7_cwd_multiple_returns_last() {
         let data = b"\x1b]7;file://localhost/old\x07some output\x1b]7;file://localhost/new\x07";
         assert_eq!(
-            extract_last_osc7_cwd(data),
+            osc::extract_last_osc7_cwd(data),
             Some("file://localhost/new".into())
         );
     }
@@ -4275,14 +4133,14 @@ mod tests {
     #[test]
     fn extract_osc7_cwd_none_when_absent() {
         let data = b"plain terminal output with no osc";
-        assert_eq!(extract_last_osc7_cwd(data), None);
+        assert_eq!(osc::extract_last_osc7_cwd(data), None);
     }
 
     #[test]
     fn extract_osc7_cwd_none_when_truncated() {
         // Sequence starts but no terminator
         let data = b"\x1b]7;file://localhost/home/user";
-        assert_eq!(extract_last_osc7_cwd(data), None);
+        assert_eq!(osc::extract_last_osc7_cwd(data), None);
     }
 
     #[test]
@@ -4290,7 +4148,7 @@ mod tests {
         // OSC 0 title + OSC 7 CWD in same chunk
         let data = b"\x1b]0;My Terminal\x07\x1b]7;file://localhost/tmp\x07";
         assert_eq!(
-            extract_last_osc7_cwd(data),
+            osc::extract_last_osc7_cwd(data),
             Some("file://localhost/tmp".into())
         );
     }
@@ -4301,7 +4159,7 @@ mod tests {
     fn extract_osc9_9_cwd_basic() {
         let data = b"\x1b]9;9;C:/Users/kochul\x07";
         assert_eq!(
-            extract_last_osc9_9_cwd(data),
+            osc::extract_last_osc9_9_cwd(data),
             Some("C:/Users/kochul".into())
         );
     }
@@ -4310,7 +4168,7 @@ mod tests {
     fn extract_osc9_9_cwd_wsl_unc() {
         let data = b"\x1b]9;9;//wsl.localhost/Ubuntu-22.04/home/user\x07";
         assert_eq!(
-            extract_last_osc9_9_cwd(data),
+            osc::extract_last_osc9_9_cwd(data),
             Some("//wsl.localhost/Ubuntu-22.04/home/user".into())
         );
     }
@@ -4318,20 +4176,20 @@ mod tests {
     #[test]
     fn extract_osc9_9_cwd_multiple_returns_last() {
         let data = b"\x1b]9;9;C:/old\x07output\x1b]9;9;C:/new\x07";
-        assert_eq!(extract_last_osc9_9_cwd(data), Some("C:/new".into()));
+        assert_eq!(osc::extract_last_osc9_9_cwd(data), Some("C:/new".into()));
     }
 
     #[test]
     fn extract_osc9_9_cwd_none_when_absent() {
         let data = b"no osc 9;9 here";
-        assert_eq!(extract_last_osc9_9_cwd(data), None);
+        assert_eq!(osc::extract_last_osc9_9_cwd(data), None);
     }
 
     #[test]
     fn extract_osc9_9_cwd_ignores_non_9_subcode() {
         // OSC 9 with non-9 subcode (e.g., notification)
         let data = b"\x1b]9;Hello notification\x07";
-        assert_eq!(extract_last_osc9_9_cwd(data), None);
+        assert_eq!(osc::extract_last_osc9_9_cwd(data), None);
     }
 
     #[test]
@@ -4735,7 +4593,7 @@ mod tests {
         let needle = &[0x1b, b']', b'7', b';'];
         let data = b"\x1b]7;file://localhost/test\x07";
         assert_eq!(
-            extract_last_osc_payload(data, needle),
+            osc::extract_last_osc_payload(data, needle),
             Some("file://localhost/test".into())
         );
     }
