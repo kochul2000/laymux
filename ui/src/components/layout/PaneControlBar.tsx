@@ -385,9 +385,9 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
       {isPinned && (
         <div
           data-testid="pane-control-bar"
-          className="flex shrink-0 items-center"
+          className="ui-toolbar shrink-0"
           style={{
-            height: BAR_H,
+            padding: 0,
             background: barBg,
             borderBottom: `1px solid ${borderClr}`,
           }}
