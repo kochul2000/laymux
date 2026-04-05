@@ -49,17 +49,17 @@ pub fn create_terminal_session(
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
         if let Some(ref socket_path) = *path_lock {
-            env.push(("LX_SOCKET".to_string(), socket_path.clone()));
+            env.push((ENV_LX_SOCKET.to_string(), socket_path.clone()));
         }
     }
     if let Ok(port_lock) = state.automation_port.lock_or_err() {
         if let Some(port) = *port_lock {
-            env.push(("LX_AUTOMATION_PORT".to_string(), port.to_string()));
+            env.push((ENV_LX_AUTOMATION_PORT.to_string(), port.to_string()));
         }
     }
     if let Ok(key_lock) = state.automation_key.lock_or_err() {
         if let Some(ref key) = *key_lock {
-            env.push(("LX_AUTOMATION_KEY".to_string(), key.clone()));
+            env.push((ENV_LX_AUTOMATION_KEY.to_string(), key.clone()));
         }
     }
 

@@ -14,6 +14,8 @@ use std::env;
 use std::io::BufReader;
 use std::net::TcpStream;
 
+use laymux_lib::constants::ENV_LX_SOCKET;
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -33,7 +35,7 @@ fn main() {
     };
 
     // Connect to IDE via IPC socket
-    let socket_addr = env::var("LX_SOCKET").unwrap_or_else(|_| {
+    let socket_addr = env::var(ENV_LX_SOCKET).unwrap_or_else(|_| {
         eprintln!("Error: LX_SOCKET not set. Are you running inside a Laymux terminal?");
         std::process::exit(1);
     });

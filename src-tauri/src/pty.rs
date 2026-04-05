@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::terminal::TerminalSession;
 
@@ -134,8 +135,8 @@ where
 
     // Collect all env vars (config + IDE vars) for shell script injection
     let mut all_env: Vec<(String, String)> = session.config.env.clone();
-    all_env.push(("LX_TERMINAL_ID".into(), session.id.clone()));
-    all_env.push(("LX_GROUP_ID".into(), session.config.sync_group.clone()));
+    all_env.push((ENV_LX_TERMINAL_ID.into(), session.id.clone()));
+    all_env.push((ENV_LX_GROUP_ID.into(), session.config.sync_group.clone()));
 
     let (cmd_path, args) = if session.config.command_line.is_empty() {
         // Fallback: legacy profile name-based resolution
