@@ -225,7 +225,7 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     write_discovery_file(port, &key);
 
     eprintln!("Automation server listening on 0.0.0.0:{port}");
-    eprintln!("Automation API key: {key}");
+    eprintln!("Automation API key: {}...{}", &key[..8], &key[key.len()-4..]);
 
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -306,20 +306,14 @@ async fn auth_middleware(
         .get("authorization")
         .and_then(|v| v.to_str().ok());
 
-    match auth_header {
-        Some(header) if header.starts_with("Bearer ") => {
-            let token = &header[7..];
-            if token == expected_key {
-                next.run(req).await
-            } else {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(err_json("Invalid API key")),
-                )
-                    .into_response()
-            }
-        }
-        _ => (
+    match auth_header.and_then(|h| h.strip_prefix("Bearer ")) {
+        Some(token) if token == expected_key => next.run(req).await,
+        Some(_) => (
+            StatusCode::UNAUTHORIZED,
+            Json(err_json("Invalid API key")),
+        )
+            .into_response(),
+        None => (
             StatusCode::UNAUTHORIZED,
             Json(err_json(
                 "Missing Authorization header. Use: Authorization: Bearer <key from automation.json>",
@@ -406,8 +400,8 @@ pub fn build_router(state: ServerState, key: &str) -> Router {
             "/api/v1/ui/notifications",
             post(ui_toggle_notification_panel),
         )
-        .layer(CorsLayer::permissive())
         .layer(middleware::from_fn_with_state(key, auth_middleware))
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
@@ -1713,11 +1707,11 @@ mod tests {
             );
 
         protected
-            .layer(CorsLayer::permissive())
             .layer(middleware::from_fn_with_state(
                 key.to_string(),
                 auth_middleware,
             ))
+            .layer(CorsLayer::permissive())
     }
 
     #[tokio::test]

@@ -170,28 +170,50 @@ pub struct AutomationConnection {
 }
 
 /// Resolve the Automation API connection from env vars or discovery file.
+///
+/// Priority: env vars (`LX_AUTOMATION_PORT`, `LX_AUTOMATION_KEY`) first,
+/// then discovery file. When using discovery file, port and key are read
+/// from the same file to avoid cross-instance mismatch.
 pub fn resolve_connection() -> AutomationConnection {
     let host = std::env::var("LX_AUTOMATION_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+
+    // If both env vars are set, use them directly (injected by terminal spawn)
+    if let (Ok(port), Ok(key)) = (
+        std::env::var("LX_AUTOMATION_PORT"),
+        std::env::var("LX_AUTOMATION_KEY"),
+    ) {
+        return AutomationConnection {
+            base_url: format!("http://{}:{}", host, port),
+            key: Some(key),
+        };
+    }
+
+    // Fall back to discovery file (port + key read together)
+    if let Some((port, key)) = read_discovery_file() {
+        return AutomationConnection {
+            base_url: format!("http://{}:{}", host, port),
+            key: Some(key),
+        };
+    }
+
+    // Last resort: env port only, no key
     let port = std::env::var("LX_AUTOMATION_PORT").unwrap_or_else(|_| "19280".into());
-    let base_url = format!("http://{}:{}", host, port);
-
-    // Try key from env first, then discovery file
-    let key = std::env::var("LX_AUTOMATION_KEY").ok().or_else(|| {
-        read_discovery_key()
-    });
-
-    AutomationConnection { base_url, key }
+    AutomationConnection {
+        base_url: format!("http://{}:{}", host, port),
+        key: None,
+    }
 }
 
-/// Read the API key from the discovery file.
-fn read_discovery_key() -> Option<String> {
-    // Try dev discovery first, then release
+/// Read port and key from the discovery file (both from the same file).
+fn read_discovery_file() -> Option<(String, String)> {
     let candidates = discovery_file_candidates();
     for path in candidates {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(key) = parsed.get("key").and_then(|v| v.as_str()) {
-                    return Some(key.to_string());
+                let port = parsed.get("port").and_then(|v| v.as_u64());
+                let key = parsed.get("key").and_then(|v| v.as_str());
+                if let (Some(port), Some(key)) = (port, key) {
+                    return Some((port.to_string(), key.to_string()));
                 }
             }
         }
@@ -199,7 +221,7 @@ fn read_discovery_key() -> Option<String> {
     None
 }
 
-/// Candidate paths for the discovery file.
+/// Candidate paths for the discovery file (dev first, then release).
 fn discovery_file_candidates() -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
 
