@@ -1238,7 +1238,7 @@ async fn terminals_list(AxumState(state): AxumState<ServerState>) -> impl IntoRe
 // -- Terminal states (backend-direct, no frontend bridge needed) --
 
 async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    let states = crate::commands::detect_all_terminal_states(&state.app_state);
+    let states = crate::activity::detect_all_terminal_states(&state.app_state);
     (
         StatusCode::OK,
         Json(serde_json::json!({ "states": states })),

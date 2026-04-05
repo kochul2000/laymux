@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::activity;
 use crate::automation_server::AutomationResponse;
 use crate::cli::{LxMessage, LxResponse};
 use crate::constants::*;
@@ -1841,7 +1842,7 @@ fn filter_targets_not_busy(
         let mut result = Vec::new();
         for id in targets {
             let buf = buffers.get(id.as_str());
-            if is_claude_terminal_from_buffer(state, id, buf) {
+            if activity::is_claude_terminal_from_buffer(state, id, buf) {
                 // Handle Claude Code terminal based on settings
                 match claude_mode {
                     crate::settings::ClaudeSyncCwdMode::Skip => {
@@ -1850,13 +1851,13 @@ fn filter_targets_not_busy(
                     }
                     crate::settings::ClaudeSyncCwdMode::Command => {
                         // Only include if Claude is idle (✳ prefix in title)
-                        if is_claude_idle_from_buffer(buf) {
+                        if activity::is_claude_idle_from_buffer(buf) {
                             claude_ids.insert(id.clone());
                             result.push(id.clone());
                         }
                     }
                 }
-            } else if is_terminal_at_prompt_from_buffer(buf) {
+            } else if activity::is_terminal_at_prompt_from_buffer(buf) {
                 result.push(id.clone());
             }
         }
@@ -1866,194 +1867,12 @@ fn filter_targets_not_busy(
     }
 }
 
-/// Check if a terminal is running Claude Code.
-/// Uses two-pronged detection:
-/// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
-/// 2. Full buffer title scan — checks ALL OSC 0/2 titles, not just the last one
-///
-/// When detected via buffer scan, the terminal ID is added to `known_claude_terminals`
-/// so future calls don't depend on the title still being in the buffer.
-fn is_claude_terminal_from_buffer(
-    state: &AppState,
-    terminal_id: &str,
-    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> bool {
-    // Prong 1: Check persistent tracking
-    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
-        if known.contains(terminal_id) {
-            return true;
-        }
-    }
-
-    // Prong 2: Scan ALL titles in buffer for "Claude Code"
-    let Some(buf) = buffer else {
-        return false;
-    };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-    if recent.is_empty() {
-        return false;
-    }
-
-    if osc::any_terminal_title_contains(&recent, "Claude Code") {
-        // Mark persistently for future calls
-        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-            known.insert(terminal_id.to_string());
-        }
-        return true;
-    }
-
-    false
-}
-
-/// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
-/// Claude Code sets the terminal title with ✳ when idle and spinner chars when working.
-fn is_claude_idle_from_buffer(buffer: Option<&crate::output_buffer::TerminalOutputBuffer>) -> bool {
-    let Some(buf) = buffer else {
-        return false;
-    };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-    if recent.is_empty() {
-        return false;
-    }
-    if let Some(title) = osc::extract_last_terminal_title(&recent) {
-        // ✳ is U+2733, encoded as \xe2\x9c\xb3 in UTF-8
-        title.starts_with('\u{2733}')
-    } else {
-        false
-    }
-}
-
-/// Check if a terminal is at a shell prompt by examining its output buffer.
-/// Returns true if the terminal appears to be at a prompt (safe to send cd).
-fn is_terminal_at_prompt_from_buffer(
-    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> bool {
-    let Some(buf) = buffer else {
-        return true; // Unknown terminal → assume at prompt
-    };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-    if recent.is_empty() {
-        return true; // No output yet → assume at prompt
-    }
-
-    // Find the last OSC 133;C (preexec) and OSC 133;D (exit code) positions.
-    // OSC format: \x1b]133;C\x07  or  \x1b]133;D;N\x07
-    let last_c = osc::find_last_osc_133(&recent, b"C");
-    let last_d = osc::find_last_osc_133(&recent, b"D");
-
-    match (last_c, last_d) {
-        (Some(c_pos), Some(d_pos)) => d_pos > c_pos, // D after C = at prompt
-        (None, Some(_)) => true,                     // Only D = at prompt
-        (Some(_), None) => false,                    // Only C = command running
-        (None, None) => true,                        // No markers = assume at prompt
-    }
-}
-
-/// Detect the activity state of a terminal from its output buffer.
-/// Returns Shell (at prompt), Running (command executing), or InteractiveApp (TUI app).
-///
-/// IMPORTANT: Check interactive app title BEFORE OSC 133 markers.
-/// When long-running apps like Claude Code run, the preexec marker (OSC 133;C) can scroll
-/// out of the 8KB buffer, causing `is_terminal_at_prompt_from_buffer` to wrongly return true.
-/// Checking the terminal title first prevents this misdetection.
-pub fn detect_terminal_activity(
-    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> TerminalActivity {
-    let Some(buf) = buffer else {
-        return TerminalActivity::Shell;
-    };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-    if recent.is_empty() {
-        return TerminalActivity::Shell;
-    }
-
-    // Check terminal title FIRST — interactive apps set their title even when
-    // OSC 133 markers have scrolled out of the buffer.
-    if let Some(name) = detect_interactive_app(&recent) {
-        return TerminalActivity::InteractiveApp { name };
-    }
-
-    let at_prompt = is_terminal_at_prompt_from_buffer(Some(buf));
-    if at_prompt {
-        return TerminalActivity::Shell;
-    }
-
-    TerminalActivity::Running
-}
-
-/// Known interactive apps detected from terminal title (OSC 0 / OSC 2).
-const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
-    ("Claude Code", "Claude Code"),
-    ("vim", "vim"),
-    ("nvim", "neovim"),
-    ("nano", "nano"),
-    ("htop", "htop"),
-    ("btop", "btop"),
-    ("top", "top"),
-    ("less", "less"),
-    ("man ", "man"),
-    ("python3", "python"),
-    ("python", "python"),
-    ("node", "node"),
-    ("ipython", "ipython"),
-];
-
-/// Detect if a known interactive app is running based on the terminal title.
-fn detect_interactive_app(data: &[u8]) -> Option<String> {
-    let title = osc::extract_last_terminal_title(data)?;
-    for &(pattern, name) in INTERACTIVE_APP_PATTERNS {
-        if title.contains(pattern) {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
-
-/// Detect full terminal state (activity + output freshness) for a single terminal.
-pub fn detect_terminal_state(
-    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> TerminalStateInfo {
-    let activity = detect_terminal_activity(buffer);
-    let (output_active, last_output_ms_ago) = if let Some(buf) = buffer {
-        if let Some(ts) = buf.last_output_at {
-            let elapsed = ts.elapsed().as_millis() as u64;
-            (elapsed < 2000, elapsed) // Active if output within last 2 seconds
-        } else {
-            (false, u64::MAX)
-        }
-    } else {
-        (false, u64::MAX)
-    };
-
-    TerminalStateInfo {
-        activity,
-        output_active,
-        last_output_ms_ago,
-    }
-}
-
-/// Detect terminal states for all terminals.
-pub fn detect_all_terminal_states(
-    state: &AppState,
-) -> std::collections::HashMap<String, TerminalStateInfo> {
-    let mut result = std::collections::HashMap::new();
-    if let Ok(buffers) = state.output_buffers.lock_or_err() {
-        if let Ok(terminals) = state.terminals.lock_or_err() {
-            for id in terminals.keys() {
-                let info = detect_terminal_state(buffers.get(id));
-                result.insert(id.clone(), info);
-            }
-        }
-    }
-    result
-}
-
 /// Tauri command: get terminal state for all terminals.
 #[tauri::command]
 pub fn get_terminal_states(
     state: State<Arc<AppState>>,
 ) -> std::collections::HashMap<String, TerminalStateInfo> {
-    detect_all_terminal_states(&state)
+    activity::detect_all_terminal_states(&state)
 }
 
 /// Tauri command: get CWD for all terminals from backend (single source of truth).
@@ -2125,7 +1944,7 @@ pub fn get_terminal_summaries_inner(
         let Some(session) = terminals.get(tid.as_str()) else {
             continue;
         };
-        let state_info = detect_terminal_state(buffers.get(tid.as_str()));
+        let state_info = activity::detect_terminal_state(buffers.get(tid.as_str()));
         let is_claude = known_claude.contains(tid.as_str());
         let term_notifs: Vec<&TerminalNotification> = notifications
             .iter()
@@ -3008,7 +2827,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
         assert!(
-            !is_terminal_at_prompt_from_buffer(Some(&buf)),
+            !activity::is_terminal_at_prompt_from_buffer(Some(&buf)),
             "After C, command is running"
         );
     }
@@ -3018,7 +2837,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
         assert!(
-            is_terminal_at_prompt_from_buffer(Some(&buf)),
+            activity::is_terminal_at_prompt_from_buffer(Some(&buf)),
             "After D, terminal is idle"
         );
     }
@@ -3027,7 +2846,7 @@ mod tests {
     fn is_terminal_at_prompt_empty_buffer() {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
         assert!(
-            is_terminal_at_prompt_from_buffer(Some(&buf)),
+            activity::is_terminal_at_prompt_from_buffer(Some(&buf)),
             "Empty buffer → assume at prompt"
         );
     }
@@ -3035,7 +2854,7 @@ mod tests {
     #[test]
     fn is_terminal_at_prompt_no_buffer() {
         assert!(
-            is_terminal_at_prompt_from_buffer(None),
+            activity::is_terminal_at_prompt_from_buffer(None),
             "No buffer → assume at prompt"
         );
     }
@@ -3109,7 +2928,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::Shell
         );
     }
@@ -3119,7 +2938,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::Running
         );
     }
@@ -3130,7 +2949,7 @@ mod tests {
         // Simulate: prompt → preexec → Claude Code sets terminal title
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::InteractiveApp {
                 name: "Claude Code".to_string()
             }
@@ -3142,7 +2961,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07\x1b]133;C\x07\x1b]0;vim main.rs\x07");
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::InteractiveApp {
                 name: "vim".to_string()
             }
@@ -3151,14 +2970,17 @@ mod tests {
 
     #[test]
     fn detect_activity_no_buffer() {
-        assert_eq!(detect_terminal_activity(None), TerminalActivity::Shell);
+        assert_eq!(
+            activity::detect_terminal_activity(None),
+            TerminalActivity::Shell
+        );
     }
 
     #[test]
     fn detect_activity_empty_buffer() {
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::Shell
         );
     }
@@ -3200,7 +3022,7 @@ mod tests {
     fn detect_state_output_active() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ "); // push sets last_output_at
-        let state_info = detect_terminal_state(Some(&buf));
+        let state_info = activity::detect_terminal_state(Some(&buf));
         assert_eq!(state_info.activity, TerminalActivity::Shell);
         assert!(
             state_info.output_active,
@@ -3215,7 +3037,7 @@ mod tests {
         buf.push(b"\x1b]133;D;0\x07prompt$ ");
         // Manually set last_output_at to the past
         buf.last_output_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
-        let state_info = detect_terminal_state(Some(&buf));
+        let state_info = activity::detect_terminal_state(Some(&buf));
         assert!(
             !state_info.output_active,
             "10s old output should not be active"
@@ -3230,7 +3052,11 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+        assert!(activity::is_claude_terminal_from_buffer(
+            &state,
+            "t1",
+            Some(&buf)
+        ));
     }
 
     #[test]
@@ -3238,20 +3064,30 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;bash\x07");
-        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+        assert!(!activity::is_claude_terminal_from_buffer(
+            &state,
+            "t1",
+            Some(&buf)
+        ));
     }
 
     #[test]
     fn is_claude_terminal_false_for_no_buffer() {
         let state = AppState::new();
-        assert!(!is_claude_terminal_from_buffer(&state, "t1", None));
+        assert!(!activity::is_claude_terminal_from_buffer(
+            &state, "t1", None
+        ));
     }
 
     #[test]
     fn is_claude_terminal_false_for_empty_buffer() {
         let state = AppState::new();
         let buf = crate::output_buffer::TerminalOutputBuffer::default();
-        assert!(!is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+        assert!(!activity::is_claude_terminal_from_buffer(
+            &state,
+            "t1",
+            Some(&buf)
+        ));
     }
 
     #[test]
@@ -3259,7 +3095,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         // ✳ (U+2733) prefix = idle
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(is_claude_idle_from_buffer(Some(&buf)));
+        assert!(activity::is_claude_idle_from_buffer(Some(&buf)));
     }
 
     #[test]
@@ -3267,12 +3103,12 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         // ✶ (U+2736) prefix = working/spinner
         buf.push(b"\x1b]0;\xe2\x9c\xb6 Claude Code\x07");
-        assert!(!is_claude_idle_from_buffer(Some(&buf)));
+        assert!(!activity::is_claude_idle_from_buffer(Some(&buf)));
     }
 
     #[test]
     fn is_claude_idle_false_for_no_buffer() {
-        assert!(!is_claude_idle_from_buffer(None));
+        assert!(!activity::is_claude_idle_from_buffer(None));
     }
 
     #[test]
@@ -3284,7 +3120,7 @@ mod tests {
         // Only a title set, no OSC 133 markers at all (simulating they scrolled out)
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output here");
         assert_eq!(
-            detect_terminal_activity(Some(&buf)),
+            activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::InteractiveApp {
                 name: "Claude Code".to_string()
             }
@@ -3926,7 +3762,7 @@ mod tests {
             b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07some output\x1b]0;\xe2\x9c\xb6 Exploring code\x07",
         );
         assert!(
-            is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            activity::is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
             "Claude should be detected even when last title is a task description"
         );
     }
@@ -3938,14 +3774,18 @@ mod tests {
         {
             let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
             buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-            assert!(is_claude_terminal_from_buffer(&state, "t1", Some(&buf)));
+            assert!(activity::is_claude_terminal_from_buffer(
+                &state,
+                "t1",
+                Some(&buf)
+            ));
         }
         // Second call: buffer no longer has "Claude Code", but persistent set remembers
         {
             let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
             buf.push(b"\x1b]0;\xe2\x9c\xbb reading file.rs\x07");
             assert!(
-                is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+                activity::is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
                 "Should be detected via persistent tracking even without Claude Code in buffer"
             );
         }
@@ -3969,7 +3809,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;bash\x07");
         assert!(
-            !is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
+            !activity::is_claude_terminal_from_buffer(&state, "t1", Some(&buf)),
             "After close, reused terminal ID should not be falsely detected"
         );
     }
