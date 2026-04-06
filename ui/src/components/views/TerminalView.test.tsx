@@ -40,6 +40,7 @@ vi.mock("@xterm/xterm", () => ({
     clearSelection = mockClearSelection;
     dispose = vi.fn();
     loadAddon = vi.fn();
+    registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     cols = 80;
     rows = 24;
     options: Record<string, unknown> = {};
@@ -54,13 +55,11 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
-let capturedLinkHandler: ((event: MouseEvent, uri: string) => void) | null = null;
-vi.mock("@xterm/addon-web-links", () => ({
-  WebLinksAddon: class MockWebLinksAddon {
-    constructor(handler?: (event: MouseEvent, uri: string) => void) {
-      if (handler) capturedLinkHandler = handler;
-    }
-    dispose = vi.fn();
+let capturedLinkClickHandler: ((uri: string) => void) | null = null;
+vi.mock("@/lib/wrapped-link-provider", () => ({
+  createWrappedLinkProvider: (_terminal: unknown, onClickLink: (uri: string) => void) => {
+    capturedLinkClickHandler = onClickLink;
+    return { provideLinks: vi.fn() };
   },
 }));
 
@@ -125,7 +124,7 @@ describe("TerminalView", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     capturedKeyHandler = null;
-    capturedLinkHandler = null;
+    capturedLinkClickHandler = null;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -729,15 +728,14 @@ describe("TerminalView", () => {
   // -- URL link click (issue #29) --
 
   describe("URL link click", () => {
-    it("passes a custom handler to WebLinksAddon that calls openExternal", async () => {
+    it("registers a wrapped link provider that calls openExternal", async () => {
       render(<TerminalView instanceId="t-link1" profile="PowerShell" syncGroup="" />);
 
-      // WebLinksAddon should have been constructed with a handler
-      expect(capturedLinkHandler).not.toBeNull();
+      // createWrappedLinkProvider should have been called with a click handler
+      expect(capturedLinkClickHandler).not.toBeNull();
 
       // Simulate clicking a link
-      const fakeEvent = new MouseEvent("click");
-      capturedLinkHandler!(fakeEvent, "https://example.com");
+      capturedLinkClickHandler!("https://example.com");
 
       await vi.waitFor(() => {
         expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
@@ -749,11 +747,10 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-link2" profile="PowerShell" syncGroup="" />);
 
-      expect(capturedLinkHandler).not.toBeNull();
+      expect(capturedLinkClickHandler).not.toBeNull();
 
       // Should not throw even when openExternal fails
-      const fakeEvent = new MouseEvent("click");
-      expect(() => capturedLinkHandler!(fakeEvent, "https://example.com")).not.toThrow();
+      expect(() => capturedLinkClickHandler!("https://example.com")).not.toThrow();
 
       await vi.waitFor(() => {
         expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
