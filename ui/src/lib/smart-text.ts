@@ -1,12 +1,42 @@
 /**
- * Smart text transforms for clipboard paste.
+ * Smart text transforms for clipboard paste and copy.
  *
+ * Copy transforms:
+ * - trimSelectionTrailingWhitespace — strip trailing whitespace from xterm.js selection
+ *
+ * Paste transforms:
  * 1. smartRemoveIndent — strip common leading whitespace from all lines
  * 2. smartRemoveLineBreak — rejoin URLs that were split across lines
  *
  * The correct order is: indent first, then linebreak.
  * If linebreak ran on indented text, the indent spaces would corrupt URLs.
  */
+
+/**
+ * Remove trailing whitespace from each line, then remove trailing blank lines.
+ *
+ * xterm.js getSelection() pads each line with trailing spaces to fill the
+ * terminal width, and includes empty lines at the end of the selection.
+ * This function cleans up the selection text before writing to clipboard.
+ */
+export function trimSelectionTrailingWhitespace(text: string): string {
+  if (!text) return text;
+
+  // Detect line ending style (CRLF vs LF)
+  const hasCRLF = text.includes("\r\n");
+  const lineEnding = hasCRLF ? "\r\n" : "\n";
+  const lines = text.split(lineEnding);
+
+  // Remove trailing whitespace from each line
+  const trimmed = lines.map((line) => line.replace(/[ \t]+$/, ""));
+
+  // Remove trailing blank lines
+  while (trimmed.length > 0 && trimmed[trimmed.length - 1] === "") {
+    trimmed.pop();
+  }
+
+  return trimmed.join(lineEnding);
+}
 
 /**
  * Remove the common leading whitespace (spaces/tabs) from every line.

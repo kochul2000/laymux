@@ -20,7 +20,7 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { transformPasteContent } from "@/lib/smart-text";
+import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
@@ -237,7 +237,9 @@ export function TerminalView({
     terminal.onSelectionChange(() => {
       const { convenience: conv } = useSettingsStore.getState();
       if (conv.copyOnSelect && terminal.hasSelection()) {
-        clipboardWriteText(terminal.getSelection()).catch(() => {});
+        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
+          () => {},
+        );
       }
     });
 
@@ -375,7 +377,9 @@ export function TerminalView({
       e.preventDefault();
       if (terminal.hasSelection()) {
         // Selection exists → copy to clipboard via Tauri, then clear
-        clipboardWriteText(terminal.getSelection()).catch(() => {});
+        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
+          () => {},
+        );
         terminal.clearSelection();
       } else {
         // No selection → paste directly to PTY (no bracketed paste = no paste highlight block)

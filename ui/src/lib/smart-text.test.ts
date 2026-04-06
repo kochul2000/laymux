@@ -4,7 +4,71 @@ import {
   smartRemoveLineBreak,
   applySmartTextTransforms,
   transformPasteContent,
+  trimSelectionTrailingWhitespace,
 } from "./smart-text";
+
+// ============================================================
+// trimSelectionTrailingWhitespace
+// ============================================================
+describe("trimSelectionTrailingWhitespace", () => {
+  it("removes trailing spaces from each line", () => {
+    const input = "hello   \nworld   ";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+
+  it("removes trailing tabs from each line", () => {
+    const input = "hello\t\t\nworld\t";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+
+  it("removes trailing blank lines (empty lines at the end)", () => {
+    const input = "hello\nworld\n\n\n";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+
+  it("removes trailing blank lines that are only whitespace", () => {
+    const input = "hello\nworld\n   \n  \n";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+
+  it("preserves internal blank lines", () => {
+    const input = "hello\n\nworld";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\n\nworld");
+  });
+
+  it("preserves leading whitespace (indent)", () => {
+    const input = "  hello   \n  world   ";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("  hello\n  world");
+  });
+
+  it("handles single line with trailing spaces", () => {
+    const input = "hello   ";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(trimSelectionTrailingWhitespace("")).toBe("");
+  });
+
+  it("returns empty string for whitespace-only input", () => {
+    expect(trimSelectionTrailingWhitespace("   \n  \n   ")).toBe("");
+  });
+
+  it("does not modify text without trailing whitespace", () => {
+    const input = "hello\nworld";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+
+  it("handles CRLF line endings", () => {
+    const input = "hello   \r\nworld   \r\n\r\n";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\r\nworld");
+  });
+
+  it("handles mixed trailing whitespace (spaces and tabs)", () => {
+    const input = "hello \t \nworld\t \t";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello\nworld");
+  });
+});
 
 // ============================================================
 // smartRemoveIndent
