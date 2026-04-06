@@ -45,6 +45,24 @@ import {
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 
+/** Byte-size threshold for the large paste warning dialog. */
+const LARGE_PASTE_THRESHOLD = 5120;
+
+const textEncoder = new TextEncoder();
+
+/**
+ * Check if a large paste should be blocked. Returns true if the user cancelled.
+ * Uses byte length (UTF-8) for consistency with PTY chunked write.
+ */
+function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
+  if (!enabled) return false;
+  const byteLength = textEncoder.encode(content).length;
+  if (byteLength <= LARGE_PASTE_THRESHOLD) return false;
+  return !window.confirm(
+    `붙여넣을 텍스트가 ${byteLength.toLocaleString()}바이트입니다. 계속하시겠습니까?`,
+  );
+}
+
 /** Resolve the workspace ID for a terminal instance (for notifications). */
 function resolveWorkspaceId(terminalId: string): string {
   const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
@@ -197,13 +215,7 @@ export function TerminalView({
           smartPaste(convenience.pasteImageDir, profile)
             .then((result) => {
               if (result.pasteType !== "none" && result.content) {
-                if (
-                  convenience.largePasteWarning &&
-                  result.content.length > 5120 &&
-                  !window.confirm(
-                    `붙여넣을 텍스트가 ${result.content.length.toLocaleString()}자입니다. 계속하시겠습니까?`,
-                  )
-                ) {
+                if (shouldBlockLargePaste(result.content, convenience.largePasteWarning)) {
                   return;
                 }
                 terminal.paste(result.content);
@@ -479,13 +491,7 @@ export function TerminalView({
         smartPaste(conv.pasteImageDir, profile)
           .then((result) => {
             if (result.pasteType !== "none" && result.content) {
-              if (
-                conv.largePasteWarning &&
-                result.content.length > 5120 &&
-                !window.confirm(
-                  `붙여넣을 텍스트가 ${result.content.length.toLocaleString()}자입니다. 계속하시겠습니까?`,
-                )
-              ) {
+              if (shouldBlockLargePaste(result.content, conv.largePasteWarning)) {
                 return;
               }
               writeToTerminal(instanceId, result.content);

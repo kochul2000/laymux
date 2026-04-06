@@ -504,6 +504,102 @@ mod tests {
         assert_eq!(result, "%NONEXISTENT_VAR_12345%");
     }
 
+    /// In-memory writer that records all written bytes for verifying chunked writes.
+    struct RecordingWriter {
+        data: Vec<u8>,
+        flush_count: usize,
+    }
+
+    impl RecordingWriter {
+        fn new() -> Self {
+            Self {
+                data: Vec::new(),
+                flush_count: 0,
+            }
+        }
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.data.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flush_count += 1;
+            Ok(())
+        }
+    }
+
+    /// Proxy that delegates to a shared RecordingWriter.
+    struct WriterProxy(Arc<Mutex<RecordingWriter>>);
+
+    impl Write for WriterProxy {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.lock().unwrap().flush()
+        }
+    }
+
+    /// Test the chunked write logic directly using PtyHandle's writer field.
+    /// We cannot construct a full PtyHandle without a real PTY (master field is
+    /// a trait object), so we exercise the same chunk loop against a recorder.
+    fn chunked_write(writer: &Mutex<Box<dyn Write + Send>>, data: &[u8]) -> Result<(), String> {
+        let mut w = writer.lock().map_err(|e| e.to_string())?;
+        for chunk in data.chunks(PTY_WRITE_CHUNK_SIZE) {
+            w.write_all(chunk)
+                .map_err(|e| format!("Write error: {e}"))?;
+            w.flush().map_err(|e| format!("Flush error: {e}"))?;
+        }
+        Ok(())
+    }
+
+    fn make_writer_with_recorder() -> (Mutex<Box<dyn Write + Send>>, Arc<Mutex<RecordingWriter>>) {
+        let recorder = Arc::new(Mutex::new(RecordingWriter::new()));
+        let writer: Box<dyn Write + Send> = Box::new(WriterProxy(Arc::clone(&recorder)));
+        (Mutex::new(writer), recorder)
+    }
+
+    #[test]
+    fn chunked_write_empty_data() {
+        let (writer, recorder) = make_writer_with_recorder();
+        chunked_write(&writer, b"").unwrap();
+        let rec = recorder.lock().unwrap();
+        assert!(rec.data.is_empty());
+        assert_eq!(rec.flush_count, 0);
+    }
+
+    #[test]
+    fn chunked_write_smaller_than_chunk_size() {
+        let (writer, recorder) = make_writer_with_recorder();
+        let data = b"hello";
+        chunked_write(&writer, data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 1);
+    }
+
+    #[test]
+    fn chunked_write_exact_chunk_size() {
+        let (writer, recorder) = make_writer_with_recorder();
+        let data = vec![0x41u8; PTY_WRITE_CHUNK_SIZE]; // exactly 1024 bytes
+        chunked_write(&writer, &data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 1);
+    }
+
+    #[test]
+    fn chunked_write_larger_than_chunk_size() {
+        let (writer, recorder) = make_writer_with_recorder();
+        let data = vec![0x42u8; PTY_WRITE_CHUNK_SIZE * 3 + 100]; // 3172 bytes
+        chunked_write(&writer, &data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 4); // 3 full chunks + 1 partial
+    }
+
     #[test]
     fn is_unix_path_detects_unix_paths() {
         assert!(is_unix_path("/home/user"));
