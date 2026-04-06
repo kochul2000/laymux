@@ -95,7 +95,7 @@ pub(crate) fn is_valid_startup_command_override(
     // Check claude --resume pattern first
     if cmd
         .strip_prefix("claude --resume ")
-        .is_some_and(|id| is_valid_session_id(id))
+        .is_some_and(is_valid_session_id)
     {
         return true;
     }

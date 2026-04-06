@@ -6,9 +6,7 @@ use crate::automation_server::AutomationResponse;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
-use crate::terminal::{
-    TerminalActivity, TerminalConfig, TerminalNotification, TerminalSession, TerminalStateInfo,
-};
+use crate::terminal::{TerminalActivity, TerminalNotification, TerminalStateInfo};
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -681,6 +679,7 @@ pub fn load_window_geometry() -> Result<Option<WindowGeometry>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::{TerminalConfig, TerminalSession};
 
     #[test]
     fn greet_returns_message() {

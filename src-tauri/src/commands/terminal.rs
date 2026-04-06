@@ -125,14 +125,14 @@ pub fn create_terminal_session(
         // "Claude Code" in terminal title (OSC 0/2). Once detected, the terminal
         // is permanently registered in known_claude_terminals (single source of truth).
         // AtomicBool fast-path avoids scanning after first detection.
-        if !claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
-            if osc::any_terminal_title_contains(&data, "Claude Code") {
-                claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Ok(mut known) = known_claude.lock_or_err() {
-                    known.insert(claude_detect_id.clone());
-                }
-                let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &claude_detect_id);
+        if !claude_detected.load(std::sync::atomic::Ordering::Relaxed)
+            && osc::any_terminal_title_contains(&data, "Claude Code")
+        {
+            claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut known) = known_claude.lock_or_err() {
+                known.insert(claude_detect_id.clone());
             }
+            let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &claude_detect_id);
         }
 
         // Proactive CWD detection: scan each PTY output chunk for OSC 7 or OSC 9;9.
