@@ -55,6 +55,21 @@ fn is_wsl_command(cmd_path: &str) -> bool {
     stem == "wsl"
 }
 
+/// Write `data` in [`PTY_WRITE_CHUNK_SIZE`]-byte chunks, flushing after each.
+///
+/// ConPTY on Windows can silently truncate a single oversized `write_all()`
+/// call, so chunking prevents paste data loss. This is a free function so that
+/// both [`PtyHandle::write`] and unit tests exercise the same code path.
+fn chunked_write_to(writer: &mut dyn Write, data: &[u8]) -> Result<(), String> {
+    for chunk in data.chunks(PTY_WRITE_CHUNK_SIZE) {
+        writer
+            .write_all(chunk)
+            .map_err(|e| format!("Write error: {e}"))?;
+        writer.flush().map_err(|e| format!("Flush error: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -68,12 +83,12 @@ pub struct PtyHandle {
 
 impl PtyHandle {
     /// Write data (user input) to the PTY.
+    ///
+    /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and
+    /// flushed individually — see [`chunked_write_to`] for details.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
         let mut writer = self.writer.lock_or_err()?;
-        writer
-            .write_all(data)
-            .map_err(|e| format!("Write error: {e}"))?;
-        writer.flush().map_err(|e| format!("Flush error: {e}"))
+        chunked_write_to(&mut *writer, data)
     }
 
     /// Get the child process ID.
@@ -495,6 +510,89 @@ mod tests {
         let result = expand_env_in_path("%NONEXISTENT_VAR_12345%");
         // Should not panic, returns the original
         assert_eq!(result, "%NONEXISTENT_VAR_12345%");
+    }
+
+    /// In-memory writer that records all written bytes for verifying chunked writes.
+    struct RecordingWriter {
+        data: Vec<u8>,
+        flush_count: usize,
+    }
+
+    impl RecordingWriter {
+        fn new() -> Self {
+            Self {
+                data: Vec::new(),
+                flush_count: 0,
+            }
+        }
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.data.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flush_count += 1;
+            Ok(())
+        }
+    }
+
+    /// Proxy that delegates to a shared RecordingWriter.
+    struct WriterProxy(Arc<Mutex<RecordingWriter>>);
+
+    impl Write for WriterProxy {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.lock().unwrap().flush()
+        }
+    }
+
+    fn make_recorder() -> (Box<dyn Write + Send>, Arc<Mutex<RecordingWriter>>) {
+        let recorder = Arc::new(Mutex::new(RecordingWriter::new()));
+        let writer: Box<dyn Write + Send> = Box::new(WriterProxy(Arc::clone(&recorder)));
+        (writer, recorder)
+    }
+
+    #[test]
+    fn chunked_write_to_empty_data() {
+        let (mut writer, recorder) = make_recorder();
+        chunked_write_to(&mut *writer, b"").unwrap();
+        let rec = recorder.lock().unwrap();
+        assert!(rec.data.is_empty());
+        assert_eq!(rec.flush_count, 0);
+    }
+
+    #[test]
+    fn chunked_write_to_smaller_than_chunk_size() {
+        let (mut writer, recorder) = make_recorder();
+        let data = b"hello";
+        chunked_write_to(&mut *writer, data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 1);
+    }
+
+    #[test]
+    fn chunked_write_to_exact_chunk_size() {
+        let (mut writer, recorder) = make_recorder();
+        let data = vec![0x41u8; PTY_WRITE_CHUNK_SIZE]; // exactly 1024 bytes
+        chunked_write_to(&mut *writer, &data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 1);
+    }
+
+    #[test]
+    fn chunked_write_to_larger_than_chunk_size() {
+        let (mut writer, recorder) = make_recorder();
+        let data = vec![0x42u8; PTY_WRITE_CHUNK_SIZE * 3 + 100]; // 3172 bytes
+        chunked_write_to(&mut *writer, &data).unwrap();
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, data);
+        assert_eq!(rec.flush_count, 4); // 3 full chunks + 1 partial
     }
 
     #[test]

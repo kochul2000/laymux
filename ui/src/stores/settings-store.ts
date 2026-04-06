@@ -82,6 +82,8 @@ export interface ConvenienceSettings {
   smartRemoveIndent: boolean;
   /** Rejoin URLs split across lines when pasting. */
   smartRemoveLineBreak: boolean;
+  /** Show a confirmation dialog when pasting large text. */
+  largePasteWarning: boolean;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -707,6 +709,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     dockArrowNav: true,
     smartRemoveIndent: true,
     smartRemoveLineBreak: true,
+    largePasteWarning: true,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
@@ -891,6 +894,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           dockArrowNav: true,
           smartRemoveIndent: true,
           smartRemoveLineBreak: true,
+          largePasteWarning: true,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
       : undefined;

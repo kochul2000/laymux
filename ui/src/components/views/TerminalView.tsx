@@ -37,6 +37,24 @@ import {
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 
+/** Byte-size threshold for the large paste warning dialog. */
+const LARGE_PASTE_THRESHOLD = 5120;
+
+const textEncoder = new TextEncoder();
+
+/**
+ * Check if a large paste should be blocked. Returns true if the user cancelled.
+ * Uses byte length (UTF-8) for consistency with PTY chunked write.
+ */
+function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
+  if (!enabled) return false;
+  const byteLength = textEncoder.encode(content).length;
+  if (byteLength <= LARGE_PASTE_THRESHOLD) return false;
+  return !window.confirm(
+    `붙여넣을 텍스트가 ${byteLength.toLocaleString()}바이트입니다. 계속하시겠습니까?`,
+  );
+}
+
 /** Notify gate fallback timeout — only used for output idle detector gating. */
 const NOTIFY_GATE_FALLBACK_MS = 3000;
 
@@ -182,6 +200,9 @@ export function TerminalView({
                   removeIndent: convenience.smartRemoveIndent,
                   removeLineBreak: convenience.smartRemoveLineBreak,
                 });
+                if (shouldBlockLargePaste(content, convenience.largePasteWarning)) {
+                  return;
+                }
                 terminal.paste(content);
               }
             })
@@ -366,6 +387,9 @@ export function TerminalView({
                 removeIndent: conv.smartRemoveIndent,
                 removeLineBreak: conv.smartRemoveLineBreak,
               });
+              if (shouldBlockLargePaste(content, conv.largePasteWarning)) {
+                return;
+              }
               writeToTerminal(instanceId, content);
             }
           })
