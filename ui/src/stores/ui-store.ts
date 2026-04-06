@@ -28,6 +28,8 @@ interface UiState {
   settingsNavTarget: string | null;
   /** Per-pane control bar mode, keyed by pane ID. Persisted via localStorage. */
   barModes: Record<string, ControlBarMode>;
+  /** Whether the app window is currently focused (not blurred to another app). */
+  isAppFocused: boolean;
 
   openSettingsModal: () => void;
   closeSettingsModal: () => void;
@@ -37,6 +39,7 @@ interface UiState {
   setSettingsNavTarget: (target: string | null) => void;
   setBarMode: (paneId: string, mode: ControlBarMode) => void;
   getBarMode: (paneId: string) => ControlBarMode;
+  setAppFocused: (focused: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
@@ -44,6 +47,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   notificationPanelOpen: false,
   settingsNavTarget: null,
   barModes: loadBarModes(),
+  isAppFocused: true,
 
   openSettingsModal: () => set({ settingsModalOpen: true, notificationPanelOpen: false }),
   closeSettingsModal: () => set({ settingsModalOpen: false }),
@@ -67,4 +71,5 @@ export const useUiStore = create<UiState>()((set, get) => ({
     });
   },
   getBarMode: (paneId) => get().barModes[paneId] ?? "hover",
+  setAppFocused: (focused) => set({ isAppFocused: focused }),
 }));

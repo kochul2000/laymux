@@ -7,6 +7,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
+import { useUiStore } from "@/stores/ui-store";
 
 interface DockProps {
   position: DockPosition;
@@ -203,6 +204,7 @@ function DockGrid({
 }) {
   const focusedDock = useDockStore((s) => s.focusedDock);
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
+  const isAppFocused = useUiStore((s) => s.isAppFocused);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoveredPane, setHoveredPane] = useState<string | null>(null);
@@ -280,7 +282,10 @@ function DockGrid({
             {isPaneFocused && (
               <div
                 className="pointer-events-none absolute inset-0"
-                style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
+                style={{
+                  boxShadow: `inset 0 0 0 1px var(${isAppFocused ? "--accent" : "--accent-50"})`,
+                  zIndex: 20,
+                }}
               />
             )}
             <PaneControlBar

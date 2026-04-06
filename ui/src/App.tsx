@@ -7,6 +7,7 @@ import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { saveBeforeClose } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
+import { useAppFocus } from "@/hooks/useAppFocus";
 
 export function App() {
   useKeyboardShortcuts();
@@ -14,6 +15,7 @@ export function App() {
   const { loaded } = useSessionPersistence();
   useAutomationBridge();
   useWindowGeometry();
+  useAppFocus();
 
   // Save terminal state before window close (Alt+F4, OS close, etc.)
   const cleanupRef = useRef<(() => void) | null>(null);

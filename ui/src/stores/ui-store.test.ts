@@ -68,4 +68,15 @@ describe("ui-store", () => {
     expect(useUiStore.getState().settingsModalOpen).toBe(true);
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
   });
+
+  it("starts with app focused", () => {
+    expect(useUiStore.getState().isAppFocused).toBe(true);
+  });
+
+  it("sets app focused state", () => {
+    useUiStore.getState().setAppFocused(false);
+    expect(useUiStore.getState().isAppFocused).toBe(false);
+    useUiStore.getState().setAppFocused(true);
+    expect(useUiStore.getState().isAppFocused).toBe(true);
+  });
 });
