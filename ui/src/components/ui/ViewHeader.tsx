@@ -20,13 +20,14 @@ interface ViewHeaderProps {
  */
 export function ViewHeader({ children, className, borderBottom = true, testId }: ViewHeaderProps) {
   const ctx = usePaneControl();
+  const registerHeader = ctx?.registerHeader;
+  const unregisterHeader = ctx?.unregisterHeader;
 
   // PaneControlBar에 "ViewHeader가 존재함"을 알린다.
   useEffect(() => {
-    ctx?.registerHeader();
-    return () => ctx?.unregisterHeader();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    registerHeader?.();
+    return () => unregisterHeader?.();
+  }, [registerHeader, unregisterHeader]);
 
   const showPaneControls = ctx && (ctx.mode === "pinned" || (ctx.mode === "hover" && ctx.hovered));
   const showMinimizedBtn = ctx && ctx.mode === "minimized" && ctx.hovered;

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
@@ -386,16 +386,19 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
     [currentView, actions, mode],
   );
 
+  const registerHeader = useCallback(() => setHasViewHeader(true), []);
+  const unregisterHeader = useCallback(() => setHasViewHeader(false), []);
+
   const ctxValue = useMemo(
     () => ({
       paneControls,
       mode,
       hovered,
       onSetMode: setMode,
-      registerHeader: () => setHasViewHeader(true),
-      unregisterHeader: () => setHasViewHeader(false),
+      registerHeader,
+      unregisterHeader,
     }),
-    [paneControls, mode, hovered],
+    [paneControls, mode, hovered, registerHeader, unregisterHeader],
   );
 
   return (
