@@ -89,6 +89,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   return (
     <ViewShell
       testId="issue-reporter-view"
+      onKeyDown={handleKeyDown}
       style={{ color: "var(--text-primary)", background: "var(--bg-base)" }}
     >
       <ViewHeader className="gap-2.5 px-2" testId="issue-reporter-header">
@@ -105,7 +106,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       <ViewBody
         testId="issue-reporter-body"
         className="flex flex-col"
-        onKeyDown={handleKeyDown}
         style={{
           padding: `${ir.paddingTop}px ${ir.paddingRight}px ${ir.paddingBottom}px ${ir.paddingLeft}px`,
         }}

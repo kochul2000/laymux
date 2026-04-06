@@ -43,7 +43,7 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
       <ViewBody>
         {sorted.length === 0 ? (
           <div
-            className="flex flex-1 h-full items-center justify-center"
+            className="flex h-full items-center justify-center"
             style={{ color: "var(--text-secondary)" }}
           >
             <p className="text-xs">No notifications</p>

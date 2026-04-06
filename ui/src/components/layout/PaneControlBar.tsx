@@ -383,7 +383,8 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
     () => (
       <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
     ),
-    [currentView, actions, mode],
+    // setMode는 useState setter라 참조 안정적이지만 exhaustive-deps 일관성 위해 포함
+    [currentView, actions, mode, setMode],
   );
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
@@ -398,7 +399,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
       registerHeader,
       unregisterHeader,
     }),
-    [paneControls, mode, hovered, registerHeader, unregisterHeader],
+    [paneControls, mode, hovered, setMode, registerHeader, unregisterHeader],
   );
 
   return (
