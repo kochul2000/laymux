@@ -205,9 +205,47 @@ pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
     last_message
 }
 
+/// Skip a single ANSI escape sequence starting at `bytes[i]`.
+/// Returns `(new_index, csi_final_byte)` where `csi_final_byte` is `Some(b'C')` etc.
+/// for CSI sequences, `None` for OSC or other sequences.
+fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
+    debug_assert!(bytes[i] == 0x1b && i + 1 < bytes.len());
+    match bytes[i + 1] {
+        b'[' => {
+            // CSI: ESC [ params final_byte
+            let mut j = i + 2;
+            while j < bytes.len() && !(bytes[j].is_ascii_alphabetic() || bytes[j] == b'~') {
+                j += 1;
+            }
+            if j < bytes.len() {
+                let final_byte = bytes[j];
+                (j + 1, Some(final_byte))
+            } else {
+                (j, None)
+            }
+        }
+        b']' => {
+            // OSC: skip to BEL or ST
+            let mut j = i + 2;
+            while j < bytes.len() && bytes[j] != 0x07 {
+                if bytes[j] == 0x1b {
+                    j += 1; // skip ST's ESC
+                    break;
+                }
+                j += 1;
+            }
+            if j < bytes.len() {
+                j += 1; // skip BEL or backslash
+            }
+            (j, None)
+        }
+        _ => (i + 2, None),
+    }
+}
+
 /// Strip ANSI and extract message text for a ● bullet line.
 /// Converts cursor-forward (`\x1b[nC`) to spaces, strips all other ANSI,
-/// and stops at spinner characters (✶✻✽✢*) or another ● bullet.
+/// and stops at spinner characters (✶✻✽✢) or another ● bullet.
 fn strip_ansi_for_bullet(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let bytes = input.as_bytes();
@@ -215,46 +253,11 @@ fn strip_ansi_for_bullet(input: &str) -> String {
 
     while i < bytes.len() {
         if bytes[i] == 0x1b && i + 1 < bytes.len() {
-            match bytes[i + 1] {
-                b'[' => {
-                    // CSI: ESC [ params final_byte
-                    let csi_start = i + 2;
-                    let mut j = csi_start;
-                    while j < bytes.len()
-                        && !(bytes[j].is_ascii_alphabetic() || bytes[j] == b'~')
-                    {
-                        j += 1;
-                    }
-                    if j < bytes.len() {
-                        let final_byte = bytes[j];
-                        if final_byte == b'C' {
-                            // Cursor forward → space
-                            result.push(' ');
-                        }
-                        // All other CSI sequences are stripped
-                        i = j + 1;
-                    } else {
-                        i = j;
-                    }
-                }
-                b']' => {
-                    // OSC: skip to BEL or ST
-                    i += 2;
-                    while i < bytes.len() && bytes[i] != 0x07 {
-                        if bytes[i] == 0x1b {
-                            i += 1;
-                            break;
-                        }
-                        i += 1;
-                    }
-                    if i < bytes.len() {
-                        i += 1;
-                    }
-                }
-                _ => {
-                    i += 2;
-                }
+            let (next_i, final_byte) = skip_ansi_escape(bytes, i);
+            if final_byte == Some(b'C') {
+                result.push(' '); // Cursor forward → space
             }
+            i = next_i;
         } else {
             // Check for spinner/stop characters
             let remaining = &input[i..];
@@ -282,40 +285,13 @@ pub fn strip_ansi(input: &str) -> String {
 
     while i < bytes.len() {
         if bytes[i] == 0x1b && i + 1 < bytes.len() {
-            match bytes[i + 1] {
-                // CSI: ESC [ ... (letter)
-                b'[' => {
-                    i += 2;
-                    while i < bytes.len() && !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'~')
-                    {
-                        i += 1;
-                    }
-                    if i < bytes.len() {
-                        i += 1; // skip final letter
-                    }
-                }
-                // OSC: ESC ] ... (BEL or ST)
-                b']' => {
-                    i += 2;
-                    while i < bytes.len() && bytes[i] != 0x07 {
-                        if bytes[i] == 0x1b {
-                            i += 1; // skip ST's ESC
-                            break;
-                        }
-                        i += 1;
-                    }
-                    if i < bytes.len() {
-                        i += 1; // skip BEL or backslash
-                    }
-                }
-                _ => {
-                    i += 2; // skip unknown ESC + next byte
-                }
-            }
+            let (next_i, _) = skip_ansi_escape(bytes, i);
+            i = next_i;
         } else {
-            // Regular byte — include in output
-            result.push(bytes[i] as char);
-            i += 1;
+            let remaining = &input[i..];
+            let ch = remaining.chars().next().unwrap();
+            result.push(ch);
+            i += ch.len_utf8();
         }
     }
 
@@ -821,6 +797,15 @@ mod tests {
     #[test]
     fn strip_ansi_no_escapes() {
         assert_eq!(strip_ansi("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_ansi_multibyte_utf8() {
+        // Verify strip_ansi correctly handles multibyte UTF-8 characters
+        assert_eq!(
+            strip_ansi("\x1b[38;5;231m한글 테스트\x1b[m"),
+            "한글 테스트"
+        );
     }
 
     #[test]
