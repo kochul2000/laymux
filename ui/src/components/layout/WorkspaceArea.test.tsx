@@ -242,9 +242,7 @@ describe("WorkspaceArea", () => {
 
     // Both workspaces should have their pane divs in the DOM
     // WS1 panes visible, WS2 panes hidden (display: none)
-    const allDivs = document.querySelectorAll(
-      "[data-testid='workspace-area'] > [class*='absolute']",
-    );
+    const allDivs = document.querySelectorAll("[data-testid='workspace-area'] [class*='absolute']");
     const hiddenDivs = Array.from(allDivs).filter(
       (el) => (el as HTMLElement).style.display === "none",
     );

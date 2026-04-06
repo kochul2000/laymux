@@ -1,4 +1,3 @@
-import { useState, useRef, useCallback, useEffect } from "react";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -6,8 +5,8 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneControlBar } from "./PaneControlBar";
-import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
-import { useUiStore } from "@/stores/ui-store";
+import { PaneGrid } from "./PaneGrid";
+import { useHoverTimer } from "@/hooks/useHoverTimer";
 
 interface DockProps {
   position: DockPosition;
@@ -53,32 +52,16 @@ export function Dock({
     return ws?.name ?? "";
   });
 
-  const [singleHovered, setSingleHovered] = useState(false);
-  const singleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const singleHover = useHoverTimer(hoverIdleSeconds);
 
-  const handleSingleHoverActivity = useCallback(() => {
-    setSingleHovered(true);
-    if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current);
-    if (hoverIdleSeconds > 0) {
-      singleHoverTimerRef.current = setTimeout(
-        () => setSingleHovered(false),
-        hoverIdleSeconds * 1000,
-      );
-    }
-  }, [hoverIdleSeconds]);
-
-  useEffect(() => {
-    return () => {
-      if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current);
-    };
-  }, []);
-
-  // Split panes rendering — 2D absolute positioned grid (same as WorkspaceArea)
+  // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
     return (
       <DockGrid
         position={position}
         panes={panes}
+        activeWorkspaceId={activeWorkspaceId}
+        activeWsName={activeWsName}
         onSplitPane={onSplitPane}
         onRemovePane={onRemovePane}
         onSetPaneView={onSetPaneView}
@@ -94,12 +77,9 @@ export function Dock({
       data-testid={`dock-${position}`}
       className="flex h-full w-full overflow-hidden"
       style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
-      onMouseEnter={handleSingleHoverActivity}
-      onMouseMove={handleSingleHoverActivity}
-      onMouseLeave={() => {
-        setSingleHovered(false);
-        if (singleHoverTimerRef.current) clearTimeout(singleHoverTimerRef.current);
-      }}
+      onMouseEnter={() => singleHover.activate("__single__")}
+      onMouseMove={() => singleHover.activate("__single__")}
+      onMouseLeave={singleHover.clear}
     >
       {showIconBar && (
         <div
@@ -129,7 +109,7 @@ export function Dock({
       <div className="relative min-w-0 flex-1">
         <PaneControlBar
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
-          hovered={singleHovered}
+          hovered={singleHover.hoveredId !== null}
           actions={{
             onSplitH: onSplitPane ? () => onSplitPane("horizontal", singlePaneId) : undefined,
             onSplitV: onSplitPane ? () => onSplitPane("vertical", singlePaneId) : undefined,
@@ -186,10 +166,12 @@ export function Dock({
   );
 }
 
-/** 2D grid dock panes — uses absolute positioning like WorkspaceArea */
+/** Thin wrapper that configures PaneGrid for dock context */
 function DockGrid({
   position,
   panes,
+  activeWorkspaceId,
+  activeWsName,
   onSplitPane,
   onRemovePane,
   onSetPaneView,
@@ -197,6 +179,8 @@ function DockGrid({
 }: {
   position: DockPosition;
   panes: DockPane[];
+  activeWorkspaceId: string;
+  activeWsName: string;
   onSplitPane?: (direction: "horizontal" | "vertical", paneId?: string) => void;
   onRemovePane?: (paneId: string) => void;
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
@@ -204,152 +188,39 @@ function DockGrid({
 }) {
   const focusedDock = useDockStore((s) => s.focusedDock);
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
-  const isAppFocused = useUiStore((s) => s.isAppFocused);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const [hoveredPane, setHoveredPane] = useState<string | null>(null);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
-  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const activeWsName = useWorkspaceStore((s) => {
-    const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
-    return ws?.name ?? "";
-  });
-
-  const handlePaneHoverActivity = useCallback(
-    (paneId: string) => {
-      setHoveredPane(paneId);
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      if (hoverIdleSeconds > 0) {
-        hoverTimerRef.current = setTimeout(() => setHoveredPane(null), hoverIdleSeconds * 1000);
-      }
-    },
-    [hoverIdleSeconds],
-  );
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      setSize({ w: width, h: height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    };
-  }, []);
 
   return (
-    <div
-      ref={containerRef}
-      data-testid={`dock-${position}`}
-      className="relative h-full w-full overflow-hidden"
-      style={{ background: "var(--bg-surface)" }}
-    >
-      {panes.map((pane) => {
-        const isHovered = hoveredPane === pane.id;
-        const isPaneFocused = focusedDock === position && focusedDockPaneId === pane.id;
-        return (
-          <div
-            key={pane.id}
-            data-testid={`dock-pane-${pane.id}`}
-            className="absolute overflow-hidden"
-            style={{
-              left: `${pane.x * 100}%`,
-              top: `${pane.y * 100}%`,
-              width: `${pane.w * 100}%`,
-              height: `${pane.h * 100}%`,
-              borderRight: "2px solid var(--border)",
-              borderBottom: "2px solid var(--border)",
-            }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              useDockStore.getState().setFocusedDock(position, pane.id);
-              useGridStore.getState().setFocusedPane(null);
-            }}
-            onMouseEnter={() => handlePaneHoverActivity(pane.id)}
-            onMouseMove={() => handlePaneHoverActivity(pane.id)}
-            onMouseLeave={() => {
-              setHoveredPane(null);
-              if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-            }}
-          >
-            {isPaneFocused && (
-              <div
-                className="pointer-events-none absolute inset-0"
-                style={{
-                  boxShadow: `inset 0 0 0 1px var(${isAppFocused ? "--accent" : "--accent-50"})`,
-                  zIndex: 20,
-                }}
-              />
-            )}
-            <PaneControlBar
-              currentView={pane.view}
-              hovered={isHovered}
-              actions={{
-                onSplitH: onSplitPane ? () => onSplitPane("horizontal", pane.id) : undefined,
-                onSplitV: onSplitPane ? () => onSplitPane("vertical", pane.id) : undefined,
-                onClear: () => onSetPaneView?.(pane.id, { type: "EmptyView" }),
-                onDelete:
-                  panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
-                onToggleCwdSend:
-                  onSetPaneView &&
-                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
-                    ? () =>
-                        onSetPaneView(pane.id, {
-                          ...pane.view,
-                          cwdSend: !((pane.view.cwdSend as boolean) ?? true),
-                        })
-                    : undefined,
-                onToggleCwdReceive:
-                  onSetPaneView &&
-                  (pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView")
-                    ? () =>
-                        onSetPaneView(pane.id, {
-                          ...pane.view,
-                          cwdReceive: !((pane.view.cwdReceive as boolean) ?? true),
-                        })
-                    : undefined,
-              }}
-            >
-              <ViewRenderer
-                viewType={pane.view.type}
-                viewConfig={pane.view}
-                paneId={pane.id}
-                workspaceId={activeWorkspaceId}
-                workspaceName={activeWsName}
-                isFocused={isPaneFocused}
-                onSelectView={(config) => onSetPaneView?.(pane.id, config)}
-                emptyViewContext="dock"
-                location="dock"
-                onKeyboardActivity={() => {
-                  setHoveredPane(null);
-                  if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-                }}
-              />
-            </PaneControlBar>
-          </div>
-        );
-      })}
-      <PaneBoundaryHandles
-        panes={panes}
-        containerWidth={size.w}
-        containerHeight={size.h}
-        getLatestPanes={() => useDockStore.getState().getDock(position)?.panes ?? []}
-        onResizePane={(idx, delta) => {
+    <PaneGrid
+      panes={panes}
+      containerTestId={`dock-${position}`}
+      containerClassName="relative h-full w-full overflow-hidden"
+      containerStyle={{ background: "var(--bg-surface)" }}
+      testIdFn={(pane) => `dock-pane-${pane.id}`}
+      isFocused={(paneId) => focusedDock === position && focusedDockPaneId === paneId}
+      onPaneFocus={(paneId) => {
+        useDockStore.getState().setFocusedDock(position, paneId);
+        useGridStore.getState().setFocusedPane(null);
+      }}
+      onSetPaneView={onSetPaneView}
+      onSplitPane={onSplitPane ? (paneId, dir) => onSplitPane(dir, paneId) : undefined}
+      onRemovePane={onRemovePane}
+      getCwdDefaults={() => ({ send: true, receive: true })}
+      workspaceId={activeWorkspaceId}
+      workspaceName={activeWsName}
+      emptyViewContext="dock"
+      location="dock"
+      boundaryHandlesProps={{
+        panes,
+        getLatestPanes: () => useDockStore.getState().getDock(position)?.panes ?? [],
+        onResizePane: (idx, delta) => {
           const pane = panes[idx];
           if (pane && onResizePane) onResizePane(pane.id, delta);
-        }}
-        onRemovePane={(idx) => {
+        },
+        onRemovePane: (idx) => {
           const pane = panes[idx];
           if (pane && onRemovePane) onRemovePane(pane.id);
-        }}
-      />
-    </div>
+        },
+      }}
+    />
   );
 }
