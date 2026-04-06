@@ -106,6 +106,8 @@ pub fn create_terminal_session(
     let app_clone = app.clone();
     let state_for_pty = Arc::clone(&*state);
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lookback_buf: Arc<std::sync::Mutex<Vec<u8>>> =
+        Arc::new(std::sync::Mutex::new(Vec::with_capacity(64)));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
@@ -258,11 +260,32 @@ pub fn create_terminal_session(
             }
         }
 
-        // ── Claude Code white-● message detection ──
+        // ── Claude Code status-marker message detection ──
         // Only runs for known Claude terminals. Extracts user-facing status
-        // messages (white ●) and stores as raw state in session.claude_message.
+        // messages (· or legacy ●) and stores as raw state in session.claude_message.
+        // Accumulates a small lookback buffer to handle cross-chunk marker splits.
         if claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
-            if let Some(msg) = claude_bullet::extract_white_bullet_message(&data) {
+            // Prepend up to 64 bytes from previous chunk to handle splits where
+            // the marker color/char arrives in one chunk and text in the next.
+            let combined: std::borrow::Cow<[u8]> = {
+                let prev = lookback_buf.lock().ok();
+                let prev_data = prev.as_ref().map(|b| b.as_slice()).unwrap_or(&[]);
+                if prev_data.is_empty() {
+                    std::borrow::Cow::Borrowed(&data)
+                } else {
+                    let mut combined = Vec::with_capacity(prev_data.len() + data.len());
+                    combined.extend_from_slice(prev_data);
+                    combined.extend_from_slice(&data);
+                    std::borrow::Cow::Owned(combined)
+                }
+            };
+            // Update lookback: keep last 64 bytes for next chunk
+            if let Ok(mut buf) = lookback_buf.lock() {
+                let keep = 64.min(data.len());
+                buf.clear();
+                buf.extend_from_slice(&data[data.len() - keep..]);
+            }
+            if let Some(msg) = claude_bullet::extract_white_bullet_message(&combined) {
                 let mut changed = false;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {

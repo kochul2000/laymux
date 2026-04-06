@@ -1,72 +1,100 @@
-//! Claude Code white-● message extraction and ANSI stripping utilities.
+//! Claude Code status-marker message extraction and ANSI stripping utilities.
 //!
-//! Scans raw PTY output for user-facing status messages emitted by Claude Code,
-//! identified by the bright-white `●` (U+25CF) marker with SGR 38;5;231 coloring.
+//! Scans raw PTY output for user-facing status messages emitted by Claude Code.
+//! Two marker variants are supported:
+//!   - Legacy: bright-white `●` (U+25CF) with SGR 38;5;231
+//!   - Current: salmon `·` (U+00B7) with SGR 38;5;174 (Claude brand color)
 //! Also provides general-purpose ANSI escape stripping.
 
 use crate::constants::BULLET_MESSAGE_SCAN_BYTES;
 
-/// UTF-8 bytes for ● (U+25CF BLACK CIRCLE)
-const BULLET: [u8; 3] = [0xe2, 0x97, 0x8f];
+/// Marker variants emitted by Claude Code for status messages.
+/// Each entry: (UTF-8 bytes of the marker char, SGR color prefix).
+const MARKERS: &[(&[u8], &[u8])] = &[
+    // Current (2025+): · (U+00B7 MIDDLE DOT) with salmon/terracotta color
+    (&[0xc2, 0xb7], b"\x1b[38;5;174m"),
+    // Legacy: ● (U+25CF BLACK CIRCLE) with bright-white color
+    (&[0xe2, 0x97, 0x8f], b"\x1b[38;5;231m"),
+];
 
-/// ANSI SGR prefix for 256-color foreground 231 (bright white).
-/// Claude Code uses this color for user-facing status messages.
-const SGR_FG_231: &[u8] = b"\x1b[38;5;231m";
-
-/// Extract the last white-● status message from Claude Code terminal output.
+/// Extract the last status-marker message from Claude Code terminal output.
 ///
-/// Scans raw PTY bytes for `●` (U+25CF) preceded by the bright-white ANSI color
-/// (`\x1b[38;5;231m`). Returns the text content after `●` with ANSI codes stripped.
-/// Non-white ● lines (e.g., gray tool-call markers) are skipped.
+/// Scans raw PTY bytes for known marker characters (`·` or `●`) preceded by their
+/// respective ANSI color codes. Returns the text content after the marker with
+/// ANSI codes stripped. Markers with non-matching colors are skipped.
 ///
 /// Claude Code uses TUI rendering with cursor-addressed output, so the message text
-/// may not be adjacent to `●` in the byte stream. We scan forward past cursor
+/// may not be adjacent to the marker in the byte stream. We scan forward past cursor
 /// control sequences to find the text, stopping at spinner characters or color changes.
 pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
-    let mut last_message: Option<String> = None;
-    let mut pos = 0;
+    let mut best: Option<(usize, String)> = None; // (position, message)
 
-    while pos + BULLET.len() <= data.len() {
-        // Find next ● in the byte stream
-        let bullet_pos = match data[pos..]
-            .windows(BULLET.len())
-            .position(|w| w == BULLET)
-        {
-            Some(p) => pos + p,
-            None => break,
-        };
+    for &(marker_bytes, sgr_prefix) in MARKERS {
+        let mut pos = 0;
+        while pos + marker_bytes.len() <= data.len() {
+            let marker_pos = match data[pos..]
+                .windows(marker_bytes.len())
+                .position(|w| w == marker_bytes)
+            {
+                Some(p) => pos + p,
+                None => break,
+            };
 
-        // Check if preceded by SGR_FG_231, allowing whitespace/control chars
-        // between the SGR and ●. Real output patterns include:
-        //   \x1b[38;5;231m●      (direct)
-        //   \x1b[38;5;231m\n●    (newline gap)
-        //   \x1b[38;5;231m\r●    (carriage return gap)
-        let is_white = {
-            let mut scan = bullet_pos;
-            while scan > 0 && matches!(data[scan - 1], b'\n' | b'\r' | b' ') {
-                scan -= 1;
+            // Check if preceded by the expected SGR color. Between the SGR and the
+            // marker, allow whitespace (\r, \n, space) and CSI sequences (e.g.,
+            // cursor positioning \x1b[13;1H). Search backwards up to 50 bytes.
+            let has_color = 'color: {
+                let search_start = marker_pos.saturating_sub(50);
+                // Look for sgr_prefix in the window before the marker
+                let window = &data[search_start..marker_pos];
+                // Find the LAST occurrence of sgr_prefix in the window
+                let sgr_pos = window
+                    .windows(sgr_prefix.len())
+                    .rposition(|w| w == sgr_prefix);
+                if let Some(rel_pos) = sgr_pos {
+                    let abs_sgr_end = search_start + rel_pos + sgr_prefix.len();
+                    // Verify gap between SGR end and marker is only whitespace/CSI
+                    let gap = &data[abs_sgr_end..marker_pos];
+                    let mut gi = 0;
+                    while gi < gap.len() {
+                        match gap[gi] {
+                            b'\n' | b'\r' | b' ' => gi += 1,
+                            0x1b if gi + 1 < gap.len() && gap[gi + 1] == b'[' => {
+                                // Skip CSI sequence
+                                let mut j = gi + 2;
+                                while j < gap.len()
+                                    && !(gap[j].is_ascii_alphabetic() || gap[j] == b'~')
+                                {
+                                    j += 1;
+                                }
+                                gi = if j < gap.len() { j + 1 } else { j };
+                            }
+                            _ => break 'color false,
+                        }
+                    }
+                    break 'color gi == gap.len();
+                }
+                false
+            };
+
+            if has_color {
+                let text_start = marker_pos + marker_bytes.len();
+                let scan_end = (text_start + BULLET_MESSAGE_SCAN_BYTES).min(data.len());
+                let raw_text = String::from_utf8_lossy(&data[text_start..scan_end]);
+                let stripped = strip_ansi_for_bullet(&raw_text);
+                if !stripped.is_empty() {
+                    // Keep the last occurrence by position in the byte stream
+                    if best.as_ref().map_or(true, |(prev_pos, _)| marker_pos > *prev_pos) {
+                        best = Some((marker_pos, stripped));
+                    }
+                }
             }
-            scan >= SGR_FG_231.len()
-                && data[scan - SGR_FG_231.len()..scan] == *SGR_FG_231
-        };
 
-        if is_white {
-            // Scan forward from ● to collect message text.
-            // In TUI mode, text is cursor-addressed; in scrollback, text is inline.
-            // We scan up to BULLET_MESSAGE_SCAN_BYTES bytes, strip ANSI, and stop at spinner chars.
-            let text_start = bullet_pos + BULLET.len();
-            let scan_end = (text_start + BULLET_MESSAGE_SCAN_BYTES).min(data.len());
-            let raw_text = String::from_utf8_lossy(&data[text_start..scan_end]);
-            let stripped = strip_ansi_for_bullet(&raw_text);
-            if !stripped.is_empty() {
-                last_message = Some(stripped);
-            }
+            pos = marker_pos + marker_bytes.len();
         }
-
-        pos = bullet_pos + BULLET.len();
     }
 
-    last_message
+    best.map(|(_, msg)| msg)
 }
 
 /// Skip a single ANSI escape sequence starting at `bytes[i]`.
@@ -257,9 +285,10 @@ mod tests {
     #[test]
     fn white_bullet_tui_mode_cursor_addressed() {
         // Real TUI pattern: ● followed by cursor movements, then text at different position
+        let legacy_bullet: &[u8] = &[0xe2, 0x97, 0x8f]; // ● U+25CF
         let mut data = Vec::new();
         data.extend_from_slice(b"\x1b[38;5;231m\r");
-        data.extend_from_slice(&BULLET);
+        data.extend_from_slice(legacy_bullet);
         data.extend_from_slice(b"\x1b[m\x1b[1C\x1b[11X\x1b[11C\x1b[?2026h\x1b[?2026l\x1b[19;3H10");
         data.extend_from_slice("이고,".as_bytes());
         data.extend_from_slice(b"\x1b[1C");
@@ -300,7 +329,7 @@ mod tests {
         // ● message followed by ─── separator line (input area divider)
         let mut data = Vec::new();
         data.extend_from_slice(b"\x1b[38;5;231m\n");
-        data.extend_from_slice(&BULLET);
+        data.extend_from_slice(&[0xe2, 0x97, 0x8f]); // ● U+25CF
         data.extend_from_slice(" \x1b[m메시지 텍스트\n".as_bytes());
         data.extend_from_slice("──────────────────\n".as_bytes());
         data.extend_from_slice("❯ ".as_bytes());
@@ -317,6 +346,77 @@ mod tests {
             extract_white_bullet_message(data),
             Some("test-result is 42".to_string())
         );
+    }
+
+    // ── Current marker (· U+00B7 with SGR 174) tests ──
+
+    #[test]
+    fn middot_basic() {
+        // Current Claude Code pattern: salmon · followed by message
+        let data = b"\x1b[38;5;174m\xc2\xb7 Creating plan\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Creating plan".to_string())
+        );
+    }
+
+    #[test]
+    fn middot_with_cursor_forward() {
+        // Real TUI: · followed by cursor-forward then text
+        let data = b"\x1b[38;5;174m\r\n\xc2\xb7\x1b[1CRead 3 files\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Read 3 files".to_string())
+        );
+    }
+
+    #[test]
+    fn middot_ignores_wrong_color() {
+        // · with wrong color should be skipped
+        let data = b"\x1b[38;5;244m\xc2\xb7 gray status\n";
+        assert_eq!(extract_white_bullet_message(data), None);
+    }
+
+    #[test]
+    fn middot_real_tui_pattern() {
+        // Real captured pattern: SGR 174 + CR LF + · + cursor-forward + "Creating…"
+        let data = b"\x1b[38;5;174m\r\n\xc2\xb7\x1b[1CCreating\xe2\x80\xa6\x1b[38;5;244m\x1b[16;1H";
+        let msg = extract_white_bullet_message(data);
+        assert!(msg.is_some(), "Should extract · message from real TUI output");
+        let text = msg.unwrap();
+        assert!(
+            text.starts_with("Creating"),
+            "Should start with 'Creating': {text}"
+        );
+    }
+
+    #[test]
+    fn middot_stops_at_spinner() {
+        let data = b"\x1b[38;5;174m\xc2\xb7\x1b[1CUpdated auth.ts\x1b[38;5;174m\x1b[20;1H\xe2\x9c\xb6 Working";
+        let msg = extract_white_bullet_message(data).unwrap();
+        assert_eq!(msg, "Updated auth.ts");
+    }
+
+    #[test]
+    fn middot_with_cursor_position_between_sgr_and_marker() {
+        // Real TUI pattern: SGR 174 + cursor position CSI + · + cursor-forward + text
+        // \x1b[38;5;174m\x1b[13;1H·\x1b[1CCreating plan
+        let data = b"\x1b[38;5;174m\x1b[13;1H\xc2\xb7\x1b[1CCreating plan";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Creating plan".to_string())
+        );
+    }
+
+    #[test]
+    fn mixed_legacy_and_current_picks_last() {
+        let mut data = Vec::new();
+        // Legacy ● with SGR 231
+        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mLegacy message\n");
+        // Current · with SGR 174
+        data.extend_from_slice(b"\x1b[38;5;174m\xc2\xb7\x1b[1CCurrent message\n");
+        let msg = extract_white_bullet_message(&data).unwrap();
+        assert_eq!(msg, "Current message");
     }
 
     // ── strip_ansi tests ──
