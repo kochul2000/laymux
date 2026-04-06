@@ -157,7 +157,7 @@ export function detectClaudeTaskTransition(
   previousTitle: string | undefined,
   newTitle: string,
   activity: TerminalActivityInfo | undefined,
-  claudeExited?: boolean,
+  claudeExited: boolean,
 ): ClaudeTaskTransition | null {
   if (activity?.type !== "interactiveApp" || activity.name !== "Claude") return null;
   if (previousTitle === undefined) return null;
