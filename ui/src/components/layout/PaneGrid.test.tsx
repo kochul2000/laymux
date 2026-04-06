@@ -63,12 +63,25 @@ describe("PaneGrid", () => {
     expect(screen.getByTestId("my-grid")).toBeInTheDocument();
   });
 
-  it("calls onSplitPane and onRemovePane through PaneControlBar", () => {
+  it("calls onSplitPane via PaneControlBar split button", () => {
     const onSplitPane = vi.fn();
+    render(<PaneGrid {...defaultProps} onSplitPane={onSplitPane} />);
+
+    // Hover to show PaneControlBar
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    fireEvent.click(screen.getByTestId("pane-control-split-h"));
+
+    expect(onSplitPane).toHaveBeenCalledWith("pane-0", "horizontal");
+  });
+
+  it("calls onRemovePane via PaneControlBar delete button", () => {
     const onRemovePane = vi.fn();
-    render(<PaneGrid {...defaultProps} onSplitPane={onSplitPane} onRemovePane={onRemovePane} />);
-    // PaneControlBar renders split/delete buttons — verifying props are passed
-    expect(onSplitPane).not.toHaveBeenCalled();
-    expect(onRemovePane).not.toHaveBeenCalled();
+    render(<PaneGrid {...defaultProps} onRemovePane={onRemovePane} />);
+
+    // Hover to show PaneControlBar
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    fireEvent.click(screen.getByTestId("pane-control-delete"));
+
+    expect(onRemovePane).toHaveBeenCalledWith("pane-0");
   });
 });

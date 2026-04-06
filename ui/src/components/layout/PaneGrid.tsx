@@ -187,7 +187,10 @@ export function PaneGrid({
         <PaneBoundaryHandles
           containerWidth={size.w}
           containerHeight={size.h}
-          {...boundaryHandlesProps}
+          panes={boundaryHandlesProps?.panes}
+          getLatestPanes={boundaryHandlesProps?.getLatestPanes}
+          onResizePane={boundaryHandlesProps?.onResizePane}
+          onRemovePane={boundaryHandlesProps?.onRemovePane}
         />
       )}
     </div>

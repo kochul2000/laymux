@@ -33,7 +33,8 @@ export function WorkspaceArea() {
       {workspaces.map((ws) => {
         const isActive = ws.id === activeWorkspaceId;
         if (!mountedWsIds.has(ws.id)) return null;
-        const idxOf = (paneId: string) => ws.panes.findIndex((p) => p.id === paneId);
+        const indexMap = new Map(ws.panes.map((p, i) => [p.id, i]));
+        const idxOf = (paneId: string) => indexMap.get(paneId) ?? -1;
         return (
           <PaneGrid
             key={ws.id}
