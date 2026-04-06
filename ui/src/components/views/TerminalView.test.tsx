@@ -402,10 +402,12 @@ describe("TerminalView", () => {
       expect(mockSmartPaste).toHaveBeenCalledWith("", "PowerShell");
     });
 
-    // Right-click paste writes directly to PTY (no bracketed paste block)
+    // Right-click paste uses terminal.paste() for consistent behavior with Ctrl+V
     await vi.waitFor(() => {
-      expect(mockWriteToTerminal).toHaveBeenCalledWith("t-rc1", "pasted text");
+      expect(mockPaste).toHaveBeenCalledWith("pasted text");
     });
+    // Should NOT call writeToTerminal directly (causes truncation with large content)
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
   it("right-click copies selection when text is selected", async () => {
