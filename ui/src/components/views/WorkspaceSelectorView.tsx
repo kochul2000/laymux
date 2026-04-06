@@ -10,6 +10,7 @@ import {
   abbreviatePath,
   mntPathToWindows,
   formatCommand,
+  CLAUDE_MSG_TRUNCATE_LEN,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
@@ -526,7 +527,7 @@ function WorkspaceItem({
             <span className="truncate" style={{ color: "var(--text-secondary)" }}>
               {formatCommand(
                 cmdStatus?.text ?? cmdInfo.command,
-                cmdStatus?.text ? 50 : 30, // Claude messages are longer than shell commands
+                cmdStatus?.text ? CLAUDE_MSG_TRUNCATE_LEN : undefined,
               )}
             </span>
             <span style={{ color: "var(--text-secondary)", opacity: 0.4 }}>

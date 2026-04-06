@@ -85,7 +85,12 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
   };
 }
 
-export function formatCommand(cmd: string, maxLen = 30): string {
+/** Max display length for shell commands in workspace summary. */
+export const CMD_TRUNCATE_LEN = 30;
+/** Max display length for Claude status messages (longer than shell commands). */
+export const CLAUDE_MSG_TRUNCATE_LEN = 50;
+
+export function formatCommand(cmd: string, maxLen = CMD_TRUNCATE_LEN): string {
   const trimmed = cmd.trim();
   if (trimmed.length <= maxLen) return trimmed;
   return trimmed.slice(0, maxLen - 1) + "…";
