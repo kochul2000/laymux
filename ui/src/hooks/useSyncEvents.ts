@@ -96,6 +96,10 @@ export function useSyncEvents() {
         // Activity detection from interactive app (Rust already detected this)
         if (data.interactiveApp) {
           updates.activity = { type: "interactiveApp", name: data.interactiveApp };
+        } else if (instance?.activity?.type === "interactiveApp") {
+          // Interactive app exited — title no longer matches any app pattern.
+          // Reset to shell so stale Claude/vim indicators don't persist.
+          updates.activity = { type: "shell" };
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);

@@ -156,12 +156,18 @@ pub fn create_terminal_session(
             }
 
             // Claude Code exit detection: title no longer contains "Claude Code"
-            // Clears stale claude_message so re-launching won't briefly show old status.
+            // Clears stale claude_message and removes from known_claude_terminals
+            // so activity detection correctly returns to "shell".
             if (event.code == 0 || event.code == 2)
                 && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
                 && !event.data.contains("Claude Code")
             {
                 claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
+                // Remove from known_claude_terminals so is_claude_terminal_from_buffer()
+                // no longer reports this terminal as running Claude Code.
+                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
+                    known.remove(&terminal_id);
+                }
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {
                         if session.claude_message.is_some() {
