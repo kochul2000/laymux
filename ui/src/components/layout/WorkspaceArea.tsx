@@ -33,55 +33,32 @@ export function WorkspaceArea() {
       {workspaces.map((ws) => {
         const isActive = ws.id === activeWorkspaceId;
         if (!mountedWsIds.has(ws.id)) return null;
+        const idxOf = (paneId: string) => ws.panes.findIndex((p) => p.id === paneId);
         return (
           <PaneGrid
             key={ws.id}
             panes={ws.panes}
             isActive={isActive}
             testIdFn={(_pane, i) => (isActive ? `workspace-pane-${i}` : undefined)}
-            isFocused={(paneId) => {
-              const idx = ws.panes.findIndex((p) => p.id === paneId);
-              return isActive && focusedPaneIndex === idx && focusedDock === null;
-            }}
+            isFocused={(paneId) =>
+              isActive && focusedPaneIndex === idxOf(paneId) && focusedDock === null
+            }
             onPaneFocus={(paneId) => {
-              const idx = ws.panes.findIndex((p) => p.id === paneId);
-              setFocusedPane(idx);
+              setFocusedPane(idxOf(paneId));
               useDockStore.getState().setFocusedDock(null);
             }}
             onSetPaneView={
-              isActive
-                ? (paneId, config) => {
-                    const idx = ws.panes.findIndex((p) => p.id === paneId);
-                    setPaneView(idx, config);
-                  }
-                : undefined
+              isActive ? (paneId, config) => setPaneView(idxOf(paneId), config) : undefined
             }
-            onSplitPane={
-              isActive
-                ? (paneId, dir) => {
-                    const idx = ws.panes.findIndex((p) => p.id === paneId);
-                    splitPane(idx, dir);
-                  }
-                : undefined
-            }
-            onRemovePane={
-              isActive && ws.panes.length > 1
-                ? (paneId) => {
-                    const idx = ws.panes.findIndex((p) => p.id === paneId);
-                    removePane(idx);
-                  }
-                : undefined
-            }
+            onSplitPane={isActive ? (paneId, dir) => splitPane(idxOf(paneId), dir) : undefined}
+            onRemovePane={isActive ? (paneId) => removePane(idxOf(paneId)) : undefined}
             getCwdDefaults={(view: ViewInstanceConfig) => {
               const profileName = (view.profile as string) || defaultProfile || FALLBACK_PROFILE;
               return resolveSyncCwdForProfile(profileName, location);
             }}
             isHoveredOverride={
               isActive && automationHoverIndex !== null
-                ? (paneId) => {
-                    const idx = ws.panes.findIndex((p) => p.id === paneId);
-                    return automationHoverIndex === idx;
-                  }
+                ? (paneId) => automationHoverIndex === idxOf(paneId)
                 : undefined
             }
             workspaceId={ws.id}

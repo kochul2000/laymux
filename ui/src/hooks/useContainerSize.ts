@@ -12,7 +12,7 @@ export function useContainerSize(containerRef: RefObject<HTMLElement | null>) {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [containerRef]);
 
   return size;
 }

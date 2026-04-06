@@ -113,7 +113,8 @@ export function PaneGrid({
             key={pane.id}
             data-testid={testIdFn(pane, i)}
             className="absolute overflow-hidden"
-            onMouseDown={() => {
+            onMouseDown={(e) => {
+              e.stopPropagation();
               if (!isActive) return;
               onPaneFocus(pane.id);
             }}
@@ -182,11 +183,13 @@ export function PaneGrid({
           </div>
         );
       })}
-      <PaneBoundaryHandles
-        containerWidth={size.w}
-        containerHeight={size.h}
-        {...boundaryHandlesProps}
-      />
+      {isActive && (
+        <PaneBoundaryHandles
+          containerWidth={size.w}
+          containerHeight={size.h}
+          {...boundaryHandlesProps}
+        />
+      )}
     </div>
   );
 }
