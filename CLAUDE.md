@@ -5,6 +5,7 @@
 * **컴파일 에러 수정 시 테스트 우선**: 새 필드/기능 추가로 인해 기존 테스트가 컴파일 에러를 일으키면, 단순히 기본값(`None`, `0` 등)을 채워 넣어 컴파일만 통과시키지 말고, 해당 기능을 실제로 검증하는 e2e 테스트를 추가한다.
 * **마이그레이션 불필요**: 현재 내부 개발 단계이므로 설정 파일 경로 변경 등에 대한 마이그레이션 로직은 구현하지 않는다. 기존 데이터는 수동으로 처리한다.
 * **Automation API 포트 규칙**: 고정 포트 — release=19280, dev=19281. 각 빌드 타입은 하나의 인스턴스만 실행 가능. 개발 중 스크린샷/API 호출은 반드시 dev 인스턴스(포트 19281)를 사용한다. Release 빌드(포트 19280)는 사용자가 직접 사용하므로 절대 건드리지 않는다. **Bearer 인증 필수**: dev discovery 파일(`%APPDATA%\laymux-dev\automation.json`)에서 `port`와 `key`를 읽어 모든 API 호출에 `Authorization: Bearer <key>` 헤더를 포함한다. Health 엔드포인트만 인증 없이 접근 가능.
+* **dev 프로세스 종료 시 반드시 `scripts/kill-dev.sh` 사용**: dev 인스턴스를 종료해야 할 때(포트 충돌, exe 잠금, 재시작 등) **절대로 `tasklist | grep laymux`로 PID를 찾아 수동 kill하지 않는다.** release와 dev가 동일한 `laymux.exe` 이름을 사용하므로 구분이 불가능하여 release를 잘못 죽일 수 있다. 반드시 `bash scripts/kill-dev.sh`를 실행하여 `automation.json` PID 기반으로 dev만 안전하게 종료한다.
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
 * **Rust 코드 설계 원칙 준수**: ARCHITECTURE.md §14에 정의된 Rust 설계 원칙을 따른다. 핵심 규칙:
   - 에러: `AppError` enum 사용, 프로덕션 코드에서 `unwrap()` 금지
