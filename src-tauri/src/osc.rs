@@ -258,8 +258,8 @@ fn strip_ansi_for_bullet(input: &str) -> String {
         } else {
             // Check for spinner/stop characters
             let remaining = &input[i..];
-            // Stop at spinner chars: ✶✻✽✢ or another ●
-            for stop_char in ['✶', '✻', '✽', '✢', '●'] {
+            // Stop at spinner chars, another ●, or input separator line (─)
+            for stop_char in ['✶', '✻', '✽', '✢', '●', '─', '❯'] {
                 if remaining.starts_with(stop_char) {
                     return result.trim().to_string();
                 }
@@ -775,6 +775,30 @@ mod tests {
         // ● with only whitespace/ANSI reset after it
         let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[m  \n";
         assert_eq!(extract_white_bullet_message(data), None);
+    }
+
+    #[test]
+    fn white_bullet_stops_at_separator_line() {
+        // ● message followed by ─── separator line (input area divider)
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m\n");
+        data.extend_from_slice(&BULLET);
+        data.extend_from_slice(" \x1b[m메시지 텍스트\n".as_bytes());
+        data.extend_from_slice("──────────────────\n".as_bytes());
+        data.extend_from_slice("❯ ".as_bytes());
+        let msg = extract_white_bullet_message(&data).unwrap();
+        assert_eq!(msg, "메시지 텍스트");
+        assert!(!msg.contains('─'), "Should not contain separator: {msg}");
+    }
+
+    #[test]
+    fn white_bullet_allows_normal_hyphen() {
+        // Normal hyphen-minus (-) in message should be preserved
+        let data = b"\x1b[38;5;231m\n\xe2\x97\x8f \x1b[mtest-result is 42\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("test-result is 42".to_string())
+        );
     }
 
     // ── strip_ansi tests ──
