@@ -6,11 +6,13 @@ import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/sto
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneBoundaryHandles } from "./PaneBoundaryHandles";
 import { PaneControlBar } from "./PaneControlBar";
+import { useUiStore } from "@/stores/ui-store";
 
 export function WorkspaceArea() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
+  const isAppFocused = useUiStore((s) => s.isAppFocused);
   const setFocusedPane = useGridStore((s) => s.setFocusedPane);
   const automationHoverIndex = useGridStore((s) => s.automationHoverIndex);
   const focusedDock = useDockStore((s) => s.focusedDock);
@@ -106,7 +108,10 @@ export function WorkspaceArea() {
                     <div
                       data-testid="pane-focus-indicator"
                       className="pointer-events-none absolute inset-0"
-                      style={{ boxShadow: "inset 0 0 0 1px var(--accent)", zIndex: 20 }}
+                      style={{
+                        boxShadow: `inset 0 0 0 1px var(${isAppFocused ? "--accent" : "--accent-50"})`,
+                        zIndex: 20,
+                      }}
                     />
                   )}
                   <PaneControlBar

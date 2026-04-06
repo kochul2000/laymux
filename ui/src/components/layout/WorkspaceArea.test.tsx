@@ -13,6 +13,7 @@ vi.mock("@/components/views/TerminalView", () => ({
 import { WorkspaceArea } from "./WorkspaceArea";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
+import { useUiStore } from "@/stores/ui-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -82,6 +83,16 @@ describe("WorkspaceArea", () => {
     expect(indicator).toBeInTheDocument();
     expect(indicator.style.boxShadow).toBe("inset 0 0 0 1px var(--accent)");
     expect(indicator.style.zIndex).toBe("20");
+  });
+
+  it("renders dimmed focus indicator when app is not focused", () => {
+    useGridStore.setState({ focusedPaneIndex: 0 });
+    useUiStore.setState({ isAppFocused: false });
+    render(<WorkspaceArea />);
+
+    const indicator = screen.getByTestId("pane-focus-indicator");
+    expect(indicator).toBeInTheDocument();
+    expect(indicator.style.boxShadow).toBe("inset 0 0 0 1px var(--accent-50)");
   });
 
   // -- Hover auto-hide --
