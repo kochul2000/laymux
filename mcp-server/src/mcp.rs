@@ -227,8 +227,16 @@ fn discovery_file_candidates() -> Vec<std::path::PathBuf> {
 
     #[cfg(target_os = "windows")]
     if let Ok(appdata) = std::env::var("APPDATA") {
-        paths.push(std::path::PathBuf::from(&appdata).join("laymux-dev").join("automation.json"));
-        paths.push(std::path::PathBuf::from(&appdata).join("laymux").join("automation.json"));
+        paths.push(
+            std::path::PathBuf::from(&appdata)
+                .join("laymux-dev")
+                .join("automation.json"),
+        );
+        paths.push(
+            std::path::PathBuf::from(&appdata)
+                .join("laymux")
+                .join("automation.json"),
+        );
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -239,7 +247,6 @@ fn discovery_file_candidates() -> Vec<std::path::PathBuf> {
 
     paths
 }
-
 
 // -- HTTP client calls to Automation API --
 
@@ -400,8 +407,12 @@ mod tests {
 
     #[test]
     fn tools_call_unknown_tool_returns_error() {
-        let resp =
-            handle_tools_call(&json!(6), &json!({"name": "bad"}), "http://localhost:1", None);
+        let resp = handle_tools_call(
+            &json!(6),
+            &json!({"name": "bad"}),
+            "http://localhost:1",
+            None,
+        );
         assert!(resp["result"]["isError"].as_bool().unwrap_or(false));
     }
 }
