@@ -388,7 +388,7 @@ function WorkspaceItem({
                           data-testid={`pane-cmd-badge-${ts.id}`}
                           className="shrink-0"
                           style={{
-                            color: tCmdStatus?.color,
+                            color: tCmdStatus.color,
                             border: ts.hasUnreadNotification
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid transparent",
@@ -397,7 +397,7 @@ function WorkspaceItem({
                             lineHeight: 1,
                           }}
                         >
-                          {tCmdStatus?.icon}
+                          {tCmdStatus.icon}
                         </span>
                       ) : wsDisplay.result && ts.hasUnreadNotification ? (
                         <span

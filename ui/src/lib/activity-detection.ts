@@ -73,7 +73,7 @@ export function parseClaudeMode(
   activity: TerminalActivityInfo | undefined,
 ): ClaudeMode | undefined {
   if (activity?.type !== "interactiveApp" || activity.name !== "Claude") return undefined;
-  if (!title) return "idle";
+  if (!title) return undefined;
 
   // Priority: plan > danger > idle/working.
   // Claude Code title may contain both mode keywords and idle/working prefix.
