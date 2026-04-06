@@ -14,7 +14,7 @@ interface DockProps {
   views: ViewType[];
   panes: DockPane[];
   onSwitchView?: (view: ViewType, viewConfig?: ViewInstanceConfig) => void;
-  onSplitPane?: (direction: "horizontal" | "vertical", paneId?: string) => void;
+  onSplitPane?: (paneId: string, direction: "horizontal" | "vertical") => void;
   onRemovePane?: (paneId: string) => void;
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
   onResizePane?: (paneId: string, delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>) => void;
@@ -111,8 +111,12 @@ export function Dock({
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHover.hoveredId !== null}
           actions={{
-            onSplitH: onSplitPane ? () => onSplitPane("horizontal", singlePaneId) : undefined,
-            onSplitV: onSplitPane ? () => onSplitPane("vertical", singlePaneId) : undefined,
+            onSplitH:
+              onSplitPane && singlePaneId
+                ? () => onSplitPane(singlePaneId, "horizontal")
+                : undefined,
+            onSplitV:
+              onSplitPane && singlePaneId ? () => onSplitPane(singlePaneId, "vertical") : undefined,
             onClear:
               activeView && activeView !== "EmptyView"
                 ? singlePaneId && onSetPaneView
@@ -181,7 +185,7 @@ function DockGrid({
   panes: DockPane[];
   activeWorkspaceId: string;
   activeWsName: string;
-  onSplitPane?: (direction: "horizontal" | "vertical", paneId?: string) => void;
+  onSplitPane?: (paneId: string, direction: "horizontal" | "vertical") => void;
   onRemovePane?: (paneId: string) => void;
   onSetPaneView?: (paneId: string, view: ViewInstanceConfig) => void;
   onResizePane?: (paneId: string, delta: Partial<Pick<DockPane, "x" | "y" | "w" | "h">>) => void;
@@ -202,7 +206,7 @@ function DockGrid({
         useGridStore.getState().setFocusedPane(null);
       }}
       onSetPaneView={onSetPaneView}
-      onSplitPane={onSplitPane ? (paneId, dir) => onSplitPane(dir, paneId) : undefined}
+      onSplitPane={onSplitPane}
       onRemovePane={onRemovePane}
       getCwdDefaults={() => ({ send: true, receive: true })}
       workspaceId={activeWorkspaceId}

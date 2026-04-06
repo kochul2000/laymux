@@ -355,6 +355,6 @@ describe("Dock", () => {
     const pane = screen.getByTestId("dock-pane-dp-1");
     fireEvent.mouseEnter(pane);
     fireEvent.click(screen.getByTestId("pane-control-split-v"));
-    expect(onSplitPane).toHaveBeenCalledWith("vertical", "dp-1");
+    expect(onSplitPane).toHaveBeenCalledWith("dp-1", "vertical");
   });
 });
