@@ -102,6 +102,11 @@ pub struct TerminalSession {
     /// Unix timestamp (millis) when last command status was updated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_command_at: Option<u64>,
+    /// Notify gate: when false, notification actions are suppressed.
+    /// Armed by OSC 133;C/E (user command execution) or fallback timer.
+    /// Prevents shell-init OSC 133;D from flooding notifications on startup.
+    #[serde(skip)]
+    pub notify_gate_armed: bool,
 }
 
 fn default_true() -> bool {
@@ -122,6 +127,7 @@ impl TerminalSession {
             last_command: None,
             last_exit_code: None,
             last_command_at: None,
+            notify_gate_armed: false,
         }
     }
 

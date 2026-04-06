@@ -10,11 +10,17 @@ import {
   onCommandStatus,
   onClaudeTerminalDetected,
   onTerminalCwdChanged,
+  onTerminalTitleChanged,
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import { detectActivityFromCommand } from "@/lib/activity-detection";
+import {
+  detectActivityFromCommand,
+  detectClaudeTaskTransition,
+  extractClaudeTaskDesc,
+  getClaudeCompletionMessage,
+} from "@/lib/activity-detection";
 
 /**
  * Hook that listens for sync events from the Tauri backend
@@ -22,6 +28,17 @@ import { detectActivityFromCommand } from "@/lib/activity-detection";
  */
 /** Debounce delay for persisting CWD changes to settings.json (ms). */
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
+
+/** Resolve the workspace ID for a terminal instance (for notifications). */
+function resolveWorkspaceId(terminalId: string): string {
+  const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+  const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
+  if (inst?.syncGroup) {
+    const ws = workspaces.find((w) => w.id === inst.syncGroup);
+    if (ws) return ws.id;
+  }
+  return activeWorkspaceId;
+}
 
 export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,6 +74,58 @@ export function useSyncEvents() {
         if (instance) {
           updateInstanceInfo(terminalId, {
             activity: { type: "interactiveApp", name: "Claude" },
+          });
+        }
+      }),
+    );
+
+    // terminal-title-changed: backend PTY callback extracted OSC 0/2 title.
+    // This is the centralized title event — handles activity detection,
+    // Claude task transitions, and title updates in one place.
+    const previousClaudeTitleMap = new Map<string, string>();
+    trackListener(
+      onTerminalTitleChanged((data) => {
+        if (cancelled) return;
+        const { updateInstanceInfo, instances } = useTerminalStore.getState();
+        const instance = instances.find((i) => i.id === data.terminalId);
+
+        // Update title in store
+        const updates: Record<string, unknown> = { title: data.title };
+
+        // Activity detection from interactive app (Rust already detected this)
+        if (data.interactiveApp) {
+          updates.activity = { type: "interactiveApp", name: data.interactiveApp };
+        }
+
+        updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
+
+        // Claude task transition detection
+        const prevTitle = previousClaudeTitleMap.get(data.terminalId) ?? instance?.title;
+        const currentActivity = data.interactiveApp
+          ? { type: "interactiveApp" as const, name: data.interactiveApp }
+          : instance?.activity;
+        const transition = detectClaudeTaskTransition(prevTitle, data.title, currentActivity);
+        previousClaudeTitleMap.set(data.terminalId, data.title);
+
+        if (transition === "completed") {
+          updateInstanceInfo(data.terminalId, {
+            lastExitCode: 0,
+            lastCommandAt: Date.now(),
+          });
+          const message = getClaudeCompletionMessage(prevTitle, data.title);
+          const wsId = resolveWorkspaceId(data.terminalId);
+          useNotificationStore.getState().addNotification({
+            terminalId: data.terminalId,
+            workspaceId: wsId,
+            message,
+            level: "success",
+          });
+        } else if (transition === "started") {
+          const taskDesc = extractClaudeTaskDesc(data.title);
+          updateInstanceInfo(data.terminalId, {
+            lastCommand: taskDesc || "Claude task",
+            lastExitCode: undefined,
+            lastCommandAt: Date.now(),
           });
         }
       }),

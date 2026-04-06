@@ -20,19 +20,10 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { processOscInOutput, type NotifyGate } from "@/hooks/useOscHooks";
-import { getPresetHooks } from "@/lib/osc-presets";
-import type { OscHook } from "@/lib/osc-parser";
 import { transformPasteContent } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
-import {
-  detectActivityFromTitle,
-  detectActivityFromCommand,
-  detectClaudeTaskTransition,
-  extractClaudeTaskDesc,
-  getClaudeCompletionMessage,
-} from "@/lib/activity-detection";
+import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -45,6 +36,9 @@ import {
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
+
+/** Notify gate fallback timeout — only used for output idle detector gating. */
+const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 /** Resolve the workspace ID for a terminal instance (for notifications). */
 function resolveWorkspaceId(terminalId: string): string {
@@ -63,7 +57,6 @@ function resolveWorkspaceId(terminalId: string): string {
 // Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
 let webglInitCount = 0;
 const WEBGL_STAGGER_MS = 150;
-const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 /** Reset the stagger counter (for tests). */
 export function _resetWebglStagger(): void {
@@ -250,81 +243,27 @@ export function TerminalView({
       resizeTerminal(instanceId, cols, rows).catch(() => {});
     });
 
-    // Claude task transition state — tracked from both onTitleChange (garbled encoding)
-    // and raw PTY output (correct UTF-8 via stream decoder).
-    let previousClaudeTitle: string | undefined;
-
-    // Track terminal title changes (OSC 0/2) for interactive app detection + Claude transitions
+    // Track terminal title changes (OSC 0/2) for interactive app detection.
+    // Claude task transitions and notifications are now handled by the Rust
+    // PTY callback via structured events (terminal-title-changed, lx-notify).
+    // xterm.js onTitleChange is kept as a lightweight fallback for activity detection.
     terminal.onTitleChange((title) => {
-      const { updateInstanceInfo, instances } = useTerminalStore.getState();
-      const instance = instances.find((i) => i.id === instanceId);
+      const { updateInstanceInfo } = useTerminalStore.getState();
       const detected = detectActivityFromTitle(title);
-      const currentActivity = detected ?? instance?.activity;
-
-      // Claude task transition (handles garbled encoding from xterm.js)
-      const prevTitle = previousClaudeTitle ?? instance?.title;
-      const transition = detectClaudeTaskTransition(prevTitle, title, currentActivity);
-      previousClaudeTitle = title;
 
       updateInstanceInfo(instanceId, {
         title,
         ...(detected ? { activity: detected } : {}),
       });
-
-      // Notify backend when Claude is detected from title (single source of truth).
-      // PTY callback usually detects first, but this covers edge cases.
-      if (detected?.name === "Claude") {
-        markClaudeTerminal(instanceId).catch(() => {});
-      }
-
-      if (transition === "completed") {
-        updateInstanceInfo(instanceId, { lastExitCode: 0, lastCommandAt: Date.now() });
-        if (notifyGate.armed) {
-          const message = getClaudeCompletionMessage(prevTitle, title);
-          const wsId = resolveWorkspaceId(instanceId);
-          useNotificationStore.getState().addNotification({
-            terminalId: instanceId,
-            workspaceId: wsId,
-            message,
-            level: "success",
-          });
-        }
-      } else if (transition === "started") {
-        const taskDesc = extractClaudeTaskDesc(title);
-        updateInstanceInfo(instanceId, {
-          lastCommand: taskDesc || "Claude task",
-          lastExitCode: undefined,
-          lastCommandAt: Date.now(),
-        });
-      }
     });
 
-    // Gate notifications until the first user command is observed (OSC 133;C/E).
-    // Shell-init OSC 133;D sequences arrive before any C/E, so they are
-    // suppressed automatically without an arbitrary timeout (see issue #111).
-    // Fallback timer arms the gate after 3s for shells without preexec (e.g.
-    // PowerShell which doesn't emit OSC 133;C/E). See issue #119.
-    const notifyGate: NotifyGate = { armed: false };
-    notifyGate.fallbackTimer = setTimeout(() => {
+    // Notify gate for output idle detector only — OSC notifications are now
+    // handled entirely in Rust. This gate controls whether the idle detector
+    // can emit "completed" notifications.
+    const notifyGate = { armed: false };
+    const notifyGateTimer = setTimeout(() => {
       notifyGate.armed = true;
-      notifyGate.fallbackTimer = undefined;
     }, NOTIFY_GATE_FALLBACK_MS);
-
-    // Build hooks list
-    const hooks: OscHook[] = [
-      ...getPresetHooks("sync-cwd"),
-      ...getPresetHooks("set-wsl-distro"),
-      ...getPresetHooks("sync-branch"),
-      ...getPresetHooks("notify-on-fail"),
-      ...getPresetHooks("notify-on-complete"),
-      ...getPresetHooks("set-title-cwd"),
-      ...getPresetHooks("notify-osc9"),
-      ...getPresetHooks("notify-osc99"),
-      ...getPresetHooks("notify-osc777"),
-      ...getPresetHooks("track-command"),
-      ...getPresetHooks("track-command-result"),
-      ...getPresetHooks("track-command-start"),
-    ];
 
     // Output idle detector (monitor-silence): fires when terminal output
     // stops for OUTPUT_IDLE_TIMEOUT_MS while activity is "running".
@@ -362,49 +301,10 @@ export function TerminalView({
       if (cancelled) return;
       terminal.write(data);
       const text = streamDecoder.decode(data, { stream: true });
-      processOscInOutput(text, hooks, instanceId, syncGroupRef.current, {
-        skipSyncCwd: !cwdSendRef.current,
-        notifyGate,
-      });
 
-      // Claude task detection from raw OSC 0 titles (bypasses xterm.js encoding issues)
-      const osc0Matches = text.match(/\x1b\]0;([^\x07]*)\x07/g);
-      if (osc0Matches) {
-        for (const oscStr of osc0Matches) {
-          const titleMatch = oscStr.match(/\x1b\]0;([^\x07]*)\x07/);
-          if (!titleMatch) continue;
-          const rawTitle = titleMatch[1];
-          const inst0 = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
-          const currentActivity = inst0?.activity;
-          const prevTitle = previousClaudeTitle;
-          const transition = detectClaudeTaskTransition(prevTitle, rawTitle, currentActivity);
-          previousClaudeTitle = rawTitle;
-
-          if (transition === "completed") {
-            useTerminalStore.getState().updateInstanceInfo(instanceId, {
-              lastExitCode: 0,
-              lastCommandAt: Date.now(),
-            });
-            if (notifyGate.armed) {
-              const message = getClaudeCompletionMessage(prevTitle, rawTitle);
-              const wsId = resolveWorkspaceId(instanceId);
-              useNotificationStore.getState().addNotification({
-                terminalId: instanceId,
-                workspaceId: wsId,
-                message,
-                level: "success",
-              });
-            }
-          } else if (transition === "started") {
-            const taskDesc = extractClaudeTaskDesc(rawTitle);
-            useTerminalStore.getState().updateInstanceInfo(instanceId, {
-              lastCommand: taskDesc || "Claude task",
-              lastExitCode: undefined,
-              lastCommandAt: Date.now(),
-            });
-          }
-        }
-      }
+      // OSC parsing and hook dispatch are now handled entirely in the Rust
+      // PTY callback (iter_osc_events + match_hooks + dispatch_osc_action).
+      // The frontend only needs to handle alt-screen detection and idle monitoring.
 
       // Feed idle detector on every output chunk
       const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
@@ -616,7 +516,7 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
-      if (notifyGate.fallbackTimer !== undefined) clearTimeout(notifyGate.fallbackTimer);
+      clearTimeout(notifyGateTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);

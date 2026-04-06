@@ -1,9 +1,11 @@
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::activity;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::osc;
+use crate::osc_hooks::{self, CommandStatusField, OscAction};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::path_utils;
 use crate::pty;
@@ -98,80 +100,153 @@ pub fn create_terminal_session(
         buffers.insert(id.clone(), TerminalOutputBuffer::default());
     }
 
-    // Spawn PTY
+    // Spawn PTY with unified OSC processing in the output callback.
     let terminal_id = id.clone();
     let app_clone = app.clone();
-    let output_buffers = state.output_buffers.clone();
-    let buffer_terminal_id = id.clone();
-    let known_claude = state.known_claude_terminals.clone();
-    let claude_detect_id = id.clone();
+    let state_for_pty = Arc::clone(&*state);
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let terminals_for_cwd = state.terminals.clone();
-    let cwd_terminal_id = id.clone();
-    let cwd_app = app.clone();
+    let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
         // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
         // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
 
         // Write to output buffer
-        if let Ok(mut buffers) = output_buffers.lock_or_err() {
-            if let Some(buf) = buffers.get_mut(&buffer_terminal_id) {
+        if let Ok(mut buffers) = state_for_pty.output_buffers.lock_or_err() {
+            if let Some(buf) = buffers.get_mut(&terminal_id) {
                 buf.push(&data);
             }
         }
 
-        // Proactive Claude Code detection: scan each PTY output chunk for
-        // "Claude Code" in terminal title (OSC 0/2). Once detected, the terminal
-        // is permanently registered in known_claude_terminals (single source of truth).
-        // AtomicBool fast-path avoids scanning after first detection.
-        if !claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-            && osc::any_terminal_title_contains(&data, "Claude Code")
-        {
-            claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Ok(mut known) = known_claude.lock_or_err() {
-                known.insert(claude_detect_id.clone());
+        // ── Unified OSC processing loop ──
+        // Single pass: parse all OSC sequences, match against presets, dispatch actions,
+        // and emit structured events. Replaces the old per-code extraction blocks.
+        let sync_group = {
+            if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                terms
+                    .get(&terminal_id)
+                    .map(|s| s.config.sync_group.clone())
+                    .unwrap_or_default()
+            } else {
+                String::new()
             }
-            let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &claude_detect_id);
-        }
+        };
 
-        // Proactive CWD detection: scan each PTY output chunk for OSC 7 or OSC 9;9.
-        // Updates backend TerminalSession.cwd directly (single source of truth).
-        // This ensures CWD is always up-to-date even if the frontend hasn't processed
-        // the OSC sequence yet (e.g., during rapid close after Claude Code exit).
-        if let Some(raw_cwd) =
-            osc::extract_last_osc7_cwd(&data).or_else(|| osc::extract_last_osc9_9_cwd(&data))
-        {
-            let normalized = path_utils::normalize_wsl_path(&raw_cwd);
-            let mut changed = false;
-            if let Ok(mut terms) = terminals_for_cwd.lock_or_err() {
-                if let Some(session) = terms.get_mut(&cwd_terminal_id) {
-                    if session.cwd.as_deref() != Some(&normalized) {
-                        // Extract WSL distro before normalization strips it
-                        if session.wsl_distro.is_none() {
-                            if let Some(distro) = path_utils::extract_wsl_distro_from_path(&raw_cwd)
-                            {
-                                session.wsl_distro = Some(distro);
-                            }
-                        }
-                        session.cwd = Some(normalized.clone());
-                        changed = true;
+        for event in osc::iter_osc_events(&data) {
+            // Arm notify gate on user command observation (OSC 133;C or 133;E)
+            if osc_hooks::should_arm_notify_gate(&event) {
+                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                    if let Some(session) = terms.get_mut(&terminal_id) {
+                        session.notify_gate_armed = true;
                     }
                 }
             }
-            if changed {
-                let _ = cwd_app.emit(
-                    EVENT_TERMINAL_CWD_CHANGED,
+
+            // Claude Code detection from OSC 0/2 titles
+            if (event.code == 0 || event.code == 2)
+                && !claude_detected.load(std::sync::atomic::Ordering::Relaxed)
+                && event.data.contains("Claude Code")
+            {
+                claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
+                    known.insert(terminal_id.clone());
+                }
+                let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
+            }
+
+            // Emit structured title change event (OSC 0/2) for frontend activity detection
+            if event.code == 0 || event.code == 2 {
+                let interactive_app = activity::detect_interactive_app_from_title(&event.data);
+                let _ = app_clone.emit(
+                    EVENT_TERMINAL_TITLE_CHANGED,
                     serde_json::json!({
-                        "terminalId": cwd_terminal_id,
-                        "cwd": normalized,
+                        "terminalId": terminal_id,
+                        "title": event.data,
+                        "interactiveApp": interactive_app,
                     }),
+                );
+            }
+
+            // Proactive CWD update (single source of truth in session.cwd)
+            // This must happen regardless of hook matching — the backend always
+            // tracks the latest CWD for each terminal.
+            if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
+                let raw_cwd = if event.code == 7 {
+                    &event.data
+                } else {
+                    &event.data // OSC 9;9 data already has "9;" stripped by iter_osc_events
+                };
+                let normalized = path_utils::normalize_wsl_path(raw_cwd);
+                let mut changed = false;
+                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                    if let Some(session) = terms.get_mut(&terminal_id) {
+                        if session.cwd.as_deref() != Some(&normalized) {
+                            if session.wsl_distro.is_none() {
+                                if let Some(distro) =
+                                    path_utils::extract_wsl_distro_from_path(raw_cwd)
+                                {
+                                    session.wsl_distro = Some(distro);
+                                }
+                            }
+                            session.cwd = Some(normalized.clone());
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    let _ = app_clone.emit(
+                        EVENT_TERMINAL_CWD_CHANGED,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "cwd": normalized,
+                        }),
+                    );
+                }
+            }
+
+            // Match hooks and dispatch actions
+            let matched = osc_hooks::match_hooks(&event, &presets);
+            for hook in matched {
+                // Check notify gate for notification actions
+                if osc_hooks::is_notify_action(&hook.action) {
+                    let armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                        terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
+                    } else {
+                        false
+                    };
+                    if !armed {
+                        continue;
+                    }
+                }
+
+                dispatch_osc_action(
+                    &state_for_pty,
+                    &app_clone,
+                    &terminal_id,
+                    &sync_group,
+                    &hook.action,
+                    &event,
                 );
             }
         }
 
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
+
+    // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
+    // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
+    {
+        let state_for_timer = Arc::clone(&*state);
+        let timer_terminal_id = id.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(NOTIFY_GATE_FALLBACK_MS));
+            if let Ok(mut terms) = state_for_timer.terminals.lock_or_err() {
+                if let Some(session) = terms.get_mut(&timer_terminal_id) {
+                    session.notify_gate_armed = true;
+                }
+            }
+        });
+    }
 
     // Store session and PTY handle
     let result = TerminalSession::new(
@@ -364,4 +439,85 @@ pub fn update_terminal_sync_group(
     }
 
     Ok(())
+}
+
+/// Dispatch an OSC hook action from the PTY callback.
+/// Called for each matched hook after OSC parsing.
+/// All locks are acquired and released independently to prevent deadlock.
+fn dispatch_osc_action(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    sync_group: &str,
+    action: &OscAction,
+    event: &osc::OscEvent,
+) {
+    match action {
+        OscAction::SyncCwd => {
+            // CWD sync — delegate to the shared do_sync_cwd function.
+            // The proactive CWD update (session.cwd) already happened above,
+            // so this handles group propagation.
+            let _ = super::ipc_dispatch::do_sync_cwd(
+                state,
+                app,
+                terminal_id,
+                sync_group,
+                &event.data,
+                false,
+                None,
+            );
+        }
+        OscAction::SyncBranch => {
+            if let Some(branch) = osc_hooks::extract_branch_from_command(&event.data) {
+                let _ = super::ipc_dispatch::do_sync_branch(
+                    state,
+                    app,
+                    terminal_id,
+                    sync_group,
+                    &branch,
+                );
+            }
+        }
+        OscAction::Notify { level } => {
+            let message = osc_hooks::extract_notify_message(event);
+            let _ =
+                super::ipc_dispatch::do_notify(state, app, terminal_id, &message, level.as_deref());
+        }
+        OscAction::SetTabTitle => {
+            let _ = super::ipc_dispatch::do_set_tab_title(state, app, terminal_id, &event.data);
+        }
+        OscAction::SetWslDistro => {
+            let _ = super::ipc_dispatch::do_set_wsl_distro(state, terminal_id, &event.data);
+        }
+        OscAction::SetCommandStatus(field) => match field {
+            CommandStatusField::Command => {
+                let _ = super::ipc_dispatch::do_set_command_status(
+                    state,
+                    app,
+                    terminal_id,
+                    Some(&event.data),
+                    None,
+                );
+            }
+            CommandStatusField::ExitCode => {
+                let exit_code = event.data.parse::<i32>().ok();
+                let _ = super::ipc_dispatch::do_set_command_status(
+                    state,
+                    app,
+                    terminal_id,
+                    None,
+                    exit_code,
+                );
+            }
+            CommandStatusField::Preexec => {
+                let _ = super::ipc_dispatch::do_set_command_status(
+                    state,
+                    app,
+                    terminal_id,
+                    Some("__preexec__"),
+                    None,
+                );
+            }
+        },
+    }
 }

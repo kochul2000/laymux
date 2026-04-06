@@ -11,10 +11,13 @@ use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalStateInfo};
 
 /// Known interactive apps detected from terminal title (OSC 0 / OSC 2).
+/// Pattern matching uses word boundaries to avoid false positives
+/// (e.g., "vim" should not match "environment").
 pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
-    ("Claude Code", "Claude Code"),
-    ("vim", "vim"),
+    ("Claude Code", "Claude"),
     ("nvim", "neovim"),
+    ("vim", "vim"),
+    ("vi", "vim"),
     ("nano", "nano"),
     ("htop", "htop"),
     ("btop", "btop"),
@@ -103,12 +106,65 @@ pub fn is_terminal_at_prompt_from_buffer(buffer: Option<&TerminalOutputBuffer>) 
 /// Detect if a known interactive app is running based on the terminal title.
 pub fn detect_interactive_app(data: &[u8]) -> Option<String> {
     let title = osc::extract_last_terminal_title(data)?;
+    detect_interactive_app_from_title(&title)
+}
+
+/// Detect interactive app from an already-extracted title string.
+/// Used by the PTY callback when the title is already available from OSC parsing.
+///
+/// Applies word-boundary matching to avoid false positives (e.g., "vim" should
+/// not match "environment", "vi" should not match "Review"). Skips path-like
+/// titles (containing `/` or `\`) that could false-positive on app names
+/// embedded in directory names.
+pub fn detect_interactive_app_from_title(title: &str) -> Option<String> {
+    // Skip path-like titles (e.g. "//wsl.localhost/.../python_projects")
+    if title.contains('/') || title.contains('\\') {
+        return None;
+    }
+
     for &(pattern, name) in INTERACTIVE_APP_PATTERNS {
-        if title.contains(pattern) {
+        if is_word_match(title, pattern) {
             return Some(name.to_string());
         }
     }
     None
+}
+
+/// Check if `pattern` appears in `text` at a word boundary.
+/// A word boundary is defined as: start/end of string, whitespace, `-`, or `:`.
+fn is_word_match(text: &str, pattern: &str) -> bool {
+    // Exact match
+    if text == pattern {
+        return true;
+    }
+
+    // Patterns ending with space (like "man ") use contains for prefix matching
+    if pattern.ends_with(' ') {
+        return text.contains(pattern);
+    }
+
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(pattern) {
+        let abs_pos = start + pos;
+        let end_pos = abs_pos + pattern.len();
+
+        // Check left boundary: start of string or boundary char
+        let left_ok = abs_pos == 0
+            || text.as_bytes()[abs_pos - 1].is_ascii_whitespace()
+            || matches!(text.as_bytes()[abs_pos - 1], b'-' | b':');
+
+        // Check right boundary: end of string or boundary char
+        let right_ok = end_pos == text.len()
+            || text.as_bytes()[end_pos].is_ascii_whitespace()
+            || matches!(text.as_bytes()[end_pos], b'-' | b':');
+
+        if left_ok && right_ok {
+            return true;
+        }
+
+        start = abs_pos + 1;
+    }
+    false
 }
 
 /// Detect the activity state of a terminal from its output buffer.
@@ -190,10 +246,7 @@ mod tests {
     #[test]
     fn detect_interactive_app_claude() {
         let data = b"\x1b]0;Claude Code\x07";
-        assert_eq!(
-            detect_interactive_app(data),
-            Some("Claude Code".to_string())
-        );
+        assert_eq!(detect_interactive_app(data), Some("Claude".to_string()));
     }
 
     #[test]
@@ -211,5 +264,97 @@ mod tests {
     #[test]
     fn prompt_detection_no_markers() {
         assert!(is_terminal_at_prompt_from_buffer(None));
+    }
+
+    // ── detect_interactive_app_from_title word boundary tests ──
+
+    #[test]
+    fn title_word_boundary_vim_not_environment() {
+        // "vim" should not match "environment"
+        assert_eq!(detect_interactive_app_from_title("environment"), None);
+    }
+
+    #[test]
+    fn title_word_boundary_vi_not_review() {
+        // "vi" should not match "Review"
+        assert_eq!(detect_interactive_app_from_title("Review"), None);
+    }
+
+    #[test]
+    fn title_word_boundary_vim_at_start() {
+        assert_eq!(
+            detect_interactive_app_from_title("vim main.rs"),
+            Some("vim".to_string())
+        );
+    }
+
+    #[test]
+    fn title_word_boundary_vim_after_dash() {
+        assert_eq!(
+            detect_interactive_app_from_title("term-vim"),
+            Some("vim".to_string())
+        );
+    }
+
+    #[test]
+    fn title_exact_match() {
+        assert_eq!(
+            detect_interactive_app_from_title("htop"),
+            Some("htop".to_string())
+        );
+    }
+
+    #[test]
+    fn title_path_like_skipped() {
+        // Path-like titles should not match
+        assert_eq!(
+            detect_interactive_app_from_title("//wsl.localhost/home/user/python_projects"),
+            None
+        );
+        assert_eq!(
+            detect_interactive_app_from_title("C:\\Users\\test\\vim"),
+            None
+        );
+    }
+
+    #[test]
+    fn title_nvim_detected() {
+        assert_eq!(
+            detect_interactive_app_from_title("nvim"),
+            Some("neovim".to_string())
+        );
+    }
+
+    #[test]
+    fn title_claude_code_detected() {
+        assert_eq!(
+            detect_interactive_app_from_title("Claude Code"),
+            Some("Claude".to_string())
+        );
+    }
+
+    #[test]
+    fn title_claude_with_prefix() {
+        // ✳ Claude Code (idle indicator)
+        assert_eq!(
+            detect_interactive_app_from_title("\u{2733} Claude Code"),
+            Some("Claude".to_string())
+        );
+    }
+
+    #[test]
+    fn title_man_page() {
+        assert_eq!(
+            detect_interactive_app_from_title("man git"),
+            Some("man".to_string())
+        );
+    }
+
+    #[test]
+    fn title_vi_exact() {
+        assert_eq!(
+            detect_interactive_app_from_title("vi"),
+            Some("vim".to_string())
+        );
     }
 }

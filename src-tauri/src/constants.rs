@@ -12,6 +12,7 @@ pub const EVENT_OPEN_FILE: &str = "open-file";
 pub const EVENT_CLAUDE_TERMINAL_DETECTED: &str = "claude-terminal-detected";
 pub const EVENT_AUTOMATION_REQUEST: &str = "automation-request";
 pub const EVENT_TERMINAL_CWD_CHANGED: &str = "terminal-cwd-changed";
+pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -36,6 +37,11 @@ pub const MAX_NOTIFICATIONS: usize = 500;
 /// title sequences even when OSC 133 markers have scrolled out.
 pub const ACTIVITY_SCAN_BYTES: usize = 16384;
 
+/// Fallback delay (ms) to arm the notify gate for shells without preexec
+/// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
+/// notifications are enabled even without observing a user command.
+pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +63,7 @@ mod tests {
             EVENT_CLAUDE_TERMINAL_DETECTED,
             EVENT_AUTOMATION_REQUEST,
             EVENT_TERMINAL_CWD_CHANGED,
+            EVENT_TERMINAL_TITLE_CHANGED,
         ];
         for name in events {
             assert!(!name.is_empty(), "Event name should not be empty");
