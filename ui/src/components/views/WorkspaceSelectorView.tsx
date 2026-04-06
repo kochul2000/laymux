@@ -874,8 +874,8 @@ export function WorkspaceSelectorView() {
       {/* New Workspace: Layout picker */}
       <div className="mx-2 mt-2 mb-1 shrink-0" data-testid="new-workspace-panel">
         <p
-          className="mb-1.5 text-[10px] font-medium uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.5 }}
+          className="mb-1.5"
+          style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
         >
           New Workspace
         </p>
@@ -907,10 +907,7 @@ export function WorkspaceSelectorView() {
 
       {/* Sort order toggle */}
       <div className="mx-2 mb-1 flex items-center justify-between">
-        <span
-          className="text-[10px] font-medium uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.5 }}
-        >
+        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
           Workspaces
         </span>
         <button
@@ -931,7 +928,7 @@ export function WorkspaceSelectorView() {
               : "Sort: Notification (most recent first)"
           }
         >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
             {workspaceSortOrder === "manual" ? (
               <>
                 <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
