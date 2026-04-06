@@ -162,7 +162,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   return (
     <div data-testid="memo-view" className="flex h-full w-full flex-col">
       <div
-        className="ui-toolbar shrink-0"
+        className="ui-toolbar shrink-0 px-2"
         style={{
           background: "var(--bg-surface)",
           borderBottom: "1px solid var(--border)",

@@ -100,7 +100,6 @@ export function GridEditToolbar() {
       data-testid="grid-edit-toolbar"
       className="ui-toolbar"
       style={{
-        padding: 0,
         background: "var(--bg-surface)",
         borderBottom: "1px solid var(--border)",
       }}
@@ -280,7 +279,7 @@ export function GridEditToolbar() {
         <button
           data-testid="window-close"
           onClick={handleClose}
-          className="hover-bg-close flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg-danger flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
             border: "none",

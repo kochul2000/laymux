@@ -385,7 +385,6 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           data-testid="pane-control-bar"
           className="ui-toolbar shrink-0"
           style={{
-            padding: 0,
             background: barBg,
             borderBottom: `1px solid ${borderClr}`,
           }}

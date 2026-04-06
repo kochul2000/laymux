@@ -20,7 +20,7 @@
 
   /* hover / interaction overlays */
   --hover-bg: rgba(255, 255, 255, 0.06);
-  --hover-bg-strong: rgba(255, 255, 255, 0.08);
+  --hover-bg-strong: rgba(255, 255, 255, 0.08); /* intentionally same as --separator-bg */
   --active-bg: rgba(255, 255, 255, 0.04);
   --backdrop-light: rgba(0, 0, 0, 0.3);
   --backdrop-heavy: rgba(0, 0, 0, 0.5);
@@ -45,7 +45,7 @@
   --fs-lg: 15px;
 
   /* utility */
-  --separator-bg: rgba(255, 255, 255, 0.08);
+  --separator-bg: rgba(255, 255, 255, 0.08); /* intentionally same as --hover-bg-strong */
   --transition-fast: 0.1s;
 }
 
@@ -84,7 +84,8 @@ body {
 .hover-bg-strong:hover {
   background: var(--hover-bg-strong);
 }
-.hover-bg-close:hover {
+/* Danger hover — window close button */
+.hover-bg-danger:hover {
   background: var(--red);
   color: var(--bg-base);
 }
@@ -94,7 +95,6 @@ body {
   display: flex;
   align-items: center;
   height: var(--bar-h);
-  padding: 0 8px;
   gap: 4px;
 }
 
