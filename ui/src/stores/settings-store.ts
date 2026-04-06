@@ -78,6 +78,10 @@ export interface ConvenienceSettings {
   dockPersistState: boolean;
   /** Allow Alt+Arrow to navigate into/out of dock areas. */
   dockArrowNav: boolean;
+  /** Strip common leading whitespace when pasting. */
+  smartRemoveIndent: boolean;
+  /** Rejoin URLs split across lines when pasting. */
+  smartRemoveLineBreak: boolean;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -701,6 +705,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     scrollbarStyle: "overlay" as const,
     dockPersistState: true,
     dockArrowNav: true,
+    smartRemoveIndent: true,
+    smartRemoveLineBreak: true,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
@@ -883,6 +889,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           scrollbarStyle: "overlay" as const,
           dockPersistState: true,
           dockArrowNav: true,
+          smartRemoveIndent: true,
+          smartRemoveLineBreak: true,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
       : undefined;

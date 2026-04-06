@@ -1096,6 +1096,62 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Smart Remove Indent toggle */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Smart Remove Indent
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              붙여넣기 시 공통 들여쓰기 제거
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="smart-remove-indent-toggle"
+                type="checkbox"
+                checked={convenience.smartRemoveIndent}
+                onChange={(e) => updateConvenience({ smartRemoveIndent: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.smartRemoveIndent ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Smart Remove Line Break toggle */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Smart Remove Line Break
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              붙여넣기 시 줄바꿈으로 깨진 URL 복원
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="smart-remove-linebreak-toggle"
+                type="checkbox"
+                checked={convenience.smartRemoveLineBreak}
+                onChange={(e) => updateConvenience({ smartRemoveLineBreak: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.smartRemoveLineBreak ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Copy On Select toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">

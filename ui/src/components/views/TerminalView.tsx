@@ -23,6 +23,7 @@ import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme"
 import { processOscInOutput, type NotifyGate } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
+import { applySmartTextTransforms } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
@@ -197,7 +198,14 @@ export function TerminalView({
           smartPaste(convenience.pasteImageDir, profile)
             .then((result) => {
               if (result.pasteType !== "none" && result.content) {
-                terminal.paste(result.content);
+                const content =
+                  result.pasteType === "text"
+                    ? applySmartTextTransforms(result.content, {
+                        removeIndent: convenience.smartRemoveIndent,
+                        removeLineBreak: convenience.smartRemoveLineBreak,
+                      })
+                    : result.content;
+                terminal.paste(content);
               }
             })
             .catch(() => {}); // clipboard read failed — silently ignore
@@ -470,7 +478,14 @@ export function TerminalView({
         smartPaste(conv.pasteImageDir, profile)
           .then((result) => {
             if (result.pasteType !== "none" && result.content) {
-              writeToTerminal(instanceId, result.content);
+              const content =
+                result.pasteType === "text"
+                  ? applySmartTextTransforms(result.content, {
+                      removeIndent: conv.smartRemoveIndent,
+                      removeLineBreak: conv.smartRemoveLineBreak,
+                    })
+                  : result.content;
+              writeToTerminal(instanceId, content);
             }
           })
           .catch(() => {});

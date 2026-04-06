@@ -111,6 +111,10 @@ export async function loadWindowGeometry(): Promise<WindowGeometry | null> {
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
+  /** Strip common leading whitespace when pasting. */
+  smartRemoveIndent: boolean;
+  /** Rejoin URLs split across lines when pasting. */
+  smartRemoveLineBreak: boolean;
 }
 
 export type ClaudeSyncCwdMode = "skip" | "command";
