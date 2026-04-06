@@ -250,6 +250,55 @@ describe("applySmartTextTransforms", () => {
 });
 
 // ============================================================
+// copy → paste end-to-end pipeline
+// (trimSelectionTrailingWhitespace on copy, applySmartTextTransforms on paste)
+// ============================================================
+describe("copy → paste pipeline", () => {
+  const pasteOpts = { removeIndent: true, removeLineBreak: true };
+
+  /** Simulate: xterm getSelection → copy trim → clipboard → paste transform */
+  function copyThenPaste(rawSelection: string): string {
+    const copied = trimSelectionTrailingWhitespace(rawSelection);
+    return applySmartTextTransforms(copied, pasteOpts);
+  }
+
+  it("indented URL with trailing spaces and blank lines", () => {
+    // xterm pads each line to terminal width with spaces, adds trailing blank lines
+    const raw =
+      "  https://example.com/path?q=1&foo=bar                    \n" +
+      "  &baz=qux                                                \n" +
+      "                                                          \n";
+    expect(copyThenPaste(raw)).toBe("https://example.com/path?q=1&foo=bar&baz=qux");
+  });
+
+  it("indented multi-line URL from terminal (real-world OAuth URL)", () => {
+    const raw =
+      "  https://mcp.notion.com/authorize?code_challenge=abc&cod   \n" +
+      "  e_challenge_method=S256&redirect_uri=http%3A%2F%2Flocal   \n" +
+      "  host%3A52516%2Fcallback                                   \n" +
+      "                                                            \n";
+    expect(copyThenPaste(raw)).toBe(
+      "https://mcp.notion.com/authorize?code_challenge=abc&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A52516%2Fcallback",
+    );
+  });
+
+  it("plain indented code block from terminal", () => {
+    const raw =
+      "    function hello() {   \n" +
+      "      return 'world';   \n" +
+      "    }                   \n" +
+      "                        \n";
+    // indent removed, but not joined (not a URL)
+    expect(copyThenPaste(raw)).toBe("function hello() {\n  return 'world';\n}");
+  });
+
+  it("single line with xterm trailing padding", () => {
+    const raw = "hello world                              \n";
+    expect(copyThenPaste(raw)).toBe("hello world");
+  });
+});
+
+// ============================================================
 // transformPasteContent
 // ============================================================
 describe("transformPasteContent", () => {
