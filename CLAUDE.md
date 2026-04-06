@@ -18,6 +18,11 @@
 * **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
 * **원시 상태 분리 → 계산 함수로 표시 도출**: 여러 시스템(OSC 133, 타이틀 변경 등)이 관여하는 상태를 표시할 때, 각 시스템은 자기 원시 상태만 독립적으로 저장하고 하나의 공유 필드를 덮어쓰지 않는다. 최종 표시(아이콘, 색상 등)는 모든 원시 상태를 입력받는 단일 계산 함수에서 도출한다. 표시 규칙이 바뀌면 계산 함수만 수정한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
+* **Claude Code 자동화 테스트 시 주의사항**: dev 터미널에서 `claude` 명령으로 Claude Code를 자동 실행할 때, 다음 절차를 따른다:
+  1. `claude\r\n` 전송 후 **10초 대기** (Claude Code 초기화 시간)
+  2. 터미널 출력(`GET /api/v1/terminals/:id/output`)에서 **"trust" 문자열 확인** — "Yes, I trust this folder" 프롬프트가 나타나면 `y\r\n` 전송하여 통과. 이 프롬프트는 해당 프로젝트 디렉터리에 처음 접근할 때 나타나며, PowerShell/WSL 모두 발생할 수 있다.
+  3. trust 통과 후 또는 trust 없을 때, **"Claude Code" 문자열이 타이틀에 나타날 때까지 폴링** (3초 간격, 최대 60초). `GET /api/v1/terminals`의 `title` 필드에 "Claude Code"가 포함되거나 activity가 `{"type":"interactiveApp","name":"Claude"}`이면 준비 완료.
+  4. 종료: Ctrl+C(`\u0003`)를 0.3초 간격으로 2회 전송. 5초 대기 후 activity가 "shell"로 변경되었는지 확인.
 * **UI 코드 설계 원칙** (`ARCHITECTURE.md` §15 참조):
   - **CSS 변수 우선**: 모든 공통 값(색상, 간격, 반경, 폰트 크기, hover overlay)은 `index.css` `:root`에 CSS 변수로 정의. 하드코딩된 매직 넘버 금지.
   - **호버/인터랙션**: `onMouseEnter/Leave`에서 `style.background` 직접 조작 금지. CSS 호버 클래스(`.hover-bg` 등)를 사용.

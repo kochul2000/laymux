@@ -148,63 +148,83 @@ describe("detectClaudeTaskTransition", () => {
 
   it("detects completed: spinner → ✳ with Claude activity", () => {
     expect(
-      detectClaudeTaskTransition("✶ Working on feature", "✳ Feature done", claudeActivity),
+      detectClaudeTaskTransition("✶ Working on feature", "✳ Feature done", claudeActivity, false),
     ).toBe("completed");
   });
 
   it("detects started: ✳ → spinner with Claude activity", () => {
-    expect(detectClaudeTaskTransition("✳ Claude Code", "✶ Working on task", claudeActivity)).toBe(
+    expect(detectClaudeTaskTransition("✳ Claude Code", "✶ Working on task", claudeActivity, false)).toBe(
       "started",
     );
   });
 
   it("returns null for same state: spinner → spinner (still working)", () => {
-    expect(detectClaudeTaskTransition("✶ Task A", "✻ Task B", claudeActivity)).toBeNull();
+    expect(detectClaudeTaskTransition("✶ Task A", "✻ Task B", claudeActivity, false)).toBeNull();
   });
 
   it("returns null for same state ✳ → ✳ (still idle)", () => {
     expect(
-      detectClaudeTaskTransition("✳ Claude Code", "✳ Something else", claudeActivity),
+      detectClaudeTaskTransition("✳ Claude Code", "✳ Something else", claudeActivity, false),
     ).toBeNull();
   });
 
   it("returns null for non-Claude activity even with matching prefixes", () => {
-    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", vimActivity)).toBeNull();
-    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", shellActivity)).toBeNull();
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", vimActivity, false)).toBeNull();
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", shellActivity, false)).toBeNull();
   });
 
   it("returns null when activity is undefined", () => {
-    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", undefined)).toBeNull();
+    expect(detectClaudeTaskTransition("✶ Working", "✳ Done", undefined, false)).toBeNull();
   });
 
   it("does not return started on first title set (previousTitle undefined)", () => {
-    expect(detectClaudeTaskTransition(undefined, "✶ Starting task", claudeActivity)).toBeNull();
+    expect(detectClaudeTaskTransition(undefined, "✶ Starting task", claudeActivity, false)).toBeNull();
   });
 
   it("returns null for titles without spinner or ✳ prefix", () => {
     // Both non-idle, non-spinner plain text → both treated as "working" → null
-    expect(detectClaudeTaskTransition("Claude Code", "Something", claudeActivity)).toBeNull();
+    expect(detectClaudeTaskTransition("Claude Code", "Something", claudeActivity, false)).toBeNull();
   });
 
   it("detects completed with various spinner characters", () => {
-    expect(detectClaudeTaskTransition("✻ Building", "✳ Done", claudeActivity)).toBe("completed");
-    expect(detectClaudeTaskTransition("✽ Running", "✳ Done", claudeActivity)).toBe("completed");
-    expect(detectClaudeTaskTransition("✢ Testing", "✳ Done", claudeActivity)).toBe("completed");
-    expect(detectClaudeTaskTransition("· Thinking", "✳ Done", claudeActivity)).toBe("completed");
-    expect(detectClaudeTaskTransition("* Working", "✳ Done", claudeActivity)).toBe("completed");
+    expect(detectClaudeTaskTransition("✻ Building", "✳ Done", claudeActivity, false)).toBe("completed");
+    expect(detectClaudeTaskTransition("✽ Running", "✳ Done", claudeActivity, false)).toBe("completed");
+    expect(detectClaudeTaskTransition("✢ Testing", "✳ Done", claudeActivity, false)).toBe("completed");
+    expect(detectClaudeTaskTransition("· Thinking", "✳ Done", claudeActivity, false)).toBe("completed");
+    expect(detectClaudeTaskTransition("* Working", "✳ Done", claudeActivity, false)).toBe("completed");
   });
 
   it("detects completed when previousTitle is spinner and new is ✳ Claude Code (idle)", () => {
-    expect(detectClaudeTaskTransition("✶ Building project", "✳ Claude Code", claudeActivity)).toBe(
+    expect(detectClaudeTaskTransition("✶ Building project", "✳ Claude Code", claudeActivity, false)).toBe(
       "completed",
     );
   });
 
   // Garbled encoding tests (Windows CP949 path)
+  it("detects completed when Claude exits while working (claudeExited=true)", () => {
+    // Claude was working (spinner), then exited entirely (title changed to shell prompt)
+    expect(
+      detectClaudeTaskTransition("✶ Building project", "bash", claudeActivity, true),
+    ).toBe("completed");
+  });
+
+  it("returns null when Claude exits while idle (claudeExited=true)", () => {
+    // Claude was idle, user exited → no task was in progress, no notification needed
+    expect(
+      detectClaudeTaskTransition("✳ Claude Code", "bash", claudeActivity, true),
+    ).toBeNull();
+  });
+
+  it("detects completed when Claude exits with various spinner prefixes", () => {
+    expect(detectClaudeTaskTransition("✻ Fix bug", "user@host:~", claudeActivity, true)).toBe("completed");
+    expect(detectClaudeTaskTransition("✽ Running", "zsh", claudeActivity, true)).toBe("completed");
+    expect(detectClaudeTaskTransition("· Thinking", "PowerShell", claudeActivity, true)).toBe("completed");
+  });
+
   it("detects completed with garbled ✳ encoding", () => {
     const garbledIdle = "\udce2\uc454 Claude Code";
     const garbledWorking = "\udce2\uc7fc Claude Code";
-    expect(detectClaudeTaskTransition(garbledWorking, garbledIdle, claudeActivity)).toBe(
+    expect(detectClaudeTaskTransition(garbledWorking, garbledIdle, claudeActivity, false)).toBe(
       "completed",
     );
   });
@@ -212,7 +232,7 @@ describe("detectClaudeTaskTransition", () => {
   it("detects started with garbled encoding", () => {
     const garbledIdle = "\udce2\uc454 Claude Code";
     const garbledWorking = "\udce2\uc7fc Working on task";
-    expect(detectClaudeTaskTransition(garbledIdle, garbledWorking, claudeActivity)).toBe("started");
+    expect(detectClaudeTaskTransition(garbledIdle, garbledWorking, claudeActivity, false)).toBe("started");
   });
 });
 

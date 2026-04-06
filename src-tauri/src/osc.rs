@@ -97,8 +97,10 @@ impl<'a> Iterator for OscEventIter<'a> {
             self.pos = next_pos;
 
             let raw_payload = String::from_utf8_lossy(&self.data[payload_start..payload_end]);
-            if raw_payload.is_empty() && code != 133 {
-                // Skip empty payloads (except OSC 133 which can have param-only like "B")
+            if raw_payload.is_empty() && !matches!(code, 0 | 2 | 133) {
+                // Skip empty payloads — except:
+                // - OSC 0/2: empty title is valid (title reset, e.g. after Claude Code exits)
+                // - OSC 133: can have param-only like "B"
                 continue;
             }
 
@@ -482,6 +484,26 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].code, 133);
         assert_eq!(events[0].param, Some("B".to_string()));
+        assert_eq!(events[0].data, "");
+    }
+
+    #[test]
+    fn iter_osc0_empty_title() {
+        // OSC 0 with empty payload = title reset (e.g. after Claude Code exits).
+        // Must NOT be skipped — the empty title is meaningful.
+        let data = b"\x1b]0;\x07";
+        let events: Vec<OscEvent> = iter_osc_events(data).collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].code, 0);
+        assert_eq!(events[0].data, "");
+    }
+
+    #[test]
+    fn iter_osc2_empty_title() {
+        let data = b"\x1b]2;\x07";
+        let events: Vec<OscEvent> = iter_osc_events(data).collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].code, 2);
         assert_eq!(events[0].data, "");
     }
 }
