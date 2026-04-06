@@ -40,7 +40,8 @@ pub struct AppState {
     /// Single source of truth for Claude Code terminal detection.
     /// Populated proactively by the PTY output callback (real-time) and
     /// by frontend via `mark_claude_terminal` command (from command text detection).
-    /// Once a terminal is marked, it stays marked until the terminal session closes.
+    /// Removed when the terminal title no longer contains "Claude Code" (exit detection)
+    /// or when the terminal session closes.
     /// Both backend (CWD skip) and frontend (activity display) consume this state.
     pub known_claude_terminals: Arc<Mutex<HashSet<String>>>,
     /// Single source of truth for terminal notifications.

@@ -357,4 +357,26 @@ mod tests {
             Some("vim".to_string())
         );
     }
+
+    #[test]
+    fn claude_removed_from_known_returns_false() {
+        let state = AppState::new();
+        let tid = "terminal-test";
+
+        // Insert into known_claude_terminals
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        assert!(is_claude_terminal_from_buffer(&state, tid, None));
+
+        // Remove (simulates Claude exit detection)
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .remove(tid);
+        assert!(!is_claude_terminal_from_buffer(&state, tid, None));
+    }
 }
