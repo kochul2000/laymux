@@ -92,15 +92,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       onKeyDown={handleKeyDown}
       style={{ color: "var(--text-primary)", background: "var(--bg-base)" }}
     >
-      <ViewHeader className="gap-2.5 px-2" testId="issue-reporter-header">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="7" stroke="var(--accent)" strokeWidth="1.5" />
-          <path d="M8 4v5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="8" cy="11.5" r="0.8" fill="var(--accent)" />
-        </svg>
-        <span className="text-sm font-semibold">Report Issue</span>
-        <span className="text-[10px]" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
-          via gh CLI
+      <ViewHeader className="px-2" testId="issue-reporter-header">
+        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
+          Report Issue
         </span>
       </ViewHeader>
       <ViewBody
