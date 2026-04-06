@@ -172,15 +172,15 @@ export function TerminalView({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
 
-    // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth)
-    const { convenience: convInit } = useSettingsStore.getState();
-    if (convInit.smartLinkJoin) {
-      terminal.registerLinkProvider(
-        createIndentedLinkProvider(terminal, (uri) => {
-          openExternal(uri).catch(() => {});
-        }),
-      );
-    }
+    // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth).
+    // Always registered; checks smartLinkJoin dynamically so setting changes apply immediately.
+    terminal.registerLinkProvider(
+      createIndentedLinkProvider(
+        terminal,
+        (uri) => openExternal(uri).catch(() => {}),
+        () => useSettingsStore.getState().convenience.smartLinkJoin,
+      ),
+    );
 
     terminalRef.current = terminal;
 

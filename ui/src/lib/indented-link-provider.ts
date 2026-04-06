@@ -83,6 +83,9 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
       .join("");
 
     // Extract URL from the joined text
+    // URL regex: stops at whitespace and common delimiters )>]"'`.
+    // Parentheses () are valid URL chars per RFC 3986, but ( is not excluded
+    // here because real URLs (e.g. Wikipedia) use them legitimately.
     const urlMatch = joined.match(/https?:\/\/[^\s)>\]"'`]+/);
     if (!urlMatch) continue;
 
@@ -134,13 +137,22 @@ function offsetToPos(
 
 /**
  * Create an ILinkProvider for indented hard-wrapped URLs.
+ *
+ * @param isEnabled - Called on each provideLinks invocation so the provider
+ *   respects dynamic setting changes without re-registration.
  */
 export function createIndentedLinkProvider(
   terminal: Terminal,
   onClickLink: (uri: string) => void,
+  isEnabled: () => boolean = () => true,
 ): ILinkProvider {
   return {
     provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
+      if (!isEnabled()) {
+        callback(undefined);
+        return;
+      }
+
       const buffer = terminal.buffer.active;
 
       // Gather a window of lines around the queried line.

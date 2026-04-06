@@ -770,20 +770,16 @@ describe("TerminalView", () => {
       });
     });
 
-    it("registers indented link provider when smartLinkJoin is enabled", () => {
-      useSettingsStore.setState({
-        convenience: { ...useSettingsStore.getState().convenience, smartLinkJoin: true },
-      });
+    it("indented link handler calls openExternal when invoked", async () => {
       render(<TerminalView instanceId="t-link3" profile="PowerShell" syncGroup="" />);
-      expect(capturedIndentedLinkHandler).not.toBeNull();
-    });
 
-    it("does not register indented link provider when smartLinkJoin is disabled", () => {
-      useSettingsStore.setState({
-        convenience: { ...useSettingsStore.getState().convenience, smartLinkJoin: false },
+      expect(capturedIndentedLinkHandler).not.toBeNull();
+
+      capturedIndentedLinkHandler!("https://example.com/indented-url");
+
+      await vi.waitFor(() => {
+        expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/indented-url");
       });
-      render(<TerminalView instanceId="t-link4" profile="PowerShell" syncGroup="" />);
-      expect(capturedIndentedLinkHandler).toBeNull();
     });
   });
 
