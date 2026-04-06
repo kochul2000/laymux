@@ -37,7 +37,9 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
   return (
     <ViewShell testId="notification-panel" style={{ color: "var(--text-primary)" }}>
       <ViewHeader className="justify-between px-2" testId="notification-header">
-        <span className="text-sm font-medium">Notifications</span>
+        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
+          Notifications
+        </span>
       </ViewHeader>
 
       <ViewBody>
