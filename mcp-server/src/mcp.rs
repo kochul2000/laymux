@@ -251,6 +251,7 @@ fn discovery_file_candidates() -> Vec<std::path::PathBuf> {
 // -- HTTP client calls to Automation API --
 
 /// Add Bearer authorization header if key is available.
+#[allow(clippy::result_large_err)]
 fn auth_get(url: &str, key: Option<&str>) -> Result<ureq::Response, ureq::Error> {
     let mut req = ureq::get(url);
     if let Some(k) = key {
@@ -259,6 +260,7 @@ fn auth_get(url: &str, key: Option<&str>) -> Result<ureq::Response, ureq::Error>
     req.call()
 }
 
+#[allow(clippy::result_large_err)]
 fn auth_post(url: &str, body: Value, key: Option<&str>) -> Result<ureq::Response, ureq::Error> {
     let mut req = ureq::post(url);
     if let Some(k) = key {

@@ -177,11 +177,9 @@ pub fn create_terminal_session(
             // This must happen regardless of hook matching — the backend always
             // tracks the latest CWD for each terminal.
             if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
-                let raw_cwd = if event.code == 7 {
-                    &event.data
-                } else {
-                    &event.data // OSC 9;9 data already has "9;" stripped by iter_osc_events
-                };
+                // Both OSC 7 and OSC 9;9 provide CWD in event.data
+                // (OSC 9;9 "9;" prefix is already stripped by iter_osc_events)
+                let raw_cwd = &event.data;
                 let normalized = path_utils::normalize_wsl_path(raw_cwd);
                 let mut changed = false;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
