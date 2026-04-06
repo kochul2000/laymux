@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::activity;
+use crate::claude_bullet;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::osc;
@@ -154,6 +155,29 @@ pub fn create_terminal_session(
                 let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
             }
 
+            // Claude Code exit detection: title no longer contains "Claude Code"
+            // Clears stale claude_message so re-launching won't briefly show old status.
+            if (event.code == 0 || event.code == 2)
+                && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
+                && !event.data.contains("Claude Code")
+            {
+                claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                    if let Some(session) = terms.get_mut(&terminal_id) {
+                        if session.claude_message.is_some() {
+                            session.claude_message = None;
+                            let _ = app_clone.emit(
+                                EVENT_CLAUDE_MESSAGE_CHANGED,
+                                serde_json::json!({
+                                    "terminalId": terminal_id,
+                                    "message": null,
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+
             // Emit structured title change event (OSC 0/2) for frontend activity detection
             if event.code == 0 || event.code == 2 {
                 let interactive_app = activity::detect_interactive_app_from_title(&event.data);
@@ -238,7 +262,7 @@ pub fn create_terminal_session(
         // Only runs for known Claude terminals. Extracts user-facing status
         // messages (white ●) and stores as raw state in session.claude_message.
         if claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
-            if let Some(msg) = osc::extract_white_bullet_message(&data) {
+            if let Some(msg) = claude_bullet::extract_white_bullet_message(&data) {
                 let mut changed = false;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {

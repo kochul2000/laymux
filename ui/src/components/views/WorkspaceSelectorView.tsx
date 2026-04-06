@@ -524,7 +524,10 @@ function WorkspaceItem({
               {cmdStatus?.icon}
             </span>
             <span className="truncate" style={{ color: "var(--text-secondary)" }}>
-              {formatCommand(cmdStatus?.text ?? cmdInfo.command, cmdStatus?.text ? 50 : 30)}
+              {formatCommand(
+                cmdStatus?.text ?? cmdInfo.command,
+                cmdStatus?.text ? 50 : 30, // Claude messages are longer than shell commands
+              )}
             </span>
             <span style={{ color: "var(--text-secondary)", opacity: 0.4 }}>
               · {formatRelativeTime(cmdInfo.timestamp)}
