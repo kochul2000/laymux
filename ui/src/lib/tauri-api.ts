@@ -593,6 +593,21 @@ export function onTerminalCwdChanged(
   });
 }
 
+export interface TerminalTitleChangedData {
+  terminalId: string;
+  title: string;
+  interactiveApp: string | null;
+  notifyGateArmed: boolean;
+}
+
+export function onTerminalTitleChanged(
+  callback: (data: TerminalTitleChangedData) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalTitleChangedData>("terminal-title-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 // -- Terminal summaries (single source of truth for workspace list) --
 
 export interface TerminalNotificationResponse {

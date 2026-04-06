@@ -4,7 +4,7 @@ export type TerminalActivityType = "shell" | "running" | "interactiveApp";
 
 export interface TerminalActivityInfo {
   type: TerminalActivityType;
-  name?: string; // For interactiveApp: "Claude Code", "vim", etc.
+  name?: string; // For interactiveApp: "Claude", "vim", "neovim", etc.
 }
 
 export interface TerminalInstance {

@@ -18,6 +18,7 @@ const mockOnSetTabTitle = vi.fn();
 const mockOnCommandStatus = vi.fn();
 const mockOnClaudeTerminalDetected = vi.fn();
 const mockOnTerminalCwdChanged = vi.fn();
+const mockOnTerminalTitleChanged = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
@@ -30,6 +31,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onCommandStatus: (...args: unknown[]) => mockOnCommandStatus(...args),
   onClaudeTerminalDetected: (...args: unknown[]) => mockOnClaudeTerminalDetected(...args),
   onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),
+  onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
@@ -53,6 +55,7 @@ describe("useSyncEvents", () => {
     mockOnCommandStatus.mockResolvedValue(unlisten);
     mockOnClaudeTerminalDetected.mockResolvedValue(unlisten);
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
+    mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
   });
 
   it("registers sync-cwd listener on mount", () => {

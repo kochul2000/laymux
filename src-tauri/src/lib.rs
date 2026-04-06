@@ -10,6 +10,7 @@ pub mod git_watcher;
 pub mod ipc_server;
 pub mod lock_ext;
 pub mod osc;
+pub mod osc_hooks;
 pub mod output_buffer;
 pub mod path_utils;
 pub mod port_detect;

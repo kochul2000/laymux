@@ -47,176 +47,27 @@ fn handle_lx_message_dispatch(
             group_id,
             all,
             target_group,
-        } => {
-            cleanup_stale_propagations(state);
-
-            // Check if this is an echo from a propagated command — suppress to prevent loop
-            if is_propagated(state, &terminal_id)? {
-                return Ok(LxResponse::ok(Some(format!(
-                    "sync-cwd {} suppressed (propagated)",
-                    path
-                ))));
-            }
-
-            // Normalize WSL UNC paths to Linux-native paths
-            let normalized_path = path_utils::normalize_wsl_path(&path);
-
-            // NOTE: We intentionally do NOT skip when the source terminal's CWD
-            // matches normalized_path. The backend PTY callback (proactive CWD
-            // detection) may have already updated session.cwd before this IPC
-            // arrives, so a naive "unchanged" check would suppress every
-            // propagation. Target-side dedup is handled by filter_targets_needing_cd.
-
-            // Update stored CWD for the source terminal
-            update_terminal_cwd(state, &terminal_id, &normalized_path);
-
-            let all_targets = resolve_target_terminals(
-                state,
-                &terminal_id,
-                &group_id,
-                all,
-                target_group.as_deref(),
-            )?;
-
-            // Skip targets that have cwd_receive disabled
-            let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
-
-            // Skip targets that have a command running (e.g., interactive apps like Claude Code)
-            let settings = crate::settings::load_settings();
-            let (idle_targets, claude_ids) =
-                filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd);
-
-            // Skip targets that are already at the same CWD
-            let target_terminals =
-                filter_targets_needing_cd(state, &idle_targets, &normalized_path);
-
-            // Write cd command to target terminals (with propagation flag + path conversion)
-            if !target_terminals.is_empty() {
-                write_cd_to_group_terminals(
-                    state,
-                    &target_terminals,
-                    &terminal_id,
-                    &normalized_path,
-                    &claude_ids,
-                )?;
-            }
-
-            // Mark targets so their OSC echo won't re-propagate
-            if !target_terminals.is_empty() {
-                mark_propagated(state, &target_terminals)?;
-            }
-
-            // Update stored CWD for receiving targets only (respect cwd_receive filter)
-            for tid in &receiving_targets {
-                update_terminal_cwd(state, tid, &normalized_path);
-            }
-
-            // Emit sync-cwd event to frontend — only receiving targets, not all
-            let _ = app.emit(
-                EVENT_SYNC_CWD,
-                serde_json::json!({
-                    "path": normalized_path,
-                    "terminalId": terminal_id,
-                    "groupId": group_id,
-                    "targets": receiving_targets,
-                }),
-            );
-
-            Ok(LxResponse::ok(Some(format!(
-                "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
-                normalized_path,
-                target_terminals.len(),
-                all_targets.len() - receiving_targets.len(),
-                receiving_targets.len() - target_terminals.len()
-            ))))
-        }
+        } => do_sync_cwd(
+            state,
+            app,
+            &terminal_id,
+            &group_id,
+            &path,
+            all,
+            target_group.as_deref(),
+        ),
         LxMessage::SyncBranch {
             branch,
             terminal_id,
             group_id,
-        } => {
-            // Update stored branch for the source terminal (single source of truth)
-            {
-                let mut terminals = state.terminals.lock_or_err()?;
-                if let Some(session) = terminals.get_mut(&terminal_id) {
-                    session.branch = Some(branch.clone());
-                }
-            }
-
-            // Emit sync-branch event to frontend for UI updates
-            let _ = app.emit(
-                EVENT_SYNC_BRANCH,
-                serde_json::json!({
-                    "branch": branch,
-                    "terminalId": terminal_id,
-                    "groupId": group_id,
-                }),
-            );
-
-            let groups = state.sync_groups.lock_or_err()?;
-            let count = groups
-                .get(&group_id)
-                .map(|g| g.terminal_ids.len())
-                .unwrap_or(0);
-
-            Ok(LxResponse::ok(Some(format!(
-                "sync-branch {} to {} terminals",
-                branch, count
-            ))))
-        }
+        } => do_sync_branch(state, app, &terminal_id, &group_id, &branch),
         LxMessage::Notify {
             message,
             terminal_id,
             level,
-        } => {
-            // Store notification in backend (single source of truth)
-            {
-                let notification = crate::terminal::TerminalNotification {
-                    id: state
-                        .notification_counter
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-                    terminal_id: terminal_id.clone(),
-                    message: message.clone(),
-                    level: level.clone().unwrap_or_else(|| "info".to_string()),
-                    created_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                    read_at: None,
-                };
-                if let Ok(mut notifs) = state.notifications.lock_or_err() {
-                    notifs.push(notification);
-                    super::evict_old_notifications(&mut notifs);
-                }
-            }
-
-            // Emit notification to frontend
-            let mut payload = serde_json::json!({
-                "message": message,
-                "terminalId": terminal_id,
-            });
-            if let Some(ref lvl) = level {
-                payload["level"] = serde_json::json!(lvl);
-            }
-            let _ = app.emit(EVENT_LX_NOTIFY, payload);
-
-            Ok(LxResponse::ok(Some(format!("notification: {}", message))))
-        }
+        } => do_notify(state, app, &terminal_id, &message, level.as_deref()),
         LxMessage::SetTabTitle { title, terminal_id } => {
-            let mut terminals = state.terminals.lock_or_err()?;
-            if let Some(session) = terminals.get_mut(&terminal_id) {
-                session.title = title.clone();
-            }
-
-            let _ = app.emit(
-                EVENT_SET_TAB_TITLE,
-                serde_json::json!({
-                    "title": title,
-                    "terminalId": terminal_id,
-                }),
-            );
-
-            Ok(LxResponse::ok(Some(format!("title set: {}", title))))
+            do_set_tab_title(state, app, &terminal_id, &title)
         }
         LxMessage::GetCwd { terminal_id } => {
             let terminals = state.terminals.lock_or_err()?;
@@ -252,7 +103,6 @@ fn handle_lx_message_dispatch(
             ))))
         }
         LxMessage::OpenFile { path, terminal_id } => {
-            // Emit open-file event to frontend
             let _ = app.emit(
                 EVENT_OPEN_FILE,
                 serde_json::json!({
@@ -260,67 +110,258 @@ fn handle_lx_message_dispatch(
                     "terminalId": terminal_id,
                 }),
             );
-
             Ok(LxResponse::ok(Some(format!("open-file: {}", path))))
         }
         LxMessage::SetCommandStatus {
             terminal_id,
             command,
             exit_code,
-        } => {
-            // Update command state on the terminal session (single source of truth).
-            {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let mut terminals = state.terminals.lock_or_err()?;
-                if let Some(session) = terminals.get_mut(&terminal_id) {
-                    if let Some(ref cmd) = command {
-                        session.last_command = Some(cmd.clone());
-                        session.last_exit_code = None;
-                        session.last_command_at = Some(now_ms);
-                        session.command_running = true;
-                    }
-                    if let Some(code) = exit_code {
-                        session.last_exit_code = Some(code);
-                        session.last_command_at = Some(now_ms);
-                        session.command_running = false;
-                    }
-                }
-            }
+        } => do_set_command_status(state, app, &terminal_id, command.as_deref(), exit_code),
+        LxMessage::SetWslDistro { path, terminal_id } => {
+            do_set_wsl_distro(state, &terminal_id, &path)
+        }
+    }
+}
 
-            let mut payload = serde_json::json!({
-                "terminalId": terminal_id,
-            });
-            if let Some(ref cmd) = command {
-                payload["command"] = serde_json::json!(cmd);
+// ── Public inner functions — callable from both LxMessage dispatch and PTY callback ──
+
+/// Sync CWD across terminal group. Handles propagation guard, target filtering, and cd writing.
+pub fn do_sync_cwd(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    group_id: &str,
+    path: &str,
+    all: bool,
+    target_group: Option<&str>,
+) -> Result<LxResponse, String> {
+    cleanup_stale_propagations(state);
+
+    if is_propagated(state, terminal_id)? {
+        return Ok(LxResponse::ok(Some(format!(
+            "sync-cwd {} suppressed (propagated)",
+            path
+        ))));
+    }
+
+    let normalized_path = path_utils::normalize_wsl_path(path);
+
+    // NOTE: We intentionally do NOT skip when the source terminal's CWD
+    // matches normalized_path. The backend PTY callback (proactive CWD
+    // detection) may have already updated session.cwd before this IPC
+    // arrives, so a naive "unchanged" check would suppress every
+    // propagation. Target-side dedup is handled by filter_targets_needing_cd.
+    update_terminal_cwd(state, terminal_id, &normalized_path);
+
+    let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
+
+    let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
+
+    let settings = crate::settings::load_settings();
+    let (idle_targets, claude_ids) =
+        filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd);
+
+    let target_terminals = filter_targets_needing_cd(state, &idle_targets, &normalized_path);
+
+    if !target_terminals.is_empty() {
+        write_cd_to_group_terminals(
+            state,
+            &target_terminals,
+            terminal_id,
+            &normalized_path,
+            &claude_ids,
+        )?;
+    }
+
+    if !target_terminals.is_empty() {
+        mark_propagated(state, &target_terminals)?;
+    }
+
+    for tid in &receiving_targets {
+        update_terminal_cwd(state, tid, &normalized_path);
+    }
+
+    let _ = app.emit(
+        EVENT_SYNC_CWD,
+        serde_json::json!({
+            "path": normalized_path,
+            "terminalId": terminal_id,
+            "groupId": group_id,
+            "targets": receiving_targets,
+        }),
+    );
+
+    Ok(LxResponse::ok(Some(format!(
+        "sync-cwd {} to {} terminals ({} filtered by cwd_receive, {} already at cwd)",
+        normalized_path,
+        target_terminals.len(),
+        all_targets.len() - receiving_targets.len(),
+        receiving_targets.len() - target_terminals.len()
+    ))))
+}
+
+/// Sync git branch across terminal group.
+pub fn do_sync_branch(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    group_id: &str,
+    branch: &str,
+) -> Result<LxResponse, String> {
+    {
+        let mut terminals = state.terminals.lock_or_err()?;
+        if let Some(session) = terminals.get_mut(terminal_id) {
+            session.branch = Some(branch.to_string());
+        }
+    }
+
+    let _ = app.emit(
+        EVENT_SYNC_BRANCH,
+        serde_json::json!({
+            "branch": branch,
+            "terminalId": terminal_id,
+            "groupId": group_id,
+        }),
+    );
+
+    let groups = state.sync_groups.lock_or_err()?;
+    let count = groups
+        .get(group_id)
+        .map(|g| g.terminal_ids.len())
+        .unwrap_or(0);
+
+    Ok(LxResponse::ok(Some(format!(
+        "sync-branch {} to {} terminals",
+        branch, count
+    ))))
+}
+
+/// Send a notification (store + emit to frontend).
+pub fn do_notify(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    message: &str,
+    level: Option<&str>,
+) -> Result<LxResponse, String> {
+    {
+        let notification = crate::terminal::TerminalNotification {
+            id: state
+                .notification_counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            terminal_id: terminal_id.to_string(),
+            message: message.to_string(),
+            level: level.unwrap_or("info").to_string(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            read_at: None,
+        };
+        if let Ok(mut notifs) = state.notifications.lock_or_err() {
+            notifs.push(notification);
+            super::evict_old_notifications(&mut notifs);
+        }
+    }
+
+    let mut payload = serde_json::json!({
+        "message": message,
+        "terminalId": terminal_id,
+    });
+    if let Some(lvl) = level {
+        payload["level"] = serde_json::json!(lvl);
+    }
+    let _ = app.emit(EVENT_LX_NOTIFY, payload);
+
+    Ok(LxResponse::ok(Some(format!("notification: {}", message))))
+}
+
+/// Set the tab title for a terminal.
+pub fn do_set_tab_title(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    title: &str,
+) -> Result<LxResponse, String> {
+    let mut terminals = state.terminals.lock_or_err()?;
+    if let Some(session) = terminals.get_mut(terminal_id) {
+        session.title = title.to_string();
+    }
+
+    let _ = app.emit(
+        EVENT_SET_TAB_TITLE,
+        serde_json::json!({
+            "title": title,
+            "terminalId": terminal_id,
+        }),
+    );
+
+    Ok(LxResponse::ok(Some(format!("title set: {}", title))))
+}
+
+/// Update command status (command text, exit code, or both).
+pub fn do_set_command_status(
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    command: Option<&str>,
+    exit_code: Option<i32>,
+) -> Result<LxResponse, String> {
+    {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let mut terminals = state.terminals.lock_or_err()?;
+        if let Some(session) = terminals.get_mut(terminal_id) {
+            if let Some(cmd) = command {
+                session.last_command = Some(cmd.to_string());
+                session.last_exit_code = None;
+                session.last_command_at = Some(now_ms);
+                session.command_running = true;
             }
             if let Some(code) = exit_code {
-                payload["exitCode"] = serde_json::json!(code);
+                session.last_exit_code = Some(code);
+                session.last_command_at = Some(now_ms);
+                session.command_running = false;
             }
-            let _ = app.emit(EVENT_COMMAND_STATUS, payload);
+        }
+    }
 
-            let desc = match (&command, exit_code) {
-                (Some(cmd), Some(code)) => format!("command '{}' exit {}", cmd, code),
-                (Some(cmd), None) => format!("command '{}' started", cmd),
-                (None, Some(code)) => format!("exit code {}", code),
-                (None, None) => "no-op".to_string(),
-            };
-            Ok(LxResponse::ok(Some(desc)))
+    let mut payload = serde_json::json!({
+        "terminalId": terminal_id,
+    });
+    if let Some(cmd) = command {
+        payload["command"] = serde_json::json!(cmd);
+    }
+    if let Some(code) = exit_code {
+        payload["exitCode"] = serde_json::json!(code);
+    }
+    let _ = app.emit(EVENT_COMMAND_STATUS, payload);
+
+    let desc = match (command, exit_code) {
+        (Some(cmd), Some(code)) => format!("command '{}' exit {}", cmd, code),
+        (Some(cmd), None) => format!("command '{}' started", cmd),
+        (None, Some(code)) => format!("exit code {}", code),
+        (None, None) => "no-op".to_string(),
+    };
+    Ok(LxResponse::ok(Some(desc)))
+}
+
+/// Set WSL distro name from a path containing UNC distro information.
+pub fn do_set_wsl_distro(
+    state: &AppState,
+    terminal_id: &str,
+    path: &str,
+) -> Result<LxResponse, String> {
+    if let Some(distro) = path_utils::extract_wsl_distro_from_path(path) {
+        let mut terminals = state.terminals.lock_or_err()?;
+        if let Some(session) = terminals.get_mut(terminal_id) {
+            session.wsl_distro = Some(distro.clone());
         }
-        LxMessage::SetWslDistro { path, terminal_id } => {
-            // Extract WSL distro name from UNC-style path (e.g., //wsl.localhost/Ubuntu-22.04/...)
-            if let Some(distro) = path_utils::extract_wsl_distro_from_path(&path) {
-                let mut terminals = state.terminals.lock_or_err()?;
-                if let Some(session) = terminals.get_mut(&terminal_id) {
-                    session.wsl_distro = Some(distro.clone());
-                }
-                Ok(LxResponse::ok(Some(format!("wsl-distro set: {distro}"))))
-            } else {
-                Ok(LxResponse::ok(Some("no distro found in path".into())))
-            }
-        }
+        Ok(LxResponse::ok(Some(format!("wsl-distro set: {distro}"))))
+    } else {
+        Ok(LxResponse::ok(Some("no distro found in path".into())))
     }
 }
 
@@ -1143,7 +1184,7 @@ mod tests {
         assert_eq!(
             activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::InteractiveApp {
-                name: "Claude Code".to_string()
+                name: "Claude".to_string()
             }
         );
     }
@@ -1319,7 +1360,7 @@ mod tests {
         assert_eq!(
             activity::detect_terminal_activity(Some(&buf)),
             TerminalActivity::InteractiveApp {
-                name: "Claude Code".to_string()
+                name: "Claude".to_string()
             }
         );
     }
