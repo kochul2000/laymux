@@ -92,8 +92,8 @@ describe("CSS utility classes — hover", () => {
     expect(cssContent).toMatch(/\.hover-bg-strong:hover\s*\{/);
   });
 
-  it("defines .hover-bg-close:hover class", () => {
-    expect(cssContent).toMatch(/\.hover-bg-close:hover\s*\{/);
+  it("defines .hover-bg-danger:hover class", () => {
+    expect(cssContent).toMatch(/\.hover-bg-danger:hover\s*\{/);
   });
 });
 
@@ -112,5 +112,22 @@ describe("CSS utility classes — toolbar", () => {
 describe("CSS utility classes — focus", () => {
   it("defines .ui-focus-ring:focus-visible class", () => {
     expect(cssContent).toMatch(/\.ui-focus-ring:focus-visible\s*\{/);
+  });
+});
+
+describe("CSS design tokens — key value validation", () => {
+  const keyValues: [string, string][] = [
+    ["--bar-h", "28px"],
+    ["--btn-h", "22px"],
+    ["--btn-min-w", "22px"],
+    ["--radius-sm", "2px"],
+    ["--radius-md", "3px"],
+    ["--radius-lg", "6px"],
+  ];
+
+  it.each(keyValues)("%s equals %s", (token, value) => {
+    const escaped = token.replace(/[-/]/g, "\\$&");
+    const regex = new RegExp(`${escaped}\\s*:\\s*${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+    expect(cssContent).toMatch(regex);
   });
 });
