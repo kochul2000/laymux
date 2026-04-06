@@ -96,8 +96,6 @@ pub fn err_json(msg: &str) -> serde_json::Value {
 
 /// Simple base64 decoder (no external crate needed).
 pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
     fn val(c: u8) -> Result<u8, String> {
         match c {
             b'A'..=b'Z' => Ok(c - b'A'),
@@ -136,7 +134,6 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
 
-    let _ = TABLE; // suppress unused warning
     Ok(out)
 }
 

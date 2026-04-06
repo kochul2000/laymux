@@ -514,6 +514,13 @@ pub async fn workspaces_get_summary(
     }
 }
 
+pub async fn terminals_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    match bridge_request(&state, "query", "terminals", "list", serde_json::json!({})).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn terminals_set_focus(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,

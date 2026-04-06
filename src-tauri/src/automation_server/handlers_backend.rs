@@ -311,21 +311,6 @@ pub async fn terminal_output(
     }
 }
 
-pub async fn terminals_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    match super::helpers::bridge_request(
-        &state,
-        "query",
-        "terminals",
-        "list",
-        serde_json::json!({}),
-    )
-    .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)),
-        Err(e) => e,
-    }
-}
-
 pub async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     let states = crate::activity::detect_all_terminal_states(&state.app_state);
     (

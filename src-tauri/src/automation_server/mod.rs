@@ -105,9 +105,13 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     // Store port and key in AppState
     if let Ok(mut p) = app_state.automation_port.lock_or_err() {
         *p = Some(port);
+    } else {
+        tracing::error!("Failed to store automation port in AppState (lock poisoned)");
     }
     if let Ok(mut k) = app_state.automation_key.lock_or_err() {
         *k = Some(key.clone());
+    } else {
+        tracing::error!("Failed to store automation key in AppState (lock poisoned)");
     }
 
     // Write discovery file (includes key)
