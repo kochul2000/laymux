@@ -6,7 +6,7 @@
 //!   - Current: salmon `·` (U+00B7) with SGR 38;5;174 (Claude brand color)
 //! Also provides general-purpose ANSI escape stripping.
 
-use crate::constants::BULLET_MESSAGE_SCAN_BYTES;
+use crate::constants::STATUS_MESSAGE_SCAN_BYTES;
 
 /// Max bytes to search backward from a marker for its SGR color prefix.
 /// Covers the SGR sequence itself plus a few CSI cursor-position sequences
@@ -21,6 +21,10 @@ const MARKERS: &[(&[u8], &[u8])] = &[
     // Legacy: ● (U+25CF BLACK CIRCLE) with bright-white color
     (&[0xe2, 0x97, 0x8f], b"\x1b[38;5;231m"),
 ];
+
+/// Characters that terminate status message text scanning.
+/// Spinner chars (✶✻✽✢), both marker variants (● ·), separator (─), prompt (❯).
+const STOP_CHARS: &[char] = &['✶', '✻', '✽', '✢', '●', '·', '─', '❯'];
 
 /// Extract the last Claude Code status message from terminal output.
 ///
@@ -50,9 +54,7 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
             // cursor positioning \x1b[13;1H).
             let has_color = 'color: {
                 let search_start = marker_pos.saturating_sub(SGR_LOOKBACK_BYTES);
-                // Look for sgr_prefix in the window before the marker
                 let window = &data[search_start..marker_pos];
-                // Find the LAST occurrence of sgr_prefix in the window
                 let sgr_pos = window
                     .windows(sgr_prefix.len())
                     .rposition(|w| w == sgr_prefix);
@@ -65,14 +67,7 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
                         match gap[gi] {
                             b'\n' | b'\r' | b' ' => gi += 1,
                             0x1b if gi + 1 < gap.len() && gap[gi + 1] == b'[' => {
-                                // Skip CSI sequence
-                                let mut j = gi + 2;
-                                while j < gap.len()
-                                    && !(gap[j].is_ascii_alphabetic() || gap[j] == b'~')
-                                {
-                                    j += 1;
-                                }
-                                gi = if j < gap.len() { j + 1 } else { j };
+                                gi = skip_csi_params(gap, gi + 2);
                             }
                             _ => break 'color false,
                         }
@@ -84,9 +79,9 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
 
             if has_color {
                 let text_start = marker_pos + marker_bytes.len();
-                let scan_end = (text_start + BULLET_MESSAGE_SCAN_BYTES).min(data.len());
+                let scan_end = (text_start + STATUS_MESSAGE_SCAN_BYTES).min(data.len());
                 let raw_text = String::from_utf8_lossy(&data[text_start..scan_end]);
-                let stripped = strip_ansi_for_bullet(&raw_text);
+                let stripped = strip_ansi_inner(&raw_text, STOP_CHARS, true);
                 if !stripped.is_empty() {
                     // Keep the last occurrence by position in the byte stream
                     if best.as_ref().map_or(true, |(prev_pos, _)| marker_pos > *prev_pos) {
@@ -102,6 +97,16 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
     best.map(|(_, msg)| msg)
 }
 
+/// Skip CSI parameter bytes starting at `start` (after ESC [), returning the
+/// index past the final byte. Shared by `has_color` validation and `skip_ansi_escape`.
+fn skip_csi_params(bytes: &[u8], start: usize) -> usize {
+    let mut j = start;
+    while j < bytes.len() && !(bytes[j].is_ascii_alphabetic() || bytes[j] == b'~') {
+        j += 1;
+    }
+    if j < bytes.len() { j + 1 } else { j }
+}
+
 /// Skip a single ANSI escape sequence starting at `bytes[i]`.
 /// Returns `(new_index, csi_final_byte)` where `csi_final_byte` is `Some(b'C')` etc.
 /// for CSI sequences, `None` for OSC or other sequences.
@@ -110,16 +115,13 @@ fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
     match bytes[i + 1] {
         b'[' => {
             // CSI: ESC [ params final_byte
-            let mut j = i + 2;
-            while j < bytes.len() && !(bytes[j].is_ascii_alphabetic() || bytes[j] == b'~') {
-                j += 1;
-            }
-            if j < bytes.len() {
-                let final_byte = bytes[j];
-                (j + 1, Some(final_byte))
+            let end = skip_csi_params(bytes, i + 2);
+            let final_byte = if end > i + 2 && end - 1 < bytes.len() {
+                Some(bytes[end - 1])
             } else {
-                (j, None)
-            }
+                None
+            };
+            (end, final_byte)
         }
         b']' => {
             // OSC: skip to BEL or ST
@@ -143,10 +145,13 @@ fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
     }
 }
 
-/// Strip ANSI and extract message text for a status marker line.
-/// Converts cursor-forward (`\x1b[nC`) to spaces, strips all other ANSI,
-/// and stops at spinner characters (✶✻✽✢) or another marker (● / ·).
-fn strip_ansi_for_bullet(input: &str) -> String {
+/// Core ANSI stripping loop shared by `strip_ansi` and status message extraction.
+///
+/// - `stop_chars`: if non-empty, stops scanning when any of these chars is encountered.
+/// - `cursor_to_space`: if true, CSI cursor-forward (`ESC[nC`) is converted to a space.
+///
+/// The result is trimmed when `stop_chars` is non-empty (status message mode).
+fn strip_ansi_inner(input: &str, stop_chars: &[char], cursor_to_space: bool) -> String {
     let mut result = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut i = 0;
@@ -154,20 +159,19 @@ fn strip_ansi_for_bullet(input: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == 0x1b && i + 1 < bytes.len() {
             let (next_i, final_byte) = skip_ansi_escape(bytes, i);
-            if final_byte == Some(b'C') {
-                result.push(' '); // Cursor forward → space
+            if cursor_to_space && final_byte == Some(b'C') {
+                result.push(' ');
             }
             i = next_i;
         } else {
-            // Check for spinner/stop characters
             let remaining = &input[i..];
-            // Stop at spinner chars, another ●, or input separator line (─)
-            for stop_char in ['✶', '✻', '✽', '✢', '●', '─', '❯'] {
-                if remaining.starts_with(stop_char) {
-                    return result.trim().to_string();
+            if !stop_chars.is_empty() {
+                for &ch in stop_chars {
+                    if remaining.starts_with(ch) {
+                        return result.trim().to_string();
+                    }
                 }
             }
-            // Regular character (safe: remaining is non-empty &str slice)
             if let Some(ch) = remaining.chars().next() {
                 result.push(ch);
                 i += ch.len_utf8();
@@ -177,31 +181,16 @@ fn strip_ansi_for_bullet(input: &str) -> String {
         }
     }
 
-    result.trim().to_string()
+    if stop_chars.is_empty() {
+        result
+    } else {
+        result.trim().to_string()
+    }
 }
 
 /// Strip ANSI escape sequences (CSI and OSC) from a string, returning plain text.
 pub fn strip_ansi(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() {
-            let (next_i, _) = skip_ansi_escape(bytes, i);
-            i = next_i;
-        } else {
-            let remaining = &input[i..];
-            if let Some(ch) = remaining.chars().next() {
-                result.push(ch);
-                i += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-    }
-
-    result
+    strip_ansi_inner(input, &[], false)
 }
 
 #[cfg(test)]
@@ -485,7 +474,6 @@ mod tests {
 
     #[test]
     fn strip_ansi_multibyte_utf8() {
-        // Verify strip_ansi correctly handles multibyte UTF-8 characters
         assert_eq!(
             strip_ansi("\x1b[38;5;231m한글 테스트\x1b[m"),
             "한글 테스트"
@@ -494,7 +482,6 @@ mod tests {
 
     #[test]
     fn strip_ansi_osc_with_st_terminator() {
-        // OSC terminated by ST (ESC \) should be fully stripped
         assert_eq!(
             strip_ansi("before\x1b]2;title\x1b\\after"),
             "beforeafter"

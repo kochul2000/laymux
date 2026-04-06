@@ -42,9 +42,9 @@ pub const PTY_WRITE_CHUNK_SIZE: usize = 1024;
 /// title sequences even when OSC 133 markers have scrolled out.
 pub const ACTIVITY_SCAN_BYTES: usize = 16384;
 
-/// Maximum number of bytes to scan forward from a white-● bullet to extract
-/// the message text. TUI cursor-addressing can spread text across many bytes.
-pub const BULLET_MESSAGE_SCAN_BYTES: usize = 500;
+/// Maximum bytes to scan forward from a Claude Code status marker (● or ·)
+/// to extract message text. TUI cursor-addressing can spread text across many bytes.
+pub const STATUS_MESSAGE_SCAN_BYTES: usize = 500;
 
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,

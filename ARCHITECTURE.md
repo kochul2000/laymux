@@ -738,6 +738,7 @@ src-tauri/src/
 ├── osc.rs                    # OSC 이스케이프 시퀀스 파싱 (iter_osc_events)
 ├── osc_hooks.rs              # OSC 훅 시스템 (조건/액션 모델, 프리셋, match_hooks)
 ├── activity.rs               # 터미널 활동 상태 감지
+├── claude_bullet.rs          # Claude Code 상태 메시지 추출 + ANSI 스트리핑
 ├── state.rs                  # AppState — 전역 상태
 ├── commands/                 # Tauri IPC 커맨드 (프론트엔드 진입점)
 │   ├── mod.rs                # pub use 허브 (로직 없음)
