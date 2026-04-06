@@ -240,7 +240,7 @@ export function AppLayout() {
           onSwitchView={(v: ViewType, config?: import("@/stores/types").ViewInstanceConfig) =>
             setDockActiveView(pos, v, config)
           }
-          onSplitPane={(dir, paneId) => splitDockPane(pos, dir, paneId)}
+          onSplitPane={(paneId, dir) => splitDockPane(pos, dir, paneId)}
           onRemovePane={(paneId) => removeDockPane(pos, paneId)}
           onSetPaneView={(paneId, view) => setDockPaneView(pos, paneId, view)}
           onResizePane={(paneId, delta) => resizeDockPane(pos, paneId, delta)}
