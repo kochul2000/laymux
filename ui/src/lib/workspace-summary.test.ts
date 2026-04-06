@@ -6,6 +6,7 @@ import {
   getLastCommandForWorkspace,
   computeWorkspaceSummary,
   computeWorkspaceSummaryFromBackend,
+  computeCommandStatus,
   abbreviatePath,
   mntPathToWindows,
   formatRelativeTime,
@@ -663,6 +664,87 @@ describe("computeWorkspaceSummaryFromBackend", () => {
     ];
     const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
     expect(result.lastCommand?.activity).toEqual({ type: "running" });
+  });
+});
+
+describe("computeCommandStatus", () => {
+  // Shell commands
+  it("returns ⏳ when exitCode is undefined (command running)", () => {
+    const s = computeCommandStatus(undefined, false, { type: "shell" }, undefined);
+    expect(s.icon).toBe("⏳");
+    expect(s.color).toBe("var(--yellow)");
+  });
+
+  it("returns ✓ for exitCode 0", () => {
+    const s = computeCommandStatus(0, false, { type: "shell" }, undefined);
+    expect(s.icon).toBe("✓");
+    expect(s.color).toBe("var(--green)");
+  });
+
+  it("returns ✗ for non-zero exitCode", () => {
+    const s = computeCommandStatus(1, false, { type: "shell" }, undefined);
+    expect(s.icon).toBe("✗");
+    expect(s.color).toBe("var(--red)");
+  });
+
+  it("returns ⏳ when outputActive even with exitCode", () => {
+    const s = computeCommandStatus(0, true, { type: "shell" }, undefined);
+    expect(s.icon).toBe("⏳");
+  });
+
+  it("returns ⏳ for running activity", () => {
+    const s = computeCommandStatus(0, false, { type: "running" }, undefined);
+    expect(s.icon).toBe("⏳");
+  });
+
+  // Interactive apps (non-Claude)
+  it("returns ⏳ for generic interactiveApp", () => {
+    const s = computeCommandStatus(0, false, { type: "interactiveApp", name: "vim" }, undefined);
+    expect(s.icon).toBe("⏳");
+  });
+
+  // Claude: uses title idle detection
+  it("returns ✓ for Claude idle (✳ prefix)", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✳ Claude Code",
+    );
+    expect(s.icon).toBe("✓");
+    expect(s.color).toBe("var(--green)");
+  });
+
+  it("returns ⏳ for Claude working (spinner prefix)", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✶ fixing bug",
+    );
+    expect(s.icon).toBe("⏳");
+    expect(s.color).toBe("var(--yellow)");
+  });
+
+  it("returns ⏳ for Claude with no title", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      undefined,
+    );
+    expect(s.icon).toBe("⏳");
+  });
+
+  it("ignores exitCode for Claude — uses title only", () => {
+    // exitCode=1 from sub-command, but Claude is idle → ✓
+    const s = computeCommandStatus(
+      1,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✳ Claude Code",
+    );
+    expect(s.icon).toBe("✓");
   });
 });
 

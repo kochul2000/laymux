@@ -1,7 +1,12 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
-import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
+import {
+  parseClaudeMode,
+  isClaudeIdle,
+  isRalphActive,
+  type ClaudeMode,
+} from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
@@ -315,6 +320,42 @@ export function formatActivity(
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }
   }
+}
+
+export interface CommandStatus {
+  icon: string; // "⏳" | "✓" | "✗"
+  color: string; // CSS color value
+}
+
+/**
+ * Compute final command status display from raw terminal states.
+ *
+ * Each system writes its own raw state independently:
+ *   - OSC 133;D → exitCode (shell owns this)
+ *   - OSC 0/2  → title (used for Claude idle/working detection)
+ *   - activity  → shell/running/interactiveApp
+ *
+ * This function is the single place that collapses them into ✓/⏳/✗.
+ */
+export function computeCommandStatus(
+  exitCode: number | undefined,
+  outputActive: boolean | undefined,
+  activity: TerminalActivityInfo | undefined,
+  title: string | undefined,
+): CommandStatus {
+  // Interactive app: Claude uses title idle detection, others always ⏳
+  if (activity?.type === "interactiveApp") {
+    if (activity.name === "Claude" && title && isClaudeIdle(title)) {
+      return { icon: "✓", color: "var(--green)" };
+    }
+    return { icon: "⏳", color: "var(--yellow)" };
+  }
+
+  // Shell command
+  if (exitCode === undefined) return { icon: "⏳", color: "var(--yellow)" };
+  if (outputActive) return { icon: "⏳", color: "var(--yellow)" };
+  if (activity?.type === "running") return { icon: "⏳", color: "var(--yellow)" };
+  return exitCode === 0 ? { icon: "✓", color: "var(--green)" } : { icon: "✗", color: "var(--red)" };
 }
 
 export function formatRelativeTime(ts: number): string {
