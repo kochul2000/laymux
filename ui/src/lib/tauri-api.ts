@@ -111,6 +111,10 @@ export async function loadWindowGeometry(): Promise<WindowGeometry | null> {
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
+  /** Strip common leading whitespace when pasting. */
+  smartRemoveIndent: boolean;
+  /** Rejoin URLs split across lines when pasting. */
+  smartRemoveLineBreak: boolean;
 }
 
 export type ClaudeSyncCwdMode = "skip" | "command";
@@ -585,6 +589,21 @@ export function onTerminalCwdChanged(
   callback: (data: { terminalId: string; cwd: string }) => void,
 ): Promise<UnlistenFn> {
   return listen<{ terminalId: string; cwd: string }>("terminal-cwd-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
+export interface TerminalTitleChangedData {
+  terminalId: string;
+  title: string;
+  interactiveApp: string | null;
+  notifyGateArmed: boolean;
+}
+
+export function onTerminalTitleChanged(
+  callback: (data: TerminalTitleChangedData) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalTitleChangedData>("terminal-title-changed", (event) => {
     callback(event.payload);
   });
 }

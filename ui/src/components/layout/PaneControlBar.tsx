@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
+import { PaneControlContext } from "./PaneControlContext";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
@@ -365,6 +366,7 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
 // ─── Main component ─────────────────────────────────────
 export function PaneControlBar({ currentView, actions, hovered, children }: PaneControlBarProps) {
   const [mode, setMode] = useState<ControlBarMode>("hover");
+  const [hasViewHeader, setHasViewHeader] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
 
@@ -377,38 +379,40 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
         ? "pane-control-pinned"
         : "pane-control-hover";
 
+  const paneControls = useMemo(
+    () => (
+      <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
+    ),
+    // setMode는 useState setter라 참조 안정적이지만 exhaustive-deps 일관성 위해 포함
+    [currentView, actions, mode, setMode],
+  );
+
+  const registerHeader = useCallback(() => setHasViewHeader(true), []);
+  const unregisterHeader = useCallback(() => setHasViewHeader(false), []);
+
+  const ctxValue = useMemo(
+    () => ({
+      paneControls,
+      mode,
+      hovered,
+      onSetMode: setMode,
+      registerHeader,
+      unregisterHeader,
+    }),
+    [paneControls, mode, hovered, setMode, registerHeader, unregisterHeader],
+  );
+
   return (
-    <div className="flex h-full w-full flex-col" data-testid={modeTestId}>
-      {/* Pinned bar: 상단에 고정, 공간 차지 */}
-      {isPinned && (
-        <div
-          data-testid="pane-control-bar"
-          className="ui-toolbar shrink-0"
-          style={{
-            background: barBg,
-            borderBottom: `1px solid ${borderClr}`,
-          }}
-        >
-          <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
-        </div>
-      )}
-
-      {/* children은 항상 이 위치에 렌더링 — 모드 전환으로 리마운트되지 않음 */}
-      <div className="relative min-h-0 flex-1">
-        {children}
-
-        {/* Hover bar: absolute overlay */}
-        {!isPinned && mode !== "minimized" && showBar && (
+    <PaneControlContext.Provider value={ctxValue}>
+      <div className="flex h-full w-full flex-col" data-testid={modeTestId}>
+        {/* Pinned bar: ViewHeader가 없는 View만 자체 바 렌더 */}
+        {isPinned && !hasViewHeader && (
           <div
             data-testid="pane-control-bar"
-            className="absolute right-1 top-1 z-20 flex items-center"
+            className="ui-toolbar shrink-0"
             style={{
-              height: BAR_H,
-              background: barBgHover,
-              backdropFilter: "blur(8px)",
-              borderBottom: `1px solid ${sepClr}`,
-              borderLeft: `1px solid ${sepClr}`,
-              borderRadius: "0 0 0 var(--radius-lg)",
+              background: barBg,
+              borderBottom: `1px solid ${borderClr}`,
             }}
           >
             <BarContent
@@ -420,9 +424,39 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           </div>
         )}
 
-        {/* Minimized: 3-dot 버튼만 표시. 클릭하면 hover 모드로 복귀. */}
-        {mode === "minimized" && hovered && <MinimizedButton onExpand={() => setMode("hover")} />}
+        {/* children은 항상 이 위치에 렌더링 — 모드 전환으로 리마운트되지 않음 */}
+        <div className="relative min-h-0 flex-1">
+          {children}
+
+          {/* Hover bar: ViewHeader가 없는 View만 overlay */}
+          {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
+            <div
+              data-testid="pane-control-bar"
+              className="absolute right-1 top-1 z-20 flex items-center"
+              style={{
+                height: BAR_H,
+                background: barBgHover,
+                backdropFilter: "blur(8px)",
+                borderBottom: `1px solid ${sepClr}`,
+                borderLeft: `1px solid ${sepClr}`,
+                borderRadius: "0 0 0 var(--radius-lg)",
+              }}
+            >
+              <BarContent
+                currentView={currentView}
+                actions={actions}
+                mode={mode}
+                onSetMode={setMode}
+              />
+            </div>
+          )}
+
+          {/* Minimized: ViewHeader가 없는 View만 3-dot 버튼 */}
+          {mode === "minimized" && !hasViewHeader && hovered && (
+            <MinimizedButton onExpand={() => setMode("hover")} />
+          )}
+        </div>
       </div>
-    </div>
+    </PaneControlContext.Provider>
   );
 }

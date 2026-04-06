@@ -410,6 +410,12 @@ pub struct ConvenienceSettings {
     /// Allow Alt+Arrow to navigate into/out of dock areas.
     #[serde(default = "default_true")]
     pub dock_arrow_nav: bool,
+    /// Smart remove indent: strip common leading whitespace when pasting.
+    #[serde(default = "default_true")]
+    pub smart_remove_indent: bool,
+    /// Smart remove line break: rejoin URLs split across lines when pasting.
+    #[serde(default = "default_true")]
+    pub smart_remove_line_break: bool,
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).
     #[serde(default = "default_true")]
     pub large_paste_warning: bool,
@@ -425,6 +431,8 @@ impl Default for ConvenienceSettings {
             scrollbar_style: "overlay".to_string(),
             dock_persist_state: true,
             dock_arrow_nav: true,
+            smart_remove_indent: true,
+            smart_remove_line_break: true,
             large_paste_warning: true,
         }
     }

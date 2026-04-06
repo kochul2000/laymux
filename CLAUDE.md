@@ -5,6 +5,7 @@
 * **컴파일 에러 수정 시 테스트 우선**: 새 필드/기능 추가로 인해 기존 테스트가 컴파일 에러를 일으키면, 단순히 기본값(`None`, `0` 등)을 채워 넣어 컴파일만 통과시키지 말고, 해당 기능을 실제로 검증하는 e2e 테스트를 추가한다.
 * **마이그레이션 불필요**: 현재 내부 개발 단계이므로 설정 파일 경로 변경 등에 대한 마이그레이션 로직은 구현하지 않는다. 기존 데이터는 수동으로 처리한다.
 * **Automation API 포트 규칙**: 고정 포트 — release=19280, dev=19281. 각 빌드 타입은 하나의 인스턴스만 실행 가능. 개발 중 스크린샷/API 호출은 반드시 dev 인스턴스(포트 19281)를 사용한다. Release 빌드(포트 19280)는 사용자가 직접 사용하므로 절대 건드리지 않는다. **Bearer 인증 필수**: dev discovery 파일(`%APPDATA%\laymux-dev\automation.json`)에서 `port`와 `key`를 읽어 모든 API 호출에 `Authorization: Bearer <key>` 헤더를 포함한다. Health 엔드포인트만 인증 없이 접근 가능.
+* **dev 프로세스 종료 시 반드시 `scripts/kill-dev.sh` 사용**: dev 인스턴스를 종료해야 할 때(포트 충돌, exe 잠금, 재시작 등) **절대로 `tasklist | grep laymux`로 PID를 찾아 수동 kill하지 않는다.** release와 dev가 동일한 `laymux.exe` 이름을 사용하므로 구분이 불가능하여 release를 잘못 죽일 수 있다. 반드시 `bash scripts/kill-dev.sh`를 실행하여 `automation.json` PID 기반으로 dev만 안전하게 종료한다.
 * **외부 프로세스 실행 시 headless_command 사용**: Rust에서 `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. Windows에서 콘솔 창이 깜빡이는 것을 방지하기 위해 `CREATE_NO_WINDOW` 플래그를 자동 적용한다.
 * **Rust 코드 설계 원칙 준수**: ARCHITECTURE.md §14에 정의된 Rust 설계 원칙을 따른다. 핵심 규칙:
   - 에러: `AppError` enum 사용, 프로덕션 코드에서 `unwrap()` 금지
@@ -13,6 +14,7 @@
   - 모듈: 파일 500줄 초과 시 분할 고려, `mod.rs`는 `pub use` 허브만
   - 커맨드: `#[tauri::command]`는 얇은 진입점, 핵심 로직은 `&AppState` 받는 내부 함수로 분리
   - 로깅: `eprintln!()` 대신 `tracing` 매크로 사용
+* **OSC 처리는 Rust 전용** (`ARCHITECTURE.md` §8.3 참조): OSC 이스케이프 시퀀스의 파싱(`osc.rs`), 훅 매칭(`osc_hooks.rs`), 액션 디스패치(`dispatch_osc_action`)는 모두 Rust PTY 콜백에서 단일 패스로 처리한다. 프론트엔드에서 OSC regex 파싱, 훅 조건 평가, IPC 라운드트립을 통한 OSC 처리를 하지 않는다. 프론트엔드는 Rust가 발행한 구조화 Tauri 이벤트(`terminal-title-changed`, `sync-cwd` 등)만 구독한다. 새 OSC 동작 추가 시 `osc_hooks.rs`에 프리셋을 추가하고 `dispatch_osc_action()`에서 분기한다.
 * **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
 * **UI 코드 설계 원칙** (`ARCHITECTURE.md` §15 참조):
