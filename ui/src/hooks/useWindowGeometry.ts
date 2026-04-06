@@ -124,12 +124,20 @@ export function useWindowGeometry() {
 
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
       const appWindow = getCurrentWindow();
-      appWindow.onMoved(() => {
-        snapshotGeometry().catch(() => {});
-      }).then((fn) => { unlistenMove = fn; });
-      appWindow.onResized(() => {
-        snapshotGeometry().catch(() => {});
-      }).then((fn) => { unlistenResize = fn; });
+      appWindow
+        .onMoved(() => {
+          snapshotGeometry().catch(() => {});
+        })
+        .then((fn) => {
+          unlistenMove = fn;
+        });
+      appWindow
+        .onResized(() => {
+          snapshotGeometry().catch(() => {});
+        })
+        .then((fn) => {
+          unlistenResize = fn;
+        });
     });
 
     return () => {

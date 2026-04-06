@@ -10,6 +10,7 @@ use std::process::Command;
 ///
 /// On non-Windows platforms this is identical to `Command::new(program)`.
 pub fn headless_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    #[allow(unused_mut)] // mut needed on Windows for creation_flags()
     let mut cmd = Command::new(program);
 
     #[cfg(target_os = "windows")]

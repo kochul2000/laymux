@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[cfg(target_os = "windows")]
 use crate::path_utils::windows_to_wsl_path;
 
 /// Result of a smart paste operation.

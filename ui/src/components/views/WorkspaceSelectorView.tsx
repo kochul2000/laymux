@@ -425,7 +425,13 @@ function WorkspaceItem({
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid transparent",
                             borderRadius: "var(--radius-md)",
-                            padding: "0 1px",
+                            width: 16,
+                            height: 16,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            boxSizing: "border-box",
+                            fontSize: 10,
                             lineHeight: 1,
                           }}
                         >

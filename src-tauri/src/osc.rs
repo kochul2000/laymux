@@ -130,8 +130,8 @@ fn extract_osc_param(code: u16, raw: &str) -> (Option<String>, String) {
         // OSC 9: ConEmu/WSL sends "9;<path>" for CWD
         // Regular OSC 9 notifications don't have this prefix
         9 => {
-            if raw.starts_with("9;") {
-                (Some("9".to_string()), raw[2..].to_string())
+            if let Some(stripped) = raw.strip_prefix("9;") {
+                (Some("9".to_string()), stripped.to_string())
             } else {
                 (None, raw.to_string())
             }
