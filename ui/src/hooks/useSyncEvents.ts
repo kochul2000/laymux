@@ -9,6 +9,7 @@ import {
   onSetTabTitle,
   onCommandStatus,
   onClaudeTerminalDetected,
+  onClaudeMessageChanged,
   onTerminalCwdChanged,
   onTerminalTitleChanged,
   markClaudeTerminal,
@@ -66,6 +67,16 @@ export function useSyncEvents() {
             activity: { type: "interactiveApp", name: "Claude" },
           });
         }
+      }),
+    );
+
+    // claude-message-changed: backend PTY callback extracted white-● status message.
+    trackListener(
+      onClaudeMessageChanged((data) => {
+        if (cancelled) return;
+        useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+          claudeMessage: data.message,
+        });
       }),
     );
 

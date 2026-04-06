@@ -153,7 +153,11 @@ const SGR_FG_231: &[u8] = b"\x1b[38;5;231m";
 ///
 /// Scans raw PTY bytes for `●` (U+25CF) preceded by the bright-white ANSI color
 /// (`\x1b[38;5;231m`). Returns the text content after `●` with ANSI codes stripped.
-/// Non-white ● lines (e.g., green tool-call markers) are skipped.
+/// Non-white ● lines (e.g., gray tool-call markers) are skipped.
+///
+/// Claude Code uses TUI rendering with cursor-addressed output, so the message text
+/// may not be adjacent to `●` in the byte stream. We scan forward past cursor
+/// control sequences to find the text, stopping at spinner characters or color changes.
 pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
     let mut last_message: Option<String> = None;
     let mut pos = 0;
@@ -168,21 +172,28 @@ pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
             None => break,
         };
 
-        // Check if preceded by SGR_FG_231
-        let is_white = bullet_pos >= SGR_FG_231.len()
-            && data[bullet_pos - SGR_FG_231.len()..bullet_pos] == *SGR_FG_231;
+        // Check if preceded by SGR_FG_231, allowing whitespace/control chars
+        // between the SGR and ●. Real output patterns include:
+        //   \x1b[38;5;231m●      (direct)
+        //   \x1b[38;5;231m\n●    (newline gap)
+        //   \x1b[38;5;231m\r●    (carriage return gap)
+        let is_white = {
+            let mut scan = bullet_pos;
+            while scan > 0 && matches!(data[scan - 1], b'\n' | b'\r' | b' ') {
+                scan -= 1;
+            }
+            scan >= SGR_FG_231.len()
+                && data[scan - SGR_FG_231.len()..scan] == *SGR_FG_231
+        };
 
         if is_white {
-            // Extract text from after ● to end of line (or end of data)
+            // Scan forward from ● to collect message text.
+            // In TUI mode, text is cursor-addressed; in scrollback, text is inline.
+            // We scan up to 500 bytes, strip ANSI, and stop at spinner chars.
             let text_start = bullet_pos + BULLET.len();
-            let line_end = data[text_start..]
-                .iter()
-                .position(|&b| b == b'\n' || b == b'\r')
-                .map(|p| text_start + p)
-                .unwrap_or(data.len());
-
-            let raw_text = String::from_utf8_lossy(&data[text_start..line_end]);
-            let stripped = strip_ansi(&raw_text).trim().to_string();
+            let scan_end = (text_start + 500).min(data.len());
+            let raw_text = String::from_utf8_lossy(&data[text_start..scan_end]);
+            let stripped = strip_ansi_for_bullet(&raw_text);
             if !stripped.is_empty() {
                 last_message = Some(stripped);
             }
@@ -192,6 +203,75 @@ pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
     }
 
     last_message
+}
+
+/// Strip ANSI and extract message text for a ● bullet line.
+/// Converts cursor-forward (`\x1b[nC`) to spaces, strips all other ANSI,
+/// and stops at spinner characters (✶✻✽✢*) or another ● bullet.
+fn strip_ansi_for_bullet(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'[' => {
+                    // CSI: ESC [ params final_byte
+                    let csi_start = i + 2;
+                    let mut j = csi_start;
+                    while j < bytes.len()
+                        && !(bytes[j].is_ascii_alphabetic() || bytes[j] == b'~')
+                    {
+                        j += 1;
+                    }
+                    if j < bytes.len() {
+                        let final_byte = bytes[j];
+                        if final_byte == b'C' {
+                            // Cursor forward → space
+                            result.push(' ');
+                        }
+                        // All other CSI sequences are stripped
+                        i = j + 1;
+                    } else {
+                        i = j;
+                    }
+                }
+                b']' => {
+                    // OSC: skip to BEL or ST
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != 0x07 {
+                        if bytes[i] == 0x1b {
+                            i += 1;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                }
+                _ => {
+                    i += 2;
+                }
+            }
+        } else {
+            // Check for spinner/stop characters
+            let remaining = &input[i..];
+            // Stop at spinner chars: ✶✻✽✢ or another ●
+            for stop_char in ['✶', '✻', '✽', '✢', '●'] {
+                if remaining.starts_with(stop_char) {
+                    return result.trim().to_string();
+                }
+            }
+            // Regular character
+            let ch = remaining.chars().next().unwrap();
+            result.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+
+    result.trim().to_string()
 }
 
 /// Strip ANSI escape sequences (CSI and OSC) from a string, returning plain text.
@@ -633,6 +713,51 @@ mod tests {
             extract_white_bullet_message(data),
             Some("Message here".to_string())
         );
+    }
+
+    #[test]
+    fn white_bullet_with_newline_gap() {
+        // Real pattern: SGR_FG_231 + \n + ● (newline between SGR and bullet)
+        let data = b"\x1b[38;5;231m\n\xe2\x97\x8f \x1b[mHostname is AMD9950\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Hostname is AMD9950".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_with_cr_gap() {
+        // Real pattern: SGR_FG_231 + \r + ● (carriage return between SGR and bullet)
+        let data = b"\x1b[38;5;231m\r\xe2\x97\x8f \x1b[mStatus update\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Status update".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_tui_mode_cursor_addressed() {
+        // Real TUI pattern: ● followed by cursor movements, then text at different position
+        // ●\x1b[m\x1b[1C\x1b[11X\x1b[11C\x1b[?2026h\x1b[?2026l\x1b[19;3H10이고,\x1b[1C안녕하세요!\x1b[38;5;174m\x1b[21;1H✶
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m\r");
+        data.extend_from_slice(&BULLET);
+        data.extend_from_slice(b"\x1b[m\x1b[1C\x1b[11X\x1b[11C\x1b[?2026h\x1b[?2026l\x1b[19;3H10");
+        data.extend_from_slice("이고,".as_bytes());
+        data.extend_from_slice(b"\x1b[1C");
+        data.extend_from_slice("안녕하세요!".as_bytes());
+        data.extend_from_slice(b"\x1b[38;5;174m\x1b[21;1H");
+        data.extend_from_slice("✶ Cont".as_bytes());
+        let msg = extract_white_bullet_message(&data);
+        assert!(msg.is_some(), "Should extract message from TUI output");
+        let text = msg.unwrap();
+        assert!(text.contains("10"), "Should contain '10': {text}");
+        assert!(
+            text.contains("안녕하세요"),
+            "Should contain greeting: {text}"
+        );
+        // Should NOT contain spinner
+        assert!(!text.contains("Cont"), "Should not contain spinner text: {text}");
     }
 
     #[test]

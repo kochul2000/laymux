@@ -554,6 +554,15 @@ export function onClaudeTerminalDetected(
   });
 }
 
+/** Listen for Claude Code white-● message changes from the backend. */
+export function onClaudeMessageChanged(
+  callback: (data: { terminalId: string; message: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ terminalId: string; message: string }>("claude-message-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 /** Register a terminal as running Claude Code in the backend (single source of truth).
  *  Called when the frontend detects Claude from command text (OSC 133 E). */
 export async function markClaudeTerminal(id: string): Promise<boolean> {

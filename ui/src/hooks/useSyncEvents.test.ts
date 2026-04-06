@@ -17,6 +17,7 @@ const mockOnLxNotify = vi.fn();
 const mockOnSetTabTitle = vi.fn();
 const mockOnCommandStatus = vi.fn();
 const mockOnClaudeTerminalDetected = vi.fn();
+const mockOnClaudeMessageChanged = vi.fn();
 const mockOnTerminalCwdChanged = vi.fn();
 const mockOnTerminalTitleChanged = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
@@ -30,6 +31,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onSetTabTitle: (...args: unknown[]) => mockOnSetTabTitle(...args),
   onCommandStatus: (...args: unknown[]) => mockOnCommandStatus(...args),
   onClaudeTerminalDetected: (...args: unknown[]) => mockOnClaudeTerminalDetected(...args),
+  onClaudeMessageChanged: (...args: unknown[]) => mockOnClaudeMessageChanged(...args),
   onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),
   onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
@@ -54,6 +56,7 @@ describe("useSyncEvents", () => {
     mockOnSetTabTitle.mockResolvedValue(unlisten);
     mockOnCommandStatus.mockResolvedValue(unlisten);
     mockOnClaudeTerminalDetected.mockResolvedValue(unlisten);
+    mockOnClaudeMessageChanged.mockResolvedValue(unlisten);
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
   });

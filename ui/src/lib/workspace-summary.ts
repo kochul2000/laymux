@@ -81,6 +81,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     outputActive: t.outputActive,
     activity: t.activity,
     title: t.title,
+    claudeMessage: t.claudeMessage,
   };
 }
 
@@ -126,6 +127,7 @@ export function computeWorkspaceSummary(
       activity: t.activity,
       outputActive: t.outputActive ?? false,
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
+      claudeMessage: t.claudeMessage,
     })),
   };
 }
