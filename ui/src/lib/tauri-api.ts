@@ -597,6 +597,7 @@ export interface TerminalTitleChangedData {
   terminalId: string;
   title: string;
   interactiveApp: string | null;
+  notifyGateArmed: boolean;
 }
 
 export function onTerminalTitleChanged(

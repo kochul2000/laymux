@@ -157,12 +157,18 @@ pub fn create_terminal_session(
             // Emit structured title change event (OSC 0/2) for frontend activity detection
             if event.code == 0 || event.code == 2 {
                 let interactive_app = activity::detect_interactive_app_from_title(&event.data);
+                let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                    terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
+                } else {
+                    false
+                };
                 let _ = app_clone.emit(
                     EVENT_TERMINAL_TITLE_CHANGED,
                     serde_json::json!({
                         "terminalId": terminal_id,
                         "title": event.data,
                         "interactiveApp": interactive_app,
+                        "notifyGateArmed": notify_gate_armed,
                     }),
                 );
             }

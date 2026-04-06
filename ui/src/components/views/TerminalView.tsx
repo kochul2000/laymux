@@ -25,7 +25,7 @@ import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { loadTerminalOutputCache } from "@/lib/tauri-api";
@@ -39,19 +39,6 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 
 /** Notify gate fallback timeout — only used for output idle detector gating. */
 const NOTIFY_GATE_FALLBACK_MS = 3000;
-
-/** Resolve the workspace ID for a terminal instance (for notifications). */
-function resolveWorkspaceId(terminalId: string): string {
-  const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
-  const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
-  if (inst?.workspaceId) return inst.workspaceId;
-  // Fall back: find workspace by syncGroup ID match
-  if (inst?.syncGroup) {
-    const ws = workspaces.find((w) => w.id === inst.syncGroup);
-    if (ws) return ws.id;
-  }
-  return activeWorkspaceId;
-}
 
 // Stagger WebGL context creation to prevent WebView2 GPU process crash.
 // Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.

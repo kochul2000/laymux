@@ -18,10 +18,6 @@ pub enum OscCondition {
     ExitCodeNotEq(String),
     /// Matches when the command starts with any of the given prefixes.
     CommandStartsWith(Vec<String>),
-    /// Matches when the message starts with the given prefix.
-    MessageStartsWith(String),
-    /// Negation of an inner condition.
-    Not(Box<OscCondition>),
 }
 
 impl OscCondition {
@@ -42,8 +38,6 @@ impl OscCondition {
                     && event.param.as_deref() == Some("E")
                     && prefixes.iter().any(|p| event.data.starts_with(p))
             }
-            OscCondition::MessageStartsWith(prefix) => event.data.starts_with(prefix),
-            OscCondition::Not(inner) => !inner.evaluate(event),
         }
     }
 }
@@ -266,8 +260,13 @@ pub fn extract_notify_message(event: &OscEvent) -> String {
 
 /// Extract git branch from a git switch/checkout command.
 /// e.g., "git switch main" → "main", "git checkout -b feature" → "feature"
+/// Ignores file paths after `--` (e.g., "git checkout -- file.txt" → None).
 pub fn extract_branch_from_command(command: &str) -> Option<String> {
     let parts: Vec<&str> = command.split_whitespace().collect();
+    // "git checkout -- file.txt" is a file restore, not a branch switch
+    if parts.contains(&"--") {
+        return None;
+    }
     parts.last().map(|s| s.to_string())
 }
 
@@ -320,22 +319,6 @@ mod tests {
 
         let other = make_event(133, Some("E"), "cargo build");
         assert!(!cond.evaluate(&other));
-    }
-
-    #[test]
-    fn condition_message_starts_with() {
-        let event = make_event(9, None, "9;C:\\Users");
-        assert!(OscCondition::MessageStartsWith("9;".into()).evaluate(&event));
-
-        let notif = make_event(9, None, "Build complete");
-        assert!(!OscCondition::MessageStartsWith("9;".into()).evaluate(&notif));
-    }
-
-    #[test]
-    fn condition_not() {
-        let event = make_event(9, None, "Build complete");
-        let cond = OscCondition::Not(Box::new(OscCondition::MessageStartsWith("9;".into())));
-        assert!(cond.evaluate(&event));
     }
 
     #[test]
@@ -494,6 +477,19 @@ mod tests {
         assert_eq!(
             extract_branch_from_command("git checkout -b feature/login"),
             Some("feature/login".into())
+        );
+    }
+
+    #[test]
+    fn extract_branch_ignores_file_restore() {
+        // "git checkout -- file.txt" is a file restore, not a branch switch
+        assert_eq!(
+            extract_branch_from_command("git checkout -- file.txt"),
+            None
+        );
+        assert_eq!(
+            extract_branch_from_command("git checkout -- src/main.rs"),
+            None
         );
     }
 

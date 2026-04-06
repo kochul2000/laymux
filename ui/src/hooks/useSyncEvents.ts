@@ -21,6 +21,7 @@ import {
   extractClaudeTaskDesc,
   getClaudeCompletionMessage,
 } from "@/lib/activity-detection";
+import { resolveWorkspaceId } from "@/lib/workspace-utils";
 
 /**
  * Hook that listens for sync events from the Tauri backend
@@ -28,17 +29,6 @@ import {
  */
 /** Debounce delay for persisting CWD changes to settings.json (ms). */
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
-
-/** Resolve the workspace ID for a terminal instance (for notifications). */
-function resolveWorkspaceId(terminalId: string): string {
-  const inst = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
-  const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
-  if (inst?.syncGroup) {
-    const ws = workspaces.find((w) => w.id === inst.syncGroup);
-    if (ws) return ws.id;
-  }
-  return activeWorkspaceId;
-}
 
 export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,14 +102,17 @@ export function useSyncEvents() {
             lastExitCode: 0,
             lastCommandAt: Date.now(),
           });
-          const message = getClaudeCompletionMessage(prevTitle, data.title);
-          const wsId = resolveWorkspaceId(data.terminalId);
-          useNotificationStore.getState().addNotification({
-            terminalId: data.terminalId,
-            workspaceId: wsId,
-            message,
-            level: "success",
-          });
+          // Only emit notification when notify gate is armed (prevents shell-init spam)
+          if (data.notifyGateArmed) {
+            const message = getClaudeCompletionMessage(prevTitle, data.title);
+            const wsId = resolveWorkspaceId(data.terminalId);
+            useNotificationStore.getState().addNotification({
+              terminalId: data.terminalId,
+              workspaceId: wsId,
+              message,
+              level: "success",
+            });
+          }
         } else if (transition === "started") {
           const taskDesc = extractClaudeTaskDesc(data.title);
           updateInstanceInfo(data.terminalId, {
