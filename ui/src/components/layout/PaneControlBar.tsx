@@ -31,15 +31,13 @@ interface PaneControlBarProps {
 }
 
 // ─── Design tokens ───────────────────────────────────────
-const BAR_H = 28; // bar height in px
-const BTN_H = 22; // button height
-const BTN_MIN_W = 22; // icon-only button width
-const RADIUS = 2; // border radius
-
+const BAR_H = "var(--bar-h)";
+const BTN_H = "var(--btn-h)";
+const BTN_MIN_W = "var(--btn-min-w)";
 const barBg = "var(--bg-surface)";
-const barBgHover = "rgba(24,24,37,0.96)";
+const barBgHover = "var(--bar-bg-hover)";
 const borderClr = "var(--border)";
-const sepClr = "rgba(255,255,255,0.08)";
+const sepClr = "var(--separator-bg)";
 
 // ─── Shared Button ───────────────────────────────────────
 function BarBtn({
@@ -64,22 +62,15 @@ function BarBtn({
       data-testid={testId}
       onClick={onClick}
       title={title}
-      className="flex shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[11px]"
+      className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[11px]"
       style={{
         height: BTN_H,
         minWidth: BTN_MIN_W,
-        background: "transparent",
         color: danger ? "var(--red)" : active ? "var(--accent)" : "var(--text-secondary)",
         border: "none",
-        borderRadius: RADIUS,
-        transition: "background 0.1s",
+        borderRadius: "var(--radius-sm)",
+        transition: "background var(--transition-fast)",
         ...style,
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = "transparent";
       }}
     >
       {children}
@@ -88,7 +79,7 @@ function BarBtn({
 }
 
 function Sep() {
-  return <div className="mx-1" style={{ width: 1, height: 14, background: sepClr }} />;
+  return <div className="ui-sep" />;
 }
 
 // ─── View selector ──────────────────────────────────────
@@ -130,7 +121,7 @@ function ViewSelect({
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
         border: `1px solid ${sepClr}`,
-        borderRadius: RADIUS,
+        borderRadius: "var(--radius-sm)",
         outline: "none",
         maxWidth: 110,
         colorScheme: "dark",
@@ -349,20 +340,15 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
       <button
         data-testid="pane-control-menu-btn"
         onClick={onExpand}
-        className="flex cursor-pointer items-center justify-center rounded"
+        className="hover-bg-strong flex cursor-pointer items-center justify-center rounded"
         style={{
           width: BTN_MIN_W,
           height: BTN_MIN_W,
-          background: "rgba(0,0,0,0.4)",
+          background: "var(--backdrop-light)",
           color: "var(--text-secondary)",
           border: `1px solid ${borderClr}`,
-          borderRadius: RADIUS,
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "var(--bg-overlay)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.4)";
+          borderRadius: "var(--radius-sm)",
+          transition: "background var(--transition-fast)",
         }}
         title="Expand control bar"
       >
@@ -397,9 +383,8 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
       {isPinned && (
         <div
           data-testid="pane-control-bar"
-          className="flex shrink-0 items-center"
+          className="ui-toolbar shrink-0"
           style={{
-            height: BAR_H,
             background: barBg,
             borderBottom: `1px solid ${borderClr}`,
           }}
@@ -423,7 +408,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
               backdropFilter: "blur(8px)",
               borderBottom: `1px solid ${sepClr}`,
               borderLeft: `1px solid ${sepClr}`,
-              borderRadius: `0 0 0 ${RADIUS + 2}px`,
+              borderRadius: "0 0 0 var(--radius-lg)",
             }}
           >
             <BarContent

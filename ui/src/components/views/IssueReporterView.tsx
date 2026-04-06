@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { FocusInput, inputStyle } from "@/components/ui/FormControls";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
@@ -82,15 +83,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const ir = useSettingsStore((s) => s.issueReporter);
   const appFont = useSettingsStore((s) => s.appFont);
 
-  const fieldStyle: React.CSSProperties = {
-    background: "var(--bg-base)",
-    color: "var(--text-primary)",
-    border: "1px solid var(--border)",
-    borderRadius: 3,
-    outline: "none",
-    colorScheme: "dark",
-  };
-
   return (
     <div
       data-testid="issue-reporter-view"
@@ -126,7 +118,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         style={{
           background: "var(--bg-overlay)",
           border: "1px solid var(--border)",
-          borderRadius: 3,
+          borderRadius: "var(--radius-md)",
         }}
       >
         {screenshotPath ? (
@@ -168,18 +160,11 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         )}
         <button
           onClick={captureScreenshot}
-          className="shrink-0 cursor-pointer rounded px-2.5 py-1 text-[10px] font-medium"
+          className="hover-bg shrink-0 cursor-pointer rounded px-2.5 py-1 text-[10px] font-medium"
           style={{
-            background: "transparent",
             color: "var(--accent)",
-            border: "1px solid rgba(137,180,250,0.2)",
-            borderRadius: 3,
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "rgba(137,180,250,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "transparent";
+            border: "1px solid var(--accent-20)",
+            borderRadius: "var(--radius-md)",
           }}
         >
           Recapture
@@ -190,7 +175,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       {showPreview && screenshotDataUrl && (
         <div
           className="mb-4 overflow-hidden rounded"
-          style={{ border: "1px solid var(--border)", borderRadius: 3 }}
+          style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}
         >
           <img
             src={screenshotDataUrl}
@@ -202,7 +187,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       )}
 
       {/* Title */}
-      <input
+      <FocusInput
         ref={titleRef}
         data-testid="issue-title"
         type="text"
@@ -210,7 +195,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Issue title"
         className="mb-3 w-full rounded px-3 py-2 text-xs"
-        style={fieldStyle}
       />
 
       {/* Body */}
@@ -222,7 +206,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         placeholder="Describe the issue..."
         className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 leading-relaxed"
         style={{
-          ...fieldStyle,
+          ...inputStyle,
           minHeight: 80,
           fontFamily: ir.fontFamily || appFont.face,
           fontSize: `${ir.fontSize || appFont.size}px`,
@@ -236,7 +220,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         style={{
           background: "var(--bg-overlay)",
           border: "1px solid var(--border)",
-          borderRadius: 3,
+          borderRadius: "var(--radius-md)",
         }}
       >
         <button
@@ -248,7 +232,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             background: state === "success" ? "var(--green)" : "var(--accent)",
             color: "var(--bg-base)",
             border: "none",
-            borderRadius: 3,
+            borderRadius: "var(--radius-md)",
             opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
             transition: "opacity 0.15s",
           }}
@@ -273,8 +257,8 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             style={{
               background: "transparent",
               color: "var(--accent)",
-              border: "1px solid rgba(137,180,250,0.2)",
-              borderRadius: 3,
+              border: "1px solid var(--accent-20)",
+              borderRadius: "var(--radius-md)",
             }}
           >
             New Report

@@ -85,29 +85,21 @@ export function GridEditToolbar() {
   const btnBase =
     "cursor-pointer rounded px-2 text-[11px] font-medium transition-colors duration-100";
 
-  const btnH = { height: 22 };
+  const btnH = { height: "var(--btn-h)" };
 
   const btnStyle: React.CSSProperties = {
     ...btnH,
-    border: "1px solid rgba(255,255,255,0.08)",
+    border: "1px solid var(--separator-bg)",
     color: "var(--text-secondary)",
     background: "transparent",
-    borderRadius: 2,
-  };
-
-  const hoverIn = (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)";
-  };
-  const hoverOut = (e: React.MouseEvent) => {
-    (e.currentTarget as HTMLElement).style.background = "transparent";
+    borderRadius: "var(--radius-sm)",
   };
 
   return (
     <div
       data-testid="grid-edit-toolbar"
-      className="flex items-center"
+      className="ui-toolbar"
       style={{
-        height: 28,
         background: "var(--bg-surface)",
         borderBottom: "1px solid var(--border)",
       }}
@@ -121,10 +113,7 @@ export function GridEditToolbar() {
           draggable={false}
         />
 
-        <div
-          className="mx-1"
-          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
-        />
+        <div className="ui-sep" />
 
         <button
           data-testid="export-new-btn"
@@ -135,10 +124,8 @@ export function GridEditToolbar() {
               flashSaved();
             }
           }}
-          className={btnBase}
+          className={`${btnBase} hover-bg`}
           style={btnStyle}
-          onMouseEnter={hoverIn}
-          onMouseLeave={hoverOut}
         >
           Export New
         </button>
@@ -242,10 +229,7 @@ export function GridEditToolbar() {
           {layoutMode === "horizontal" ? "H" : "V"}
         </button>
 
-        <div
-          className="mx-1"
-          style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }}
-        />
+        <div className="ui-sep" />
 
         <button
           data-testid="settings-gear-btn"
@@ -267,65 +251,42 @@ export function GridEditToolbar() {
         <button
           data-testid="window-minimize"
           onClick={handleMinimize}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title="Minimize"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
         >
           {"\uE921"}
         </button>
         <button
           data-testid="window-maximize"
           onClick={handleToggleMaximize}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title={maximized ? "Restore" : "Maximize"}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
         >
           {maximized ? "\uE923" : "\uE922"}
         </button>
         <button
           data-testid="window-close"
           onClick={handleClose}
-          className="flex h-full w-[46px] cursor-pointer items-center justify-center"
+          className="hover-bg-danger flex h-full w-[46px] cursor-pointer items-center justify-center"
           style={{
             color: "var(--text-secondary)",
-            background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
-            fontSize: 10,
+            fontSize: "var(--fs-xs)",
           }}
           title="Close"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#c42b1c";
-            e.currentTarget.style.color = "#fff";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
         >
           {"\uE8BB"}
         </button>

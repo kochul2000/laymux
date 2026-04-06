@@ -541,7 +541,7 @@ export function FileExplorerView({
         <div
           className="flex items-center shrink-0 px-3 border-b"
           style={{
-            height: 28,
+            height: "var(--bar-h)",
             borderColor: "var(--border)",
             background: "var(--bg-surface)",
           }}

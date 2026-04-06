@@ -153,11 +153,7 @@ function WorkspaceItem({
       onDragEnd={drag.onDragEnd}
       className="relative mb-0.5 cursor-pointer rounded py-2"
       style={{
-        background: isActive
-          ? "rgba(137,180,250,0.08)"
-          : hovered
-            ? "rgba(255,255,255,0.03)"
-            : "transparent",
+        background: isActive ? "var(--accent-08)" : hovered ? "var(--active-bg)" : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
         boxShadow:
           dropIndicator?.wsId === ws.id
@@ -203,7 +199,7 @@ function WorkspaceItem({
               className="shrink-0 rounded px-1.5 text-[9px]"
               style={{
                 color: "var(--text-secondary)",
-                background: "rgba(255,255,255,0.06)",
+                background: "var(--hover-bg)",
                 opacity: 0.7,
               }}
             >
@@ -334,8 +330,8 @@ function WorkspaceItem({
                       paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                       ...(isFocusedPane
                         ? {
-                            background: "rgba(137,180,250,0.12)",
-                            borderRadius: 3,
+                            background: "var(--accent-12)",
+                            borderRadius: "var(--radius-md)",
                             filter: "brightness(1.3)",
                           }
                         : {}),
@@ -373,9 +369,9 @@ function WorkspaceItem({
                             background:
                               ts.activity?.type === "interactiveApp"
                                 ? ts.activity?.name === "Claude"
-                                  ? "rgba(217,119,87,0.15)"
-                                  : "rgba(137,180,250,0.12)"
-                                : "rgba(255,255,255,0.04)",
+                                  ? "var(--orange-15)"
+                                  : "var(--accent-12)"
+                                : "var(--active-bg)",
                             minWidth: 52,
                             textAlign: "center",
                             display: "inline-block",
@@ -428,7 +424,7 @@ function WorkspaceItem({
                             border: ts.hasUnreadNotification
                               ? "1.5px solid var(--accent)"
                               : "1.5px solid transparent",
-                            borderRadius: 3,
+                            borderRadius: "var(--radius-md)",
                             padding: "0 1px",
                             lineHeight: 1,
                           }}
@@ -461,8 +457,8 @@ function WorkspaceItem({
                     paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
                     ...(isFocusedPane
                       ? {
-                          background: "rgba(137,180,250,0.08)",
-                          borderRadius: 3,
+                          background: "var(--accent-08)",
+                          borderRadius: "var(--radius-md)",
                           color: "var(--text-primary)",
                         }
                       : {}),
@@ -604,7 +600,7 @@ function LayoutCard({
       }}
       style={{
         border: `1px solid ${isDefault && hovered ? "var(--accent)" : hovered ? "var(--text-secondary)" : "transparent"}`,
-        background: hovered ? "rgba(137,180,250,0.08)" : "transparent",
+        background: hovered ? "var(--accent-08)" : "transparent",
         transition: "all 0.15s",
         opacity: hovered ? 1 : 0.85,
       }}
@@ -663,7 +659,7 @@ function LayoutCard({
               className="shrink-0 rounded-sm px-1 text-[8px] uppercase tracking-wider"
               style={{
                 color: "var(--accent)",
-                background: "rgba(137,180,250,0.12)",
+                background: "var(--accent-12)",
                 lineHeight: "14px",
               }}
             >
@@ -951,7 +947,7 @@ export function WorkspaceSelectorView() {
           className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[9px]"
           style={{
             color: "var(--text-secondary)",
-            background: "rgba(255,255,255,0.04)",
+            background: "var(--active-bg)",
             border: "none",
             opacity: 0.7,
           }}
@@ -1093,7 +1089,7 @@ export function WorkspaceSelectorView() {
         style={{
           borderTop: "1px solid var(--border)",
           color: notifBtnHovered ? "var(--text-primary)" : "var(--text-secondary)",
-          background: notifBtnHovered ? "rgba(255,255,255,0.03)" : "var(--bg-surface)",
+          background: notifBtnHovered ? "var(--active-bg)" : "var(--bg-surface)",
           transition: "all 0.15s",
         }}
       >

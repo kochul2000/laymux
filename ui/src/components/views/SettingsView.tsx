@@ -19,24 +19,11 @@ import {
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
+import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
 
-// -- Shared styles --
-const inputCls = "w-full rounded px-2 py-1.5 text-[13px]";
-const inputStyle: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  background: "var(--bg-base)",
-  color: "var(--text-primary)",
-  outline: "none",
-  transition: "border-color 0.15s",
-  colorScheme: "dark",
-};
-const inputFocusStyle: React.CSSProperties = {
-  ...inputStyle,
-  border: "1px solid var(--accent)",
-};
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
-  borderRadius: "6px",
+  borderRadius: "var(--radius-lg)",
   border: "1px solid var(--border)",
 };
 
@@ -68,46 +55,6 @@ function SettingRow({
       </div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
-  );
-}
-
-/** Input wrapper that adds focus ring */
-function FocusInput(
-  props: React.InputHTMLAttributes<HTMLInputElement> & { inputStyle?: React.CSSProperties },
-) {
-  const [focused, setFocused] = useState(false);
-  const { inputStyle: customStyle, ...rest } = props;
-  return (
-    <input
-      {...rest}
-      style={focused ? { ...inputFocusStyle, ...customStyle } : { ...inputStyle, ...customStyle }}
-      onFocus={(e) => {
-        setFocused(true);
-        props.onFocus?.(e);
-      }}
-      onBlur={(e) => {
-        setFocused(false);
-        props.onBlur?.(e);
-      }}
-    />
-  );
-}
-
-function FocusSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <select
-      {...props}
-      style={focused ? inputFocusStyle : inputStyle}
-      onFocus={(e) => {
-        setFocused(true);
-        props.onFocus?.(e);
-      }}
-      onBlur={(e) => {
-        setFocused(false);
-        props.onBlur?.(e);
-      }}
-    />
   );
 }
 
@@ -316,7 +263,7 @@ function FontFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -407,7 +354,7 @@ function AppearanceFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -547,7 +494,7 @@ function AdvancedFields({
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
         style={{
           color: "var(--accent)",
-          background: "rgba(137,180,250,0.1)",
+          background: "var(--accent-10)",
           border: "none",
           cursor: "pointer",
         }}
@@ -2148,10 +2095,10 @@ const kbdStyle: React.CSSProperties = {
   background: "var(--bg-surface)",
   border: "1px solid var(--border)",
   borderBottom: "2px solid var(--border)",
-  borderRadius: 3,
+  borderRadius: "var(--radius-md)",
   padding: "2px 8px",
   fontFamily: "'Consolas', monospace",
-  fontSize: 11,
+  fontSize: "var(--fs-sm)",
   color: "var(--text-primary)",
   whiteSpace: "nowrap" as const,
   display: "inline-block",
@@ -2252,7 +2199,7 @@ function KeybindingsSection() {
               <div
                 className="flex items-center gap-3 px-3 py-1.5"
                 style={{
-                  background: isEditing ? "rgba(137,180,250,0.06)" : "transparent",
+                  background: isEditing ? "var(--accent-06)" : "transparent",
                   borderLeft: isOverridden ? "2px solid var(--accent)" : "2px solid transparent",
                 }}
               >
@@ -2284,7 +2231,7 @@ function KeybindingsSection() {
                       outline: "none",
                       minWidth: 120,
                       fontFamily: "'Consolas', monospace",
-                      fontSize: 11,
+                      fontSize: "var(--fs-sm)",
                     }}
                   >
                     {capturedKeys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
@@ -2368,7 +2315,7 @@ function KeybindingsSection() {
                   outline: "none",
                   minWidth: 120,
                   fontFamily: "'Consolas', monospace",
-                  fontSize: 11,
+                  fontSize: "var(--fs-sm)",
                 }}
               >
                 {kb.keys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
@@ -2607,7 +2554,7 @@ export function SettingsView() {
       background: isActive
         ? "var(--bg-overlay)"
         : isHover
-          ? "rgba(255,255,255,0.03)"
+          ? "var(--hover-bg-subtle)"
           : "transparent",
       color: isActive ? "var(--accent)" : "var(--text-primary)",
       borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
@@ -2640,7 +2587,7 @@ export function SettingsView() {
               color: "var(--text-secondary)",
               background: "transparent",
               border: "1px solid var(--border)",
-              borderRadius: 3,
+              borderRadius: "var(--radius-md)",
               cursor: "pointer",
               opacity: 0.7,
             }}
@@ -2857,7 +2804,7 @@ export function SettingsView() {
                 border: "1px solid var(--border)",
                 cursor: dirty ? "pointer" : "default",
                 transition: "all 0.15s",
-                borderRadius: 4,
+                borderRadius: "var(--radius-md)",
                 opacity: dirty ? 1 : 0.4,
               }}
             >
@@ -2879,7 +2826,7 @@ export function SettingsView() {
                 border: "none",
                 cursor: dirty ? "pointer" : "default",
                 transition: "all 0.15s",
-                borderRadius: 4,
+                borderRadius: "var(--radius-md)",
                 opacity: dirty ? 1 : 0.4,
               }}
             >
