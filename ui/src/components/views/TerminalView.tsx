@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
-import { createWrappedLinkProvider } from "@/lib/wrapped-link-provider";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -164,12 +165,22 @@ export function TerminalView({
 
     const fitAddon = new FitAddon();
     fitAddonRef.current = fitAddon;
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      openExternal(uri).catch(() => {});
+    });
+
     terminal.loadAddon(fitAddon);
-    terminal.registerLinkProvider(
-      createWrappedLinkProvider(terminal, (uri) => {
-        openExternal(uri).catch(() => {});
-      }),
-    );
+    terminal.loadAddon(webLinksAddon);
+
+    // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth)
+    const { convenience: convInit } = useSettingsStore.getState();
+    if (convInit.smartLinkJoin) {
+      terminal.registerLinkProvider(
+        createIndentedLinkProvider(terminal, (uri) => {
+          openExternal(uri).catch(() => {});
+        }),
+      );
+    }
 
     terminalRef.current = terminal;
 

@@ -1152,6 +1152,34 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Smart Link Join toggle */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Smart Link Join
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              인덴트된 여러 줄 URL을 하나의 클릭 가능한 링크로 감지
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="smart-link-join-toggle"
+                type="checkbox"
+                checked={convenience.smartLinkJoin}
+                onChange={(e) => updateConvenience({ smartLinkJoin: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.smartLinkJoin ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Copy On Select toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">

@@ -416,6 +416,9 @@ pub struct ConvenienceSettings {
     /// Smart remove line break: rejoin URLs split across lines when pasting.
     #[serde(default = "default_true")]
     pub smart_remove_line_break: bool,
+    /// Smart link join: detect indented multi-line URLs and make them clickable as a single link.
+    #[serde(default = "default_true")]
+    pub smart_link_join: bool,
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).
     #[serde(default = "default_true")]
     pub large_paste_warning: bool,
@@ -433,6 +436,7 @@ impl Default for ConvenienceSettings {
             dock_arrow_nav: true,
             smart_remove_indent: true,
             smart_remove_line_break: true,
+            smart_link_join: true,
             large_paste_warning: true,
         }
     }

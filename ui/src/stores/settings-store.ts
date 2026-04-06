@@ -82,6 +82,8 @@ export interface ConvenienceSettings {
   smartRemoveIndent: boolean;
   /** Rejoin URLs split across lines when pasting. */
   smartRemoveLineBreak: boolean;
+  /** Detect indented multi-line URLs and make them clickable as a single link. */
+  smartLinkJoin: boolean;
   /** Show a confirmation dialog when pasting large text. */
   largePasteWarning: boolean;
 }
@@ -709,6 +711,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     dockArrowNav: true,
     smartRemoveIndent: true,
     smartRemoveLineBreak: true,
+    smartLinkJoin: true,
     largePasteWarning: true,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
@@ -894,6 +897,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           dockArrowNav: true,
           smartRemoveIndent: true,
           smartRemoveLineBreak: true,
+          smartLinkJoin: true,
           largePasteWarning: true,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
