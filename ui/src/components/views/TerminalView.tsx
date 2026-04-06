@@ -23,7 +23,7 @@ import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme"
 import { processOscInOutput, type NotifyGate } from "@/hooks/useOscHooks";
 import { getPresetHooks } from "@/lib/osc-presets";
 import type { OscHook } from "@/lib/osc-parser";
-import { applySmartTextTransforms } from "@/lib/smart-text";
+import { transformPasteContent } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
@@ -198,13 +198,10 @@ export function TerminalView({
           smartPaste(convenience.pasteImageDir, profile)
             .then((result) => {
               if (result.pasteType !== "none" && result.content) {
-                const content =
-                  result.pasteType === "text"
-                    ? applySmartTextTransforms(result.content, {
-                        removeIndent: convenience.smartRemoveIndent,
-                        removeLineBreak: convenience.smartRemoveLineBreak,
-                      })
-                    : result.content;
+                const content = transformPasteContent(result.content, result.pasteType, {
+                  removeIndent: convenience.smartRemoveIndent,
+                  removeLineBreak: convenience.smartRemoveLineBreak,
+                });
                 terminal.paste(content);
               }
             })
@@ -478,13 +475,10 @@ export function TerminalView({
         smartPaste(conv.pasteImageDir, profile)
           .then((result) => {
             if (result.pasteType !== "none" && result.content) {
-              const content =
-                result.pasteType === "text"
-                  ? applySmartTextTransforms(result.content, {
-                      removeIndent: conv.smartRemoveIndent,
-                      removeLineBreak: conv.smartRemoveLineBreak,
-                    })
-                  : result.content;
+              const content = transformPasteContent(result.content, result.pasteType, {
+                removeIndent: conv.smartRemoveIndent,
+                removeLineBreak: conv.smartRemoveLineBreak,
+              });
               writeToTerminal(instanceId, content);
             }
           })

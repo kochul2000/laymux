@@ -40,7 +40,10 @@ export function smartRemoveIndent(text: string): string {
 /**
  * Detect if the entire text (when all newlines are removed) forms a single URL.
  * If so, join lines by removing newlines.
- * Currently only applies to http:// and https:// URLs.
+ *
+ * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
+ * validate URL structure — in a clipboard-paste context, false positives
+ * (non-standard chars in a URL-shaped string) are harmless.
  */
 export function smartRemoveLineBreak(text: string): string {
   if (!text || !text.includes("\n")) return text;
@@ -63,11 +66,12 @@ export interface SmartTextOptions {
 
 /**
  * Apply smart text transforms in the correct order:
- * 1. Remove common indent
- * 2. Remove line breaks (for URLs)
+ * 1. Normalize \r\n to \n (Windows clipboard may contain CRLF)
+ * 2. Remove common indent
+ * 3. Remove line breaks (for URLs)
  */
 export function applySmartTextTransforms(text: string, options: SmartTextOptions): string {
-  let result = text;
+  let result = text.replace(/\r\n/g, "\n");
   if (options.removeIndent) {
     result = smartRemoveIndent(result);
   }
@@ -75,4 +79,18 @@ export function applySmartTextTransforms(text: string, options: SmartTextOptions
     result = smartRemoveLineBreak(result);
   }
   return result;
+}
+
+/**
+ * Transform paste result content using smart text settings.
+ * Centralises the "is it text? → apply transforms" logic shared by
+ * Ctrl+V and right-click paste paths.
+ */
+export function transformPasteContent(
+  content: string,
+  pasteType: string,
+  convenience: SmartTextOptions,
+): string {
+  if (pasteType !== "text") return content;
+  return applySmartTextTransforms(content, convenience);
 }

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { smartRemoveIndent, smartRemoveLineBreak, applySmartTextTransforms } from "./smart-text";
+import {
+  smartRemoveIndent,
+  smartRemoveLineBreak,
+  applySmartTextTransforms,
+  transformPasteContent,
+} from "./smart-text";
 
 // ============================================================
 // smartRemoveIndent
@@ -158,5 +163,36 @@ describe("applySmartTextTransforms", () => {
     expect(applySmartTextTransforms(input, { removeIndent: true, removeLineBreak: true })).toBe(
       "https://example.com/path",
     );
+  });
+
+  it("normalizes CRLF to LF before processing", () => {
+    const input = "  hello\r\n  world";
+    expect(applySmartTextTransforms(input, { removeIndent: true, removeLineBreak: false })).toBe(
+      "hello\nworld",
+    );
+  });
+
+  it("normalizes CRLF in URL before joining lines", () => {
+    const input = "https://example.com/pa\r\nth";
+    expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
+      "https://example.com/path",
+    );
+  });
+});
+
+// ============================================================
+// transformPasteContent
+// ============================================================
+describe("transformPasteContent", () => {
+  const opts = { removeIndent: true, removeLineBreak: true };
+
+  it("applies transforms for text paste type", () => {
+    const input = "  https://example.com/pa\n  th";
+    expect(transformPasteContent(input, "text", opts)).toBe("https://example.com/path");
+  });
+
+  it("returns content unchanged for non-text paste type", () => {
+    const input = "  some image data";
+    expect(transformPasteContent(input, "image", opts)).toBe("  some image data");
   });
 });
