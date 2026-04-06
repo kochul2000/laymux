@@ -382,7 +382,7 @@ export function TerminalView({
         );
         terminal.clearSelection();
       } else {
-        // No selection → paste directly to PTY (no bracketed paste = no paste highlight block)
+        // No selection → paste via terminal.paste() (same as Ctrl+V for bracketed paste support)
         const { convenience: conv } = useSettingsStore.getState();
         smartPaste(conv.pasteImageDir, profile)
           .then((result) => {
@@ -394,7 +394,7 @@ export function TerminalView({
               if (shouldBlockLargePaste(content, conv.largePasteWarning)) {
                 return;
               }
-              writeToTerminal(instanceId, content);
+              terminal.paste(content);
             }
           })
           .catch(() => {});
