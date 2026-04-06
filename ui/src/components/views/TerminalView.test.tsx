@@ -40,6 +40,7 @@ vi.mock("@xterm/xterm", () => ({
     clearSelection = mockClearSelection;
     dispose = vi.fn();
     loadAddon = vi.fn();
+    registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     cols = 80;
     rows = 24;
     options: Record<string, unknown> = {};
@@ -61,6 +62,14 @@ vi.mock("@xterm/addon-web-links", () => ({
       if (handler) capturedLinkHandler = handler;
     }
     dispose = vi.fn();
+  },
+}));
+
+let capturedIndentedLinkHandler: ((uri: string) => void) | null = null;
+vi.mock("@/lib/indented-link-provider", () => ({
+  createIndentedLinkProvider: (_terminal: unknown, onClickLink: (uri: string) => void) => {
+    capturedIndentedLinkHandler = onClickLink;
+    return { provideLinks: vi.fn() };
   },
 }));
 
@@ -126,6 +135,7 @@ describe("TerminalView", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     capturedKeyHandler = null;
     capturedLinkHandler = null;
+    capturedIndentedLinkHandler = null;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -757,6 +767,18 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com");
+      });
+    });
+
+    it("indented link handler calls openExternal when invoked", async () => {
+      render(<TerminalView instanceId="t-link3" profile="PowerShell" syncGroup="" />);
+
+      expect(capturedIndentedLinkHandler).not.toBeNull();
+
+      capturedIndentedLinkHandler!("https://example.com/indented-url");
+
+      await vi.waitFor(() => {
+        expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/indented-url");
       });
     });
   });

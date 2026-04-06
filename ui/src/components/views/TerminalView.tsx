@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -170,6 +171,16 @@ export function TerminalView({
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
+
+    // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth).
+    // Always registered; checks smartLinkJoin dynamically so setting changes apply immediately.
+    terminal.registerLinkProvider(
+      createIndentedLinkProvider(
+        terminal,
+        (uri) => openExternal(uri).catch(() => {}),
+        () => useSettingsStore.getState().convenience.smartLinkJoin,
+      ),
+    );
 
     terminalRef.current = terminal;
 
