@@ -40,6 +40,8 @@ export function WorkspaceArea() {
             key={ws.id}
             panes={ws.panes}
             isActive={isActive}
+            containerClassName="absolute inset-0"
+            containerStyle={{ display: isActive ? undefined : "none" }}
             testIdFn={(_pane, i) => (isActive ? `workspace-pane-${i}` : undefined)}
             isFocused={(paneId) =>
               isActive && focusedPaneIndex === idxOf(paneId) && focusedDock === null
