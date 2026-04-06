@@ -258,7 +258,17 @@ mod windows_tests {
         }
 
         unsafe {
-            assert_ne!(OpenClipboard(ptr::null_mut()), 0, "OpenClipboard failed");
+            // OpenClipboard can fail transiently when another process holds the
+            // clipboard (clipboard viewer, manager, etc.). Retry a few times.
+            let mut opened = false;
+            for _ in 0..20 {
+                if OpenClipboard(ptr::null_mut()) != 0 {
+                    opened = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            assert!(opened, "OpenClipboard failed after retries");
             EmptyClipboard();
 
             let hmem = GlobalAlloc(0x0002, dib.len()); // GMEM_MOVEABLE
