@@ -163,11 +163,7 @@ pub fn create_terminal_session(
                 && !event.data.contains("Claude Code")
             {
                 claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
-                // Remove from known_claude_terminals so is_claude_terminal_from_buffer()
-                // no longer reports this terminal as running Claude Code.
-                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                    known.remove(&terminal_id);
-                }
+                // Lock ordering: terminals (1) before known_claude_terminals (3)
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {
                         if session.claude_message.is_some() {
@@ -181,6 +177,11 @@ pub fn create_terminal_session(
                             );
                         }
                     }
+                }
+                // Remove from known_claude_terminals so is_claude_terminal_from_buffer()
+                // no longer reports this terminal as running Claude Code.
+                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
+                    known.remove(&terminal_id);
                 }
             }
 
