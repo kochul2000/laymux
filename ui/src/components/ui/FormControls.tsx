@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type React from "react";
 
 export const inputCls = "w-full rounded px-2 py-1.5 text-[13px] ui-focus-ring";
@@ -12,18 +13,20 @@ export const inputStyle: React.CSSProperties = {
 };
 
 /** Input with CSS focus ring */
-export function FocusInput(
-  props: React.InputHTMLAttributes<HTMLInputElement> & { inputStyle?: React.CSSProperties },
-) {
+export const FocusInput = forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement> & { inputStyle?: React.CSSProperties }
+>(function FocusInput(props, ref) {
   const { inputStyle: customStyle, ...rest } = props;
   return (
     <input
+      ref={ref}
       {...rest}
       className={`${inputCls} ${rest.className ?? ""}`}
       style={{ ...inputStyle, ...customStyle }}
     />
   );
-}
+});
 
 export function FocusSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
