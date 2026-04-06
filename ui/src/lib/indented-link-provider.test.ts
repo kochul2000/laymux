@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { findIndentedUrls, type IndentedLineInfo } from "./indented-link-provider";
+import { describe, it, expect, vi } from "vitest";
+import {
+  findIndentedUrls,
+  createIndentedLinkProvider,
+  type IndentedLineInfo,
+} from "./indented-link-provider";
 
 function makeLines(texts: string[], wrappedIndices: number[] = []): IndentedLineInfo[] {
   return texts.map((text, i) => ({
@@ -156,5 +160,27 @@ describe("findIndentedUrls", () => {
     expect(result).toHaveLength(1);
     // URL stops at the space before "to"
     expect(result[0].text).toBe("https://example.com/path?very-long-param=value");
+  });
+});
+
+describe("createIndentedLinkProvider", () => {
+  it("returns undefined when isEnabled returns false", () => {
+    const mockTerminal = {
+      buffer: {
+        active: {
+          length: 2,
+          getLine: (y: number) => ({
+            translateToString: () => ["  https://example.com/long-pa", "  ram=value"][y] ?? "",
+            isWrapped: false,
+          }),
+        },
+      },
+    };
+
+    const provider = createIndentedLinkProvider(mockTerminal as never, vi.fn(), () => false);
+
+    const callback = vi.fn();
+    provider.provideLinks(1, callback);
+    expect(callback).toHaveBeenCalledWith(undefined);
   });
 });

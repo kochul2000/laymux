@@ -62,7 +62,9 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     let endIdx = startIdx;
     for (let j = startIdx + 1; j < lines.length; j++) {
       const nextLine = lines[j];
-      // Stop at wrapped lines (different wrapping mechanism)
+      // Stop at soft-wrapped lines — these use a different wrapping mechanism
+      // (WebLinksAddon handles them). A mixed hard+soft wrap scenario is
+      // theoretically possible but extremely rare in practice.
       if (nextLine.isWrapped) break;
       const nextIndent = getIndent(nextLine.text);
       const nextContent = nextLine.text.slice(nextIndent);
@@ -126,7 +128,7 @@ function offsetToPos(
     const contentLen = lines[i].text.length - indent;
     if (remaining < contentLen || i === endIdx) {
       return {
-        x: indent + remaining + 1, // 1-based
+        x: indent + Math.min(remaining, contentLen - 1) + 1, // 1-based, clamped
         y: lines[i].lineNumber,
       };
     }
