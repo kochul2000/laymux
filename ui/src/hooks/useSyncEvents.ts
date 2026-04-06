@@ -99,7 +99,6 @@ export function useSyncEvents() {
 
         if (transition === "completed") {
           updateInstanceInfo(data.terminalId, {
-            lastExitCode: 0,
             lastCommandAt: Date.now(),
           });
           // Only emit notification when notify gate is armed (prevents shell-init spam)
@@ -117,7 +116,6 @@ export function useSyncEvents() {
           const taskDesc = extractClaudeTaskDesc(data.title);
           updateInstanceInfo(data.terminalId, {
             lastCommand: taskDesc || "Claude task",
-            lastExitCode: undefined,
             lastCommandAt: Date.now(),
           });
         }

@@ -1,7 +1,12 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
-import { parseClaudeMode, isRalphActive, type ClaudeMode } from "./activity-detection";
+import {
+  parseClaudeMode,
+  isClaudeIdle,
+  isRalphActive,
+  type ClaudeMode,
+} from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
@@ -9,6 +14,7 @@ export interface LastCommandInfo {
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   activity?: TerminalActivityInfo; // terminal activity state (shell/running/interactiveApp)
+  title?: string; // terminal title — used to detect Claude idle/working via isClaudeIdle()
 }
 
 export interface TerminalSummaryInfo {
@@ -72,6 +78,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
     activity: t.activity,
+    title: t.title,
   };
 }
 
@@ -161,6 +168,7 @@ export function computeWorkspaceSummaryFromBackend(
           timestamp: s.lastCommandAt,
           outputActive: s.outputActive,
           activity: s.activity as TerminalActivityInfo,
+          title: s.title ?? undefined,
         };
       }
     }
@@ -287,13 +295,6 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
   return `${shown}  +${ports.length - maxDisplay}`;
 }
 
-const CLAUDE_MODE_LABELS: Record<ClaudeMode, { suffix: string; icon: string }> = {
-  idle: { suffix: "", icon: "✳" },
-  working: { suffix: "", icon: "✶" },
-  plan: { suffix: " Plan", icon: "📋" },
-  danger: { suffix: " Danger", icon: "⚠" },
-};
-
 /** Get a display label for terminal activity state. */
 export function formatActivity(
   activity: TerminalActivityInfo | undefined,
@@ -314,15 +315,47 @@ export function formatActivity(
       if (activity.name === "Claude") {
         const mode = parseClaudeMode(title, activity);
         const ralph = isRalphActive(title);
-        const modeInfo = mode ? CLAUDE_MODE_LABELS[mode] : { suffix: "", icon: "" };
-        const label = `${modeInfo.icon} Claude${modeInfo.suffix}${ralph ? " ®" : ""}`.trim();
-        const color =
-          mode === "danger" ? "var(--red)" : mode === "plan" ? "var(--yellow)" : "#D97757";
-        return { label, color, claudeMode: mode, ralph };
+        return { label: "Claude", color: "#D97757", claudeMode: mode, ralph };
       }
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }
   }
+}
+
+export interface CommandStatus {
+  icon: string; // "⏳" | "✓" | "✗"
+  color: string; // CSS color value
+}
+
+/**
+ * Compute final command status display from raw terminal states.
+ *
+ * Each system writes its own raw state independently:
+ *   - OSC 133;D → exitCode (shell owns this)
+ *   - OSC 0/2  → title (used for Claude idle/working detection)
+ *   - activity  → shell/running/interactiveApp
+ *
+ * This function is the single place that collapses them into ✓/⏳/✗.
+ */
+export function computeCommandStatus(
+  exitCode: number | undefined,
+  outputActive: boolean | undefined,
+  activity: TerminalActivityInfo | undefined,
+  title: string | undefined,
+): CommandStatus {
+  // Interactive app: Claude uses title idle detection, others always ⏳
+  if (activity?.type === "interactiveApp") {
+    if (activity.name === "Claude" && title && isClaudeIdle(title)) {
+      return { icon: "✓", color: "var(--green)" };
+    }
+    return { icon: "⏳", color: "var(--yellow)" };
+  }
+
+  // Shell command
+  if (exitCode === undefined) return { icon: "⏳", color: "var(--yellow)" };
+  if (outputActive) return { icon: "⏳", color: "var(--yellow)" };
+  if (activity?.type === "running") return { icon: "⏳", color: "var(--yellow)" };
+  return exitCode === 0 ? { icon: "✓", color: "var(--green)" } : { icon: "✗", color: "var(--red)" };
 }
 
 export function formatRelativeTime(ts: number): string {

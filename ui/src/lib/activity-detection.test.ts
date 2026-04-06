@@ -341,8 +341,8 @@ describe("parseClaudeMode", () => {
     expect(parseClaudeMode("✳ Danger mode active", claudeActivity)).toBe("danger");
   });
 
-  it("returns idle when title is undefined", () => {
-    expect(parseClaudeMode(undefined, claudeActivity)).toBe("idle");
+  it("returns undefined when title is undefined", () => {
+    expect(parseClaudeMode(undefined, claudeActivity)).toBeUndefined();
   });
 });
 

@@ -16,6 +16,7 @@
   - 로깅: `eprintln!()` 대신 `tracing` 매크로 사용
 * **OSC 처리는 Rust 전용** (`ARCHITECTURE.md` §8.3 참조): OSC 이스케이프 시퀀스의 파싱(`osc.rs`), 훅 매칭(`osc_hooks.rs`), 액션 디스패치(`dispatch_osc_action`)는 모두 Rust PTY 콜백에서 단일 패스로 처리한다. 프론트엔드에서 OSC regex 파싱, 훅 조건 평가, IPC 라운드트립을 통한 OSC 처리를 하지 않는다. 프론트엔드는 Rust가 발행한 구조화 Tauri 이벤트(`terminal-title-changed`, `sync-cwd` 등)만 구독한다. 새 OSC 동작 추가 시 `osc_hooks.rs`에 프리셋을 추가하고 `dispatch_osc_action()`에서 분기한다.
 * **`color-mix()` 사용 금지**: `color-mix(in srgb, ...)` 등 현대 CSS 색상 함수는 html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. 반투명 accent가 필요하면 `var(--accent-50)`, `var(--accent-20)` 등 `index.css`에 정의된 CSS 변수를 사용한다.
+* **원시 상태 분리 → 계산 함수로 표시 도출**: 여러 시스템(OSC 133, 타이틀 변경 등)이 관여하는 상태를 표시할 때, 각 시스템은 자기 원시 상태만 독립적으로 저장하고 하나의 공유 필드를 덮어쓰지 않는다. 최종 표시(아이콘, 색상 등)는 모든 원시 상태를 입력받는 단일 계산 함수에서 도출한다. 표시 규칙이 바뀌면 계산 함수만 수정한다.
 * **CWD는 모든 설계의 핵심**: CWD(현재 작업 디렉터리)는 SyncGroup을 통해 터미널 간 동기화되며, `terminalStore`에 중앙 관리된다. 새 View나 기능이 CWD 정보를 필요로 할 때 **백그라운드 셸을 생성하지 말고** `terminalStore`의 syncGroup CWD를 구독하여 사용한다. 파일 시스템 접근(디렉터리 목록 등)은 Rust 백엔드(`std::fs`)를 직접 호출한다.
 * **UI 코드 설계 원칙** (`ARCHITECTURE.md` §15 참조):
   - **CSS 변수 우선**: 모든 공통 값(색상, 간격, 반경, 폰트 크기, hover overlay)은 `index.css` `:root`에 CSS 변수로 정의. 하드코딩된 매직 넘버 금지.
