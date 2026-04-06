@@ -12,6 +12,9 @@ import {
 // convertFileSrc no longer needed — images are returned as data URLs
 import { shellEscape, joinPath, parentPath } from "@/lib/file-explorer-parse";
 import { TerminalView } from "./TerminalView";
+import { ViewShell } from "@/components/ui/ViewShell";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { ViewBody } from "@/components/ui/ViewBody";
 
 export interface FileExplorerViewProps {
   instanceId: string;
@@ -528,25 +531,15 @@ export function FileExplorerView({
 
   if (mode.type === "viewing") {
     return (
-      <div
+      <ViewShell
+        testId="file-explorer-view"
+        className="outline-none"
         ref={containerRef}
-        data-testid="file-explorer-view"
-        className="flex h-full w-full flex-col"
         tabIndex={-1}
-        style={{ outline: "none" }}
         onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
       >
-        {/* Viewer title bar */}
-        <div
-          className="flex items-center shrink-0 px-3 border-b"
-          style={{
-            height: "var(--bar-h)",
-            borderColor: "var(--border)",
-            background: "var(--bg-surface)",
-          }}
-          data-testid="file-explorer-viewer-titlebar"
-        >
+        <ViewHeader className="px-3" testId="file-explorer-viewer-titlebar">
           <span className="flex-1 text-xs truncate" style={{ color: "var(--text-primary)" }}>
             {mode.filePath}
           </span>
@@ -558,10 +551,9 @@ export function FileExplorerView({
           >
             ✕
           </button>
-        </div>
+        </ViewHeader>
 
-        {/* Viewer content */}
-        <div className="flex-1 overflow-auto" style={listStyle}>
+        <ViewBody style={listStyle}>
           {mode.viewerType === "terminal" && mode.command ? (
             <div className="h-full" data-testid="file-explorer-viewer-terminal">
               <TerminalView
@@ -610,33 +602,23 @@ export function FileExplorerView({
               Loading...
             </div>
           )}
-        </div>
-      </div>
+        </ViewBody>
+      </ViewShell>
     );
   }
 
   // --- Listing mode ---
   return (
-    <div
+    <ViewShell
       ref={containerRef}
-      data-testid="file-explorer-view"
-      className="flex h-full w-full flex-col"
+      testId="file-explorer-view"
+      className="outline-none"
       tabIndex={-1}
-      style={{ outline: "none" }}
       onKeyDown={handleKeyDown}
       onMouseDown={handleMouseDown}
       onContextMenu={handleContextMenu}
     >
-      {/* Path bar with back/forward buttons */}
-      <div
-        className="flex items-center shrink-0 px-1 border-b"
-        style={{
-          height: 28,
-          borderColor: "var(--border)",
-          background: "var(--bg-surface)",
-        }}
-        data-testid="file-explorer-path-bar"
-      >
+      <ViewHeader className="px-1" testId="file-explorer-path-bar">
         <button
           onClick={goBack}
           disabled={!canGoBack}
@@ -666,15 +648,9 @@ export function FileExplorerView({
         <span className="text-xs truncate ml-1" style={{ color: "var(--text-primary)" }}>
           {currentCwd || "..."}
         </span>
-      </div>
+      </ViewHeader>
 
-      {/* File list */}
-      <div
-        ref={listRef}
-        className="flex-1 overflow-auto"
-        style={listStyle}
-        data-testid="file-explorer-list"
-      >
+      <ViewBody ref={listRef} style={listStyle} testId="file-explorer-list">
         {loading ? (
           <div
             className="flex items-center justify-center h-full"
@@ -731,7 +707,7 @@ export function FileExplorerView({
             </div>
           ))
         )}
-      </div>
-    </div>
+      </ViewBody>
+    </ViewShell>
   );
 }

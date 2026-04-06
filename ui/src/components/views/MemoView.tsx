@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { splitParagraphs } from "@/lib/memo-paragraphs";
+import { ViewShell } from "@/components/ui/ViewShell";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { ViewBody } from "@/components/ui/ViewBody";
 
 const DEBOUNCE_MS = 300;
 
@@ -160,20 +163,13 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   );
 
   return (
-    <div data-testid="memo-view" className="flex h-full w-full flex-col">
-      <div
-        className="ui-toolbar shrink-0 px-2"
-        style={{
-          background: "var(--bg-surface)",
-          borderBottom: "1px solid var(--border)",
-          color: "var(--text-secondary)",
-          fontSize: "var(--fs-sm)",
-          fontWeight: 600,
-        }}
-      >
-        Memo
-      </div>
-      <div className="relative flex-1" onMouseLeave={handleMouseLeave}>
+    <ViewShell testId="memo-view">
+      <ViewHeader className="px-2" testId="memo-header">
+        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
+          Memo
+        </span>
+      </ViewHeader>
+      <ViewBody variant="full" onMouseLeave={handleMouseLeave}>
         <textarea
           ref={textareaRef}
           data-testid="memo-textarea"
@@ -204,8 +200,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
             fontSize={effectiveFontSize}
           />
         )}
-      </div>
-    </div>
+      </ViewBody>
+    </ViewShell>
   );
 }
 

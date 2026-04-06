@@ -43,8 +43,8 @@ describe("IssueReporterView", () => {
 
   it("applies default padding (8px) from settings", () => {
     render(<IssueReporterView />);
-    const view = screen.getByTestId("issue-reporter-view");
-    expect(view.style.padding).toBe("8px");
+    const body = screen.getByTestId("issue-reporter-body");
+    expect(body.style.padding).toBe("8px");
   });
 
   it("applies custom padding from settings", () => {
@@ -59,8 +59,8 @@ describe("IssueReporterView", () => {
       },
     });
     render(<IssueReporterView />);
-    const view = screen.getByTestId("issue-reporter-view");
-    expect(view.style.padding).toBe("20px 10px 5px 15px");
+    const body = screen.getByTestId("issue-reporter-body");
+    expect(body.style.padding).toBe("20px 10px 5px 15px");
   });
 
   it("disables submit button after successful submission", async () => {
