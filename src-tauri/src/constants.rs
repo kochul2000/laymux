@@ -13,6 +13,7 @@ pub const EVENT_CLAUDE_TERMINAL_DETECTED: &str = "claude-terminal-detected";
 pub const EVENT_AUTOMATION_REQUEST: &str = "automation-request";
 pub const EVENT_TERMINAL_CWD_CHANGED: &str = "terminal-cwd-changed";
 pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
+pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -68,6 +69,7 @@ mod tests {
             EVENT_AUTOMATION_REQUEST,
             EVENT_TERMINAL_CWD_CHANGED,
             EVENT_TERMINAL_TITLE_CHANGED,
+            EVENT_CLAUDE_MESSAGE_CHANGED,
         ];
         for name in events {
             assert!(!name.is_empty(), "Event name should not be empty");

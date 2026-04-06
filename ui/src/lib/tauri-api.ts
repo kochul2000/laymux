@@ -632,6 +632,7 @@ export interface TerminalSummaryResponse {
   activity: { type: "shell" } | { type: "running" } | { type: "interactiveApp"; name: string };
   outputActive: boolean;
   isClaude: boolean;
+  claudeMessage: string | null;
   unreadNotificationCount: number;
   latestNotification: TerminalNotificationResponse | null;
 }

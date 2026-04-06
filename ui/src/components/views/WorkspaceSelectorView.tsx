@@ -106,7 +106,13 @@ function WorkspaceItem({
 
   const cmdInfo = summary.lastCommand;
   const cmdStatus = cmdInfo
-    ? computeCommandStatus(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity, cmdInfo.title)
+    ? computeCommandStatus(
+        cmdInfo.exitCode,
+        cmdInfo.outputActive,
+        cmdInfo.activity,
+        cmdInfo.title,
+        cmdInfo.claudeMessage,
+      )
     : null;
 
   return (
@@ -287,7 +293,13 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdStatus = ts.lastCommand
-                  ? computeCommandStatus(ts.lastExitCode, ts.outputActive, ts.activity, ts.title)
+                  ? computeCommandStatus(
+                      ts.lastExitCode,
+                      ts.outputActive,
+                      ts.activity,
+                      ts.title,
+                      ts.claudeMessage,
+                    )
                   : null;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (
@@ -512,7 +524,7 @@ function WorkspaceItem({
               {cmdStatus?.icon}
             </span>
             <span className="truncate" style={{ color: "var(--text-secondary)" }}>
-              {formatCommand(cmdInfo.command)}
+              {formatCommand(cmdStatus?.text ?? cmdInfo.command, cmdStatus?.text ? 50 : 30)}
             </span>
             <span style={{ color: "var(--text-secondary)", opacity: 0.4 }}>
               · {formatRelativeTime(cmdInfo.timestamp)}

@@ -381,6 +381,7 @@ pub struct TerminalSummaryResponse {
     pub activity: TerminalActivity,
     pub output_active: bool,
     pub is_claude: bool,
+    pub claude_message: Option<String>,
     pub unread_notification_count: u32,
     pub latest_notification: Option<TerminalNotification>,
 }
@@ -444,6 +445,7 @@ pub fn get_terminal_summaries_inner(
             activity: state_info.activity,
             output_active: state_info.output_active,
             is_claude,
+            claude_message: session.claude_message.clone(),
             unread_notification_count: unread_count,
             latest_notification: latest_unread,
         });

@@ -746,6 +746,46 @@ describe("computeCommandStatus", () => {
     );
     expect(s.icon).toBe("✓");
   });
+
+  // Claude: claudeMessage → text field
+  it("returns claudeMessage as text for Claude working", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✶ fixing bug",
+      "모든 테스트 통과했습니다.",
+    );
+    expect(s.icon).toBe("⏳");
+    expect(s.text).toBe("모든 테스트 통과했습니다.");
+  });
+
+  it("returns claudeMessage as text for Claude idle", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✳ Claude Code",
+      "1235개 테스트 모두 통과했습니다.",
+    );
+    expect(s.icon).toBe("✓");
+    expect(s.text).toBe("1235개 테스트 모두 통과했습니다.");
+  });
+
+  it("returns undefined text for Claude without claudeMessage", () => {
+    const s = computeCommandStatus(
+      undefined,
+      false,
+      { type: "interactiveApp", name: "Claude" },
+      "✶ working",
+    );
+    expect(s.text).toBeUndefined();
+  });
+
+  it("returns undefined text for non-Claude commands", () => {
+    const s = computeCommandStatus(0, false, { type: "shell" }, undefined, "some message");
+    expect(s.text).toBeUndefined();
+  });
 });
 
 describe("formatRelativeTime", () => {

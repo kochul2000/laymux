@@ -15,6 +15,7 @@ export interface LastCommandInfo {
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   activity?: TerminalActivityInfo; // terminal activity state (shell/running/interactiveApp)
   title?: string; // terminal title — used to detect Claude idle/working via isClaudeIdle()
+  claudeMessage?: string; // latest white-● status message from Claude Code output
 }
 
 export interface TerminalSummaryInfo {
@@ -30,6 +31,7 @@ export interface TerminalSummaryInfo {
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
   hasUnreadNotification: boolean;
+  claudeMessage: string | undefined;
 }
 
 export interface WorkspaceSummary {
@@ -151,6 +153,7 @@ export function computeWorkspaceSummaryFromBackend(
     activity: s.activity as TerminalActivityInfo,
     outputActive: s.outputActive,
     hasUnreadNotification: s.unreadNotificationCount > 0,
+    claudeMessage: s.claudeMessage ?? undefined,
   }));
 
   // Workspace-level aggregation
@@ -169,6 +172,7 @@ export function computeWorkspaceSummaryFromBackend(
           outputActive: s.outputActive,
           activity: s.activity as TerminalActivityInfo,
           title: s.title ?? undefined,
+          claudeMessage: s.claudeMessage ?? undefined,
         };
       }
     }
@@ -325,6 +329,7 @@ export function formatActivity(
 export interface CommandStatus {
   icon: string; // "⏳" | "✓" | "✗"
   color: string; // CSS color value
+  text?: string; // display text override (e.g., Claude ● message)
 }
 
 /**
@@ -342,11 +347,15 @@ export function computeCommandStatus(
   outputActive: boolean | undefined,
   activity: TerminalActivityInfo | undefined,
   title: string | undefined,
+  claudeMessage?: string,
 ): CommandStatus {
   // Interactive app: Claude uses title idle detection, others always ⏳
   if (activity?.type === "interactiveApp") {
     if (activity.name === "Claude" && title && isClaudeIdle(title)) {
-      return { icon: "✓", color: "var(--green)" };
+      return { icon: "✓", color: "var(--green)", text: claudeMessage };
+    }
+    if (activity.name === "Claude") {
+      return { icon: "⏳", color: "var(--yellow)", text: claudeMessage };
     }
     return { icon: "⏳", color: "var(--yellow)" };
   }

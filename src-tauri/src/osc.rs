@@ -140,6 +140,108 @@ fn extract_osc_param(code: u16, raw: &str) -> (Option<String>, String) {
     }
 }
 
+// ── Claude Code white-● message extraction ──
+
+/// UTF-8 bytes for ● (U+25CF BLACK CIRCLE)
+const BULLET: [u8; 3] = [0xe2, 0x97, 0x8f];
+
+/// ANSI SGR prefix for 256-color foreground 231 (bright white).
+/// Claude Code uses this color for user-facing status messages.
+const SGR_FG_231: &[u8] = b"\x1b[38;5;231m";
+
+/// Extract the last white-● status message from Claude Code terminal output.
+///
+/// Scans raw PTY bytes for `●` (U+25CF) preceded by the bright-white ANSI color
+/// (`\x1b[38;5;231m`). Returns the text content after `●` with ANSI codes stripped.
+/// Non-white ● lines (e.g., green tool-call markers) are skipped.
+pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
+    let mut last_message: Option<String> = None;
+    let mut pos = 0;
+
+    while pos + BULLET.len() <= data.len() {
+        // Find next ● in the byte stream
+        let bullet_pos = match data[pos..]
+            .windows(BULLET.len())
+            .position(|w| w == BULLET)
+        {
+            Some(p) => pos + p,
+            None => break,
+        };
+
+        // Check if preceded by SGR_FG_231
+        let is_white = bullet_pos >= SGR_FG_231.len()
+            && data[bullet_pos - SGR_FG_231.len()..bullet_pos] == *SGR_FG_231;
+
+        if is_white {
+            // Extract text from after ● to end of line (or end of data)
+            let text_start = bullet_pos + BULLET.len();
+            let line_end = data[text_start..]
+                .iter()
+                .position(|&b| b == b'\n' || b == b'\r')
+                .map(|p| text_start + p)
+                .unwrap_or(data.len());
+
+            let raw_text = String::from_utf8_lossy(&data[text_start..line_end]);
+            let stripped = strip_ansi(&raw_text).trim().to_string();
+            if !stripped.is_empty() {
+                last_message = Some(stripped);
+            }
+        }
+
+        pos = bullet_pos + BULLET.len();
+    }
+
+    last_message
+}
+
+/// Strip ANSI escape sequences (CSI and OSC) from a string, returning plain text.
+pub fn strip_ansi(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                // CSI: ESC [ ... (letter)
+                b'[' => {
+                    i += 2;
+                    while i < bytes.len() && !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'~')
+                    {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1; // skip final letter
+                    }
+                }
+                // OSC: ESC ] ... (BEL or ST)
+                b']' => {
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != 0x07 {
+                        if bytes[i] == 0x1b {
+                            i += 1; // skip ST's ESC
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1; // skip BEL or backslash
+                    }
+                }
+                _ => {
+                    i += 2; // skip unknown ESC + next byte
+                }
+            }
+        } else {
+            // Regular byte — include in output
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    result
+}
+
 /// OSC 7 needle: `ESC ] 7 ;`
 pub const OSC7_NEEDLE: &[u8] = &[0x1b, b']', b'7', b';'];
 
@@ -472,6 +574,104 @@ mod tests {
         assert_eq!(events[0].data, "First");
         assert_eq!(events[1].data, "Second");
         assert_eq!(events[2].data, "Third");
+    }
+
+    // ── extract_white_bullet_message tests ──
+
+    #[test]
+    fn white_bullet_basic() {
+        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mAll tests passed\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("All tests passed".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_ignores_green() {
+        // Green ●: \x1b[38;5;2m●
+        let data = b"\x1b[38;5;2m\xe2\x97\x8f Bash(cargo test)\n";
+        assert_eq!(extract_white_bullet_message(data), None);
+    }
+
+    #[test]
+    fn white_bullet_picks_last() {
+        let mut data = Vec::new();
+        // First white ●
+        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mFirst message\n");
+        // Green ● (should be skipped)
+        data.extend_from_slice(b"\x1b[38;5;2m\xe2\x97\x8f Bash(ls)\n");
+        // Second white ●
+        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mSecond message\n");
+        assert_eq!(
+            extract_white_bullet_message(&data),
+            Some("Second message".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_no_bullet_returns_none() {
+        let data = b"plain text without any bullets";
+        assert_eq!(extract_white_bullet_message(data), None);
+    }
+
+    #[test]
+    fn white_bullet_strips_ansi_in_content() {
+        // ● with ANSI codes inside the message text
+        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mAll \x1b[1m1235\x1b[m tests passed\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("All 1235 tests passed".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_with_cr_newline() {
+        // Real terminal output often uses \r\n or just \r
+        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mMessage here\r\n";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Message here".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_at_end_of_data() {
+        // No newline at end
+        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mFinal status";
+        assert_eq!(
+            extract_white_bullet_message(data),
+            Some("Final status".to_string())
+        );
+    }
+
+    #[test]
+    fn white_bullet_empty_after_bullet_skipped() {
+        // ● with only whitespace/ANSI reset after it
+        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[m  \n";
+        assert_eq!(extract_white_bullet_message(data), None);
+    }
+
+    // ── strip_ansi tests ──
+
+    #[test]
+    fn strip_ansi_basic_sgr() {
+        assert_eq!(strip_ansi("\x1b[1mBold\x1b[0m text"), "Bold text");
+    }
+
+    #[test]
+    fn strip_ansi_256_color() {
+        assert_eq!(strip_ansi("\x1b[38;5;231mWhite\x1b[m"), "White");
+    }
+
+    #[test]
+    fn strip_ansi_erase_line() {
+        assert_eq!(strip_ansi("text\x1b[K"), "text");
+    }
+
+    #[test]
+    fn strip_ansi_no_escapes() {
+        assert_eq!(strip_ansi("plain text"), "plain text");
     }
 
     #[test]

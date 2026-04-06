@@ -102,6 +102,10 @@ pub struct TerminalSession {
     /// Unix timestamp (millis) when last command status was updated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_command_at: Option<u64>,
+    /// Latest white-● status message from Claude Code output.
+    /// Raw value — display text is derived by frontend computation function.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_message: Option<String>,
     /// Notify gate: when false, notification actions are suppressed.
     /// Armed by OSC 133;C/E (user command execution) or fallback timer.
     /// Prevents shell-init OSC 133;D from flooding notifications on startup.
@@ -127,6 +131,7 @@ impl TerminalSession {
             last_command: None,
             last_exit_code: None,
             last_command_at: None,
+            claude_message: None,
             notify_gate_armed: false,
         }
     }
