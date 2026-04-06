@@ -122,12 +122,72 @@ pub fn detect_interactive_app_from_title(title: &str) -> Option<String> {
         return None;
     }
 
+    // Claude Code uses spinner/idle prefix characters when working/idle.
+    // Titles like "✶ Creating plan" or "✳ Claude Code" don't contain "Claude Code"
+    // as a word-boundary match, but the spinner prefix identifies them as Claude.
+    if is_claude_code_title(title) {
+        return Some("Claude".to_string());
+    }
+
     for &(pattern, name) in INTERACTIVE_APP_PATTERNS {
         if is_word_match(title, pattern) {
             return Some(name.to_string());
         }
     }
     None
+}
+
+/// Claude Code spinner/idle prefix characters.
+/// Idle: ✳ (U+2733). Working: ✶✻✽✢· (various spinners).
+const CLAUDE_TITLE_PREFIXES: &[char] = &['✳', '✶', '✻', '✽', '✢', '·'];
+
+/// Check if a terminal title belongs to Claude Code (for initial detection).
+///
+/// Claude Code sets titles in two patterns:
+/// 1. Contains "Claude Code" literally (initial title, idle with description)
+/// 2. Starts with a known spinner/idle prefix character (working state)
+///
+/// Note: On WSL, spinner characters may be garbled through encoding mismatch
+/// (CP949 passthrough). Use `is_claude_exit_title()` for exit detection when
+/// the terminal is already known to be running Claude Code.
+pub fn is_claude_code_title(title: &str) -> bool {
+    if title.contains("Claude Code") {
+        return true;
+    }
+    // Check for spinner/idle prefix: first char is a known Claude prefix
+    if let Some(first_char) = title.chars().next() {
+        if CLAUDE_TITLE_PREFIXES.contains(&first_char) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a title indicates Claude Code has exited (for terminals already
+/// detected as Claude).
+///
+/// Returns true only when the title clearly belongs to a shell, not Claude.
+/// Claude titles always start with non-ASCII characters (spinner/idle prefix),
+/// even when garbled by WSL encoding. Shell titles start with ASCII (paths,
+/// shell names like "bash", "PowerShell").
+///
+/// This avoids false exits from garbled spinner characters that `is_claude_code_title()`
+/// cannot match by clean Unicode comparison.
+pub fn is_claude_exit_title(title: &str) -> bool {
+    if title.is_empty() {
+        return false; // Transient state — don't trigger exit
+    }
+    if title.contains("Claude Code") {
+        return false;
+    }
+    // Non-ASCII first char = likely a (possibly garbled) spinner prefix → not exit
+    if let Some(first_char) = title.chars().next() {
+        if !first_char.is_ascii() {
+            return false;
+        }
+    }
+    // ASCII-starting title without "Claude Code" → shell/path title → Claude exited
+    true
 }
 
 /// Check if `pattern` appears in `text` at a word boundary.
@@ -356,6 +416,56 @@ mod tests {
             detect_interactive_app_from_title("vi"),
             Some("vim".to_string())
         );
+    }
+
+    #[test]
+    fn claude_spinner_title_detected() {
+        // Claude Code working state: spinner prefix without "Claude Code" text
+        assert_eq!(
+            detect_interactive_app_from_title("\u{2736} Creating plan"),
+            Some("Claude".to_string())
+        );
+        assert_eq!(
+            detect_interactive_app_from_title("\u{273B} Reading files"),
+            Some("Claude".to_string())
+        );
+        assert_eq!(
+            detect_interactive_app_from_title("\u{00B7} Updating code"),
+            Some("Claude".to_string())
+        );
+    }
+
+    #[test]
+    fn is_claude_code_title_patterns() {
+        assert!(is_claude_code_title("Claude Code"));
+        assert!(is_claude_code_title("\u{2733} Claude Code"));
+        assert!(is_claude_code_title("\u{2736} Creating plan"));
+        assert!(is_claude_code_title("\u{273B} Reading files"));
+        assert!(is_claude_code_title("\u{00B7} Updating code"));
+        // Non-Claude titles
+        assert!(!is_claude_code_title("bash"));
+        assert!(!is_claude_code_title("vim"));
+        assert!(!is_claude_code_title(""));
+    }
+
+    #[test]
+    fn is_claude_exit_title_patterns() {
+        // Shell/path titles → Claude exited
+        assert!(is_claude_exit_title("bash"));
+        assert!(is_claude_exit_title("D:/PycharmProjects/laymux"));
+        assert!(is_claude_exit_title("PowerShell"));
+        assert!(is_claude_exit_title("C:/Users"));
+        // Claude titles → not exit
+        assert!(!is_claude_exit_title("Claude Code"));
+        assert!(!is_claude_exit_title("\u{2733} Claude Code"));
+        assert!(!is_claude_exit_title("\u{2736} Creating plan"));
+        // Empty → not exit (transient)
+        assert!(!is_claude_exit_title(""));
+        // Non-ASCII first char (garbled spinner from WSL) → not exit
+        // U+C454 is a Korean char that appears when WSL garbles ✳ via CP949
+        assert!(!is_claude_exit_title("\u{C454} Understanding constants"));
+        // Use a valid non-ASCII char to simulate garbled spinner prefix
+        assert!(!is_claude_exit_title("\u{00E2} Some task description"));
     }
 
     #[test]

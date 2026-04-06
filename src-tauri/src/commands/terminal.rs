@@ -145,10 +145,12 @@ pub fn create_terminal_session(
                 }
             }
 
-            // Claude Code detection from OSC 0/2 titles
+            // Claude Code detection from OSC 0/2 titles.
+            // Uses is_claude_code_title() which recognizes both "Claude Code" text
+            // and spinner/idle prefix characters (✳✶✻✽✢·).
             if (event.code == 0 || event.code == 2)
                 && !claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && event.data.contains("Claude Code")
+                && activity::is_claude_code_title(&event.data)
             {
                 claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
@@ -157,12 +159,13 @@ pub fn create_terminal_session(
                 let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
             }
 
-            // Claude Code exit detection: title no longer contains "Claude Code"
-            // Clears stale claude_message and removes from known_claude_terminals
-            // so activity detection correctly returns to "shell".
+            // Claude Code exit detection: title clearly indicates a shell, not Claude.
+            // Uses is_claude_exit_title() which requires an ASCII-starting title,
+            // because garbled spinner characters (from WSL encoding mismatch)
+            // are non-ASCII and should not trigger a false exit.
             if (event.code == 0 || event.code == 2)
                 && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && !event.data.contains("Claude Code")
+                && activity::is_claude_exit_title(&event.data)
             {
                 claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
                 // Lock ordering: terminals (1) before known_claude_terminals (3)
@@ -187,9 +190,18 @@ pub fn create_terminal_session(
                 }
             }
 
-            // Emit structured title change event (OSC 0/2) for frontend activity detection
+            // Emit structured title change event (OSC 0/2) for frontend activity detection.
+            // When claude_detected is true but the title is garbled (WSL encoding),
+            // detect_interactive_app_from_title may fail. Override to "Claude" to
+            // prevent frontend from resetting activity to shell.
             if event.code == 0 || event.code == 2 {
-                let interactive_app = activity::detect_interactive_app_from_title(&event.data);
+                let interactive_app = if claude_detected.load(std::sync::atomic::Ordering::Relaxed)
+                    && !activity::is_claude_exit_title(&event.data)
+                {
+                    Some("Claude".to_string())
+                } else {
+                    activity::detect_interactive_app_from_title(&event.data)
+                };
                 let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
                     terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
                 } else {

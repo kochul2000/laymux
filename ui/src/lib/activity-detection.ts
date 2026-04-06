@@ -16,11 +16,41 @@ const INTERACTIVE_APPS: { title: string; command: string; name: string }[] = [
   { title: "ipython", command: "ipython", name: "ipython" },
 ];
 
+/** Claude Code spinner/idle prefix characters used in terminal titles. */
+const CLAUDE_TITLE_PREFIXES = ["✳", "✶", "✻", "✽", "✢", "·"];
+
+/** Check if a terminal title belongs to Claude Code (initial detection).
+ * Matches "Claude Code" text or spinner/idle prefix characters. */
+export function isClaudeCodeTitle(title: string): boolean {
+  if (title.includes("Claude Code")) return true;
+  const first = title.charAt(0);
+  return first !== "" && CLAUDE_TITLE_PREFIXES.includes(first);
+}
+
+/** Check if a title indicates Claude Code has exited (for already-detected terminals).
+ * Returns true only for clearly non-Claude titles (ASCII start, shell/path patterns).
+ * Garbled spinner chars from WSL encoding are non-ASCII and won't trigger false exit. */
+export function isClaudeExitTitle(title: string): boolean {
+  if (!title) return false;
+  if (title.includes("Claude Code")) return false;
+  const code = title.charCodeAt(0);
+  // Non-ASCII first char = likely garbled spinner → not exit
+  if (code > 127) return false;
+  // ASCII-starting title without "Claude Code" → shell/path → exited
+  return true;
+}
+
 /** Detect interactive app from terminal title (OSC 0/2). */
 export function detectActivityFromTitle(title: string): TerminalActivityInfo | undefined {
   // Skip path-like titles (e.g. "//wsl.localhost/.../python_projects")
   // These can false-positive on app names embedded in directory names
   if (title.includes("/") || title.includes("\\")) return undefined;
+
+  // Claude Code uses spinner/idle prefix characters when working/idle.
+  // Titles like "✶ Creating plan" don't contain "Claude Code" but the prefix identifies them.
+  if (isClaudeCodeTitle(title)) {
+    return { type: "interactiveApp", name: "Claude" };
+  }
 
   for (const app of INTERACTIVE_APPS) {
     // Use word boundary matching to avoid false positives

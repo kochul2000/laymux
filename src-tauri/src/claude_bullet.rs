@@ -60,14 +60,22 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
                     .rposition(|w| w == sgr_prefix);
                 if let Some(rel_pos) = sgr_pos {
                     let abs_sgr_end = search_start + rel_pos + sgr_prefix.len();
-                    // Verify gap between SGR end and marker is only whitespace/CSI
+                    // Verify gap between SGR end and marker contains only whitespace
+                    // and non-color CSI sequences (cursor movement, erase, etc.).
+                    // If another SGR (final byte 'm') appears in the gap, it overrides
+                    // the color — the marker's actual render color is NOT the one we found.
                     let gap = &data[abs_sgr_end..marker_pos];
                     let mut gi = 0;
                     while gi < gap.len() {
                         match gap[gi] {
                             b'\n' | b'\r' | b' ' => gi += 1,
                             0x1b if gi + 1 < gap.len() && gap[gi + 1] == b'[' => {
-                                gi = skip_csi_params(gap, gi + 2);
+                                let end = skip_csi_params(gap, gi + 2);
+                                // Check final byte: 'm' = SGR (color change) → invalidates
+                                if end > gi + 2 && gap[end - 1] == b'm' {
+                                    break 'color false;
+                                }
+                                gi = end;
                             }
                             _ => break 'color false,
                         }
@@ -448,6 +456,31 @@ mod tests {
         data.extend_from_slice(b"\x1b[1CCurrent message\n");
         let msg = extract_claude_status_message(&data).unwrap();
         assert_eq!(msg, "Current message");
+    }
+
+    #[test]
+    fn middot_with_intervening_sgr_rejected() {
+        // SGR 174 followed by another SGR (246) before the · marker.
+        // The · is rendered in color 246 (gray), not 174 (salmon).
+        // This pattern appears in Claude Code's "1 MCP server failed · /mcp" line.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m banner text \x1b[38;5;246m");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b" /mcp\x1b[m\n");
+        assert_eq!(extract_claude_status_message(&data), None);
+    }
+
+    #[test]
+    fn middot_with_cursor_csi_in_gap_accepted() {
+        // Cursor-movement CSI (not SGR) between SGR 174 and · should be allowed.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m\x1b[13;1H");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CCreating plan\n");
+        assert_eq!(
+            extract_claude_status_message(&data),
+            Some("Creating plan".to_string())
+        );
     }
 
     // ── strip_ansi tests ──

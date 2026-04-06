@@ -43,9 +43,24 @@ describe("detectActivityFromTitle", () => {
 
   it("does not false-positive on app names embedded in words", () => {
     expect(detectActivityFromTitle("Review current directory structure")).toBeUndefined();
-    expect(detectActivityFromTitle("✳ Review code changes")).toBeUndefined();
     expect(detectActivityFromTitle("navigation helper")).toBeUndefined();
     expect(detectActivityFromTitle("environment variables")).toBeUndefined();
+  });
+
+  it("detects Claude Code from spinner/idle prefix titles", () => {
+    // ✳ prefix = Claude idle, ✶ prefix = Claude working
+    expect(detectActivityFromTitle("✳ Review code changes")).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
+    expect(detectActivityFromTitle("✶ Creating plan")).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
+    expect(detectActivityFromTitle("✻ Reading files")).toEqual({
+      type: "interactiveApp",
+      name: "Claude",
+    });
   });
 
   it("detects app names with surrounding delimiters", () => {
