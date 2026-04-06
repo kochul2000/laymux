@@ -9,6 +9,7 @@ export interface LastCommandInfo {
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   activity?: TerminalActivityInfo; // terminal activity state (shell/running/interactiveApp)
+  title?: string; // terminal title — used to detect Claude idle/working via isClaudeIdle()
 }
 
 export interface TerminalSummaryInfo {
@@ -72,6 +73,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
     activity: t.activity,
+    title: t.title,
   };
 }
 
@@ -161,6 +163,7 @@ export function computeWorkspaceSummaryFromBackend(
           timestamp: s.lastCommandAt,
           outputActive: s.outputActive,
           activity: s.activity as TerminalActivityInfo,
+          title: s.title ?? undefined,
         };
       }
     }
@@ -287,13 +290,6 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
   return `${shown}  +${ports.length - maxDisplay}`;
 }
 
-const CLAUDE_MODE_LABELS: Record<ClaudeMode, { suffix: string; icon: string }> = {
-  idle: { suffix: "", icon: "✳" },
-  working: { suffix: "", icon: "✶" },
-  plan: { suffix: " Plan", icon: "📋" },
-  danger: { suffix: " Danger", icon: "⚠" },
-};
-
 /** Get a display label for terminal activity state. */
 export function formatActivity(
   activity: TerminalActivityInfo | undefined,
@@ -314,11 +310,7 @@ export function formatActivity(
       if (activity.name === "Claude") {
         const mode = parseClaudeMode(title, activity);
         const ralph = isRalphActive(title);
-        const modeInfo = mode ? CLAUDE_MODE_LABELS[mode] : { suffix: "", icon: "" };
-        const label = `${modeInfo.icon} Claude${modeInfo.suffix}${ralph ? " ®" : ""}`.trim();
-        const color =
-          mode === "danger" ? "var(--red)" : mode === "plan" ? "var(--yellow)" : "#D97757";
-        return { label, color, claudeMode: mode, ralph };
+        return { label: "Claude", color: "#D97757", claudeMode: mode, ralph };
       }
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }

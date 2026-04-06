@@ -18,6 +18,7 @@ import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import type { WorkspacePane } from "@/stores/types";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import { isClaudeIdle } from "@/lib/activity-detection";
 import { persistSession } from "@/lib/persist-session";
 
 /** Abbreviate profile/view labels to max 3 characters. */
@@ -45,11 +46,19 @@ function getCommandIcon(
   exitCode: number | undefined,
   outputActive?: boolean,
   activity?: TerminalActivityInfo,
+  title?: string,
 ): string {
   if (exitCode === undefined) return "⏳";
   if (outputActive) return "⏳";
-  // If terminal activity indicates something is still running, override error display
-  if (activity?.type === "running" || activity?.type === "interactiveApp") return "⏳";
+  if (activity?.type === "running") return "⏳";
+  if (activity?.type === "interactiveApp") {
+    // Claude: idle (✳) → show exit code icon, working → ⏳
+    if (activity.name === "Claude") {
+      if (!title || !isClaudeIdle(title)) return "⏳";
+    } else {
+      return "⏳";
+    }
+  }
   return exitCode === 0 ? "✓" : "✗";
 }
 
@@ -58,11 +67,18 @@ function getCommandColor(
   exitCode: number | undefined,
   outputActive?: boolean,
   activity?: TerminalActivityInfo,
+  title?: string,
 ): string {
   if (exitCode === undefined) return "var(--yellow)";
   if (outputActive) return "var(--yellow)";
-  // If terminal activity indicates something is still running, override error display
-  if (activity?.type === "running" || activity?.type === "interactiveApp") return "var(--yellow)";
+  if (activity?.type === "running") return "var(--yellow)";
+  if (activity?.type === "interactiveApp") {
+    if (activity.name === "Claude") {
+      if (!title || !isClaudeIdle(title)) return "var(--yellow)";
+    } else {
+      return "var(--yellow)";
+    }
+  }
   return exitCode === 0 ? "var(--green)" : "var(--red)";
 }
 
@@ -132,10 +148,10 @@ function WorkspaceItem({
 
   const cmdInfo = summary.lastCommand;
   const cmdIcon = cmdInfo
-    ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity)
+    ? getCommandIcon(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity, cmdInfo.title)
     : null;
   const cmdColor = cmdInfo
-    ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity)
+    ? getCommandColor(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.activity, cmdInfo.title)
     : undefined;
 
   return (
@@ -316,10 +332,10 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdIcon = ts.lastCommand
-                  ? getCommandIcon(ts.lastExitCode, ts.outputActive, ts.activity)
+                  ? getCommandIcon(ts.lastExitCode, ts.outputActive, ts.activity, ts.title)
                   : null;
                 const tCmdColor = ts.lastCommand
-                  ? getCommandColor(ts.lastExitCode, ts.outputActive, ts.activity)
+                  ? getCommandColor(ts.lastExitCode, ts.outputActive, ts.activity, ts.title)
                   : undefined;
                 const actInfo = formatActivity(ts.activity, ts.title);
                 return (

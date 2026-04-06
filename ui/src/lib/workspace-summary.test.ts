@@ -327,6 +327,22 @@ describe("getLastCommandForWorkspace — interactive app cleanup", () => {
     expect(getLastCommandForWorkspace(terminals)).toBeNull();
   });
 
+  it("includes terminal title in lastCommand for Claude idle detection", () => {
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        lastCommand: "Claude task",
+        lastExitCode: 0,
+        lastCommandAt: 200,
+        title: "✳ Claude Code",
+        activity: { type: "interactiveApp", name: "Claude" },
+      }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result?.title).toBe("✳ Claude Code");
+    expect(result?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
   it("returns other terminal command after one terminal's command state was cleared", () => {
     const terminals = [
       makeTerminal({
@@ -506,28 +522,29 @@ describe("formatActivity", () => {
 
   it("returns Claude brand color (#D97757) for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
-    expect(result.label).toContain("Claude");
+    expect(result.label).toBe("Claude");
     expect(result.color).toBe("#D97757");
   });
 
-  it("shows Claude mode from title", () => {
-    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Plan: approach");
-    expect(result.label).toContain("Plan");
-    expect(result.claudeMode).toBe("plan");
-    expect(result.color).toBe("var(--yellow)");
+  it("returns plain 'Claude' label regardless of title mode", () => {
+    const plan = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Plan: approach");
+    expect(plan.label).toBe("Claude");
+    expect(plan.claudeMode).toBe("plan");
+    expect(plan.color).toBe("#D97757");
+
+    const danger = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Danger mode");
+    expect(danger.label).toBe("Claude");
+    expect(danger.claudeMode).toBe("danger");
+
+    const idle = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Claude Code");
+    expect(idle.label).toBe("Claude");
+    expect(idle.claudeMode).toBe("idle");
   });
 
-  it("shows Claude danger mode from title", () => {
-    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Danger mode");
-    expect(result.label).toContain("Danger");
-    expect(result.claudeMode).toBe("danger");
-    expect(result.color).toBe("var(--red)");
-  });
-
-  it("shows Ralph indicator from title", () => {
+  it("tracks Ralph state without changing label", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
     expect(result.ralph).toBe(true);
-    expect(result.label).toContain("®");
+    expect(result.label).toBe("Claude");
   });
 });
 
