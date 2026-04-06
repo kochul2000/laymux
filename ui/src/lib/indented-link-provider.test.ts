@@ -101,4 +101,60 @@ describe("findIndentedUrls", () => {
     const result = findIndentedUrls(lines, 1);
     expect(result).toHaveLength(0);
   });
+
+  it("stops at an empty line", () => {
+    const lines = makeLines(["  https://example.com/path?very-long-pa", "", "  ram=value"]);
+    const result = findIndentedUrls(lines, 1);
+    expect(result).toHaveLength(0); // single line → ignored
+  });
+
+  it("handles tab indentation", () => {
+    const lines = makeLines([
+      "\thttps://example.com/path?very-long-par",
+      "\tam=value&another=data",
+    ]);
+    const result = findIndentedUrls(lines, 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe("https://example.com/path?very-long-param=value&another=data");
+  });
+
+  it("handles http:// scheme across indented lines", () => {
+    const lines = makeLines(["  http://example.com/very-long-path?par", "  am=value&end=true"]);
+    const result = findIndentedUrls(lines, 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe("http://example.com/very-long-path?param=value&end=true");
+  });
+
+  it("strips trailing URL delimiters (parentheses, quotes)", () => {
+    // URL followed by closing paren on the last continuation line
+    const lines = makeLines(["  (https://example.com/path?very-long-p", '  aram=value)"']);
+    const result = findIndentedUrls(lines, 1);
+    expect(result).toHaveLength(1);
+    // URL regex stops before ) and "
+    expect(result[0].text).toBe("https://example.com/path?very-long-param=value");
+  });
+
+  it("real-world Claude Code OAuth URL (4+ lines)", () => {
+    const lines = makeLines([
+      "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri",
+      "  =https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference+user%3A",
+      "  sessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload&code_challenge=M_9abywp-1WkuoWIZtP5ZOosVWRTuM05vLxN6s6Xbe8&code_ch",
+      "  allenge_method=S256&state=zbsbfsAvsyT1epOdDbFrGPwWr6N7YYtQ2VHdy7b8D8I",
+    ]);
+    const result = findIndentedUrls(lines, 2);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toContain("claude.com/cai/oauth/authorize");
+    expect(result[0].text).toContain("code_challenge_method=S256");
+    expect(result[0].text).toContain("state=zbsbfsAvsyT1epOdDbFrGPwWr6N7YYtQ2VHdy7b8D8I");
+    // Should be one continuous URL with no spaces
+    expect(result[0].text).not.toContain(" ");
+  });
+
+  it("handles URL ending mid-line with trailing text on last line", () => {
+    const lines = makeLines(["  https://example.com/path?very-long-pa", "  ram=value to continue"]);
+    const result = findIndentedUrls(lines, 1);
+    expect(result).toHaveLength(1);
+    // URL stops at the space before "to"
+    expect(result[0].text).toBe("https://example.com/path?very-long-param=value");
+  });
 });
