@@ -197,6 +197,15 @@ export function TerminalView({
           smartPaste(convenience.pasteImageDir, profile)
             .then((result) => {
               if (result.pasteType !== "none" && result.content) {
+                if (
+                  convenience.largePasteWarning &&
+                  result.content.length > 5120 &&
+                  !window.confirm(
+                    `붙여넣을 텍스트가 ${result.content.length.toLocaleString()}자입니다. 계속하시겠습니까?`,
+                  )
+                ) {
+                  return;
+                }
                 terminal.paste(result.content);
               }
             })
@@ -470,6 +479,15 @@ export function TerminalView({
         smartPaste(conv.pasteImageDir, profile)
           .then((result) => {
             if (result.pasteType !== "none" && result.content) {
+              if (
+                conv.largePasteWarning &&
+                result.content.length > 5120 &&
+                !window.confirm(
+                  `붙여넣을 텍스트가 ${result.content.length.toLocaleString()}자입니다. 계속하시겠습니까?`,
+                )
+              ) {
+                return;
+              }
               writeToTerminal(instanceId, result.content);
             }
           })

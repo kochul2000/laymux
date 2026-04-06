@@ -68,12 +68,19 @@ pub struct PtyHandle {
 
 impl PtyHandle {
     /// Write data (user input) to the PTY.
+    ///
+    /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and
+    /// flushed individually. ConPTY on Windows can silently truncate a single
+    /// oversized `write_all()` call, so chunking prevents paste data loss.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
         let mut writer = self.writer.lock_or_err()?;
-        writer
-            .write_all(data)
-            .map_err(|e| format!("Write error: {e}"))?;
-        writer.flush().map_err(|e| format!("Flush error: {e}"))
+        for chunk in data.chunks(PTY_WRITE_CHUNK_SIZE) {
+            writer
+                .write_all(chunk)
+                .map_err(|e| format!("Write error: {e}"))?;
+            writer.flush().map_err(|e| format!("Flush error: {e}"))?;
+        }
+        Ok(())
     }
 
     /// Get the child process ID.

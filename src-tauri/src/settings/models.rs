@@ -410,6 +410,9 @@ pub struct ConvenienceSettings {
     /// Allow Alt+Arrow to navigate into/out of dock areas.
     #[serde(default = "default_true")]
     pub dock_arrow_nav: bool,
+    /// Show a confirmation dialog when pasting large text (like Windows Terminal).
+    #[serde(default = "default_true")]
+    pub large_paste_warning: bool,
 }
 
 impl Default for ConvenienceSettings {
@@ -422,6 +425,7 @@ impl Default for ConvenienceSettings {
             scrollbar_style: "overlay".to_string(),
             dock_persist_state: true,
             dock_arrow_nav: true,
+            large_paste_warning: true,
         }
     }
 }

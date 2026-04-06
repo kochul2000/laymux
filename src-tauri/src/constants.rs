@@ -31,6 +31,10 @@ pub const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// notifications are evicted first. Unread notifications are never evicted.
 pub const MAX_NOTIFICATIONS: usize = 500;
 
+/// Maximum number of bytes to write to a PTY in a single `write_all()` call.
+/// ConPTY on Windows can silently truncate large writes; chunking prevents this.
+pub const PTY_WRITE_CHUNK_SIZE: usize = 1024;
+
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal
 /// title sequences even when OSC 133 markers have scrolled out.
