@@ -268,6 +268,8 @@ pub fn create_terminal_session(
             // Prepend up to 64 bytes from previous chunk to handle splits where
             // the marker color/char arrives in one chunk and text in the next.
             let combined: std::borrow::Cow<[u8]> = {
+                // Using lock().ok() instead of lock_or_err(): in PTY callback,
+                // a poisoned lock is non-fatal (graceful degradation, not an error path).
                 let prev = lookback_buf.lock().ok();
                 let prev_data = prev.as_ref().map(|b| b.as_slice()).unwrap_or(&[]);
                 if prev_data.is_empty() {
@@ -285,7 +287,7 @@ pub fn create_terminal_session(
                 buf.clear();
                 buf.extend_from_slice(&data[data.len() - keep..]);
             }
-            if let Some(msg) = claude_bullet::extract_white_bullet_message(&combined) {
+            if let Some(msg) = claude_bullet::extract_claude_status_message(&combined) {
                 let mut changed = false;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {

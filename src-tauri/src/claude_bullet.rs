@@ -8,6 +8,11 @@
 
 use crate::constants::BULLET_MESSAGE_SCAN_BYTES;
 
+/// Max bytes to search backward from a marker for its SGR color prefix.
+/// Covers the SGR sequence itself plus a few CSI cursor-position sequences
+/// that the TUI may insert between color and marker.
+const SGR_LOOKBACK_BYTES: usize = 50;
+
 /// Marker variants emitted by Claude Code for status messages.
 /// Each entry: (UTF-8 bytes of the marker char, SGR color prefix).
 const MARKERS: &[(&[u8], &[u8])] = &[
@@ -17,7 +22,7 @@ const MARKERS: &[(&[u8], &[u8])] = &[
     (&[0xe2, 0x97, 0x8f], b"\x1b[38;5;231m"),
 ];
 
-/// Extract the last status-marker message from Claude Code terminal output.
+/// Extract the last Claude Code status message from terminal output.
 ///
 /// Scans raw PTY bytes for known marker characters (`·` or `●`) preceded by their
 /// respective ANSI color codes. Returns the text content after the marker with
@@ -26,7 +31,7 @@ const MARKERS: &[(&[u8], &[u8])] = &[
 /// Claude Code uses TUI rendering with cursor-addressed output, so the message text
 /// may not be adjacent to the marker in the byte stream. We scan forward past cursor
 /// control sequences to find the text, stopping at spinner characters or color changes.
-pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
+pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
     let mut best: Option<(usize, String)> = None; // (position, message)
 
     for &(marker_bytes, sgr_prefix) in MARKERS {
@@ -42,9 +47,9 @@ pub fn extract_white_bullet_message(data: &[u8]) -> Option<String> {
 
             // Check if preceded by the expected SGR color. Between the SGR and the
             // marker, allow whitespace (\r, \n, space) and CSI sequences (e.g.,
-            // cursor positioning \x1b[13;1H). Search backwards up to 50 bytes.
+            // cursor positioning \x1b[13;1H).
             let has_color = 'color: {
-                let search_start = marker_pos.saturating_sub(50);
+                let search_start = marker_pos.saturating_sub(SGR_LOOKBACK_BYTES);
                 // Look for sgr_prefix in the window before the marker
                 let window = &data[search_start..marker_pos];
                 // Find the LAST occurrence of sgr_prefix in the window
@@ -138,9 +143,9 @@ fn skip_ansi_escape(bytes: &[u8], i: usize) -> (usize, Option<u8>) {
     }
 }
 
-/// Strip ANSI and extract message text for a ● bullet line.
+/// Strip ANSI and extract message text for a status marker line.
 /// Converts cursor-forward (`\x1b[nC`) to spaces, strips all other ANSI,
-/// and stops at spinner characters (✶✻✽✢) or another ● bullet.
+/// and stops at spinner characters (✶✻✽✢) or another marker (● / ·).
 fn strip_ansi_for_bullet(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let bytes = input.as_bytes();
@@ -203,99 +208,118 @@ pub fn strip_ansi(input: &str) -> String {
 mod tests {
     use super::*;
 
-    // ── extract_white_bullet_message tests ──
+    /// Legacy marker: ● (U+25CF BLACK CIRCLE)
+    const LEGACY_BULLET: &[u8] = &[0xe2, 0x97, 0x8f];
+    /// Current marker: · (U+00B7 MIDDLE DOT)
+    const MIDDOT: &[u8] = &[0xc2, 0xb7];
+
+    // ── Legacy marker (● U+25CF with SGR 231) tests ──
 
     #[test]
-    fn white_bullet_basic() {
-        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mAll tests passed\n";
+    fn legacy_bullet_basic() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mAll tests passed\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("All tests passed".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_ignores_green() {
-        // Green ●: \x1b[38;5;2m●
-        let data = b"\x1b[38;5;2m\xe2\x97\x8f Bash(cargo test)\n";
-        assert_eq!(extract_white_bullet_message(data), None);
+    fn legacy_bullet_ignores_green() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;2m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" Bash(cargo test)\n");
+        assert_eq!(extract_claude_status_message(&data), None);
     }
 
     #[test]
-    fn white_bullet_picks_last() {
+    fn legacy_bullet_picks_last() {
         let mut data = Vec::new();
-        // First white ●
-        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mFirst message\n");
-        // Green ● (should be skipped)
-        data.extend_from_slice(b"\x1b[38;5;2m\xe2\x97\x8f Bash(ls)\n");
-        // Second white ●
-        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mSecond message\n");
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mFirst message\n");
+        data.extend_from_slice(b"\x1b[38;5;2m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" Bash(ls)\n");
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mSecond message\n");
         assert_eq!(
-            extract_white_bullet_message(&data),
+            extract_claude_status_message(&data),
             Some("Second message".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_no_bullet_returns_none() {
-        let data = b"plain text without any bullets";
-        assert_eq!(extract_white_bullet_message(data), None);
+    fn no_marker_returns_none() {
+        let data = b"plain text without any markers";
+        assert_eq!(extract_claude_status_message(data), None);
     }
 
     #[test]
-    fn white_bullet_strips_ansi_in_content() {
-        // ● with ANSI codes inside the message text
-        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mAll \x1b[1m1235\x1b[m tests passed\n";
+    fn legacy_bullet_strips_ansi_in_content() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mAll \x1b[1m1235\x1b[m tests passed\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("All 1235 tests passed".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_with_cr_newline() {
-        // Real terminal output often uses \r\n or just \r
-        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mMessage here\r\n";
+    fn legacy_bullet_with_cr_newline() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mMessage here\r\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Message here".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_with_newline_gap() {
-        // Real pattern: SGR_FG_231 + \n + ● (newline between SGR and bullet)
-        let data = b"\x1b[38;5;231m\n\xe2\x97\x8f \x1b[mHostname is AMD9950\n";
+    fn legacy_bullet_with_newline_gap() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m\n");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mHostname is AMD9950\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Hostname is AMD9950".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_with_cr_gap() {
-        // Real pattern: SGR_FG_231 + \r + ● (carriage return between SGR and bullet)
-        let data = b"\x1b[38;5;231m\r\xe2\x97\x8f \x1b[mStatus update\n";
+    fn legacy_bullet_with_cr_gap() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m\r");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mStatus update\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Status update".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_tui_mode_cursor_addressed() {
-        // Real TUI pattern: ● followed by cursor movements, then text at different position
-        let legacy_bullet: &[u8] = &[0xe2, 0x97, 0x8f]; // ● U+25CF
+    fn legacy_bullet_tui_mode_cursor_addressed() {
         let mut data = Vec::new();
         data.extend_from_slice(b"\x1b[38;5;231m\r");
-        data.extend_from_slice(legacy_bullet);
+        data.extend_from_slice(LEGACY_BULLET);
         data.extend_from_slice(b"\x1b[m\x1b[1C\x1b[11X\x1b[11C\x1b[?2026h\x1b[?2026l\x1b[19;3H10");
         data.extend_from_slice("이고,".as_bytes());
         data.extend_from_slice(b"\x1b[1C");
         data.extend_from_slice("안녕하세요!".as_bytes());
         data.extend_from_slice(b"\x1b[38;5;174m\x1b[21;1H");
         data.extend_from_slice("✶ Cont".as_bytes());
-        let msg = extract_white_bullet_message(&data);
+        let msg = extract_claude_status_message(&data);
         assert!(msg.is_some(), "Should extract message from TUI output");
         let text = msg.unwrap();
         assert!(text.contains("10"), "Should contain '10': {text}");
@@ -303,47 +327,51 @@ mod tests {
             text.contains("안녕하세요"),
             "Should contain greeting: {text}"
         );
-        // Should NOT contain spinner
         assert!(!text.contains("Cont"), "Should not contain spinner text: {text}");
     }
 
     #[test]
-    fn white_bullet_at_end_of_data() {
-        // No newline at end
-        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mFinal status";
+    fn legacy_bullet_at_end_of_data() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mFinal status");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Final status".to_string())
         );
     }
 
     #[test]
-    fn white_bullet_empty_after_bullet_skipped() {
-        // ● with only whitespace/ANSI reset after it
-        let data = b"\x1b[38;5;231m\xe2\x97\x8f \x1b[m  \n";
-        assert_eq!(extract_white_bullet_message(data), None);
+    fn legacy_bullet_empty_after_marker_skipped() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[m  \n");
+        assert_eq!(extract_claude_status_message(&data), None);
     }
 
     #[test]
-    fn white_bullet_stops_at_separator_line() {
-        // ● message followed by ─── separator line (input area divider)
+    fn legacy_bullet_stops_at_separator_line() {
         let mut data = Vec::new();
         data.extend_from_slice(b"\x1b[38;5;231m\n");
-        data.extend_from_slice(&[0xe2, 0x97, 0x8f]); // ● U+25CF
+        data.extend_from_slice(LEGACY_BULLET);
         data.extend_from_slice(" \x1b[m메시지 텍스트\n".as_bytes());
         data.extend_from_slice("──────────────────\n".as_bytes());
         data.extend_from_slice("❯ ".as_bytes());
-        let msg = extract_white_bullet_message(&data).unwrap();
+        let msg = extract_claude_status_message(&data).unwrap();
         assert_eq!(msg, "메시지 텍스트");
         assert!(!msg.contains('─'), "Should not contain separator: {msg}");
     }
 
     #[test]
-    fn white_bullet_allows_normal_hyphen() {
-        // Normal hyphen-minus (-) in message should be preserved
-        let data = b"\x1b[38;5;231m\n\xe2\x97\x8f \x1b[mtest-result is 42\n";
+    fn legacy_bullet_allows_normal_hyphen() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;231m\n");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mtest-result is 42\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("test-result is 42".to_string())
         );
     }
@@ -352,36 +380,44 @@ mod tests {
 
     #[test]
     fn middot_basic() {
-        // Current Claude Code pattern: salmon · followed by message
-        let data = b"\x1b[38;5;174m\xc2\xb7 Creating plan\n";
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b" Creating plan\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Creating plan".to_string())
         );
     }
 
     #[test]
     fn middot_with_cursor_forward() {
-        // Real TUI: · followed by cursor-forward then text
-        let data = b"\x1b[38;5;174m\r\n\xc2\xb7\x1b[1CRead 3 files\n";
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m\r\n");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CRead 3 files\n");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Read 3 files".to_string())
         );
     }
 
     #[test]
     fn middot_ignores_wrong_color() {
-        // · with wrong color should be skipped
-        let data = b"\x1b[38;5;244m\xc2\xb7 gray status\n";
-        assert_eq!(extract_white_bullet_message(data), None);
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;244m");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b" gray status\n");
+        assert_eq!(extract_claude_status_message(&data), None);
     }
 
     #[test]
     fn middot_real_tui_pattern() {
-        // Real captured pattern: SGR 174 + CR LF + · + cursor-forward + "Creating…"
-        let data = b"\x1b[38;5;174m\r\n\xc2\xb7\x1b[1CCreating\xe2\x80\xa6\x1b[38;5;244m\x1b[16;1H";
-        let msg = extract_white_bullet_message(data);
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m\r\n");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CCreating\xe2\x80\xa6\x1b[38;5;244m\x1b[16;1H");
+        let msg = extract_claude_status_message(&data);
         assert!(msg.is_some(), "Should extract · message from real TUI output");
         let text = msg.unwrap();
         assert!(
@@ -392,18 +428,22 @@ mod tests {
 
     #[test]
     fn middot_stops_at_spinner() {
-        let data = b"\x1b[38;5;174m\xc2\xb7\x1b[1CUpdated auth.ts\x1b[38;5;174m\x1b[20;1H\xe2\x9c\xb6 Working";
-        let msg = extract_white_bullet_message(data).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CUpdated auth.ts\x1b[38;5;174m\x1b[20;1H\xe2\x9c\xb6 Working");
+        let msg = extract_claude_status_message(&data).unwrap();
         assert_eq!(msg, "Updated auth.ts");
     }
 
     #[test]
     fn middot_with_cursor_position_between_sgr_and_marker() {
-        // Real TUI pattern: SGR 174 + cursor position CSI + · + cursor-forward + text
-        // \x1b[38;5;174m\x1b[13;1H·\x1b[1CCreating plan
-        let data = b"\x1b[38;5;174m\x1b[13;1H\xc2\xb7\x1b[1CCreating plan";
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x1b[38;5;174m\x1b[13;1H");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CCreating plan");
         assert_eq!(
-            extract_white_bullet_message(data),
+            extract_claude_status_message(&data),
             Some("Creating plan".to_string())
         );
     }
@@ -411,11 +451,13 @@ mod tests {
     #[test]
     fn mixed_legacy_and_current_picks_last() {
         let mut data = Vec::new();
-        // Legacy ● with SGR 231
-        data.extend_from_slice(b"\x1b[38;5;231m\xe2\x97\x8f \x1b[mLegacy message\n");
-        // Current · with SGR 174
-        data.extend_from_slice(b"\x1b[38;5;174m\xc2\xb7\x1b[1CCurrent message\n");
-        let msg = extract_white_bullet_message(&data).unwrap();
+        data.extend_from_slice(b"\x1b[38;5;231m");
+        data.extend_from_slice(LEGACY_BULLET);
+        data.extend_from_slice(b" \x1b[mLegacy message\n");
+        data.extend_from_slice(b"\x1b[38;5;174m");
+        data.extend_from_slice(MIDDOT);
+        data.extend_from_slice(b"\x1b[1CCurrent message\n");
+        let msg = extract_claude_status_message(&data).unwrap();
         assert_eq!(msg, "Current message");
     }
 
