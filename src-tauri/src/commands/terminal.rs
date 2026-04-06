@@ -496,17 +496,16 @@ fn dispatch_osc_action(
             let _ = super::ipc_dispatch::do_set_wsl_distro(state, terminal_id, &event.data);
         }
         OscAction::SetCommandStatus(field) => {
-            // Skip command status updates for propagated terminals (LX_PROPAGATED=1 cd).
-            // Command text (133;E) is already filtered by the preset condition,
-            // but ExitCode (133;D) and Preexec (133;C) carry no command text,
-            // so we check is_propagated() here.
-            if matches!(
-                field,
-                CommandStatusField::ExitCode | CommandStatusField::Preexec
-            ) {
-                if super::ipc_dispatch::is_propagated(state, terminal_id).unwrap_or(false) {
-                    return;
+            // Skip all command status updates for propagated terminals (LX_PROPAGATED=1 cd).
+            // Command text (133;E) is also filtered by the preset condition
+            // (CommandDoesNotStartWith), but we check is_propagated() here as
+            // defense-in-depth in case custom hooks bypass the preset condition.
+            match super::ipc_dispatch::is_propagated(state, terminal_id) {
+                Ok(true) => return,
+                Err(e) => {
+                    tracing::warn!(terminal_id, error = %e, "is_propagated check failed");
                 }
+                _ => {}
             }
 
             match field {
