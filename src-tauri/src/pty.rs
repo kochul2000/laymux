@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::constants::*;
+use crate::lock_ext::MutexExt;
 use crate::terminal::TerminalSession;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
@@ -53,25 +55,6 @@ fn is_wsl_command(cmd_path: &str) -> bool {
     stem == "wsl"
 }
 
-/// Convert a `/mnt/X/...` WSL path back to a Windows path `X:\...`.
-/// Returns `None` if the path is not a `/mnt/X/...` pattern.
-fn mnt_path_to_windows(path: &str) -> Option<String> {
-    let rest = path.strip_prefix("/mnt/")?;
-    let bytes = rest.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
-        return None;
-    }
-    let drive = bytes[0].to_ascii_uppercase() as char;
-    let tail = if bytes.len() > 1 && bytes[1] == b'/' {
-        rest[1..].replace('/', "\\")
-    } else if bytes.len() == 1 {
-        "\\".to_string()
-    } else {
-        return None;
-    };
-    Some(format!("{drive}:{tail}"))
-}
-
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -86,7 +69,7 @@ pub struct PtyHandle {
 impl PtyHandle {
     /// Write data (user input) to the PTY.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
-        let mut writer = self.writer.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let mut writer = self.writer.lock_or_err()?;
         writer
             .write_all(data)
             .map_err(|e| format!("Write error: {e}"))?;
@@ -100,7 +83,7 @@ impl PtyHandle {
 
     /// Resize the PTY.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let master = self.master.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let master = self.master.lock_or_err()?;
         master
             .resize(PtySize {
                 rows,
@@ -133,8 +116,8 @@ where
 
     // Collect all env vars (config + IDE vars) for shell script injection
     let mut all_env: Vec<(String, String)> = session.config.env.clone();
-    all_env.push(("LX_TERMINAL_ID".into(), session.id.clone()));
-    all_env.push(("LX_GROUP_ID".into(), session.config.sync_group.clone()));
+    all_env.push((ENV_LX_TERMINAL_ID.into(), session.id.clone()));
+    all_env.push((ENV_LX_GROUP_ID.into(), session.config.sync_group.clone()));
 
     let (cmd_path, args) = if session.config.command_line.is_empty() {
         // Fallback: legacy profile name-based resolution
@@ -174,7 +157,7 @@ where
         } else {
             // For non-WSL commands, convert /mnt/X/... back to Windows path
             let effective_dir = if is_unix_path(&dir) {
-                mnt_path_to_windows(&dir).unwrap_or(dir)
+                crate::path_utils::mnt_path_to_windows(&dir).unwrap_or(dir)
             } else {
                 dir
             };
@@ -430,19 +413,25 @@ mod tests {
     #[test]
     fn mnt_path_to_windows_converts_correctly() {
         assert_eq!(
-            mnt_path_to_windows("/mnt/c/Users/test"),
+            crate::path_utils::mnt_path_to_windows("/mnt/c/Users/test"),
             Some("C:\\Users\\test".into())
         );
         assert_eq!(
-            mnt_path_to_windows("/mnt/d/Projects/app"),
+            crate::path_utils::mnt_path_to_windows("/mnt/d/Projects/app"),
             Some("D:\\Projects\\app".into())
         );
-        assert_eq!(mnt_path_to_windows("/mnt/c/"), Some("C:\\".into()));
-        assert_eq!(mnt_path_to_windows("/mnt/c"), Some("C:\\".into()));
+        assert_eq!(
+            crate::path_utils::mnt_path_to_windows("/mnt/c/"),
+            Some("C:\\".into())
+        );
+        assert_eq!(
+            crate::path_utils::mnt_path_to_windows("/mnt/c"),
+            Some("C:\\".into())
+        );
         // Not a /mnt/ path
-        assert_eq!(mnt_path_to_windows("/home/user"), None);
-        assert_eq!(mnt_path_to_windows("/tmp"), None);
-        assert_eq!(mnt_path_to_windows("C:\\Users"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("/home/user"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("/tmp"), None);
+        assert_eq!(crate::path_utils::mnt_path_to_windows("C:\\Users"), None);
     }
 
     #[test]

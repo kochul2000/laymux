@@ -119,7 +119,7 @@ where
                             let writer = match stream.try_clone() {
                                 Ok(w) => w,
                                 Err(e) => {
-                                    eprintln!("IPC stream clone failed: {e}");
+                                    tracing::warn!(error = %e, "IPC stream clone failed");
                                     return;
                                 }
                             };

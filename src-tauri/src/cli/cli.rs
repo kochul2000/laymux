@@ -2,6 +2,7 @@ use std::env;
 use std::io::{BufRead, Write};
 
 use super::{LxMessage, LxResponse};
+use crate::constants::{ENV_LX_GROUP_ID, ENV_LX_TERMINAL_ID};
 
 /// Parse command-line args into an LxMessage.
 pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
@@ -9,8 +10,8 @@ pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
         return Err("No command provided. Usage: lx <command> [args...]".into());
     }
 
-    let terminal_id = env::var("LX_TERMINAL_ID").unwrap_or_default();
-    let group_id = env::var("LX_GROUP_ID").unwrap_or_default();
+    let terminal_id = env::var(ENV_LX_TERMINAL_ID).unwrap_or_default();
+    let group_id = env::var(ENV_LX_GROUP_ID).unwrap_or_default();
 
     match args[0].as_str() {
         "sync-cwd" => {

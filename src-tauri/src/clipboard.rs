@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::path_utils::windows_to_wsl_path;
+
 /// Result of a smart paste operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,19 +36,6 @@ pub fn is_wsl_profile(profile: &str) -> bool {
         || lower.contains("ubuntu")
         || lower.contains("debian")
         || lower.contains("linux")
-}
-
-/// Convert a Windows path to a WSL path.
-/// e.g. `C:\Users\foo\bar.png` → `/mnt/c/Users/foo/bar.png`
-pub fn windows_to_wsl_path(win_path: &str) -> String {
-    let path = win_path.replace('\\', "/");
-    // Match drive letter pattern: C:/ or c:/
-    if path.len() >= 3 && path.as_bytes()[1] == b':' && path.as_bytes()[2] == b'/' {
-        let drive = (path.as_bytes()[0] as char).to_lowercase().next().unwrap();
-        format!("/mnt/{}/{}", drive, &path[3..])
-    } else {
-        path
-    }
 }
 
 /// Get the default paste image directory.
