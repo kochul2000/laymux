@@ -495,35 +495,49 @@ fn dispatch_osc_action(
         OscAction::SetWslDistro => {
             let _ = super::ipc_dispatch::do_set_wsl_distro(state, terminal_id, &event.data);
         }
-        OscAction::SetCommandStatus(field) => match field {
-            CommandStatusField::Command => {
-                let _ = super::ipc_dispatch::do_set_command_status(
-                    state,
-                    app,
-                    terminal_id,
-                    Some(&event.data),
-                    None,
-                );
+        OscAction::SetCommandStatus(field) => {
+            // Skip all command status updates for propagated terminals (LX_PROPAGATED=1 cd).
+            // Command text (133;E) is also filtered by the preset condition
+            // (CommandDoesNotStartWith), but we check is_propagated() here as
+            // defense-in-depth in case custom hooks bypass the preset condition.
+            match super::ipc_dispatch::is_propagated(state, terminal_id) {
+                Ok(true) => return,
+                Err(e) => {
+                    tracing::warn!(terminal_id, error = %e, "is_propagated check failed");
+                }
+                _ => {}
             }
-            CommandStatusField::ExitCode => {
-                let exit_code = event.data.parse::<i32>().ok();
-                let _ = super::ipc_dispatch::do_set_command_status(
-                    state,
-                    app,
-                    terminal_id,
-                    None,
-                    exit_code,
-                );
+
+            match field {
+                CommandStatusField::Command => {
+                    let _ = super::ipc_dispatch::do_set_command_status(
+                        state,
+                        app,
+                        terminal_id,
+                        Some(&event.data),
+                        None,
+                    );
+                }
+                CommandStatusField::ExitCode => {
+                    let exit_code = event.data.parse::<i32>().ok();
+                    let _ = super::ipc_dispatch::do_set_command_status(
+                        state,
+                        app,
+                        terminal_id,
+                        None,
+                        exit_code,
+                    );
+                }
+                CommandStatusField::Preexec => {
+                    let _ = super::ipc_dispatch::do_set_command_status(
+                        state,
+                        app,
+                        terminal_id,
+                        Some("__preexec__"),
+                        None,
+                    );
+                }
             }
-            CommandStatusField::Preexec => {
-                let _ = super::ipc_dispatch::do_set_command_status(
-                    state,
-                    app,
-                    terminal_id,
-                    Some("__preexec__"),
-                    None,
-                );
-            }
-        },
+        }
     }
 }

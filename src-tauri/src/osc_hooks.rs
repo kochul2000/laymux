@@ -18,6 +18,8 @@ pub enum OscCondition {
     ExitCodeNotEq(String),
     /// Matches when the command starts with any of the given prefixes.
     CommandStartsWith(Vec<String>),
+    /// Matches when the command does NOT start with any of the given prefixes.
+    CommandDoesNotStartWith(Vec<String>),
 }
 
 impl OscCondition {
@@ -37,6 +39,12 @@ impl OscCondition {
                 event.code == 133
                     && event.param.as_deref() == Some("E")
                     && prefixes.iter().any(|p| event.data.starts_with(p))
+            }
+            OscCondition::CommandDoesNotStartWith(prefixes) => {
+                // OSC 133;E — matches only when command does NOT start with any prefix.
+                event.code == 133
+                    && event.param.as_deref() == Some("E")
+                    && !prefixes.iter().any(|p| event.data.starts_with(p))
             }
         }
     }
@@ -180,11 +188,14 @@ pub fn default_presets() -> Vec<OscHookDef> {
             when: OscCondition::Always,
             action: OscAction::Notify { level: None },
         },
-        // track-command: OSC 133;E → set command text
+        // track-command: OSC 133;E → set command text (skip propagated commands)
         OscHookDef {
             osc: 133,
             param: ParamMatch::Exact("E"),
-            when: OscCondition::Always,
+            when: OscCondition::CommandDoesNotStartWith(vec![
+                "LX_PROPAGATED=1 ".to_string(),
+                "$env:LX_PROPAGATED".to_string(),
+            ]),
             action: OscAction::SetCommandStatus(CommandStatusField::Command),
         },
         // track-command-result: OSC 133;D → set exit code
@@ -319,6 +330,53 @@ mod tests {
 
         let other = make_event(133, Some("E"), "cargo build");
         assert!(!cond.evaluate(&other));
+    }
+
+    #[test]
+    fn condition_command_does_not_start_with() {
+        let cond = OscCondition::CommandDoesNotStartWith(vec![
+            "LX_PROPAGATED=1 ".into(),
+            "$env:LX_PROPAGATED".into(),
+        ]);
+
+        // Normal command → matches
+        let normal = make_event(133, Some("E"), "cargo build");
+        assert!(cond.evaluate(&normal));
+
+        // Propagated bash command → does NOT match
+        let propagated_bash = make_event(133, Some("E"), "LX_PROPAGATED=1 cd /home/user");
+        assert!(!cond.evaluate(&propagated_bash));
+
+        // Propagated PowerShell command → does NOT match
+        let propagated_ps = make_event(133, Some("E"), "$env:LX_PROPAGATED='1';cd C:\\Users");
+        assert!(!cond.evaluate(&propagated_ps));
+
+        // Wrong OSC code → does NOT match (condition requires 133;E)
+        let wrong_osc = make_event(7, None, "cargo build");
+        assert!(!cond.evaluate(&wrong_osc));
+    }
+
+    #[test]
+    fn track_command_skips_propagated() {
+        let presets = default_presets();
+
+        // Normal command → track-command fires
+        let normal = make_event(133, Some("E"), "npm test");
+        let matched = match_hooks(&normal, &presets);
+        let actions: Vec<_> = matched.iter().map(|h| &h.action).collect();
+        assert!(actions.contains(&&OscAction::SetCommandStatus(CommandStatusField::Command)));
+
+        // Propagated bash cd → track-command does NOT fire
+        let propagated = make_event(133, Some("E"), "LX_PROPAGATED=1 cd /foo");
+        let matched = match_hooks(&propagated, &presets);
+        let actions: Vec<_> = matched.iter().map(|h| &h.action).collect();
+        assert!(!actions.contains(&&OscAction::SetCommandStatus(CommandStatusField::Command)));
+
+        // Propagated PowerShell cd → track-command does NOT fire
+        let propagated_ps = make_event(133, Some("E"), "$env:LX_PROPAGATED='1';cd C:\\foo");
+        let matched = match_hooks(&propagated_ps, &presets);
+        let actions: Vec<_> = matched.iter().map(|h| &h.action).collect();
+        assert!(!actions.contains(&&OscAction::SetCommandStatus(CommandStatusField::Command)));
     }
 
     #[test]

@@ -515,7 +515,7 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
 /// Unlike the old consume_propagation, this does NOT remove the entry —
 /// the flag stays active for the full PROPAGATION_TIMEOUT so that multiple
 /// OSC sequences (e.g. OSC 7 + OSC 9;9 from WSL) are all suppressed.
-fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool, String> {
+pub(crate) fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool, String> {
     let propagated = state.propagated_terminals.lock_or_err()?;
     if let Some(ts) = propagated.get(terminal_id) {
         Ok(ts.elapsed() < PROPAGATION_TIMEOUT)
