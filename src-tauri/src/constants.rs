@@ -46,6 +46,10 @@ pub const ACTIVITY_SCAN_BYTES: usize = 16384;
 /// to extract message text. TUI cursor-addressing can spread text across many bytes.
 pub const STATUS_MESSAGE_SCAN_BYTES: usize = 500;
 
+/// Debounce duration for Claude Code status message updates. TUI redraws
+/// produce rapid partial updates (~50-100ms); only emit after this quiet period.
+pub const CLAUDE_MESSAGE_DEBOUNCE: Duration = Duration::from_millis(500);
+
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
 /// notifications are enabled even without observing a user command.

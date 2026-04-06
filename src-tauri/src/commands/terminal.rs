@@ -108,6 +108,11 @@ pub fn create_terminal_session(
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let lookback_buf: Arc<std::sync::Mutex<Vec<u8>>> =
         Arc::new(std::sync::Mutex::new(Vec::with_capacity(64)));
+    // Debounce state for claude_message: (pending_message, timestamp).
+    // Only emit after CLAUDE_MESSAGE_DEBOUNCE has elapsed since last update.
+    let pending_claude_msg: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let pending_for_flush = Arc::clone(&pending_claude_msg);
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
@@ -182,6 +187,10 @@ pub fn create_terminal_session(
                             );
                         }
                     }
+                }
+                // Clear pending debounced message on exit
+                if let Ok(mut pending) = pending_claude_msg.lock() {
+                    *pending = None;
                 }
                 // Remove from known_claude_terminals so is_claude_terminal_from_buffer()
                 // no longer reports this terminal as running Claude Code.
@@ -306,30 +315,108 @@ pub fn create_terminal_session(
                 buf.clear();
                 buf.extend_from_slice(&data[data.len() - keep..]);
             }
-            if let Some(msg) = claude_bullet::extract_claude_status_message(&combined) {
-                let mut changed = false;
-                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                    if let Some(session) = terms.get_mut(&terminal_id) {
-                        if session.claude_message.as_deref() != Some(&msg) {
-                            session.claude_message = Some(msg.clone());
-                            changed = true;
+            // Debounced claude_message update: store pending message,
+            // only emit when CLAUDE_MESSAGE_DEBOUNCE has elapsed since last change.
+            // This filters out partial TUI redraws (~50-100ms) while keeping
+            // stable status messages (seconds between changes).
+            let new_msg = claude_bullet::extract_claude_status_message(&combined);
+
+            // Debounced update: a message must be seen identically in two
+            // consecutive extractions (confirmation pattern) before being emitted.
+            // This filters out partial TUI redraws where the text is being
+            // progressively written — each redraw step produces a different string,
+            // but the final stable state repeats on subsequent chunks.
+            if let Ok(mut pending) = pending_claude_msg.lock() {
+                match (&*pending, &new_msg) {
+                    // Same message seen again → confirmed, emit it
+                    // Also require minimum length to filter TUI redraw fragments.
+                    (Some((prev_msg, _)), Some(msg))
+                        if prev_msg == msg && msg.chars().count() >= 5 =>
+                    {
+                        let mut changed = false;
+                        if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
+                            if let Some(session) = terms.get_mut(&terminal_id) {
+                                if session.claude_message.as_deref() != Some(msg) {
+                                    session.claude_message = Some(msg.clone());
+                                    changed = true;
+                                }
+                            }
                         }
+                        if changed {
+                            let _ = app_clone.emit(
+                                EVENT_CLAUDE_MESSAGE_CHANGED,
+                                serde_json::json!({
+                                    "terminalId": terminal_id,
+                                    "message": msg,
+                                }),
+                            );
+                        }
+                        // Keep as pending (still the current stable message)
                     }
-                }
-                if changed {
-                    let _ = app_clone.emit(
-                        EVENT_CLAUDE_MESSAGE_CHANGED,
-                        serde_json::json!({
-                            "terminalId": terminal_id,
-                            "message": msg,
-                        }),
-                    );
+                    // Different message or first extraction → store as pending
+                    (_, Some(msg)) => {
+                        *pending = Some((msg.clone(), std::time::Instant::now()));
+                    }
+                    // No message extracted → keep pending (flush timer will emit it)
+                    (_, None) => {}
+
                 }
             }
         }
 
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
+
+    // Start claude_message debounce flush timer.
+    // PTY callback stores pending messages but only emits on next chunk.
+    // This timer ensures the last message is emitted even when PTY output stops.
+    {
+        let flush_pending = pending_for_flush;
+        let flush_state = Arc::clone(&*state);
+        let flush_app = app.clone();
+        let flush_terminal_id = id.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                // Check if terminal still exists
+                if let Ok(terms) = flush_state.terminals.lock_or_err() {
+                    if !terms.contains_key(&flush_terminal_id) {
+                        break; // Terminal closed
+                    }
+                } else {
+                    break;
+                }
+                // Flush pending message if debounce elapsed and message is meaningful.
+                // Short messages (< 3 chars) are TUI redraw fragments — discard them.
+                if let Ok(mut pending) = flush_pending.lock() {
+                    if let Some((ref msg, since)) = *pending {
+                        if since.elapsed() >= CLAUDE_MESSAGE_DEBOUNCE && msg.chars().count() >= 5 {
+                            let msg = msg.clone();
+                            let mut changed = false;
+                            if let Ok(mut terms) = flush_state.terminals.lock_or_err() {
+                                if let Some(session) = terms.get_mut(&flush_terminal_id) {
+                                    if session.claude_message.as_deref() != Some(&msg) {
+                                        session.claude_message = Some(msg.clone());
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            if changed {
+                                let _ = flush_app.emit(
+                                    EVENT_CLAUDE_MESSAGE_CHANGED,
+                                    serde_json::json!({
+                                        "terminalId": flush_terminal_id,
+                                        "message": msg,
+                                    }),
+                                );
+                            }
+                            *pending = None;
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
