@@ -46,6 +46,11 @@ describe("trimSelectionTrailingWhitespace", () => {
     expect(trimSelectionTrailingWhitespace(input)).toBe("hello");
   });
 
+  it("handles single line with trailing newline", () => {
+    const input = "hello\n";
+    expect(trimSelectionTrailingWhitespace(input)).toBe("hello");
+  });
+
   it("returns empty string for empty input", () => {
     expect(trimSelectionTrailingWhitespace("")).toBe("");
   });
