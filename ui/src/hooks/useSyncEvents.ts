@@ -109,7 +109,16 @@ export function useSyncEvents() {
         const currentActivity = data.interactiveApp
           ? { type: "interactiveApp" as const, name: data.interactiveApp }
           : instance?.activity;
-        const transition = detectClaudeTaskTransition(prevTitle, data.title, currentActivity);
+        const claudeExited =
+          !data.interactiveApp &&
+          instance?.activity?.type === "interactiveApp" &&
+          instance.activity.name === "Claude";
+        const transition = detectClaudeTaskTransition(
+          prevTitle,
+          data.title,
+          currentActivity,
+          claudeExited,
+        );
         previousClaudeTitleMap.set(data.terminalId, data.title);
 
         if (transition === "completed") {

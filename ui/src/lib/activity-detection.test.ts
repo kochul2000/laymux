@@ -201,6 +201,26 @@ describe("detectClaudeTaskTransition", () => {
   });
 
   // Garbled encoding tests (Windows CP949 path)
+  it("detects completed when Claude exits while working (claudeExited=true)", () => {
+    // Claude was working (spinner), then exited entirely (title changed to shell prompt)
+    expect(
+      detectClaudeTaskTransition("✶ Building project", "bash", claudeActivity, true),
+    ).toBe("completed");
+  });
+
+  it("returns null when Claude exits while idle (claudeExited=true)", () => {
+    // Claude was idle, user exited → no task was in progress, no notification needed
+    expect(
+      detectClaudeTaskTransition("✳ Claude Code", "bash", claudeActivity, true),
+    ).toBeNull();
+  });
+
+  it("detects completed when Claude exits with various spinner prefixes", () => {
+    expect(detectClaudeTaskTransition("✻ Fix bug", "user@host:~", claudeActivity, true)).toBe("completed");
+    expect(detectClaudeTaskTransition("✽ Running", "zsh", claudeActivity, true)).toBe("completed");
+    expect(detectClaudeTaskTransition("· Thinking", "PowerShell", claudeActivity, true)).toBe("completed");
+  });
+
   it("detects completed with garbled ✳ encoding", () => {
     const garbledIdle = "\udce2\uc454 Claude Code";
     const garbledWorking = "\udce2\uc7fc Claude Code";

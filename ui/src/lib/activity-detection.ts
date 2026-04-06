@@ -157,11 +157,18 @@ export function detectClaudeTaskTransition(
   previousTitle: string | undefined,
   newTitle: string,
   activity: TerminalActivityInfo | undefined,
+  claudeExited?: boolean,
 ): ClaudeTaskTransition | null {
   if (activity?.type !== "interactiveApp" || activity.name !== "Claude") return null;
   if (previousTitle === undefined) return null;
 
   const wasIdle = isClaudeIdle(previousTitle);
+
+  // Claude exited entirely: working → exit = completed, idle → exit = no transition
+  if (claudeExited) {
+    return wasIdle ? null : "completed";
+  }
+
   const nowIdle = isClaudeIdle(newTitle);
 
   if (!wasIdle && nowIdle) return "completed";
