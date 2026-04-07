@@ -13,8 +13,6 @@ async function getWindow() {
 
 export function GridEditToolbar() {
   const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
-  const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
-  const layouts = useWorkspaceStore((s) => s.layouts);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
@@ -23,7 +21,6 @@ export function GridEditToolbar() {
 
   const [maximized, setMaximized] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
-  const [selectKey, setSelectKey] = useState(0);
 
   const flashSaved = useCallback(() => {
     setShowSaved(true);
@@ -129,41 +126,6 @@ export function GridEditToolbar() {
         >
           Export New
         </button>
-        {layouts.length > 0 && (
-          <select
-            key={selectKey}
-            data-testid="export-overwrite-select"
-            className={btnBase}
-            style={{
-              ...btnStyle,
-              cursor: "pointer",
-              minWidth: 90,
-              backgroundColor: "var(--bg-surface)",
-              color: "var(--text-secondary)",
-            }}
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) {
-                exportToLayout(e.target.value);
-                setSelectKey((k) => k + 1);
-                flashSaved();
-              }
-            }}
-          >
-            <option value="" disabled style={{ background: "var(--bg-surface)" }}>
-              Overwrite...
-            </option>
-            {layouts.map((l) => (
-              <option
-                key={l.id}
-                value={l.id}
-                style={{ background: "var(--bg-surface)", color: "var(--text-primary)" }}
-              >
-                {l.name}
-              </option>
-            ))}
-          </select>
-        )}
         {showSaved && (
           <span
             data-testid="layout-saved-indicator"

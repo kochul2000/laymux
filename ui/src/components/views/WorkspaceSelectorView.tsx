@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -572,6 +572,7 @@ function LayoutCard({
   onDuplicate,
   onDelete,
   onSetDefault,
+  onOverwrite,
 }: {
   layout: { id: string; name: string; panes: { x: number; y: number; w: number; h: number }[] };
   isDefault: boolean;
@@ -581,19 +582,39 @@ function LayoutCard({
   onDuplicate: () => void;
   onDelete: () => void;
   onSetDefault: () => void;
+  onOverwrite: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const minimapPanes = layout.panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleDismiss = (e: Event) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setHovered(false);
+      }
+    };
+    document.addEventListener("mousedown", handleDismiss, true);
+    document.addEventListener("focusin", handleDismiss, true);
+    return () => {
+      document.removeEventListener("mousedown", handleDismiss, true);
+      document.removeEventListener("focusin", handleDismiss, true);
+    };
+  }, [menuOpen]);
 
   return (
     <div
+      ref={cardRef}
       data-testid={`layout-card-${layout.id}`}
       className="relative flex items-center gap-2 px-1 py-1.5"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
-        setHovered(false);
-        setMenuOpen(false);
+        if (!menuOpen) {
+          setHovered(false);
+        }
       }}
       style={{
         border: `1px solid ${isDefault && hovered ? "var(--accent)" : hovered ? "var(--text-secondary)" : "transparent"}`,
@@ -709,11 +730,23 @@ function LayoutCard({
         >
           <button
             onClick={() => {
+              onOverwrite();
+              setMenuOpen(false);
+            }}
+            className="cursor-pointer px-3 py-1 text-left text-[11px]"
+            style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
+            title="Save current workspace pane layout to this template"
+          >
+            Overwrite
+          </button>
+          <button
+            onClick={() => {
               onRename();
               setMenuOpen(false);
             }}
             className="cursor-pointer px-3 py-1 text-left text-[11px]"
             style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
+            title="Rename this layout"
           >
             Rename
           </button>
@@ -724,6 +757,7 @@ function LayoutCard({
             }}
             className="cursor-pointer px-3 py-1 text-left text-[11px]"
             style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
+            title="Create a copy of this layout"
           >
             Duplicate
           </button>
@@ -735,6 +769,7 @@ function LayoutCard({
               }}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
+              title="Use this layout when creating new workspaces"
             >
               Set as Default
             </button>
@@ -742,11 +777,14 @@ function LayoutCard({
           {canDelete && (
             <button
               onClick={() => {
-                onDelete();
+                if (window.confirm(`Delete layout "${layout.name}"?`)) {
+                  onDelete();
+                }
                 setMenuOpen(false);
               }}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--red)", background: "transparent", border: "none" }}
+              title="Permanently delete this layout"
             >
               Delete
             </button>
@@ -776,6 +814,7 @@ export function WorkspaceSelectorView() {
   const removeLayout = useWorkspaceStore((s) => s.removeLayout);
   const duplicateLayout = useWorkspaceStore((s) => s.duplicateLayout);
   const setDefaultLayout = useWorkspaceStore((s) => s.setDefaultLayout);
+  const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
 
   const notifications = useNotificationStore((s) => s.notifications);
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
@@ -915,6 +954,7 @@ export function WorkspaceSelectorView() {
               onDuplicate={() => duplicateLayout(layout.id, `${layout.name} Copy`)}
               onDelete={() => removeLayout(layout.id)}
               onSetDefault={() => setDefaultLayout(layout.id)}
+              onOverwrite={() => exportToLayout(layout.id)}
             />
           ))}
         </div>
