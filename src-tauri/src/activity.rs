@@ -189,25 +189,10 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
     TerminalActivity::Running
 }
 
-/// Detect full terminal state (activity + output freshness) for a single terminal.
+/// Detect full terminal state (activity) for a single terminal.
 pub fn detect_terminal_state(buffer: Option<&TerminalOutputBuffer>) -> TerminalStateInfo {
     let activity = detect_terminal_activity(buffer);
-    let (output_active, last_output_ms_ago) = if let Some(buf) = buffer {
-        if let Some(ts) = buf.last_output_at {
-            let elapsed = ts.elapsed().as_millis() as u64;
-            (elapsed < 2000, elapsed)
-        } else {
-            (false, u64::MAX)
-        }
-    } else {
-        (false, u64::MAX)
-    };
-
-    TerminalStateInfo {
-        activity,
-        output_active,
-        last_output_ms_ago,
-    }
+    TerminalStateInfo { activity }
 }
 
 /// Detect terminal states for all terminals.

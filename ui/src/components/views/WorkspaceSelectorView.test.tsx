@@ -64,7 +64,6 @@ function buildSummariesFromStores(ids: string[]): TerminalSummaryResponse[] {
         lastCommandAt: inst.lastCommandAt ?? null,
         commandRunning: inst.lastCommand != null && inst.lastExitCode == null,
         activity: inst.activity ?? { type: "shell" as const },
-        outputActive: inst.outputActive ?? false,
         isClaude: false,
         unreadNotificationCount: unread.length,
         latestNotification: latestUnread

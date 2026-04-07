@@ -108,6 +108,8 @@ pub fn create_terminal_session(
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let lookback_buf: Arc<std::sync::Mutex<Vec<u8>>> =
         Arc::new(std::sync::Mutex::new(Vec::with_capacity(64)));
+    let last_activity_emit_ms =
+        Arc::new(std::sync::atomic::AtomicU64::new(0));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
@@ -118,6 +120,30 @@ pub fn create_terminal_session(
         if let Ok(mut buffers) = state_for_pty.output_buffers.lock_or_err() {
             if let Some(buf) = buffers.get_mut(&terminal_id) {
                 buf.push(&data);
+            }
+        }
+
+        // ── DEC 2026 detection: TUI app screen redraw ──
+        // TUI apps (Claude Code, neovim) emit \x1b[?2026h before each frame.
+        // Shell commands never use this, so it's a high-confidence activity signal.
+        if data.len() >= DEC_SYNC_OUTPUT_SET.len()
+            && data
+                .windows(DEC_SYNC_OUTPUT_SET.len())
+                .any(|w| w == DEC_SYNC_OUTPUT_SET)
+        {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let prev_ms = last_activity_emit_ms
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if now_ms.saturating_sub(prev_ms) >= OUTPUT_ACTIVITY_THROTTLE_MS {
+                last_activity_emit_ms
+                    .store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                let _ = app_clone.emit(
+                    EVENT_TERMINAL_OUTPUT_ACTIVITY,
+                    serde_json::json!({ "terminalId": terminal_id }),
+                );
             }
         }
 

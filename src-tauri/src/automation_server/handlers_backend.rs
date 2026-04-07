@@ -166,7 +166,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/terminals/states",
-                "description": "Get activity state for all terminals. Returns { states: { terminalId: { activity: {type, name?}, outputActive, lastOutputMsAgo } } }."
+                "description": "Get activity state for all terminals. Returns { states: { terminalId: { activity: {type, name?} } } }."
             },
             {
                 "method": "GET", "path": "/api/v1/layouts",

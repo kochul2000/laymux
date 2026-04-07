@@ -148,7 +148,7 @@ export function computeWorkspaceSummaryFromBackend(
     lastExitCode: s.lastExitCode ?? undefined,
     lastCommandAt: s.lastCommandAt ?? undefined,
     activity: s.activity as TerminalActivityInfo,
-    outputActive: s.outputActive,
+    outputActive: false, // outputActive is driven by frontend DEC 2026 events, not backend
     hasUnreadNotification: s.unreadNotificationCount > 0,
     claudeMessage: s.claudeMessage ?? undefined,
   }));
@@ -166,7 +166,7 @@ export function computeWorkspaceSummaryFromBackend(
           command: s.lastCommand,
           exitCode: s.lastExitCode ?? undefined,
           timestamp: s.lastCommandAt,
-          outputActive: s.outputActive,
+          outputActive: false, // outputActive is driven by frontend DEC 2026 events
           claudeMessage: s.claudeMessage ?? undefined,
         };
       }

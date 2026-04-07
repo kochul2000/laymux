@@ -12,6 +12,7 @@ import {
   onClaudeMessageChanged,
   onTerminalCwdChanged,
   onTerminalTitleChanged,
+  onTerminalOutputActivity,
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
@@ -78,6 +79,32 @@ export function useSyncEvents() {
       }),
     );
 
+    // terminal-output-activity: PTY callback detected DEC 2026 synchronized render.
+    // TUI apps (Claude Code, neovim) emit this before each frame redraw.
+    // outputActive drives the ⏳ spinner icon in workspace summary.
+    trackListener(
+      onTerminalOutputActivity((data) => {
+        if (cancelled) return;
+        const { updateInstanceInfo } = useTerminalStore.getState();
+
+        updateInstanceInfo(data.terminalId, { outputActive: true });
+
+        // Reset timer: clear outputActive after 2s of no activity
+        const prev = outputActiveTimers.current.get(data.terminalId);
+        if (prev) clearTimeout(prev);
+        outputActiveTimers.current.set(
+          data.terminalId,
+          setTimeout(() => {
+            if (cancelled) return;
+            useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+              outputActive: false,
+            });
+            outputActiveTimers.current.delete(data.terminalId);
+          }, OUTPUT_ACTIVE_RESET_MS),
+        );
+      }),
+    );
+
     // terminal-title-changed: backend PTY callback extracted OSC 0/2 title.
     // Handles activity detection and title updates.
     trackListener(
@@ -93,32 +120,10 @@ export function useSyncEvents() {
         // including known_claude_terminals fallback for spinner titles like "✢ Working").
         if (data.interactiveApp) {
           updates.activity = { type: "interactiveApp", name: data.interactiveApp };
-          // Interactive app title change = screen redraw = outputActive.
-          // Reset to false after OUTPUT_ACTIVE_RESET_MS of no further title changes.
-          updates.outputActive = true;
-          const prev = outputActiveTimers.current.get(data.terminalId);
-          if (prev) clearTimeout(prev);
-          outputActiveTimers.current.set(
-            data.terminalId,
-            setTimeout(() => {
-              if (cancelled) return;
-              useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
-                outputActive: false,
-              });
-              outputActiveTimers.current.delete(data.terminalId);
-            }, OUTPUT_ACTIVE_RESET_MS),
-          );
         } else if (instance?.activity?.type === "interactiveApp") {
           // Interactive app exited — title no longer matches any app pattern.
           // Reset to shell so stale Claude/vim indicators don't persist.
           updates.activity = { type: "shell" };
-          updates.outputActive = false;
-          // Clear any pending timer
-          const prev = outputActiveTimers.current.get(data.terminalId);
-          if (prev) {
-            clearTimeout(prev);
-            outputActiveTimers.current.delete(data.terminalId);
-          }
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);

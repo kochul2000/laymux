@@ -18,10 +18,6 @@ pub enum TerminalActivity {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalStateInfo {
     pub activity: TerminalActivity,
-    /// True if terminal has received output recently (screen is updating).
-    pub output_active: bool,
-    /// Milliseconds since last output from the terminal PTY.
-    pub last_output_ms_ago: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
