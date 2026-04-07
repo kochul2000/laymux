@@ -4,6 +4,7 @@ import {
   createIndentedLinkProvider,
   type IndentedLineInfo,
 } from "./indented-link-provider";
+import { RAW_XTERM_SELECTION, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
 
 function makeLines(texts: string[], wrappedIndices: number[] = []): IndentedLineInfo[] {
   return texts.map((text, i) => ({
@@ -167,25 +168,7 @@ describe("findIndentedUrls", () => {
 // Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
 // ============================================================
 describe("findIndentedUrls — right-pane fixture (terminal-padded lines)", () => {
-  // Real terminal buffer lines: 75 cols wide, 2-space indent, trailing space padding
-  const PADDED_LINES = makeLines([
-    "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61  ",
-    "  b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F  ",
-    "  platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke  ",
-    "  y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A  ",
-    "  mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo  ",
-    "  WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc  ",
-    "  rIoqL8KF-JsBbAo6tlEK_GB0                                               ",
-  ]);
-
-  const CLEAN_URL =
-    "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61" +
-    "b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F" +
-    "platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke" +
-    "y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A" +
-    "mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo" +
-    "WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc" +
-    "rIoqL8KF-JsBbAo6tlEK_GB0";
+  const PADDED_LINES = makeLines(RAW_XTERM_SELECTION.split("\n"));
 
   it("trailing space가 있어도 전체 URL을 감지", () => {
     const result = findIndentedUrls(PADDED_LINES, 1);

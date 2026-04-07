@@ -6,6 +6,11 @@ import {
   transformPasteContent,
   trimSelectionTrailingWhitespace,
 } from "./smart-text";
+import {
+  RAW_XTERM_SELECTION,
+  WRONG_RESULT,
+  CLEAN_URL,
+} from "./__fixtures__/right-pane-fixture";
 
 // ============================================================
 // trimSelectionTrailingWhitespace
@@ -319,30 +324,6 @@ describe("transformPasteContent", () => {
 // Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
 // ============================================================
 describe("right-pane fixture: terminal-padded multi-line URL", () => {
-  // Raw xterm.js getSelection() output — each line padded to terminal width (75 cols)
-  // with 2-space indent and 2 trailing spaces (except last line)
-  const RAW_XTERM_SELECTION = [
-    "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61  ",
-    "  b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F  ",
-    "  platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke  ",
-    "  y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A  ",
-    "  mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo  ",
-    "  WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc  ",
-    "  rIoqL8KF-JsBbAo6tlEK_GB0                                               ",
-  ].join("\n");
-
-  // right-pane-right.txt: desired copy result (leading indent + clean URL)
-  const CLEAN_URL =
-    "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61" +
-    "b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F" +
-    "platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke" +
-    "y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A" +
-    "mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo" +
-    "WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc" +
-    "rIoqL8KF-JsBbAo6tlEK_GB0";
-
-  // right-pane-wrong.txt: current broken result (raw selection with newlines removed)
-  const WRONG_RESULT = RAW_XTERM_SELECTION.replace(/\n/g, "");
 
   const pasteOpts = { removeIndent: true, removeLineBreak: true };
 
