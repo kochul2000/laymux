@@ -1255,31 +1255,12 @@ mod tests {
     }
 
     #[test]
-    fn detect_state_output_active() {
+    fn detect_state_activity_only() {
         use crate::terminal::TerminalActivity;
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
-        buf.push(b"\x1b]133;D;0\x07prompt$ "); // push sets last_output_at
+        buf.push(b"\x1b]133;D;0\x07prompt$ ");
         let state_info = activity::detect_terminal_state(Some(&buf));
         assert_eq!(state_info.activity, TerminalActivity::Shell);
-        assert!(
-            state_info.output_active,
-            "Just pushed output should be active"
-        );
-        assert!(state_info.last_output_ms_ago < 1000);
-    }
-
-    #[test]
-    fn detect_state_output_stale() {
-        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
-        buf.push(b"\x1b]133;D;0\x07prompt$ ");
-        // Manually set last_output_at to the past
-        buf.last_output_at = Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
-        let state_info = activity::detect_terminal_state(Some(&buf));
-        assert!(
-            !state_info.output_active,
-            "10s old output should not be active"
-        );
-        assert!(state_info.last_output_ms_ago >= 9000);
     }
 
     // --- Claude Code detection tests ---

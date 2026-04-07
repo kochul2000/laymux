@@ -64,7 +64,6 @@ function buildSummariesFromStores(ids: string[]): TerminalSummaryResponse[] {
         lastCommandAt: inst.lastCommandAt ?? null,
         commandRunning: inst.lastCommand != null && inst.lastExitCode == null,
         activity: inst.activity ?? { type: "shell" as const },
-        outputActive: inst.outputActive ?? false,
         isClaude: false,
         unreadNotificationCount: unread.length,
         latestNotification: latestUnread
@@ -500,7 +499,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("displays running indicator when command has no exit code", async () => {
+  it("displays idle indicator when command has no exit code and no output", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -534,11 +533,11 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("—");
     });
   });
 
-  it("displays running indicator when command failed but activity is interactiveApp", async () => {
+  it("displays failure indicator when command failed regardless of activity type", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -574,49 +573,8 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      // Should show running (hourglass) instead of failure (cross) because interactive app is still running
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
-    });
-  });
-
-  it("displays running indicator when command failed but activity is running", async () => {
-    useWorkspaceStore.setState({
-      workspaces: [
-        {
-          id: "ws-default",
-          name: "Default",
-          panes: [
-            {
-              id: "p1",
-              x: 0,
-              y: 0,
-              w: 1,
-              h: 1,
-              view: { type: "TerminalView", profile: "PowerShell" },
-            },
-          ],
-        },
-      ],
-      activeWorkspaceId: "ws-default",
-    });
-    useTerminalStore.getState().registerInstance({
-      id: "terminal-p1",
-      profile: "PowerShell",
-      syncGroup: "Default",
-      workspaceId: "ws-default",
-    });
-    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
-      lastCommand: "cargo build",
-      lastExitCode: 1,
-      lastCommandAt: Date.now(),
-      activity: { type: "running" },
-    });
-
-    render(<WorkspaceSelectorView />);
-
-    await waitFor(() => {
-      // Should show running (hourglass) instead of failure because process is still running
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("⏳");
+      // Universal 4-state: exitCode≠0 → ✗ regardless of activity
+      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
     });
   });
 
@@ -1122,7 +1080,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("shows notification border on hourglass icon for running command with notification", async () => {
+  it("shows notification border on idle icon for command with no exit code and notification", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -1157,7 +1115,7 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("⏳");
+      expect(badge).toHaveTextContent("—");
       expect(badge.style.border).toContain("var(--accent)");
     });
   });

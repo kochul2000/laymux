@@ -1,20 +1,12 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
-import {
-  parseClaudeMode,
-  isClaudeIdle,
-  isRalphActive,
-  type ClaudeMode,
-} from "./activity-detection";
 
 export interface LastCommandInfo {
   command: string;
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
-  activity?: TerminalActivityInfo; // terminal activity state (shell/running/interactiveApp)
-  title?: string; // terminal title — used to detect Claude idle/working via isClaudeIdle()
   claudeMessage?: string; // latest white-● status message from Claude Code output
 }
 
@@ -79,8 +71,6 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
-    activity: t.activity,
-    title: t.title,
     claudeMessage: t.claudeMessage,
   };
 }
@@ -158,7 +148,7 @@ export function computeWorkspaceSummaryFromBackend(
     lastExitCode: s.lastExitCode ?? undefined,
     lastCommandAt: s.lastCommandAt ?? undefined,
     activity: s.activity as TerminalActivityInfo,
-    outputActive: s.outputActive,
+    outputActive: false, // outputActive is driven by frontend DEC 2026 events, not backend
     hasUnreadNotification: s.unreadNotificationCount > 0,
     claudeMessage: s.claudeMessage ?? undefined,
   }));
@@ -176,9 +166,7 @@ export function computeWorkspaceSummaryFromBackend(
           command: s.lastCommand,
           exitCode: s.lastExitCode ?? undefined,
           timestamp: s.lastCommandAt,
-          outputActive: s.outputActive,
-          activity: s.activity as TerminalActivityInfo,
-          title: s.title ?? undefined,
+          outputActive: false, // outputActive is driven by frontend DEC 2026 events
           claudeMessage: s.claudeMessage ?? undefined,
         };
       }
@@ -307,14 +295,9 @@ export function formatPorts(ports: number[], maxDisplay = 5): string {
 }
 
 /** Get a display label for terminal activity state. */
-export function formatActivity(
-  activity: TerminalActivityInfo | undefined,
-  title?: string,
-): {
+export function formatActivity(activity: TerminalActivityInfo | undefined): {
   label: string;
   color: string;
-  claudeMode?: ClaudeMode;
-  ralph?: boolean;
 } {
   if (!activity) return { label: "shell", color: "var(--text-secondary)" };
   switch (activity.type) {
@@ -323,55 +306,40 @@ export function formatActivity(
     case "running":
       return { label: "running", color: "var(--yellow)" };
     case "interactiveApp": {
-      if (activity.name === "Claude") {
-        const mode = parseClaudeMode(title, activity);
-        const ralph = isRalphActive(title);
-        return { label: "Claude", color: "#D97757", claudeMode: mode, ralph };
-      }
+      if (activity.name === "Claude") return { label: "Claude", color: "#D97757" };
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }
   }
 }
 
 export interface CommandStatus {
-  icon: string; // "⏳" | "✓" | "✗"
+  icon: string; // "⏳" | "✓" | "✗" | "—"
   color: string; // CSS color value
   text?: string; // display text override (e.g., Claude ● message)
 }
 
 /**
- * Compute final command status display from raw terminal states.
+ * Compute final command status display from raw terminal states (universal, app-agnostic).
  *
- * Each system writes its own raw state independently:
- *   - OSC 133;D → exitCode (shell owns this)
- *   - OSC 0/2  → title (used for Claude idle/working detection)
- *   - activity  → shell/running/interactiveApp
+ * 4-state rule:
+ *   1. outputActive === true          → ⏳ yellow (screen updating)
+ *   2. exitCode === 0                 → ✓ green  (OSC success)
+ *   3. exitCode !== undefined (≠ 0)   → ✗ red    (OSC failure)
+ *   4. otherwise                      → — gray   (idle/waiting)
  *
- * This function is the single place that collapses them into ✓/⏳/✗.
+ * claudeMessage only sets the text field — never affects icon/color.
  */
 export function computeCommandStatus(
   exitCode: number | undefined,
   outputActive: boolean | undefined,
-  activity: TerminalActivityInfo | undefined,
-  title: string | undefined,
   claudeMessage?: string,
 ): CommandStatus {
-  // Interactive app: Claude uses title idle detection, others always ⏳
-  if (activity?.type === "interactiveApp") {
-    if (activity.name === "Claude" && title && isClaudeIdle(title)) {
-      return { icon: "✓", color: "var(--green)", text: claudeMessage };
-    }
-    if (activity.name === "Claude") {
-      return { icon: "⏳", color: "var(--yellow)", text: claudeMessage };
-    }
-    return { icon: "⏳", color: "var(--yellow)" };
-  }
-
-  // Shell command
-  if (exitCode === undefined) return { icon: "⏳", color: "var(--yellow)" };
-  if (outputActive) return { icon: "⏳", color: "var(--yellow)" };
-  if (activity?.type === "running") return { icon: "⏳", color: "var(--yellow)" };
-  return exitCode === 0 ? { icon: "✓", color: "var(--green)" } : { icon: "✗", color: "var(--red)" };
+  // Intentionally uses || (not ??) to also convert empty string "" to undefined
+  const text = claudeMessage || undefined;
+  if (outputActive) return { icon: "⏳", color: "var(--yellow)", text };
+  if (exitCode === 0) return { icon: "✓", color: "var(--green)", text };
+  if (exitCode !== undefined) return { icon: "✗", color: "var(--red)", text };
+  return { icon: "—", color: "var(--text-secondary)", text };
 }
 
 export function formatRelativeTime(ts: number): string {

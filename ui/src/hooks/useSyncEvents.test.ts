@@ -20,6 +20,7 @@ const mockOnClaudeTerminalDetected = vi.fn();
 const mockOnClaudeMessageChanged = vi.fn();
 const mockOnTerminalCwdChanged = vi.fn();
 const mockOnTerminalTitleChanged = vi.fn();
+const mockOnTerminalOutputActivity = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
@@ -34,6 +35,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onClaudeMessageChanged: (...args: unknown[]) => mockOnClaudeMessageChanged(...args),
   onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),
   onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
+  onTerminalOutputActivity: (...args: unknown[]) => mockOnTerminalOutputActivity(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
@@ -59,6 +61,7 @@ describe("useSyncEvents", () => {
     mockOnClaudeMessageChanged.mockResolvedValue(unlisten);
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
+    mockOnTerminalOutputActivity.mockResolvedValue(unlisten);
   });
 
   it("registers sync-cwd listener on mount", () => {
@@ -469,5 +472,52 @@ describe("useSyncEvents", () => {
     callback({ terminalId: "t1", command: "vim file.txt" });
 
     expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("clears outputActive immediately on active:false event (app-agnostic)", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      outputActive: true,
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalOutputActivity.mock.calls[0][0];
+    // Backend sends active:false on TUI working→idle transition
+    callback({ terminalId: "t1", active: false });
+
+    const inst = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(inst?.outputActive).toBe(false);
+  });
+
+  it("cleans up outputActive timer when terminal is removed from store", () => {
+    vi.useFakeTimers();
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    // Trigger outputActive so a timer is created
+    const callback = mockOnTerminalOutputActivity.mock.calls[0][0];
+    callback({ terminalId: "t1" });
+
+    const inst = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(inst?.outputActive).toBe(true);
+
+    // Remove terminal — timer should be cleaned up
+    useTerminalStore.getState().unregisterInstance("t1");
+
+    // Timer was cleared (no stale entries). Advancing time should not cause errors.
+    vi.advanceTimersByTime(3000);
+    vi.useRealTimers();
   });
 });

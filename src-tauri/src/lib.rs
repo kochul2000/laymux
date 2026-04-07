@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 pub mod activity;
 pub mod automation_server;
+pub mod claude_activity;
 pub mod claude_bullet;
 pub mod cli;
 pub mod clipboard;

@@ -12,17 +12,12 @@ import {
   onClaudeMessageChanged,
   onTerminalCwdChanged,
   onTerminalTitleChanged,
+  onTerminalOutputActivity,
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import {
-  detectActivityFromCommand,
-  detectClaudeTaskTransition,
-  extractClaudeTaskDesc,
-  getClaudeCompletionMessage,
-} from "@/lib/activity-detection";
-import { resolveWorkspaceId } from "@/lib/workspace-utils";
+import { detectActivityFromCommand } from "@/lib/activity-detection";
 
 /**
  * Hook that listens for sync events from the Tauri backend
@@ -31,8 +26,16 @@ import { resolveWorkspaceId } from "@/lib/workspace-utils";
 /** Debounce delay for persisting CWD changes to settings.json (ms). */
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 
+/** Delay before resetting outputActive to false after last DEC 2026 event (ms).
+ *
+ * **Coupled with backend**: must match `DEC2026_BURST_WINDOW_MS` in `constants.rs`.
+ * If shorter, outputActive flickers between DEC 2026 events.
+ * If longer, ⏳ persists after TUI stops rendering. */
+const OUTPUT_ACTIVE_RESET_MS = 2000;
+
 export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const debouncedPersistCwd = useCallback(() => {
     if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
@@ -80,10 +83,50 @@ export function useSyncEvents() {
       }),
     );
 
+    // terminal-output-activity: Two modes of operation:
+    //   1. active=true (default, omitted): DEC 2026 burst detected → TUI is rendering frames.
+    //      Sets outputActive=true + starts 2s auto-reset timer.
+    //   2. active=false: Rust detected TUI working→idle transition (e.g., Claude task completion).
+    //      Immediately clears outputActive — no 2s lag. This is app-agnostic: the frontend
+    //      doesn't check which app triggered it. Rust's state machine decides when to emit.
+    trackListener(
+      onTerminalOutputActivity((data) => {
+        if (cancelled) return;
+        const { updateInstanceInfo } = useTerminalStore.getState();
+
+        if (data.active === false) {
+          // Immediate deactivation from Rust state machine (TUI working→idle).
+          // Arrives BEFORE terminal-title-changed for the same title update,
+          // so ⏳→✓ transition happens without the DEC 2026 timeout lag.
+          updateInstanceInfo(data.terminalId, { outputActive: false });
+          const timer = outputActiveTimers.current.get(data.terminalId);
+          if (timer) {
+            clearTimeout(timer);
+            outputActiveTimers.current.delete(data.terminalId);
+          }
+          return;
+        }
+
+        updateInstanceInfo(data.terminalId, { outputActive: true });
+
+        // Reset timer: clear outputActive after 2s of no activity
+        const prev = outputActiveTimers.current.get(data.terminalId);
+        if (prev) clearTimeout(prev);
+        outputActiveTimers.current.set(
+          data.terminalId,
+          setTimeout(() => {
+            if (cancelled) return;
+            useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+              outputActive: false,
+            });
+            outputActiveTimers.current.delete(data.terminalId);
+          }, OUTPUT_ACTIVE_RESET_MS),
+        );
+      }),
+    );
+
     // terminal-title-changed: backend PTY callback extracted OSC 0/2 title.
-    // This is the centralized title event — handles activity detection,
-    // Claude task transitions, and title updates in one place.
-    const previousClaudeTitleMap = new Map<string, string>();
+    // Handles activity detection and title updates.
     trackListener(
       onTerminalTitleChanged((data) => {
         if (cancelled) return;
@@ -93,7 +136,8 @@ export function useSyncEvents() {
         // Update title in store
         const updates: Record<string, unknown> = { title: data.title };
 
-        // Activity detection from interactive app (Rust already detected this)
+        // Activity detection from interactive app (Rust already detected this,
+        // including known_claude_terminals fallback for spinner titles like "✢ Working").
         if (data.interactiveApp) {
           updates.activity = { type: "interactiveApp", name: data.interactiveApp };
         } else if (instance?.activity?.type === "interactiveApp") {
@@ -103,46 +147,6 @@ export function useSyncEvents() {
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
-
-        // Claude task transition detection
-        const prevTitle = previousClaudeTitleMap.get(data.terminalId) ?? instance?.title;
-        const currentActivity = data.interactiveApp
-          ? { type: "interactiveApp" as const, name: data.interactiveApp }
-          : instance?.activity;
-        const claudeExited =
-          !data.interactiveApp &&
-          instance?.activity?.type === "interactiveApp" &&
-          instance.activity.name === "Claude";
-        const transition = detectClaudeTaskTransition(
-          prevTitle,
-          data.title,
-          currentActivity,
-          claudeExited,
-        );
-        previousClaudeTitleMap.set(data.terminalId, data.title);
-
-        if (transition === "completed") {
-          updateInstanceInfo(data.terminalId, {
-            lastCommandAt: Date.now(),
-          });
-          // Only emit notification when notify gate is armed (prevents shell-init spam)
-          if (data.notifyGateArmed) {
-            const message = getClaudeCompletionMessage(prevTitle, data.title);
-            const wsId = resolveWorkspaceId(data.terminalId);
-            useNotificationStore.getState().addNotification({
-              terminalId: data.terminalId,
-              workspaceId: wsId,
-              message,
-              level: "success",
-            });
-          }
-        } else if (transition === "started") {
-          const taskDesc = extractClaudeTaskDesc(data.title);
-          updateInstanceInfo(data.terminalId, {
-            lastCommand: taskDesc || "Claude task",
-            lastCommandAt: Date.now(),
-          });
-        }
       }),
     );
 
@@ -288,9 +292,27 @@ export function useSyncEvents() {
       }),
     );
 
+    // Clean up outputActive timers when terminals are removed from the store
+    const unsubStore = useTerminalStore.subscribe((state, prevState) => {
+      if (state.instances.length < prevState.instances.length) {
+        const currentIds = new Set(state.instances.map((i) => i.id));
+        for (const [id, timer] of outputActiveTimers.current) {
+          if (!currentIds.has(id)) {
+            clearTimeout(timer);
+            outputActiveTimers.current.delete(id);
+          }
+        }
+      }
+    });
+
     return () => {
       cancelled = true;
+      unsubStore();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
+      for (const timer of outputActiveTimers.current.values()) {
+        clearTimeout(timer);
+      }
+      outputActiveTimers.current.clear();
       for (const unlisten of unlisteners) {
         unlisten();
       }
