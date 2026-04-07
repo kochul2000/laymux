@@ -107,8 +107,6 @@ pub fn create_terminal_session(
     let app_clone = app.clone();
     let state_for_pty = Arc::clone(&*state);
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let lookback_buf: Arc<std::sync::Mutex<Vec<u8>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(64)));
     let last_activity_emit_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let dec2026_burst_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let dec2026_burst_start = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -257,17 +255,69 @@ pub fn create_terminal_session(
                     }
                 }
 
-                // Update working state + dispatch task completion notification
+                // Update working state, claude_message, and dispatch task completion
                 if !cr.exited && (cr.now_working || cr.now_idle) {
+                    // Determine claude_message based on state transition
+                    let new_message = if cr.task_completed.is_some() {
+                        // Task completed (working→idle): extract from output buffer
+                        if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
+                            buffers.get(&terminal_id).and_then(|buf| {
+                                let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+                                claude_bullet::extract_claude_status_message(&recent)
+                            })
+                        } else {
+                            None
+                        }
+                    } else if cr.now_working {
+                        // Working: use title text (strip spinner prefix)
+                        let text = claude_activity::strip_claude_spinner_prefix(&event.data);
+                        if text.is_empty() || text == "Claude Code" {
+                            None
+                        } else {
+                            Some(text.to_string())
+                        }
+                    } else {
+                        None // idle without task_completed — keep existing
+                    };
+
+                    let mut message_changed = false;
                     if let Ok(mut terms) =
                         state_for_pty.terminals.lock_or_err()
                     {
                         if let Some(session) = terms.get_mut(&terminal_id) {
                             session.claude_was_working = cr.now_working;
+                            // Update claude_message if we have a new value
+                            if let Some(ref msg) = new_message {
+                                if session.claude_message.as_deref() != Some(msg) {
+                                    session.claude_message = Some(msg.clone());
+                                    message_changed = true;
+                                }
+                            }
                         }
+                    }
+                    if message_changed {
+                        let _ = app_clone.emit(
+                            EVENT_CLAUDE_MESSAGE_CHANGED,
+                            serde_json::json!({
+                                "terminalId": terminal_id,
+                                "message": new_message,
+                            }),
+                        );
                     }
                 }
                 if let Some(ref message) = cr.task_completed {
+                    // Emit active:false BEFORE terminal-title-changed (emitted below at L346+).
+                    // Both events originate from the same PTY callback thread, so ordering is
+                    // guaranteed: the frontend receives active:false first, clears outputActive,
+                    // then processes the title change — no 2-second DEC 2026 timeout lag.
+                    // This is app-agnostic: any TUI working→idle transition triggers it.
+                    let _ = app_clone.emit(
+                        EVENT_TERMINAL_OUTPUT_ACTIVITY,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "active": false,
+                        }),
+                    );
                     let _ = super::ipc_dispatch::do_notify(
                         &state_for_pty,
                         &app_clone,
@@ -368,54 +418,9 @@ pub fn create_terminal_session(
             }
         }
 
-        // ── Claude Code status-marker message detection ──
-        // Only runs for known Claude terminals. Extracts user-facing status
-        // messages (· or legacy ●) and stores as raw state in session.claude_message.
-        // Accumulates a small lookback buffer to handle cross-chunk marker splits.
-        if claude_detected.load(std::sync::atomic::Ordering::Relaxed) {
-            // Prepend up to 64 bytes from previous chunk to handle splits where
-            // the marker color/char arrives in one chunk and text in the next.
-            let combined: std::borrow::Cow<[u8]> = {
-                // Using lock().ok() instead of lock_or_err(): in PTY callback,
-                // a poisoned lock is non-fatal (graceful degradation, not an error path).
-                let prev = lookback_buf.lock().ok();
-                let prev_data = prev.as_ref().map(|b| b.as_slice()).unwrap_or(&[]);
-                if prev_data.is_empty() {
-                    std::borrow::Cow::Borrowed(&data)
-                } else {
-                    let mut combined = Vec::with_capacity(prev_data.len() + data.len());
-                    combined.extend_from_slice(prev_data);
-                    combined.extend_from_slice(&data);
-                    std::borrow::Cow::Owned(combined)
-                }
-            };
-            // Update lookback: keep last 64 bytes for next chunk
-            if let Ok(mut buf) = lookback_buf.lock() {
-                let keep = 64.min(data.len());
-                buf.clear();
-                buf.extend_from_slice(&data[data.len() - keep..]);
-            }
-            if let Some(msg) = claude_bullet::extract_claude_status_message(&combined) {
-                let mut changed = false;
-                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                    if let Some(session) = terms.get_mut(&terminal_id) {
-                        if session.claude_message.as_deref() != Some(&msg) {
-                            session.claude_message = Some(msg.clone());
-                            changed = true;
-                        }
-                    }
-                }
-                if changed {
-                    let _ = app_clone.emit(
-                        EVENT_CLAUDE_MESSAGE_CHANGED,
-                        serde_json::json!({
-                            "terminalId": terminal_id,
-                            "message": msg,
-                        }),
-                    );
-                }
-            }
-        }
+        // Claude Code status message is updated in two places:
+        // 1. Working title → strip spinner prefix → claude_message (in OSC title handler below)
+        // 2. Task completion (working→idle) → extract from output buffer via claude_bullet (below)
 
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;

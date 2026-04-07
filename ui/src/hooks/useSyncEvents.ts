@@ -79,13 +79,29 @@ export function useSyncEvents() {
       }),
     );
 
-    // terminal-output-activity: PTY callback detected DEC 2026 synchronized render.
-    // TUI apps (Claude Code, neovim) emit this before each frame redraw.
-    // outputActive drives the ⏳ spinner icon in workspace summary.
+    // terminal-output-activity: Two modes of operation:
+    //   1. active=true (default, omitted): DEC 2026 burst detected → TUI is rendering frames.
+    //      Sets outputActive=true + starts 2s auto-reset timer.
+    //   2. active=false: Rust detected TUI working→idle transition (e.g., Claude task completion).
+    //      Immediately clears outputActive — no 2s lag. This is app-agnostic: the frontend
+    //      doesn't check which app triggered it. Rust's state machine decides when to emit.
     trackListener(
       onTerminalOutputActivity((data) => {
         if (cancelled) return;
         const { updateInstanceInfo } = useTerminalStore.getState();
+
+        if (data.active === false) {
+          // Immediate deactivation from Rust state machine (TUI working→idle).
+          // Arrives BEFORE terminal-title-changed for the same title update,
+          // so ⏳→✓ transition happens without the DEC 2026 timeout lag.
+          updateInstanceInfo(data.terminalId, { outputActive: false });
+          const timer = outputActiveTimers.current.get(data.terminalId);
+          if (timer) {
+            clearTimeout(timer);
+            outputActiveTimers.current.delete(data.terminalId);
+          }
+          return;
+        }
 
         updateInstanceInfo(data.terminalId, { outputActive: true });
 
@@ -124,21 +140,6 @@ export function useSyncEvents() {
           // Interactive app exited — title no longer matches any app pattern.
           // Reset to shell so stale Claude/vim indicators don't persist.
           updates.activity = { type: "shell" };
-        }
-
-        // Claude idle transition: immediately clear outputActive so ⏳→✓
-        // doesn't lag behind the notification by the DEC 2026 timeout (2s).
-        if (
-          data.interactiveApp === "Claude" &&
-          data.title.startsWith("\u{2733}") &&
-          instance?.outputActive
-        ) {
-          updates.outputActive = false;
-          const timer = outputActiveTimers.current.get(data.terminalId);
-          if (timer) {
-            clearTimeout(timer);
-            outputActiveTimers.current.delete(data.terminalId);
-          }
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
@@ -287,8 +288,22 @@ export function useSyncEvents() {
       }),
     );
 
+    // Clean up outputActive timers when terminals are removed from the store
+    const unsubStore = useTerminalStore.subscribe((state, prevState) => {
+      if (state.instances.length < prevState.instances.length) {
+        const currentIds = new Set(state.instances.map((i) => i.id));
+        for (const [id, timer] of outputActiveTimers.current) {
+          if (!currentIds.has(id)) {
+            clearTimeout(timer);
+            outputActiveTimers.current.delete(id);
+          }
+        }
+      }
+    });
+
     return () => {
       cancelled = true;
+      unsubStore();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
       for (const timer of outputActiveTimers.current.values()) {
         clearTimeout(timer);

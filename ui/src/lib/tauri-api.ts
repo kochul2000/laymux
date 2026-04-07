@@ -555,13 +555,17 @@ export function onClaudeTerminalDetected(
 }
 
 /** Listen for DEC 2026 output activity events from the backend PTY callback.
- *  Emitted (throttled, max 1/sec per terminal) when a TUI app redraws its screen. */
+ *  Emitted (throttled, max 1/sec per terminal) when a TUI app redraws its screen.
+ *  active=false is sent when a TUI app transitions from working→idle (e.g., task completion). */
 export function onTerminalOutputActivity(
-  callback: (data: { terminalId: string }) => void,
+  callback: (data: { terminalId: string; active?: boolean }) => void,
 ): Promise<UnlistenFn> {
-  return listen<{ terminalId: string }>("terminal-output-activity", (event) => {
-    callback(event.payload);
-  });
+  return listen<{ terminalId: string; active?: boolean }>(
+    "terminal-output-activity",
+    (event) => {
+      callback(event.payload);
+    },
+  );
 }
 
 /** Listen for Claude Code white-● message changes from the backend. */

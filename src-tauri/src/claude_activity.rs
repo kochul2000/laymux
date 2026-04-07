@@ -27,6 +27,20 @@ pub fn is_claude_idle_title(title: &str) -> bool {
     title.starts_with('\u{2733}')
 }
 
+/// Strip the spinner prefix character (star-based or Braille) from a Claude Code title.
+/// Returns the text after the spinner character, trimmed.
+/// If no spinner prefix is found, returns the full title trimmed.
+pub fn strip_claude_spinner_prefix(title: &str) -> &str {
+    let mut chars = title.chars();
+    if let Some(first) = chars.next() {
+        if CLAUDE_SPINNER_PREFIXES.contains(&first) || ('\u{2800}'..='\u{28FF}').contains(&first)
+        {
+            return chars.as_str().trim();
+        }
+    }
+    title.trim()
+}
+
 /// Check if a Claude Code title indicates active/working state.
 /// Working spinners: star-based (✶✻✽✢) or Braille patterns (U+2800..U+28FF).
 /// Excludes ✳ (idle) — that's the idle indicator, not a working spinner.
@@ -251,5 +265,41 @@ mod tests {
         assert!(r.entered);
         assert!(r.now_idle);
         assert!(r.task_completed.is_none());
+    }
+
+    // ── strip_claude_spinner_prefix ──
+
+    #[test]
+    fn strip_star_spinner() {
+        assert_eq!(
+            strip_claude_spinner_prefix("\u{2736} Working on task"),
+            "Working on task"
+        );
+    }
+
+    #[test]
+    fn strip_braille_spinner() {
+        assert_eq!(
+            strip_claude_spinner_prefix("\u{2810} General coding assistance session"),
+            "General coding assistance session"
+        );
+    }
+
+    #[test]
+    fn strip_idle_prefix() {
+        assert_eq!(
+            strip_claude_spinner_prefix("\u{2733} Claude Code"),
+            "Claude Code"
+        );
+    }
+
+    #[test]
+    fn strip_no_prefix() {
+        assert_eq!(strip_claude_spinner_prefix("Claude Code"), "Claude Code");
+    }
+
+    #[test]
+    fn strip_empty_after_spinner() {
+        assert_eq!(strip_claude_spinner_prefix("\u{2736}"), "");
     }
 }
