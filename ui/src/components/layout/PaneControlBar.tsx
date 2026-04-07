@@ -334,7 +334,7 @@ function BarContent({
 function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   return (
     <div
-      className="absolute right-1 top-1 z-30 flex items-center"
+      className="absolute right-0.5 top-0 z-20 flex items-center"
       style={{ height: BAR_H }}
       onClick={(e) => e.stopPropagation()}
     >
