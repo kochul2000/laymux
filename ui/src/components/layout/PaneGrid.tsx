@@ -135,6 +135,7 @@ export function PaneGrid({
             <PaneControlBar
               currentView={pane.view}
               hovered={isActive && isHovered}
+              paneId={pane.id}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)

@@ -1,5 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
+import { abbreviatePath, mntPathToWindows } from "@/lib/workspace-summary";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
 
@@ -28,6 +30,7 @@ interface PaneControlBarProps {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
+  paneId?: string;
   children: React.ReactNode;
 }
 
@@ -154,7 +157,7 @@ function BarContent({
 }) {
   return (
     <div
-      className="flex w-full items-center justify-end gap-0.5"
+      className="flex shrink-0 items-center justify-end gap-0.5"
       onClick={(e) => e.stopPropagation()}
     >
       {actions.onChangeView && (
@@ -363,8 +366,30 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   );
 }
 
+// ─── Terminal info (CWD + branch) ───────────────────────
+function TerminalInfo({ paneId }: { paneId: string }) {
+  const inst = useTerminalStore((s) => s.instances.find((i) => i.id === `terminal-${paneId}`));
+  const cwd = inst?.cwd ? abbreviatePath(mntPathToWindows(inst.cwd)) : null;
+  const branch = inst?.branch || null;
+  if (!cwd && !branch) return null;
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[11px]">
+      {branch && (
+        <span className="shrink-0" style={{ color: "var(--green)" }}>
+          {branch}
+        </span>
+      )}
+      {cwd && (
+        <span className="truncate" style={{ color: "var(--text-secondary)" }}>
+          {cwd}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ─────────────────────────────────────
-export function PaneControlBar({ currentView, actions, hovered, children }: PaneControlBarProps) {
+export function PaneControlBar({ currentView, actions, hovered, paneId, children }: PaneControlBarProps) {
   const [mode, setMode] = useState<ControlBarMode>("hover");
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
@@ -409,12 +434,15 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
         {isPinned && !hasViewHeader && (
           <div
             data-testid="pane-control-bar"
-            className="ui-toolbar shrink-0 pr-1"
+            className="ui-toolbar shrink-0 pl-2 pr-1"
             style={{
               background: barBg,
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
+            {paneId && currentView.type === "TerminalView" && (
+              <TerminalInfo paneId={paneId} />
+            )}
             <BarContent
               currentView={currentView}
               actions={actions}
@@ -432,16 +460,18 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className="absolute right-0 top-0 z-20 flex items-center pl-0.5 pr-1"
+              className="absolute left-0 right-0 top-0 z-20 flex items-center pl-2 pr-1"
               style={{
                 height: BAR_H,
                 background: barBgHover,
                 backdropFilter: "blur(8px)",
                 borderBottom: `1px solid ${sepClr}`,
-                borderLeft: `1px solid ${sepClr}`,
                 borderRadius: 0,
               }}
             >
+              {paneId && currentView.type === "TerminalView" && (
+                <TerminalInfo paneId={paneId} />
+              )}
               <BarContent
                 currentView={currentView}
                 actions={actions}
