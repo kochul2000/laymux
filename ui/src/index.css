@@ -82,6 +82,28 @@
     width: 0;
     height: 0;
   }
+
+}
+
+/* EmptyView: xterm-like overlay scrollbar (override global hide) */
+.empty-view-scroll {
+  overflow-y: overlay;
+}
+.empty-view-scroll::-webkit-scrollbar {
+  width: 20px;
+}
+.empty-view-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border: 6px solid transparent;
+  background-clip: padding-box;
+}
+.empty-view-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+  border: 6px solid transparent;
+  background-clip: padding-box;
+}
+.empty-view-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @layer components {

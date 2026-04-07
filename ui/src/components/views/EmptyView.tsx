@@ -283,7 +283,7 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       ref={containerRef}
       tabIndex={-1}
       data-testid="empty-view"
-      className="flex h-full flex-col items-center justify-center gap-3 p-6 outline-none"
+      className="empty-view-scroll flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 outline-none"
       style={{ color: "var(--text-secondary)" }}
     >
       {/* Header */}
