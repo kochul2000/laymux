@@ -69,7 +69,9 @@ export function smartRemoveIndent(text: string): string {
 
 /**
  * Detect if the entire text (when all newlines are removed) forms a single URL.
- * If so, join lines by removing newlines.
+ * If so, join lines by removing newlines. Trailing whitespace is trimmed from
+ * each line before joining — terminal buffer lines are often padded to the
+ * terminal width with spaces.
  *
  * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
  * validate URL structure — in a clipboard-paste context, false positives
@@ -78,8 +80,12 @@ export function smartRemoveIndent(text: string): string {
 export function smartRemoveLineBreak(text: string): string {
   if (!text || !text.includes("\n")) return text;
 
-  // Check if joining all lines produces a valid-looking URL
-  const joined = text.split("\n").join("");
+  // Check if joining all lines (with trailing whitespace trimmed) produces a URL.
+  // Terminal selections may have trailing spaces from buffer padding.
+  const joined = text
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .join("");
 
   // Must start with http:// or https://
   if (/^https?:\/\/\S+$/.test(joined)) {

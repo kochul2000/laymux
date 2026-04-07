@@ -4,6 +4,7 @@ import {
   createIndentedLinkProvider,
   type IndentedLineInfo,
 } from "./indented-link-provider";
+import { RAW_XTERM_SELECTION, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
 
 function makeLines(texts: string[], wrappedIndices: number[] = []): IndentedLineInfo[] {
   return texts.map((text, i) => ({
@@ -160,6 +161,25 @@ describe("findIndentedUrls", () => {
     expect(result).toHaveLength(1);
     // URL stops at the space before "to"
     expect(result[0].text).toBe("https://example.com/path?very-long-param=value");
+  });
+});
+
+// ============================================================
+// Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
+// ============================================================
+describe("findIndentedUrls — right-pane fixture (terminal-padded lines)", () => {
+  const PADDED_LINES = makeLines(RAW_XTERM_SELECTION.split("\n"));
+
+  it("trailing space가 있어도 전체 URL을 감지", () => {
+    const result = findIndentedUrls(PADDED_LINES, 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe(CLEAN_URL);
+  });
+
+  it("continuation line에서 쿼리해도 전체 URL 반환", () => {
+    const result = findIndentedUrls(PADDED_LINES, 4);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe(CLEAN_URL);
   });
 });
 

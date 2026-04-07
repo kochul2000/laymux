@@ -6,6 +6,11 @@ import {
   transformPasteContent,
   trimSelectionTrailingWhitespace,
 } from "./smart-text";
+import {
+  RAW_XTERM_SELECTION,
+  WRONG_RESULT,
+  CLEAN_URL,
+} from "./__fixtures__/right-pane-fixture";
 
 // ============================================================
 // trimSelectionTrailingWhitespace
@@ -312,5 +317,44 @@ describe("transformPasteContent", () => {
   it("returns content unchanged for non-text paste type", () => {
     const input = "  some image data";
     expect(transformPasteContent(input, "image", opts)).toBe("  some image data");
+  });
+});
+
+// ============================================================
+// Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
+// ============================================================
+describe("right-pane fixture: terminal-padded multi-line URL", () => {
+
+  const pasteOpts = { removeIndent: true, removeLineBreak: true };
+
+  it("문제 재현: raw xterm selection에서 newline만 제거하면 URL에 공백이 포함됨", () => {
+    // 외부 앱(브라우저 URL bar 등)은 붙여넣기 시 newline을 제거
+    // trailing space(2) + leading indent(2) = fragment 사이 4-space gap
+    expect(WRONG_RESULT).toContain("e61    b-44d9"); // 4 spaces between fragments
+    expect(WRONG_RESULT).not.toBe(CLEAN_URL);
+  });
+
+  it("smartRemoveLineBreak가 trailing whitespace 있는 입력에서도 URL joining 성공", () => {
+    const afterIndentRemoval = smartRemoveIndent(RAW_XTERM_SELECTION.replace(/\r\n/g, "\n"));
+    // indent 제거 후에도 trailing space가 남아있지만
+    const firstLine = afterIndentRemoval.split("\n")[0];
+    expect(firstLine).toMatch(/\s$/); // trailing space 존재
+    // smartRemoveLineBreak가 trailing space를 무시하고 URL joining 성공
+    const result = smartRemoveLineBreak(afterIndentRemoval);
+    expect(result).toBe(CLEAN_URL);
+  });
+
+  it("applySmartTextTransforms가 raw input에서도 URL joining 성공", () => {
+    // trimSelectionTrailingWhitespace 없이 raw input이 paste pipeline에 진입해도
+    const result = applySmartTextTransforms(RAW_XTERM_SELECTION, pasteOpts);
+    expect(result).toBe(CLEAN_URL);
+  });
+
+  it("copy→paste pipeline은 trim이 선행되면 URL joining 성공", () => {
+    // trimSelectionTrailingWhitespace가 먼저 적용된 경우
+    const copied = trimSelectionTrailingWhitespace(RAW_XTERM_SELECTION);
+    const pasted = applySmartTextTransforms(copied, pasteOpts);
+    // trim이 trailing space를 제거하므로 URL joining 성공
+    expect(pasted).toBe(CLEAN_URL);
   });
 });

@@ -78,10 +78,12 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     // Only interesting if multiple lines were joined
     if (endIdx === startIdx) continue;
 
-    // Join the content (indent-stripped)
+    // Join the content (indent-stripped, trailing whitespace trimmed).
+    // Terminal buffer lines are padded to terminal width with spaces;
+    // without trimming, those spaces would break URL detection.
     const joined = lines
       .slice(startIdx, endIdx + 1)
-      .map((l) => l.text.slice(indent))
+      .map((l) => l.text.slice(indent).replace(/\s+$/, ""))
       .join("");
 
     // Extract URL from the joined text
