@@ -1,18 +1,22 @@
 import { useState, useMemo, useCallback } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore, type ControlBarMode } from "@/stores/ui-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
- * - hover: 마우스 hover 시 표시, idle/타이핑/패인이탈 시 숨김 (기본값)
+ * - hover: 마우스 hover 시 표시, idle/타이핑/패인이탈 시 숨김
  * - pinned: 항상 표시 (콘텐츠 위에 고정)
  * - minimized: 3-dot 버튼만 표시, 클릭 시 hover로 복귀
  *
  * ⚠️ 모드 내부에 "열림/닫힘" 같은 서브 상태를 절대 추가하지 말 것.
  *    모드 전환은 항상 setMode() 한번으로 완결되어야 한다.
+ *
+ * 기본 모드는 settings > convenience > defaultControlBarMode에서 설정.
+ * per-pane 모드는 ui-store barModes에 localStorage로 persist.
  */
-export type ControlBarMode = "hover" | "pinned" | "minimized";
+export type { ControlBarMode } from "@/stores/ui-store";
 
 export interface PaneControlBarActions {
   onSplitH?: () => void;
@@ -25,6 +29,8 @@ export interface PaneControlBarActions {
 }
 
 interface PaneControlBarProps {
+  /** Stable pane ID for persisting control bar mode across restarts. */
+  paneId?: string;
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
@@ -266,7 +272,7 @@ function BarContent({
         </BarBtn>
       )}
       {actions.onClear && (
-        <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view">
+        <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
             <path
               d="M5 3l5 5-3 3-5-5z"
@@ -381,8 +387,13 @@ function BarLabel({ viewType }: { viewType: ViewType }) {
 }
 
 // ─── Main component ─────────────────────────────────────
-export function PaneControlBar({ currentView, actions, hovered, children }: PaneControlBarProps) {
-  const [mode, setMode] = useState<ControlBarMode>("hover");
+export function PaneControlBar({ paneId, currentView, actions, hovered, children }: PaneControlBarProps) {
+  const mode = useUiStore((s) => paneId ? (s.barModes[paneId] ?? s.getBarMode(paneId)) : s.getBarMode("__fallback__"));
+  const setBarMode = useUiStore((s) => s.setBarMode);
+  const setMode = useCallback(
+    (m: ControlBarMode) => setBarMode(paneId ?? "__fallback__", m),
+    [paneId, setBarMode],
+  );
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
@@ -402,7 +413,6 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
     () => (
       <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
     ),
-    // setMode는 useState setter라 참조 안정적이지만 exhaustive-deps 일관성 위해 포함
     [currentView, actions, mode, setMode],
   );
 

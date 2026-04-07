@@ -1293,6 +1293,37 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Default control bar mode */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Control Bar Mode
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              새 Pane의 기본 컨트롤 바 모드
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="default-control-bar-mode-select"
+              className={inputCls}
+              value={convenience.defaultControlBarMode}
+              onChange={(e) =>
+                updateConvenience({
+                  defaultControlBarMode: e.target.value as "hover" | "pinned" | "minimized",
+                })
+              }
+            >
+              <option value="minimized">Minimized (최소화, 호버 시 ⋯ 버튼)</option>
+              <option value="hover">Hover (호버 시 바 표시)</option>
+              <option value="pinned">Pinned (항상 고정 표시)</option>
+            </FocusSelect>
+          </div>
+        </div>
+
         {/* Notification dismiss mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">

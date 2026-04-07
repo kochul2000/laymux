@@ -33,11 +33,17 @@ import { Dock } from "./Dock";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
+import { useUiStore } from "@/stores/ui-store";
 
 describe("Dock", () => {
   beforeEach(() => {
     useDockStore.setState(useDockStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    // 기존 테스트는 hover를 기본 모드로 가정
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+    }));
     capturedViewConfigs.length = 0;
   });
 

@@ -61,11 +61,16 @@ export type PathEllipsisMode = "start" | "end";
 /** Terminal scrollbar rendering mode. */
 export type ScrollbarStyle = "overlay" | "separate";
 
+/** Pane control bar default mode. */
+export type ControlBarMode = "hover" | "pinned" | "minimized";
+
 export interface ConvenienceSettings {
   smartPaste: boolean;
   pasteImageDir: string;
   /** Seconds of mouse inactivity before hiding the pane control bar. 0 = never hide. */
   hoverIdleSeconds: number;
+  /** Default control bar mode for new panes. */
+  defaultControlBarMode: ControlBarMode;
   /** When to auto-dismiss notifications as read. */
   notificationDismiss: NotificationDismissMode;
   /** Automatically copy text to clipboard when selected in terminal. */
@@ -703,6 +708,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     smartPaste: true,
     pasteImageDir: "",
     hoverIdleSeconds: 2,
+    defaultControlBarMode: "minimized" as const,
     notificationDismiss: "workspace" as const,
     copyOnSelect: true,
     pathEllipsis: "start" as const,
@@ -889,6 +895,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           smartPaste: true,
           pasteImageDir: "",
           hoverIdleSeconds: 2,
+          defaultControlBarMode: "minimized" as const,
           notificationDismiss: "workspace" as const,
           copyOnSelect: true,
           pathEllipsis: "start" as const,

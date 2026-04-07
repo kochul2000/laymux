@@ -351,7 +351,7 @@ function WorkspaceItem({
                       {wsDisplay.activity && (
                         <span
                           data-testid={`terminal-activity-${ts.id}`}
-                          className="shrink-0 rounded px-1 text-[9px]"
+                          className="shrink-0 rounded px-1 mr-1 text-[9px]"
                           style={{
                             color: actInfo.color,
                             background:
@@ -360,7 +360,7 @@ function WorkspaceItem({
                                   ? "var(--orange-15)"
                                   : "var(--accent-12)"
                                 : "var(--active-bg)",
-                            minWidth: 52,
+                            minWidth: 40,
                             textAlign: "center",
                             display: "inline-block",
                             opacity: isActive ? 1 : 0.7,
@@ -372,7 +372,6 @@ function WorkspaceItem({
                       )}
                       {wsDisplay.path && ts.branch && (
                         <>
-                          <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span
                             className="shrink-0"
                             style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}
@@ -383,7 +382,6 @@ function WorkspaceItem({
                       )}
                       {wsDisplay.path && ts.cwd && (
                         <>
-                          <span style={{ color: "var(--text-secondary)", opacity: 0.3 }}>·</span>
                           <span
                             className="truncate"
                             style={{

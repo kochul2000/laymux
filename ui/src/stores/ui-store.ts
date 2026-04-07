@@ -1,6 +1,7 @@
 import { create } from "zustand";
+import { useSettingsStore, type ControlBarMode } from "./settings-store";
 
-export type ControlBarMode = "hover" | "pinned" | "minimized";
+export type { ControlBarMode } from "./settings-store";
 
 const BAR_MODES_KEY = "laymux-bar-modes";
 
@@ -70,6 +71,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
       return { barModes };
     });
   },
-  getBarMode: (paneId) => get().barModes[paneId] ?? "hover",
+  getBarMode: (paneId) =>
+    get().barModes[paneId] ?? useSettingsStore.getState().convenience.defaultControlBarMode,
   setAppFocused: (focused) => set({ isAppFocused: focused }),
 }));

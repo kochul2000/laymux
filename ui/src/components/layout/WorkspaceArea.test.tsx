@@ -14,10 +14,16 @@ import { WorkspaceArea } from "./WorkspaceArea";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    // 기존 테스트는 hover를 기본 모드로 가정
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+    }));
   });
 
   it("renders workspace area container", () => {

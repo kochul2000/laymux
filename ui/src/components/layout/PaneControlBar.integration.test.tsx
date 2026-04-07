@@ -18,6 +18,7 @@ vi.mock("@/lib/tauri-api", () => ({
 import { PaneControlBar } from "./PaneControlBar";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore } from "@/stores/ui-store";
 
 /**
  * PaneControlBar + ViewHeader 통합 테스트.
@@ -35,6 +36,11 @@ describe("PaneControlBar + ViewHeader integration", () => {
 
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    // 기존 테스트는 hover를 기본 모드로 가정
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+    }));
     vi.clearAllMocks();
   });
 

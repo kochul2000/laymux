@@ -1,6 +1,8 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PaneGrid, type GridPane } from "./PaneGrid";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore } from "@/stores/ui-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -13,6 +15,15 @@ const makePanes = (count: number): GridPane[] =>
   }));
 
 describe("PaneGrid", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    // 기존 테스트는 hover를 기본 모드로 가정
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+    }));
+  });
+
   const defaultProps = {
     panes: makePanes(2),
     testIdFn: (_p: GridPane, i: number) => `test-pane-${i}`,

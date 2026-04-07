@@ -108,6 +108,7 @@ export function Dock({
       )}
       <div className="relative min-w-0 flex-1">
         <PaneControlBar
+          paneId={singlePaneId}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHover.hoveredId !== null}
           actions={{

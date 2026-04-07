@@ -133,6 +133,7 @@ export function PaneGrid({
           >
             {focused && <FocusIndicator testId="pane-focus-indicator" />}
             <PaneControlBar
+              paneId={pane.id}
               currentView={pane.view}
               hovered={isActive && isHovered}
               actions={{
