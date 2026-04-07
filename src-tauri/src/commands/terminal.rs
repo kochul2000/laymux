@@ -164,13 +164,18 @@ pub fn create_terminal_session(
                 let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
             }
 
-            // Claude Code exit detection: title clearly indicates a shell, not Claude.
-            // Uses is_claude_exit_title() which requires an ASCII-starting title,
-            // because garbled spinner characters (from WSL encoding mismatch)
-            // are non-ASCII and should not trigger a false exit.
-            if (event.code == 0 || event.code == 2)
+            // Claude Code exit detection from three signals:
+            // 1. Title change (OSC 0/2) to a shell title (ASCII-starting, no "Claude Code")
+            // 2. Shell prompt marker (OSC 133;A) — shell regained control
+            // 3. Command done marker (OSC 133;D) — shell reports Claude command finished
+            //    This is the primary Ctrl+C exit signal: Claude may not reset its title,
+            //    but the shell always emits OSC 133;D when the foreground process exits.
+            let is_title_exit = (event.code == 0 || event.code == 2)
+                && activity::is_claude_exit_title(&event.data);
+            let is_shell_marker_exit = event.code == 133
+                && matches!(event.param.as_deref(), Some("A") | Some("D"));
+            if (is_title_exit || is_shell_marker_exit)
                 && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && activity::is_claude_exit_title(&event.data)
             {
                 claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
                 // Lock ordering: terminals (1) before known_claude_terminals (3)
@@ -196,6 +201,20 @@ pub fn create_terminal_session(
                 // no longer reports this terminal as running Claude Code.
                 if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                     known.remove(&terminal_id);
+                }
+                // Emit title change event so frontend resets activity to shell.
+                // When exit is detected via OSC 133;A (not a title event), we still
+                // need to notify the frontend that Claude is no longer active.
+                if is_shell_marker_exit && !is_title_exit {
+                    let _ = app_clone.emit(
+                        EVENT_TERMINAL_TITLE_CHANGED,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "title": "",
+                            "interactiveApp": null,
+                            "notifyGateArmed": true,
+                        }),
+                    );
                 }
             }
 
