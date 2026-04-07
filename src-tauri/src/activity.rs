@@ -10,6 +10,19 @@ use crate::output_buffer::TerminalOutputBuffer;
 use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalStateInfo};
 
+/// Star-based spinner prefixes used by Claude Code in terminal titles.
+const CLAUDE_SPINNER_PREFIXES: &[char] = &['✶', '✻', '✽', '✢', '✳'];
+
+/// Check if a terminal title looks like a Claude Code title.
+/// Returns true if the title contains "Claude Code" or starts with a known
+/// Claude spinner prefix (star-based or Braille pattern U+2800..U+28FF).
+pub fn is_claude_title(title: &str) -> bool {
+    title.contains("Claude Code")
+        || title.starts_with(|c: char| {
+            CLAUDE_SPINNER_PREFIXES.contains(&c) || ('\u{2800}'..='\u{28FF}').contains(&c)
+        })
+}
+
 /// Known interactive apps detected from terminal title (OSC 0 / OSC 2).
 /// Pattern matching uses word boundaries to avoid false positives
 /// (e.g., "vim" should not match "environment").
@@ -341,6 +354,43 @@ mod tests {
             detect_interactive_app_from_title("vi"),
             Some("vim".to_string())
         );
+    }
+
+    // ── is_claude_title tests ──
+
+    #[test]
+    fn claude_title_with_claude_code_text() {
+        assert!(is_claude_title("Claude Code"));
+        assert!(is_claude_title("✳ Claude Code"));
+        assert!(is_claude_title("✢ Claude Code"));
+    }
+
+    #[test]
+    fn claude_title_star_spinner_without_claude_code() {
+        // Star spinner prefixes should still be recognized
+        assert!(is_claude_title("✶ Working on task"));
+        assert!(is_claude_title("✻ Analyzing code"));
+        assert!(is_claude_title("✽ Building"));
+        assert!(is_claude_title("✢ Running tests"));
+        assert!(is_claude_title("✳ General coding session"));
+    }
+
+    #[test]
+    fn claude_title_braille_spinner() {
+        // Claude Code v2.1+ uses Braille pattern spinners
+        assert!(is_claude_title("\u{2802} Claude Code")); // ⠂
+        assert!(is_claude_title("\u{2810} General coding assistance session")); // ⠐
+        assert!(is_claude_title("\u{280B} Working on task")); // ⠋
+        assert!(is_claude_title("\u{2819} Analyzing")); // ⠙
+        assert!(is_claude_title("\u{2839} Building")); // ⠹
+    }
+
+    #[test]
+    fn claude_title_not_claude() {
+        assert!(!is_claude_title("bash"));
+        assert!(!is_claude_title("vim main.rs"));
+        assert!(!is_claude_title("/home/user/project"));
+        assert!(!is_claude_title("C:\\Users\\test"));
     }
 
     #[test]

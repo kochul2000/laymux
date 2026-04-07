@@ -205,11 +205,8 @@ pub fn create_terminal_session(
             }
 
             // Claude Code exit detection: title no longer looks like Claude Code.
-            // Claude titles: "Claude Code", "✳ Claude Code" (idle), "✢ Working" (spinner).
             // Only declare exit when title has NO "Claude Code" AND NO spinner prefix.
-            const CLAUDE_SPINNER_PREFIXES: &[char] = &['✶', '✻', '✽', '✢', '✳'];
-            let is_claude_title = event.data.contains("Claude Code")
-                || event.data.starts_with(|c: char| CLAUDE_SPINNER_PREFIXES.contains(&c));
+            let is_claude_title = activity::is_claude_title(&event.data);
             if (event.code == 0 || event.code == 2)
                 && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
                 && !is_claude_title
