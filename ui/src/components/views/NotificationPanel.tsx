@@ -15,9 +15,11 @@ const levelColorMap: Record<NotificationLevel, string> = {
 
 interface NotificationPanelProps {
   workspaceId?: string;
+  /** When true, skip ViewShell/ViewHeader (used when embedded inside another view). */
+  embedded?: boolean;
 }
 
-export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) {
+export function NotificationPanel({ workspaceId, embedded }: NotificationPanelProps = {}) {
   const allNotifications = useNotificationStore((s) => s.notifications);
   const notifications = workspaceId
     ? allNotifications.filter((n) => n.workspaceId === workspaceId)
@@ -34,21 +36,16 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
   });
   const workspaceIds = [...new Set(sorted.map((n) => n.workspaceId))];
 
-  return (
-    <ViewShell testId="notification-panel" style={{ color: "var(--text-primary)" }}>
-      <ViewHeader className="justify-between" testId="notification-header" title="Notifications" />
-
-      <ViewBody>
-        {sorted.length === 0 ? (
-          <div
-            className="flex h-full items-center justify-center"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            <p className="text-xs">No notifications</p>
-          </div>
-        ) : (
-          <div className="flex flex-col">
-            {workspaceIds.map((wsId) => {
+  const content = sorted.length === 0 ? (
+    <div
+      className="flex h-full items-center justify-center"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      <p className="text-xs">No notifications</p>
+    </div>
+  ) : (
+    <div className="flex flex-col">
+      {workspaceIds.map((wsId) => {
               const wsNotifs = sorted.filter((n) => n.workspaceId === wsId);
               const hasUnread = wsNotifs.some((n) => n.readAt === null);
               return (
@@ -124,8 +121,14 @@ export function NotificationPanel({ workspaceId }: NotificationPanelProps = {}) 
               );
             })}
           </div>
-        )}
-      </ViewBody>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <ViewShell testId="notification-panel" style={{ color: "var(--text-primary)" }}>
+      <ViewHeader className="justify-between" testId="notification-header" title="Notifications" />
+      <ViewBody>{content}</ViewBody>
     </ViewShell>
   );
 }

@@ -1126,8 +1126,8 @@ export function WorkspaceSelectorView() {
       </button>
 
       {showNotifPanel && (
-        <div className="overflow-y-auto" style={{ minHeight: "80px", maxHeight: "200px" }}>
-          <NotificationPanel />
+        <div className="empty-view-scroll overflow-y-auto" style={{ minHeight: "80px", maxHeight: "200px" }}>
+          <NotificationPanel embedded />
         </div>
       )}
     </div>
