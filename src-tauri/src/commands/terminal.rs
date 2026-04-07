@@ -291,6 +291,15 @@ pub fn create_terminal_session(
                             "active": false,
                         }),
                     );
+                    // Synthetic exitCode=0: TUI apps don't emit OSC 133;D, so the
+                    // isolated app module provides a completion signal here (§15.5).
+                    let _ = super::ipc_dispatch::do_set_command_status(
+                        &state_for_pty,
+                        &app_clone,
+                        &terminal_id,
+                        None,
+                        Some(0),
+                    );
                     let _ = super::ipc_dispatch::do_notify(
                         &state_for_pty,
                         &app_clone,
