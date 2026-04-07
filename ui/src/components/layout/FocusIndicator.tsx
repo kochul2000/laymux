@@ -6,10 +6,9 @@ export function FocusIndicator({ testId }: { testId?: string }) {
   return (
     <div
       data-testid={testId}
-      className="pointer-events-none absolute inset-0"
+      className="pointer-events-none absolute inset-0 z-30"
       style={{
         boxShadow: `inset 0 0 0 1px var(${isAppFocused ? "--accent" : "--accent-50"})`,
-        zIndex: 20,
       }}
     />
   );

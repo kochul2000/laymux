@@ -432,7 +432,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className="absolute right-0 top-0 z-10 flex items-center"
+              className="absolute right-0 top-0 z-20 flex items-center"
               style={{
                 height: BAR_H,
                 background: barBgHover,
