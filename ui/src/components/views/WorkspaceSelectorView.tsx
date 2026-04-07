@@ -107,13 +107,7 @@ function WorkspaceItem({
 
   const cmdInfo = summary.lastCommand;
   const cmdStatus = cmdInfo
-    ? computeCommandStatus(
-        cmdInfo.exitCode,
-        cmdInfo.outputActive,
-        cmdInfo.activity,
-        cmdInfo.title,
-        cmdInfo.claudeMessage,
-      )
+    ? computeCommandStatus(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.claudeMessage)
     : null;
 
   return (
@@ -294,15 +288,9 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdStatus = ts.lastCommand
-                  ? computeCommandStatus(
-                      ts.lastExitCode,
-                      ts.outputActive,
-                      ts.activity,
-                      ts.title,
-                      ts.claudeMessage,
-                    )
+                  ? computeCommandStatus(ts.lastExitCode, ts.outputActive, ts.claudeMessage)
                   : null;
-                const actInfo = formatActivity(ts.activity, ts.title);
+                const actInfo = formatActivity(ts.activity);
                 return (
                   <div
                     key={pane.id}

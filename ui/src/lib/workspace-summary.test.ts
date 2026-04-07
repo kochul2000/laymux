@@ -328,22 +328,6 @@ describe("getLastCommandForWorkspace — interactive app cleanup", () => {
     expect(getLastCommandForWorkspace(terminals)).toBeNull();
   });
 
-  it("includes terminal title in lastCommand for Claude idle detection", () => {
-    const terminals = [
-      makeTerminal({
-        id: "t1",
-        lastCommand: "Claude task",
-        lastExitCode: 0,
-        lastCommandAt: 200,
-        title: "✳ Claude Code",
-        activity: { type: "interactiveApp", name: "Claude" },
-      }),
-    ];
-    const result = getLastCommandForWorkspace(terminals);
-    expect(result?.title).toBe("✳ Claude Code");
-    expect(result?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
-  });
-
   it("returns other terminal command after one terminal's command state was cleared", () => {
     const terminals = [
       makeTerminal({
@@ -526,27 +510,6 @@ describe("formatActivity", () => {
     expect(result.label).toBe("Claude");
     expect(result.color).toBe("#D97757");
   });
-
-  it("returns plain 'Claude' label regardless of title mode", () => {
-    const plan = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Plan: approach");
-    expect(plan.label).toBe("Claude");
-    expect(plan.claudeMode).toBe("plan");
-    expect(plan.color).toBe("#D97757");
-
-    const danger = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Danger mode");
-    expect(danger.label).toBe("Claude");
-    expect(danger.claudeMode).toBe("danger");
-
-    const idle = formatActivity({ type: "interactiveApp", name: "Claude" }, "✳ Claude Code");
-    expect(idle.label).toBe("Claude");
-    expect(idle.claudeMode).toBe("idle");
-  });
-
-  it("tracks Ralph state without changing label", () => {
-    const result = formatActivity({ type: "interactiveApp", name: "Claude" }, "✶ Ralph: fixing");
-    expect(result.ralph).toBe(true);
-    expect(result.label).toBe("Claude");
-  });
 });
 
 describe("computeWorkspaceSummaryFromBackend", () => {
@@ -635,155 +598,60 @@ describe("computeWorkspaceSummaryFromBackend", () => {
     const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
     expect(result.lastCommand?.outputActive).toBe(false);
   });
-
-  it("includes activity in workspace lastCommand from the source terminal", () => {
-    const summaries = [
-      makeBackendSummary({
-        id: "t1",
-        lastCommand: "gh pr view 3237",
-        lastExitCode: 1,
-        lastCommandAt: 200,
-        outputActive: false,
-        activity: { type: "interactiveApp", name: "Claude" },
-      }),
-    ];
-    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
-    expect(result.lastCommand?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
-  });
-
-  it("includes activity in workspace lastCommand for running activity", () => {
-    const summaries = [
-      makeBackendSummary({
-        id: "t1",
-        lastCommand: "cargo build",
-        lastExitCode: 1,
-        lastCommandAt: 200,
-        outputActive: false,
-        activity: { type: "running" },
-      }),
-    ];
-    const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
-    expect(result.lastCommand?.activity).toEqual({ type: "running" });
-  });
 });
 
 describe("computeCommandStatus", () => {
-  // Shell commands
-  it("returns ⏳ when exitCode is undefined (command running)", () => {
-    const s = computeCommandStatus(undefined, false, { type: "shell" }, undefined);
+  // 4-state universal rule: outputActive → ⏳, exitCode=0 → ✓, exitCode≠0 → ✗, else → —
+
+  it("returns ⏳ when outputActive is true", () => {
+    const s = computeCommandStatus(undefined, true);
     expect(s.icon).toBe("⏳");
     expect(s.color).toBe("var(--yellow)");
   });
 
+  it("returns ⏳ when outputActive even with exitCode 0", () => {
+    const s = computeCommandStatus(0, true);
+    expect(s.icon).toBe("⏳");
+  });
+
   it("returns ✓ for exitCode 0", () => {
-    const s = computeCommandStatus(0, false, { type: "shell" }, undefined);
+    const s = computeCommandStatus(0, false);
     expect(s.icon).toBe("✓");
     expect(s.color).toBe("var(--green)");
   });
 
   it("returns ✗ for non-zero exitCode", () => {
-    const s = computeCommandStatus(1, false, { type: "shell" }, undefined);
+    const s = computeCommandStatus(1, false);
     expect(s.icon).toBe("✗");
     expect(s.color).toBe("var(--red)");
   });
 
-  it("returns ⏳ when outputActive even with exitCode", () => {
-    const s = computeCommandStatus(0, true, { type: "shell" }, undefined);
-    expect(s.icon).toBe("⏳");
+  it("returns — when exitCode is undefined and not outputActive (idle)", () => {
+    const s = computeCommandStatus(undefined, false);
+    expect(s.icon).toBe("—");
+    expect(s.color).toBe("var(--text-secondary)");
   });
 
-  it("returns ⏳ for running activity", () => {
-    const s = computeCommandStatus(0, false, { type: "running" }, undefined);
-    expect(s.icon).toBe("⏳");
-  });
-
-  // Interactive apps (non-Claude)
-  it("returns ⏳ for generic interactiveApp", () => {
-    const s = computeCommandStatus(0, false, { type: "interactiveApp", name: "vim" }, undefined);
-    expect(s.icon).toBe("⏳");
-  });
-
-  // Claude: uses title idle detection
-  it("returns ✓ for Claude idle (✳ prefix)", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✳ Claude Code",
-    );
-    expect(s.icon).toBe("✓");
-    expect(s.color).toBe("var(--green)");
-  });
-
-  it("returns ⏳ for Claude working (spinner prefix)", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✶ fixing bug",
-    );
-    expect(s.icon).toBe("⏳");
-    expect(s.color).toBe("var(--yellow)");
-  });
-
-  it("returns ⏳ for Claude with no title", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      undefined,
-    );
-    expect(s.icon).toBe("⏳");
-  });
-
-  it("ignores exitCode for Claude — uses title only", () => {
-    // exitCode=1 from sub-command, but Claude is idle → ✓
-    const s = computeCommandStatus(
-      1,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✳ Claude Code",
-    );
-    expect(s.icon).toBe("✓");
-  });
-
-  // Claude: claudeMessage → text field
-  it("returns claudeMessage as text for Claude working", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✶ fixing bug",
-      "모든 테스트 통과했습니다.",
-    );
+  // claudeMessage → text field (app-agnostic, just passes through)
+  it("returns claudeMessage as text when outputActive", () => {
+    const s = computeCommandStatus(undefined, true, "모든 테스트 통과했습니다.");
     expect(s.icon).toBe("⏳");
     expect(s.text).toBe("모든 테스트 통과했습니다.");
   });
 
-  it("returns claudeMessage as text for Claude idle", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✳ Claude Code",
-      "1235개 테스트 모두 통과했습니다.",
-    );
+  it("returns claudeMessage as text for success", () => {
+    const s = computeCommandStatus(0, false, "1235개 테스트 모두 통과했습니다.");
     expect(s.icon).toBe("✓");
     expect(s.text).toBe("1235개 테스트 모두 통과했습니다.");
   });
 
-  it("returns undefined text for Claude without claudeMessage", () => {
-    const s = computeCommandStatus(
-      undefined,
-      false,
-      { type: "interactiveApp", name: "Claude" },
-      "✶ working",
-    );
+  it("returns undefined text when no claudeMessage", () => {
+    const s = computeCommandStatus(0, false);
     expect(s.text).toBeUndefined();
   });
 
-  it("returns undefined text for non-Claude commands", () => {
-    const s = computeCommandStatus(0, false, { type: "shell" }, undefined, "some message");
+  it("returns undefined text for empty string claudeMessage", () => {
+    const s = computeCommandStatus(0, false, "");
     expect(s.text).toBeUndefined();
   });
 });

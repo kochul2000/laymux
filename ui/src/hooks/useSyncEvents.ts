@@ -16,13 +16,7 @@ import {
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import {
-  detectActivityFromCommand,
-  detectClaudeTaskTransition,
-  extractClaudeTaskDesc,
-  getClaudeCompletionMessage,
-} from "@/lib/activity-detection";
-import { resolveWorkspaceId } from "@/lib/workspace-utils";
+import { detectActivityFromCommand } from "@/lib/activity-detection";
 
 /**
  * Hook that listens for sync events from the Tauri backend
@@ -81,9 +75,7 @@ export function useSyncEvents() {
     );
 
     // terminal-title-changed: backend PTY callback extracted OSC 0/2 title.
-    // This is the centralized title event — handles activity detection,
-    // Claude task transitions, and title updates in one place.
-    const previousClaudeTitleMap = new Map<string, string>();
+    // Handles activity detection and title updates.
     trackListener(
       onTerminalTitleChanged((data) => {
         if (cancelled) return;
@@ -103,46 +95,6 @@ export function useSyncEvents() {
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
-
-        // Claude task transition detection
-        const prevTitle = previousClaudeTitleMap.get(data.terminalId) ?? instance?.title;
-        const currentActivity = data.interactiveApp
-          ? { type: "interactiveApp" as const, name: data.interactiveApp }
-          : instance?.activity;
-        const claudeExited =
-          !data.interactiveApp &&
-          instance?.activity?.type === "interactiveApp" &&
-          instance.activity.name === "Claude";
-        const transition = detectClaudeTaskTransition(
-          prevTitle,
-          data.title,
-          currentActivity,
-          claudeExited,
-        );
-        previousClaudeTitleMap.set(data.terminalId, data.title);
-
-        if (transition === "completed") {
-          updateInstanceInfo(data.terminalId, {
-            lastCommandAt: Date.now(),
-          });
-          // Only emit notification when notify gate is armed (prevents shell-init spam)
-          if (data.notifyGateArmed) {
-            const message = getClaudeCompletionMessage(prevTitle, data.title);
-            const wsId = resolveWorkspaceId(data.terminalId);
-            useNotificationStore.getState().addNotification({
-              terminalId: data.terminalId,
-              workspaceId: wsId,
-              message,
-              level: "success",
-            });
-          }
-        } else if (transition === "started") {
-          const taskDesc = extractClaudeTaskDesc(data.title);
-          updateInstanceInfo(data.terminalId, {
-            lastCommand: taskDesc || "Claude task",
-            lastCommandAt: Date.now(),
-          });
-        }
       }),
     );
 
