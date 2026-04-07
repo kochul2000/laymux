@@ -589,7 +589,7 @@ function LayoutCard({
   return (
     <div
       data-testid={`layout-card-${layout.id}`}
-      className="relative flex items-center gap-2 rounded px-2 py-1.5"
+      className="relative flex items-center gap-2 px-1 py-1.5"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
@@ -671,27 +671,30 @@ function LayoutCard({
               Ctrl+Alt+N
             </span>
           )}
-          {hovered && (
-            <button
-              data-testid={`layout-menu-${layout.id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen((v) => !v);
-              }}
-              className="shrink-0 flex h-4 w-4 cursor-pointer items-center justify-center rounded text-[10px]"
-              style={{
-                background: menuOpen ? "var(--bg-overlay)" : "transparent",
-                color: "var(--text-secondary)",
-                border: "none",
-                marginLeft: 2,
-              }}
-              title="Layout options"
-            >
-              ⋯
-            </button>
-          )}
         </span>
       </button>
+      {hovered && (
+        <button
+          data-testid={`layout-menu-${layout.id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className={`shrink-0 flex h-4 w-4 cursor-pointer items-center justify-center rounded mx-1 text-[12px] ${menuOpen ? "" : "hover-bg-strong"}`}
+          style={{
+            background: menuOpen ? "var(--bg-overlay)" : undefined,
+            color: "var(--text-secondary)",
+            border: "none",
+          }}
+          title="Layout options"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+            <circle cx="6" cy="2.5" r="1.2" />
+            <circle cx="6" cy="6" r="1.2" />
+            <circle cx="6" cy="9.5" r="1.2" />
+          </svg>
+        </button>
+      )}
 
       {/* Context menu */}
       {menuOpen && (
@@ -896,8 +899,8 @@ export function WorkspaceSelectorView() {
     <div data-testid="workspace-selector" className="flex h-full flex-col">
       <ViewHeader testId="workspace-selector-header" title="New Workspace" />
       {/* New Workspace: Layout picker */}
-      <div className="mx-2 mt-2 mb-1 shrink-0" data-testid="new-workspace-panel">
-        <div className="flex flex-col gap-1">
+      <div className="mt-1 mb-1 shrink-0" data-testid="new-workspace-panel">
+        <div className="flex flex-col">
           {layouts.map((layout, i) => (
             <LayoutCard
               key={layout.id}
@@ -919,7 +922,7 @@ export function WorkspaceSelectorView() {
 
       {/* Separator between creation panel and list */}
       <div
-        className="my-1 border-t"
+        className="mb-1 border-t"
         style={{ borderColor: "var(--border)", opacity: 0.5 }}
       />
 
