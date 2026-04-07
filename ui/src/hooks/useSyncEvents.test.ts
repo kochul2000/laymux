@@ -473,4 +473,56 @@ describe("useSyncEvents", () => {
 
     expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
   });
+
+  it("clears outputActive immediately when Claude title transitions to idle", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    // Simulate Claude running with outputActive
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      outputActive: true,
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    // Claude idle title (✳ prefix)
+    callback({
+      terminalId: "t1",
+      title: "\u2733 Task completed",
+      interactiveApp: "Claude",
+    });
+
+    const inst = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(inst?.outputActive).toBe(false);
+  });
+
+  it("does NOT clear outputActive for non-Claude idle title", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "vim" },
+      outputActive: true,
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "\u2733 some title",
+      interactiveApp: "vim",
+    });
+
+    const inst = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(inst?.outputActive).toBe(true);
+  });
 });

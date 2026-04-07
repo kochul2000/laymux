@@ -107,6 +107,10 @@ pub struct TerminalSession {
     /// Prevents shell-init OSC 133;D from flooding notifications on startup.
     #[serde(skip)]
     pub notify_gate_armed: bool,
+    /// True when Claude Code was in "working" state (non-idle spinner title).
+    /// Used to detect working→idle transition for task completion notification.
+    #[serde(skip)]
+    pub claude_was_working: bool,
 }
 
 fn default_true() -> bool {
@@ -129,6 +133,7 @@ impl TerminalSession {
             last_command_at: None,
             claude_message: None,
             notify_gate_armed: false,
+            claude_was_working: false,
         }
     }
 

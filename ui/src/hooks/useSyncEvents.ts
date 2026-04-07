@@ -126,6 +126,21 @@ export function useSyncEvents() {
           updates.activity = { type: "shell" };
         }
 
+        // Claude idle transition: immediately clear outputActive so ⏳→✓
+        // doesn't lag behind the notification by the DEC 2026 timeout (2s).
+        if (
+          data.interactiveApp === "Claude" &&
+          data.title.startsWith("\u{2733}") &&
+          instance?.outputActive
+        ) {
+          updates.outputActive = false;
+          const timer = outputActiveTimers.current.get(data.terminalId);
+          if (timer) {
+            clearTimeout(timer);
+            outputActiveTimers.current.delete(data.terminalId);
+          }
+        }
+
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
       }),
     );

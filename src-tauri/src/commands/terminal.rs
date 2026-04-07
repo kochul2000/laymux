@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::activity;
+use crate::claude_activity;
 use crate::claude_bullet;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
@@ -192,45 +193,88 @@ pub fn create_terminal_session(
                 }
             }
 
-            // Claude Code detection from OSC 0/2 titles
-            if (event.code == 0 || event.code == 2)
-                && !claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && event.data.contains("Claude Code")
-            {
-                claude_detected.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                    known.insert(terminal_id.clone());
-                }
-                let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
-            }
+            // ── Claude Code title state machine (single pass) ──
+            // Handles entry/exit detection, working→idle task completion,
+            // and known_claude_terminals tracking for OSC 0/2 title changes.
+            if event.code == 0 || event.code == 2 {
+                let was_detected =
+                    claude_detected.load(std::sync::atomic::Ordering::Relaxed);
+                let was_working = if was_detected {
+                    if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
+                        terms
+                            .get(&terminal_id)
+                            .is_some_and(|s| s.claude_was_working)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
 
-            // Claude Code exit detection: title no longer looks like Claude Code.
-            // Only declare exit when title has NO "Claude Code" AND NO spinner prefix.
-            let is_claude_title = activity::is_claude_title(&event.data);
-            if (event.code == 0 || event.code == 2)
-                && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && !is_claude_title
-            {
-                claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
-                // Lock ordering: terminals (1) before known_claude_terminals (3)
-                if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
-                    if let Some(session) = terms.get_mut(&terminal_id) {
-                        if session.claude_message.is_some() {
-                            session.claude_message = None;
-                            let _ = app_clone.emit(
-                                EVENT_CLAUDE_MESSAGE_CHANGED,
-                                serde_json::json!({
-                                    "terminalId": terminal_id,
-                                    "message": null,
-                                }),
-                            );
+                let cr = claude_activity::process_claude_title(
+                    &event.data,
+                    was_detected,
+                    was_working,
+                );
+
+                if cr.entered {
+                    claude_detected
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Ok(mut known) =
+                        state_for_pty.known_claude_terminals.lock_or_err()
+                    {
+                        known.insert(terminal_id.clone());
+                    }
+                    let _ = app_clone
+                        .emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
+                }
+
+                if cr.exited {
+                    claude_detected
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    // Lock ordering: terminals (1) before known_claude_terminals (3)
+                    if let Ok(mut terms) =
+                        state_for_pty.terminals.lock_or_err()
+                    {
+                        if let Some(session) = terms.get_mut(&terminal_id) {
+                            session.claude_was_working = false;
+                            if session.claude_message.is_some() {
+                                session.claude_message = None;
+                                let _ = app_clone.emit(
+                                    EVENT_CLAUDE_MESSAGE_CHANGED,
+                                    serde_json::json!({
+                                        "terminalId": terminal_id,
+                                        "message": null,
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    if let Ok(mut known) =
+                        state_for_pty.known_claude_terminals.lock_or_err()
+                    {
+                        known.remove(&terminal_id);
+                    }
+                }
+
+                // Update working state + dispatch task completion notification
+                if !cr.exited && (cr.now_working || cr.now_idle) {
+                    if let Ok(mut terms) =
+                        state_for_pty.terminals.lock_or_err()
+                    {
+                        if let Some(session) = terms.get_mut(&terminal_id) {
+                            session.claude_was_working = cr.now_working;
                         }
                     }
                 }
-                // Remove from known_claude_terminals so is_claude_terminal_from_buffer()
-                // no longer reports this terminal as running Claude Code.
-                if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                    known.remove(&terminal_id);
+                if let Some(ref message) = cr.task_completed {
+                    let _ = super::ipc_dispatch::do_notify(
+                        &state_for_pty,
+                        &app_clone,
+                        &terminal_id,
+                        message,
+                        Some("success"),
+                    );
                 }
             }
 
@@ -238,8 +282,8 @@ pub fn create_terminal_session(
             if event.code == 0 || event.code == 2 {
                 let interactive_app = activity::detect_interactive_app_from_title(&event.data)
                     .or_else(|| {
-                        // Title may not contain "Claude Code" (e.g. spinner "✢ Working on task"),
-                        // but if the terminal is in known_claude_terminals, preserve the detection.
+                        // Title may not contain "Claude Code" (e.g. spinner "✢ Working"),
+                        // but if the terminal is in known_claude_terminals, preserve detection.
                         if let Ok(known) = state_for_pty.known_claude_terminals.lock_or_err() {
                             if known.contains(&terminal_id) {
                                 return Some("Claude".to_string());
