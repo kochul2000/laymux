@@ -108,8 +108,9 @@ pub fn create_terminal_session(
     let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let lookback_buf: Arc<std::sync::Mutex<Vec<u8>>> =
         Arc::new(std::sync::Mutex::new(Vec::with_capacity(64)));
-    let last_activity_emit_ms =
-        Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let last_activity_emit_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let dec2026_burst_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let dec2026_burst_start = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
@@ -123,9 +124,10 @@ pub fn create_terminal_session(
             }
         }
 
-        // ── DEC 2026 detection: TUI app screen redraw ──
+        // ── DEC 2026 burst detection: sustained TUI activity ──
         // TUI apps (Claude Code, neovim) emit \x1b[?2026h before each frame.
-        // Shell commands never use this, so it's a high-confidence activity signal.
+        // Single events (focus redraw, keystroke echo) are filtered out by
+        // requiring DEC2026_BURST_THRESHOLD hits within DEC2026_BURST_WINDOW_MS.
         if data.len() >= DEC_SYNC_OUTPUT_SET.len()
             && data
                 .windows(DEC_SYNC_OUTPUT_SET.len())
@@ -135,15 +137,34 @@ pub fn create_terminal_session(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            let prev_ms = last_activity_emit_ms
+
+            // Sliding window burst counter
+            let window_start = dec2026_burst_start
                 .load(std::sync::atomic::Ordering::Relaxed);
-            if now_ms.saturating_sub(prev_ms) >= OUTPUT_ACTIVITY_THROTTLE_MS {
-                last_activity_emit_ms
+            if now_ms.saturating_sub(window_start) > DEC2026_BURST_WINDOW_MS {
+                // Window expired — reset
+                dec2026_burst_start
                     .store(now_ms, std::sync::atomic::Ordering::Relaxed);
-                let _ = app_clone.emit(
-                    EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                    serde_json::json!({ "terminalId": terminal_id }),
-                );
+                dec2026_burst_count
+                    .store(1, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                dec2026_burst_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+
+            let count = dec2026_burst_count
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if count >= DEC2026_BURST_THRESHOLD {
+                let prev_emit = last_activity_emit_ms
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if now_ms.saturating_sub(prev_emit) >= OUTPUT_ACTIVITY_THROTTLE_MS {
+                    last_activity_emit_ms
+                        .store(now_ms, std::sync::atomic::Ordering::Relaxed);
+                    let _ = app_clone.emit(
+                        EVENT_TERMINAL_OUTPUT_ACTIVITY,
+                        serde_json::json!({ "terminalId": terminal_id }),
+                    );
+                }
             }
         }
 
@@ -183,12 +204,15 @@ pub fn create_terminal_session(
                 let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
             }
 
-            // Claude Code exit detection: title no longer contains "Claude Code"
-            // Clears stale claude_message and removes from known_claude_terminals
-            // so activity detection correctly returns to "shell".
+            // Claude Code exit detection: title no longer looks like Claude Code.
+            // Claude titles: "Claude Code", "✳ Claude Code" (idle), "✢ Working" (spinner).
+            // Only declare exit when title has NO "Claude Code" AND NO spinner prefix.
+            const CLAUDE_SPINNER_PREFIXES: &[char] = &['✶', '✻', '✽', '✢', '✳'];
+            let is_claude_title = event.data.contains("Claude Code")
+                || event.data.starts_with(|c: char| CLAUDE_SPINNER_PREFIXES.contains(&c));
             if (event.code == 0 || event.code == 2)
                 && claude_detected.load(std::sync::atomic::Ordering::Relaxed)
-                && !event.data.contains("Claude Code")
+                && !is_claude_title
             {
                 claude_detected.store(false, std::sync::atomic::Ordering::Relaxed);
                 // Lock ordering: terminals (1) before known_claude_terminals (3)
