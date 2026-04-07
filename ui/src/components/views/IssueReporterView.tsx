@@ -92,11 +92,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       onKeyDown={handleKeyDown}
       style={{ color: "var(--text-primary)", background: "var(--bg-base)" }}
     >
-      <ViewHeader className="px-2" testId="issue-reporter-header">
-        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
-          Report Issue
-        </span>
-      </ViewHeader>
+      <ViewHeader testId="issue-reporter-header" title="Report Issue" />
       <ViewBody
         testId="issue-reporter-body"
         className="flex flex-col"

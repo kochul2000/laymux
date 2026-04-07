@@ -2,7 +2,9 @@ import { useEffect } from "react";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 
 interface ViewHeaderProps {
-  children: React.ReactNode;
+  /** 헤더 제목. 지정하면 통일된 스타일(--text-secondary, --fs-sm, 600)로 렌더링. */
+  title?: string;
+  children?: React.ReactNode;
   className?: string;
   borderBottom?: boolean;
   testId?: string;
@@ -18,7 +20,7 @@ interface ViewHeaderProps {
  *
  * Context 없이도 독립적으로 동작한다 (Dock 등).
  */
-export function ViewHeader({ children, className, borderBottom = true, testId }: ViewHeaderProps) {
+export function ViewHeader({ title, children, className, borderBottom = true, testId }: ViewHeaderProps) {
   const ctx = usePaneControl();
   const registerHeader = ctx?.registerHeader;
   const unregisterHeader = ctx?.unregisterHeader;
@@ -35,13 +37,20 @@ export function ViewHeader({ children, className, borderBottom = true, testId }:
   return (
     <div
       data-testid={testId}
-      className={`ui-toolbar shrink-0 ${className ?? ""}`.trim()}
+      className={`ui-toolbar shrink-0 px-2 ${className ?? ""}`.trim()}
       style={{
         background: "var(--bg-surface)",
         ...(borderBottom ? { borderBottom: "1px solid var(--border)" } : {}),
       }}
     >
-      <div className="flex min-w-0 flex-1 items-center">{children}</div>
+      <div className="flex min-w-0 flex-1 items-center">
+        {title && (
+          <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
+            {title}
+          </span>
+        )}
+        {children}
+      </div>
       {showPaneControls && (
         <div data-testid="pane-control-bar-content" onClick={(e) => e.stopPropagation()}>
           {ctx.paneControls}

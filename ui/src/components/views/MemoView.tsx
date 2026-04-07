@@ -164,11 +164,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   return (
     <ViewShell testId="memo-view">
-      <ViewHeader className="px-2" testId="memo-header">
-        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
-          Memo
-        </span>
-      </ViewHeader>
+      <ViewHeader testId="memo-header" title="Memo" />
       <ViewBody variant="full" onMouseLeave={handleMouseLeave}>
         <textarea
           ref={textareaRef}

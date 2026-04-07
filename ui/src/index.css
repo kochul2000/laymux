@@ -49,72 +49,75 @@
   --transition-fast: 0.1s;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Reset: Tailwind v4 @layer base already provides *, ::before, ::after { margin:0; padding:0; box-sizing:border-box }.
+   Do NOT duplicate outside @layer — unlayered CSS beats @layer utilities, breaking px-*, py-*, m-* etc. */
 
 /* Remove browser default focus outlines — IDE handles its own focus indicators */
-*:focus {
-  outline: none;
-}
-*:focus-visible {
-  outline: none;
-}
-
-body {
-  font-family: "Consolas", "Fira Code", monospace;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  height: 100vh;
-  overflow: hidden;
+@layer base {
+  *:focus {
+    outline: none;
+  }
+  *:focus-visible {
+    outline: none;
+  }
 }
 
-#root {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+@layer base {
+  body {
+    font-family: "Consolas", "Fira Code", monospace;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Hide scrollbars globally — content is still scrollable */
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
 }
 
-/* Hover utility classes */
-.hover-bg:hover {
-  background: var(--hover-bg);
-}
-.hover-bg-strong:hover {
-  background: var(--hover-bg-strong);
-}
-/* Danger hover — window close button */
-.hover-bg-danger:hover {
-  background: var(--red);
-  color: var(--bg-base);
-}
+@layer components {
+  /* Hover utility classes */
+  .hover-bg:hover {
+    background: var(--hover-bg);
+  }
+  .hover-bg-strong:hover {
+    background: var(--hover-bg-strong);
+  }
+  /* Danger hover — window close button */
+  .hover-bg-danger:hover {
+    background: var(--red);
+    color: var(--bg-base);
+  }
 
-/* Toolbar (28px header bar) */
-.ui-toolbar {
-  display: flex;
-  align-items: center;
-  height: var(--bar-h);
-  gap: 4px;
-}
+  /* Toolbar (28px header bar) */
+  .ui-toolbar {
+    display: flex;
+    align-items: center;
+    height: var(--bar-h);
+    gap: 4px;
+  }
 
-/* Focus-visible for form controls */
-.ui-focus-ring:focus-visible {
-  border-color: var(--accent);
-}
+  /* Focus-visible for form controls */
+  .ui-focus-ring:focus-visible {
+    border-color: var(--accent);
+  }
 
-/* Separator */
-.ui-sep {
-  width: 1px;
-  height: 14px;
-  margin: 0 4px;
-  background: var(--separator-bg);
-}
-
-/* Hide scrollbars globally — content is still scrollable */
-::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  /* Separator */
+  .ui-sep {
+    width: 1px;
+    height: 14px;
+    margin: 0 4px;
+    background: var(--separator-bg);
+  }
 }
 
 /*

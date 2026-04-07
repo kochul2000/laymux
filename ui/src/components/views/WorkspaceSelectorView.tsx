@@ -18,6 +18,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
+import { ViewHeader } from "@/components/ui/ViewHeader";
 import type { WorkspacePane } from "@/stores/types";
 import { persistSession } from "@/lib/persist-session";
 
@@ -39,6 +40,23 @@ function isWindowsProfile(profile: string): boolean {
 
 function shortLabel(label: string): string {
   return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
+}
+
+/** 섹션 소제목 라벨 (uppercase, 작은 폰트, 반투명) */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="uppercase tracking-wider"
+      style={{
+        color: "var(--text-secondary)",
+        fontSize: "var(--fs-xs)",
+        fontWeight: 500,
+        opacity: 0.7,
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
 function CountBadge({ count, testId }: { count: number; testId?: string }) {
@@ -123,10 +141,11 @@ function WorkspaceItem({
       onDragLeave={(e) => drag.onDragLeave(e)}
       onDrop={(e) => drag.onDrop(e, ws.id)}
       onDragEnd={drag.onDragEnd}
-      className="relative mb-0.5 cursor-pointer rounded py-2"
+      className="relative cursor-pointer"
       style={{
         background: isActive ? "var(--accent-08)" : hovered ? "var(--active-bg)" : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
+        borderBottom: "1px solid var(--border)",
         boxShadow:
           dropIndicator?.wsId === ws.id
             ? dropIndicator.position === "top"
@@ -875,14 +894,9 @@ export function WorkspaceSelectorView() {
 
   return (
     <div data-testid="workspace-selector" className="flex h-full flex-col">
+      <ViewHeader testId="workspace-selector-header" title="New Workspace" />
       {/* New Workspace: Layout picker */}
       <div className="mx-2 mt-2 mb-1 shrink-0" data-testid="new-workspace-panel">
-        <p
-          className="mb-1.5"
-          style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
-        >
-          New Workspace
-        </p>
         <div className="flex flex-col gap-1">
           {layouts.map((layout, i) => (
             <LayoutCard
@@ -905,21 +919,19 @@ export function WorkspaceSelectorView() {
 
       {/* Separator between creation panel and list */}
       <div
-        className="mx-2 my-1.5 border-t"
+        className="my-1 border-t"
         style={{ borderColor: "var(--border)", opacity: 0.5 }}
       />
 
       {/* Sort order toggle */}
-      <div className="mx-2 mb-1 flex items-center justify-between">
-        <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
-          Workspaces
-        </span>
+      <div className="px-2 pb-1 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
+        <SectionLabel>Workspaces</SectionLabel>
         <button
           data-testid="sort-order-toggle"
           onClick={() =>
             setWorkspaceSortOrder(workspaceSortOrder === "manual" ? "notification" : "manual")
           }
-          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[9px]"
+          className="flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px]"
           style={{
             color: "var(--text-secondary)",
             background: "var(--active-bg)",
@@ -932,7 +944,7 @@ export function WorkspaceSelectorView() {
               : "Sort: Notification (most recent first)"
           }
         >
-          <svg width="12" height="12" viewBox="0 0 10 10" fill="none">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
             {workspaceSortOrder === "manual" ? (
               <>
                 <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
@@ -952,7 +964,7 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Workspace list */}
-      <div className="flex flex-1 flex-col overflow-y-auto px-1.5 py-0.5">
+      <div className="flex flex-1 flex-col overflow-y-auto">
         {sortedWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
           // Compute summary from frontend stores (event-driven, no polling).
