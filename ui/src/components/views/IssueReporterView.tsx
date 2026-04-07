@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
-import { FocusInput, inputStyle } from "@/components/ui/FormControls";
+import { inputStyle } from "@/components/ui/FormControls";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
@@ -102,7 +102,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
       >
         {/* Screenshot status */}
         <div
-          className="mb-4 flex items-center gap-2.5 rounded px-3.5 py-2.5"
+          className="mb-1 flex items-center gap-1 rounded px-1 py-1"
           style={{
             background: "var(--bg-overlay)",
             border: "1px solid var(--border)",
@@ -112,7 +112,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           {screenshotPath ? (
             <button
               onClick={() => setShowPreview((v) => !v)}
-              className="flex flex-1 cursor-pointer items-center gap-2.5 text-left"
+              className="flex flex-1 cursor-pointer items-center gap-1 text-left"
               style={{ background: "transparent", border: "none" }}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -148,7 +148,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           )}
           <button
             onClick={captureScreenshot}
-            className="hover-bg shrink-0 cursor-pointer rounded px-2.5 py-1 text-[10px] font-medium"
+            className="hover-bg shrink-0 cursor-pointer rounded px-1 py-0.5 text-[10px] font-medium"
             style={{
               color: "var(--accent)",
               border: "1px solid var(--accent-20)",
@@ -162,7 +162,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         {/* Screenshot preview */}
         {showPreview && screenshotDataUrl && (
           <div
-            className="mb-4 overflow-hidden rounded"
+            className="mb-1 overflow-hidden rounded"
             style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}
           >
             <img
@@ -175,14 +175,20 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         )}
 
         {/* Title */}
-        <FocusInput
+        <input
           ref={titleRef}
           data-testid="issue-title"
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Issue title"
-          className="mb-3 w-full rounded px-3 py-2 text-xs"
+          className="mb-1 w-full rounded px-1 py-1 ui-focus-ring"
+          style={{
+            ...inputStyle,
+            fontFamily: ir.fontFamily || appFont.face,
+            fontSize: `${ir.fontSize || appFont.size}px`,
+            fontWeight: ir.fontWeight || appFont.weight,
+          }}
         />
 
         {/* Body */}
@@ -192,7 +198,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Describe the issue..."
-          className="mb-4 min-h-0 w-full flex-1 resize-none rounded px-3 py-2 leading-relaxed"
+          className="mb-1 min-h-0 w-full flex-1 resize-none rounded px-1 py-1 leading-relaxed"
           style={{
             ...inputStyle,
             minHeight: 80,
@@ -204,7 +210,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
 
         {/* Submit bar */}
         <div
-          className="flex items-center gap-3 rounded px-3.5 py-3"
+          className="flex items-center gap-1 rounded px-1 py-1"
           style={{
             background: "var(--bg-overlay)",
             border: "1px solid var(--border)",
@@ -215,7 +221,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             data-testid="issue-submit"
             onClick={handleSubmit}
             disabled={!title.trim() || state === "submitting" || state === "success"}
-            className="cursor-pointer px-5 py-1.5 text-xs font-medium"
+            className="cursor-pointer px-1 py-1 text-xs font-medium"
             style={{
               background: state === "success" ? "var(--green)" : "var(--accent)",
               color: "var(--bg-base)",
@@ -241,7 +247,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             <button
               data-testid="issue-new-report"
               onClick={handleNewReport}
-              className="cursor-pointer px-4 py-1.5 text-xs font-medium"
+              className="cursor-pointer px-1 py-1 text-xs font-medium"
               style={{
                 background: "transparent",
                 color: "var(--accent)",
@@ -280,7 +286,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
                 window.open(resultMsg, "_blank");
               }
             }}
-            className="mt-2 truncate text-[11px] underline"
+            className="mt-1 truncate text-[11px] underline"
             style={{ color: "var(--accent)", cursor: "pointer" }}
             title={resultMsg}
           >
