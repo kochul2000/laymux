@@ -936,7 +936,7 @@ export function WorkspaceSelectorView() {
     <div data-testid="workspace-selector" className="flex h-full flex-col">
       <ViewHeader testId="workspace-selector-header" title="New Workspace" />
       {/* New Workspace: Layout picker */}
-      <div className="mt-1 mb-1 shrink-0" data-testid="new-workspace-panel">
+      <div className="shrink-0" data-testid="new-workspace-panel">
         <div className="flex flex-col">
           {layouts.map((layout, i) => (
             <LayoutCard
