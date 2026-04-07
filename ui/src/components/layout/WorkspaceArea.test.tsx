@@ -82,7 +82,7 @@ describe("WorkspaceArea", () => {
     const indicator = screen.getByTestId("pane-focus-indicator");
     expect(indicator).toBeInTheDocument();
     expect(indicator.style.boxShadow).toBe("inset 0 0 0 1px var(--accent)");
-    expect(indicator.style.zIndex).toBe("20");
+    expect(indicator.className).toContain("z-30");
   });
 
   it("renders dimmed focus indicator when app is not focused", () => {

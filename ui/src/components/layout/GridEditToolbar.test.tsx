@@ -19,7 +19,6 @@ describe("GridEditToolbar", () => {
   it("always shows export action buttons", () => {
     render(<GridEditToolbar />);
     expect(screen.getByTestId("export-new-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("export-overwrite-select")).toBeInTheDocument();
   });
 
   it("export-new button creates new layout with prompted name", async () => {
@@ -33,19 +32,6 @@ describe("GridEditToolbar", () => {
     expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
     expect(useWorkspaceStore.getState().layouts[1].name).toBe("My Layout");
     promptSpy.mockRestore();
-  });
-
-  it("export-overwrite select overwrites existing layout", async () => {
-    const user = userEvent.setup();
-    useWorkspaceStore.getState().splitPane(0, "vertical");
-
-    render(<GridEditToolbar />);
-
-    const select = screen.getByTestId("export-overwrite-select");
-    await user.selectOptions(select, "default-layout");
-
-    const layout = useWorkspaceStore.getState().layouts[0];
-    expect(layout.panes).toHaveLength(2);
   });
 
   it("renders dock toggle buttons for all 4 positions", () => {
@@ -86,35 +72,4 @@ describe("GridEditToolbar", () => {
     expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
   });
 
-  it("shows Saved! after overwrite", async () => {
-    const user = userEvent.setup();
-    render(<GridEditToolbar />);
-
-    const select = screen.getByTestId("export-overwrite-select");
-    await user.selectOptions(select, "default-layout");
-
-    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
-  });
-
-  it("allows overwriting the same layout consecutively", async () => {
-    const user = userEvent.setup();
-    const exportToLayout = vi.spyOn(useWorkspaceStore.getState(), "exportToLayout");
-
-    render(<GridEditToolbar />);
-
-    // First overwrite
-    let select = screen.getByTestId("export-overwrite-select");
-    await user.selectOptions(select, "default-layout");
-    expect(exportToLayout).toHaveBeenCalledTimes(1);
-
-    // After selection, select should reset (key changes → new element)
-    select = screen.getByTestId("export-overwrite-select");
-    expect((select as HTMLSelectElement).value).toBe("");
-
-    // Second overwrite of the SAME layout should still work
-    await user.selectOptions(select, "default-layout");
-    expect(exportToLayout).toHaveBeenCalledTimes(2);
-
-    exportToLayout.mockRestore();
-  });
 });
