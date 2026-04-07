@@ -189,7 +189,17 @@ pub fn create_terminal_session(
 
             // Emit structured title change event (OSC 0/2) for frontend activity detection
             if event.code == 0 || event.code == 2 {
-                let interactive_app = activity::detect_interactive_app_from_title(&event.data);
+                let interactive_app = activity::detect_interactive_app_from_title(&event.data)
+                    .or_else(|| {
+                        // Title may not contain "Claude Code" (e.g. spinner "✢ Working on task"),
+                        // but if the terminal is in known_claude_terminals, preserve the detection.
+                        if let Ok(known) = state_for_pty.known_claude_terminals.lock_or_err() {
+                            if known.contains(&terminal_id) {
+                                return Some("Claude".to_string());
+                            }
+                        }
+                        None
+                    });
                 let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
                     terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
                 } else {

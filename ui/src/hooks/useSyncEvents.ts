@@ -25,8 +25,12 @@ import { detectActivityFromCommand } from "@/lib/activity-detection";
 /** Debounce delay for persisting CWD changes to settings.json (ms). */
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 
+/** Delay before resetting outputActive to false after last title change (ms). */
+const OUTPUT_ACTIVE_RESET_MS = 2000;
+
 export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const debouncedPersistCwd = useCallback(() => {
     if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
@@ -85,13 +89,36 @@ export function useSyncEvents() {
         // Update title in store
         const updates: Record<string, unknown> = { title: data.title };
 
-        // Activity detection from interactive app (Rust already detected this)
+        // Activity detection from interactive app (Rust already detected this,
+        // including known_claude_terminals fallback for spinner titles like "✢ Working").
         if (data.interactiveApp) {
           updates.activity = { type: "interactiveApp", name: data.interactiveApp };
+          // Interactive app title change = screen redraw = outputActive.
+          // Reset to false after OUTPUT_ACTIVE_RESET_MS of no further title changes.
+          updates.outputActive = true;
+          const prev = outputActiveTimers.current.get(data.terminalId);
+          if (prev) clearTimeout(prev);
+          outputActiveTimers.current.set(
+            data.terminalId,
+            setTimeout(() => {
+              if (cancelled) return;
+              useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
+                outputActive: false,
+              });
+              outputActiveTimers.current.delete(data.terminalId);
+            }, OUTPUT_ACTIVE_RESET_MS),
+          );
         } else if (instance?.activity?.type === "interactiveApp") {
           // Interactive app exited — title no longer matches any app pattern.
           // Reset to shell so stale Claude/vim indicators don't persist.
           updates.activity = { type: "shell" };
+          updates.outputActive = false;
+          // Clear any pending timer
+          const prev = outputActiveTimers.current.get(data.terminalId);
+          if (prev) {
+            clearTimeout(prev);
+            outputActiveTimers.current.delete(data.terminalId);
+          }
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);
@@ -243,6 +270,10 @@ export function useSyncEvents() {
     return () => {
       cancelled = true;
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
+      for (const timer of outputActiveTimers.current.values()) {
+        clearTimeout(timer);
+      }
+      outputActiveTimers.current.clear();
       for (const unlisten of unlisteners) {
         unlisten();
       }
