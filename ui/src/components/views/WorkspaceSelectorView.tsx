@@ -1107,23 +1107,16 @@ export function WorkspaceSelectorView() {
         )}
       </div>
 
-      {/* #6: Show Notifications — improved contrast, unread count, hover */}
-      <button
+      {/* #6: Notifications section header — matches Workspaces section style */}
+      <div
         data-testid="toggle-notification-panel"
         onClick={() => setShowNotifPanel((v) => !v)}
-        onMouseEnter={() => setNotifBtnHovered(true)}
-        onMouseLeave={() => setNotifBtnHovered(false)}
-        className="flex w-full shrink-0 cursor-pointer items-center gap-2 p-2 text-left text-xs"
-        style={{
-          borderTop: "1px solid var(--border)",
-          color: notifBtnHovered ? "var(--text-primary)" : "var(--text-secondary)",
-          background: notifBtnHovered ? "var(--active-bg)" : "var(--bg-surface)",
-          transition: "all 0.15s",
-        }}
+        className="hover-bg flex shrink-0 cursor-pointer items-center justify-between px-2 pt-1 pb-1"
+        style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
       >
-        <span>{showNotifPanel ? "Hide Notifications" : "Notifications"}</span>
+        <SectionLabel>{showNotifPanel ? "Hide Notifications" : "Notifications"}</SectionLabel>
         {totalUnread > 0 && <CountBadge count={totalUnread} />}
-      </button>
+      </div>
 
       {showNotifPanel && (
         <div className="empty-view-scroll overflow-y-auto" style={{ minHeight: "80px", maxHeight: "200px" }}>
