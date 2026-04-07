@@ -795,7 +795,6 @@ function LayoutCard({
 
 export function WorkspaceSelectorView() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const [notifBtnHovered, setNotifBtnHovered] = useState(false);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
