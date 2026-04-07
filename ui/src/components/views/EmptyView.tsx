@@ -64,7 +64,7 @@ function EmptyViewCard({
         onClick={onSelect}
         onMouseEnter={() => onHover(true)}
         onMouseLeave={() => onHover(false)}
-        className="flex w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-left transition-all duration-100"
+        className="flex w-full cursor-pointer items-center gap-1 px-1 py-1 text-left transition-all duration-100"
         style={{
           border: `1px solid ${hovered ? "var(--accent)" : "var(--border)"}`,
           background: hovered ? "var(--accent-08)" : "var(--bg-surface)",
