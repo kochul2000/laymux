@@ -163,6 +163,44 @@ describe("findIndentedUrls", () => {
   });
 });
 
+// ============================================================
+// Fixture: Claude Code OAuth URL from right-pane (real terminal buffer)
+// See __fixtures__/right-pane-*.txt for original data
+// ============================================================
+describe("findIndentedUrls — right-pane fixture (terminal-padded lines)", () => {
+  // Real terminal buffer lines: 75 cols wide, 2-space indent, trailing space padding
+  const PADDED_LINES = makeLines([
+    "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61  ",
+    "  b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F  ",
+    "  platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke  ",
+    "  y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A  ",
+    "  mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo  ",
+    "  WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc  ",
+    "  rIoqL8KF-JsBbAo6tlEK_GB0                                               ",
+  ]);
+
+  const CLEAN_URL =
+    "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61" +
+    "b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F" +
+    "platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke" +
+    "y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A" +
+    "mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo" +
+    "WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc" +
+    "rIoqL8KF-JsBbAo6tlEK_GB0";
+
+  it("trailing space가 있어도 전체 URL을 감지", () => {
+    const result = findIndentedUrls(PADDED_LINES, 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe(CLEAN_URL);
+  });
+
+  it("continuation line에서 쿼리해도 전체 URL 반환", () => {
+    const result = findIndentedUrls(PADDED_LINES, 4);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe(CLEAN_URL);
+  });
+});
+
 describe("createIndentedLinkProvider", () => {
   it("returns undefined when isEnabled returns false", () => {
     const mockTerminal = {

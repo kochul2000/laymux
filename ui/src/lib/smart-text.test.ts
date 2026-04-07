@@ -314,3 +314,67 @@ describe("transformPasteContent", () => {
     expect(transformPasteContent(input, "image", opts)).toBe("  some image data");
   });
 });
+
+// ============================================================
+// Fixture: Claude Code OAuth URL from right-pane (real terminal buffer)
+// See __fixtures__/right-pane-*.txt for original data
+// ============================================================
+describe("right-pane fixture: terminal-padded multi-line URL", () => {
+  // Raw xterm.js getSelection() output — each line padded to terminal width (75 cols)
+  // with 2-space indent and 2 trailing spaces (except last line)
+  const RAW_XTERM_SELECTION = [
+    "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61  ",
+    "  b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F  ",
+    "  platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke  ",
+    "  y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A  ",
+    "  mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo  ",
+    "  WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc  ",
+    "  rIoqL8KF-JsBbAo6tlEK_GB0                                               ",
+  ].join("\n");
+
+  // right-pane-right.txt: desired copy result (leading indent + clean URL)
+  const CLEAN_URL =
+    "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61" +
+    "b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2F" +
+    "platform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_ke" +
+    "y+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3A" +
+    "mcp_servers+user%3Afile_upload&code_challenge=ftMghcKqRo39OCAzfeCONGimo" +
+    "WWKd7O6EjMM8JJpKr8&code_challenge_method=S256&state=s3S3YTVq0WiWxtxY7gc" +
+    "rIoqL8KF-JsBbAo6tlEK_GB0";
+
+  // right-pane-wrong.txt: current broken result (raw selection with newlines removed)
+  const WRONG_RESULT = RAW_XTERM_SELECTION.replace(/\n/g, "");
+
+  const pasteOpts = { removeIndent: true, removeLineBreak: true };
+
+  it("문제 재현: raw xterm selection에서 newline만 제거하면 URL에 공백이 포함됨", () => {
+    // 외부 앱(브라우저 URL bar 등)은 붙여넣기 시 newline을 제거
+    // trailing space(2) + leading indent(2) = fragment 사이 4-space gap
+    expect(WRONG_RESULT).toContain("e61    b-44d9"); // 4 spaces between fragments
+    expect(WRONG_RESULT).not.toBe(CLEAN_URL);
+  });
+
+  it("smartRemoveLineBreak가 trailing whitespace 있는 입력에서도 URL joining 성공", () => {
+    const afterIndentRemoval = smartRemoveIndent(RAW_XTERM_SELECTION.replace(/\r\n/g, "\n"));
+    // indent 제거 후에도 trailing space가 남아있지만
+    const firstLine = afterIndentRemoval.split("\n")[0];
+    expect(firstLine).toMatch(/\s$/); // trailing space 존재
+    // smartRemoveLineBreak가 trailing space를 무시하고 URL joining 성공
+    const result = smartRemoveLineBreak(afterIndentRemoval);
+    expect(result).toBe(CLEAN_URL);
+  });
+
+  it("applySmartTextTransforms가 raw input에서도 URL joining 성공", () => {
+    // trimSelectionTrailingWhitespace 없이 raw input이 paste pipeline에 진입해도
+    const result = applySmartTextTransforms(RAW_XTERM_SELECTION, pasteOpts);
+    expect(result).toBe(CLEAN_URL);
+  });
+
+  it("copy→paste pipeline은 trim이 선행되면 URL joining 성공", () => {
+    // trimSelectionTrailingWhitespace가 먼저 적용된 경우
+    const copied = trimSelectionTrailingWhitespace(RAW_XTERM_SELECTION);
+    const pasted = applySmartTextTransforms(copied, pasteOpts);
+    // trim이 trailing space를 제거하므로 URL joining 성공
+    expect(pasted).toBe(CLEAN_URL);
+  });
+});

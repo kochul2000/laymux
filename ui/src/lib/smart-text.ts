@@ -78,8 +78,12 @@ export function smartRemoveIndent(text: string): string {
 export function smartRemoveLineBreak(text: string): string {
   if (!text || !text.includes("\n")) return text;
 
-  // Check if joining all lines produces a valid-looking URL
-  const joined = text.split("\n").join("");
+  // Check if joining all lines (with trailing whitespace trimmed) produces a URL.
+  // Terminal selections may have trailing spaces from buffer padding.
+  const joined = text
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .join("");
 
   // Must start with http:// or https://
   if (/^https?:\/\/\S+$/.test(joined)) {
