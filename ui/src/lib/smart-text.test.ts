@@ -316,8 +316,7 @@ describe("transformPasteContent", () => {
 });
 
 // ============================================================
-// Fixture: Claude Code OAuth URL from right-pane (real terminal buffer)
-// See __fixtures__/right-pane-*.txt for original data
+// Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
 // ============================================================
 describe("right-pane fixture: terminal-padded multi-line URL", () => {
   // Raw xterm.js getSelection() output — each line padded to terminal width (75 cols)

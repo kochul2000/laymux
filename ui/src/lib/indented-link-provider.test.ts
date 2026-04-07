@@ -164,8 +164,7 @@ describe("findIndentedUrls", () => {
 });
 
 // ============================================================
-// Fixture: Claude Code OAuth URL from right-pane (real terminal buffer)
-// See __fixtures__/right-pane-*.txt for original data
+// Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
 // ============================================================
 describe("findIndentedUrls — right-pane fixture (terminal-padded lines)", () => {
   // Real terminal buffer lines: 75 cols wide, 2-space indent, trailing space padding
