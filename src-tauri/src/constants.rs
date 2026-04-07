@@ -59,6 +59,10 @@ pub const OUTPUT_ACTIVITY_THROTTLE_MS: u64 = 1000;
 /// Time window (ms) for counting DEC 2026h events to determine sustained activity.
 /// Single events (focus redraw, keystroke echo) are filtered out; only sustained
 /// TUI rendering (multiple frames within this window) triggers outputActive.
+///
+/// **Coupled with frontend**: `OUTPUT_ACTIVE_RESET_MS` in `useSyncEvents.ts` must
+/// match this value. If the frontend reset timer is shorter, outputActive flickers
+/// between DEC 2026 events. If longer, ⏳ persists after TUI stops.
 pub const DEC2026_BURST_WINDOW_MS: u64 = 2000;
 
 /// Minimum number of DEC 2026h events within `DEC2026_BURST_WINDOW_MS` to

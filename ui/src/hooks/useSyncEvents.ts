@@ -26,7 +26,11 @@ import { detectActivityFromCommand } from "@/lib/activity-detection";
 /** Debounce delay for persisting CWD changes to settings.json (ms). */
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 
-/** Delay before resetting outputActive to false after last title change (ms). */
+/** Delay before resetting outputActive to false after last DEC 2026 event (ms).
+ *
+ * **Coupled with backend**: must match `DEC2026_BURST_WINDOW_MS` in `constants.rs`.
+ * If shorter, outputActive flickers between DEC 2026 events.
+ * If longer, ⏳ persists after TUI stops rendering. */
 const OUTPUT_ACTIVE_RESET_MS = 2000;
 
 export function useSyncEvents() {

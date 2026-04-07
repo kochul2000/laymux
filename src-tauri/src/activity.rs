@@ -2,6 +2,10 @@
 //!
 //! Detects whether a terminal is at a shell prompt, running a command,
 //! or running an interactive application (Claude Code, vim, etc.).
+//! Also contains `BurstDetector` for DEC 2026 sustained TUI activity detection.
+
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use crate::constants::ACTIVITY_SCAN_BYTES;
 use crate::lock_ext::MutexExt;
@@ -211,6 +215,90 @@ pub fn detect_all_terminal_states(
     result
 }
 
+// ── DEC 2026 Burst Detection ──
+
+/// Bundled state for DEC 2026 burst detection in the PTY callback.
+///
+/// TUI apps (Claude Code, neovim) emit `\x1b[?2026h` (DEC Synchronized Output)
+/// before each frame. Single events (focus redraw, keystroke echo) are filtered
+/// by requiring `threshold` hits within `window`. Only then is an event emitted,
+/// throttled to at most one per `throttle` interval.
+///
+/// Uses `Instant` (monotonic clock) instead of `SystemTime` to avoid NTP jumps
+/// breaking the sliding window.
+pub struct BurstDetector {
+    window: std::time::Duration,
+    threshold: u64,
+    throttle: std::time::Duration,
+    /// Sliding window state: (burst_start, burst_count, last_emit)
+    /// Protected by Mutex because Instant is not Atomic-storable.
+    inner: std::sync::Mutex<BurstDetectorInner>,
+}
+
+struct BurstDetectorInner {
+    burst_start: Instant,
+    burst_count: u64,
+    last_emit: Instant,
+}
+
+impl BurstDetector {
+    pub fn new(window_ms: u64, threshold: u64, throttle_ms: u64) -> Self {
+        let now = Instant::now();
+        Self {
+            window: std::time::Duration::from_millis(window_ms),
+            threshold,
+            throttle: std::time::Duration::from_millis(throttle_ms),
+            inner: std::sync::Mutex::new(BurstDetectorInner {
+                burst_start: now,
+                burst_count: 0,
+                last_emit: now - std::time::Duration::from_millis(throttle_ms + 1),
+            }),
+        }
+    }
+
+    /// Record a DEC 2026h hit. Returns `true` if an event should be emitted
+    /// (burst threshold reached + throttle interval elapsed).
+    pub fn record_hit(&self) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        let now = Instant::now();
+
+        // Sliding window: reset if window expired
+        if now.duration_since(inner.burst_start) > self.window {
+            inner.burst_start = now;
+            inner.burst_count = 1;
+        } else {
+            inner.burst_count += 1;
+        }
+
+        if inner.burst_count >= self.threshold
+            && now.duration_since(inner.last_emit) >= self.throttle
+        {
+            inner.last_emit = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Bundled per-terminal state captured by the PTY callback closure.
+/// Groups individual `Arc<Atomic*>` fields into a single `Arc<PtyCallbackState>`.
+pub struct PtyCallbackState {
+    pub claude_detected: AtomicBool,
+    pub burst_detector: BurstDetector,
+}
+
+impl PtyCallbackState {
+    pub fn new(burst_window_ms: u64, burst_threshold: u64, throttle_ms: u64) -> Self {
+        Self {
+            claude_detected: AtomicBool::new(false),
+            burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,5 +451,53 @@ mod tests {
             .unwrap()
             .remove(tid);
         assert!(!is_claude_terminal_from_buffer(&state, tid, None));
+    }
+
+    // ── BurstDetector tests ──
+
+    #[test]
+    fn burst_below_threshold_does_not_emit() {
+        let detector = BurstDetector::new(2000, 3, 1000);
+        assert!(!detector.record_hit());
+        assert!(!detector.record_hit());
+        // 2 hits < threshold 3 → no emit
+    }
+
+    #[test]
+    fn burst_at_threshold_emits() {
+        let detector = BurstDetector::new(2000, 3, 1000);
+        assert!(!detector.record_hit());
+        assert!(!detector.record_hit());
+        assert!(detector.record_hit()); // 3rd hit → emit
+    }
+
+    #[test]
+    fn burst_throttle_prevents_rapid_emit() {
+        let detector = BurstDetector::new(2000, 3, 1000);
+        // First burst → emit
+        for _ in 0..3 {
+            detector.record_hit();
+        }
+        // Immediately after — still within throttle window
+        assert!(!detector.record_hit());
+        assert!(!detector.record_hit());
+    }
+
+    #[test]
+    fn burst_window_expired_resets_count() {
+        let detector = BurstDetector::new(0, 3, 0); // 0ms window → always expired
+        // Each hit resets the window, so count never accumulates past 1
+        assert!(!detector.record_hit());
+        assert!(!detector.record_hit());
+        assert!(!detector.record_hit());
+    }
+
+    #[test]
+    fn burst_sustained_activity_emits_after_throttle() {
+        // Short throttle for test
+        let detector = BurstDetector::new(5000, 2, 0); // 0ms throttle
+        assert!(!detector.record_hit());
+        assert!(detector.record_hit()); // 2nd → emit
+        assert!(detector.record_hit()); // still above threshold, 0ms throttle → emit again
     }
 }

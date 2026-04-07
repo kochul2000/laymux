@@ -334,6 +334,7 @@ export function computeCommandStatus(
   outputActive: boolean | undefined,
   claudeMessage?: string,
 ): CommandStatus {
+  // Intentionally uses || (not ??) to also convert empty string "" to undefined
   const text = claudeMessage || undefined;
   if (outputActive) return { icon: "⏳", color: "var(--yellow)", text };
   if (exitCode === 0) return { icon: "✓", color: "var(--green)", text };

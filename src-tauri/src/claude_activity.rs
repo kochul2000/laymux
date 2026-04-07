@@ -8,8 +8,22 @@
 //! returns structured results. The caller (PTY callback) is responsible
 //! for updating persistent state and dispatching events.
 
-/// Star-based spinner prefixes used by Claude Code in terminal titles.
-const CLAUDE_SPINNER_PREFIXES: &[char] = &['✶', '✻', '✽', '✢', '✳'];
+/// Idle indicator prefix (✳ U+2733). Separated from working spinners
+/// so the two sets can be composed without duplication.
+const IDLE_PREFIX: char = '✳';
+
+/// Star-based working spinner prefixes (excludes IDLE_PREFIX).
+const WORKING_STAR_SPINNERS: &[char] = &['✶', '✻', '✽', '✢'];
+
+/// All star-based spinner prefixes (working + idle).
+/// Used by `is_claude_title` and `strip_claude_spinner_prefix`.
+const CLAUDE_SPINNER_PREFIXES: &[char] = &[
+    WORKING_STAR_SPINNERS[0],
+    WORKING_STAR_SPINNERS[1],
+    WORKING_STAR_SPINNERS[2],
+    WORKING_STAR_SPINNERS[3],
+    IDLE_PREFIX,
+];
 
 /// Check if a terminal title looks like a Claude Code title.
 /// Returns true if the title contains "Claude Code" or starts with a known
@@ -24,7 +38,7 @@ pub fn is_claude_title(title: &str) -> bool {
 /// Check if a Claude Code title indicates idle state (✳ U+2733 prefix).
 /// Claude Code sets this prefix when waiting for user input.
 pub fn is_claude_idle_title(title: &str) -> bool {
-    title.starts_with('\u{2733}')
+    title.starts_with(IDLE_PREFIX)
 }
 
 /// Strip the spinner prefix character (star-based or Braille) from a Claude Code title.
@@ -43,11 +57,10 @@ pub fn strip_claude_spinner_prefix(title: &str) -> &str {
 
 /// Check if a Claude Code title indicates active/working state.
 /// Working spinners: star-based (✶✻✽✢) or Braille patterns (U+2800..U+28FF).
-/// Excludes ✳ (idle) — that's the idle indicator, not a working spinner.
+/// Excludes ✳ (IDLE_PREFIX) — that's the idle indicator, not a working spinner.
 pub fn is_claude_working_title(title: &str) -> bool {
-    const WORKING_SPINNERS: &[char] = &['✶', '✻', '✽', '✢'];
     title.starts_with(|c: char| {
-        WORKING_SPINNERS.contains(&c) || ('\u{2800}'..='\u{28FF}').contains(&c)
+        WORKING_STAR_SPINNERS.contains(&c) || ('\u{2800}'..='\u{28FF}').contains(&c)
     })
 }
 
@@ -101,7 +114,7 @@ pub fn process_claude_title(
 
         // Task completion: working → idle transition
         if was_working && result.now_idle {
-            let description = title.trim_start_matches('\u{2733}').trim();
+            let description = title.trim_start_matches(IDLE_PREFIX).trim();
             result.task_completed = Some(
                 if description.is_empty() || description == "Claude Code" {
                     "Claude Code task completed".to_string()

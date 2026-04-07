@@ -106,10 +106,11 @@ pub fn create_terminal_session(
     let terminal_id = id.clone();
     let app_clone = app.clone();
     let state_for_pty = Arc::clone(&*state);
-    let claude_detected = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let last_activity_emit_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let dec2026_burst_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let dec2026_burst_start = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
+        DEC2026_BURST_WINDOW_MS,
+        DEC2026_BURST_THRESHOLD,
+        OUTPUT_ACTIVITY_THROTTLE_MS,
+    ));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
@@ -124,46 +125,17 @@ pub fn create_terminal_session(
         }
 
         // ── DEC 2026 burst detection: sustained TUI activity ──
-        // TUI apps (Claude Code, neovim) emit \x1b[?2026h before each frame.
-        // Single events (focus redraw, keystroke echo) are filtered out by
-        // requiring DEC2026_BURST_THRESHOLD hits within DEC2026_BURST_WINDOW_MS.
+        // See activity::BurstDetector for sliding window + throttle logic.
         if data.len() >= DEC_SYNC_OUTPUT_SET.len()
             && data
                 .windows(DEC_SYNC_OUTPUT_SET.len())
                 .any(|w| w == DEC_SYNC_OUTPUT_SET)
         {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-
-            // Sliding window burst counter
-            let window_start = dec2026_burst_start
-                .load(std::sync::atomic::Ordering::Relaxed);
-            if now_ms.saturating_sub(window_start) > DEC2026_BURST_WINDOW_MS {
-                // Window expired — reset
-                dec2026_burst_start
-                    .store(now_ms, std::sync::atomic::Ordering::Relaxed);
-                dec2026_burst_count
-                    .store(1, std::sync::atomic::Ordering::Relaxed);
-            } else {
-                dec2026_burst_count
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-
-            let count = dec2026_burst_count
-                .load(std::sync::atomic::Ordering::Relaxed);
-            if count >= DEC2026_BURST_THRESHOLD {
-                let prev_emit = last_activity_emit_ms
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                if now_ms.saturating_sub(prev_emit) >= OUTPUT_ACTIVITY_THROTTLE_MS {
-                    last_activity_emit_ms
-                        .store(now_ms, std::sync::atomic::Ordering::Relaxed);
-                    let _ = app_clone.emit(
-                        EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                        serde_json::json!({ "terminalId": terminal_id }),
-                    );
-                }
+            if pty_cb_state.burst_detector.record_hit() {
+                let _ = app_clone.emit(
+                    EVENT_TERMINAL_OUTPUT_ACTIVITY,
+                    serde_json::json!({ "terminalId": terminal_id }),
+                );
             }
         }
 
@@ -194,9 +166,16 @@ pub fn create_terminal_session(
             // ── Claude Code title state machine (single pass) ──
             // Handles entry/exit detection, working→idle task completion,
             // and known_claude_terminals tracking for OSC 0/2 title changes.
+            //
+            // Lock strategy: the terminals lock is acquired once per OSC 0/2 event
+            // to read was_working and write back exited/working/idle state. This
+            // avoids repeated lock acquisitions for what is logically one operation.
+            // known_claude_terminals (lock #3) is acquired separately to maintain
+            // lock ordering (terminals=#1 < known_claude_terminals=#3).
             if event.code == 0 || event.code == 2 {
-                let was_detected =
-                    claude_detected.load(std::sync::atomic::Ordering::Relaxed);
+                let was_detected = pty_cb_state
+                    .claude_detected
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 let was_working = if was_detected {
                     if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
                         terms
@@ -216,7 +195,8 @@ pub fn create_terminal_session(
                 );
 
                 if cr.entered {
-                    claude_detected
+                    pty_cb_state
+                        .claude_detected
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     if let Ok(mut known) =
                         state_for_pty.known_claude_terminals.lock_or_err()
@@ -227,27 +207,60 @@ pub fn create_terminal_session(
                         .emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
                 }
 
-                if cr.exited {
-                    claude_detected
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                    // Lock ordering: terminals (1) before known_claude_terminals (3)
-                    if let Ok(mut terms) =
-                        state_for_pty.terminals.lock_or_err()
-                    {
+                // Determine claude_message before acquiring the terminals lock
+                let new_message = if cr.exited {
+                    None // will clear in the block below
+                } else if cr.task_completed.is_some() {
+                    // Task completed (working→idle): extract from output buffer
+                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
+                        buffers.get(&terminal_id).and_then(|buf| {
+                            let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+                            claude_bullet::extract_claude_status_message(&recent)
+                        })
+                    } else {
+                        None
+                    }
+                } else if cr.now_working {
+                    // Working: use title text (strip spinner prefix)
+                    let text = claude_activity::strip_claude_spinner_prefix(&event.data);
+                    if text.is_empty() || text == "Claude Code" {
+                        None
+                    } else {
+                        Some(text.to_string())
+                    }
+                } else {
+                    None
+                };
+
+                // Single terminals lock for exited/working/idle state updates
+                let mut message_changed = false;
+                if cr.exited || cr.now_working || cr.now_idle {
+                    if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                         if let Some(session) = terms.get_mut(&terminal_id) {
-                            session.claude_was_working = false;
-                            if session.claude_message.is_some() {
-                                session.claude_message = None;
-                                let _ = app_clone.emit(
-                                    EVENT_CLAUDE_MESSAGE_CHANGED,
-                                    serde_json::json!({
-                                        "terminalId": terminal_id,
-                                        "message": null,
-                                    }),
-                                );
+                            if cr.exited {
+                                session.claude_was_working = false;
+                                if session.claude_message.is_some() {
+                                    session.claude_message = None;
+                                    message_changed = true;
+                                }
+                            } else {
+                                session.claude_was_working = cr.now_working;
+                                if let Some(ref msg) = new_message {
+                                    if session.claude_message.as_deref() != Some(msg) {
+                                        session.claude_message = Some(msg.clone());
+                                        message_changed = true;
+                                    }
+                                }
                             }
                         }
                     }
+                }
+
+                if cr.exited {
+                    pty_cb_state
+                        .claude_detected
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    // known_claude_terminals lock (#3) — separate from terminals (#1)
                     if let Ok(mut known) =
                         state_for_pty.known_claude_terminals.lock_or_err()
                     {
@@ -255,55 +268,15 @@ pub fn create_terminal_session(
                     }
                 }
 
-                // Update working state, claude_message, and dispatch task completion
-                if !cr.exited && (cr.now_working || cr.now_idle) {
-                    // Determine claude_message based on state transition
-                    let new_message = if cr.task_completed.is_some() {
-                        // Task completed (working→idle): extract from output buffer
-                        if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
-                            buffers.get(&terminal_id).and_then(|buf| {
-                                let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-                                claude_bullet::extract_claude_status_message(&recent)
-                            })
-                        } else {
-                            None
-                        }
-                    } else if cr.now_working {
-                        // Working: use title text (strip spinner prefix)
-                        let text = claude_activity::strip_claude_spinner_prefix(&event.data);
-                        if text.is_empty() || text == "Claude Code" {
-                            None
-                        } else {
-                            Some(text.to_string())
-                        }
-                    } else {
-                        None // idle without task_completed — keep existing
-                    };
-
-                    let mut message_changed = false;
-                    if let Ok(mut terms) =
-                        state_for_pty.terminals.lock_or_err()
-                    {
-                        if let Some(session) = terms.get_mut(&terminal_id) {
-                            session.claude_was_working = cr.now_working;
-                            // Update claude_message if we have a new value
-                            if let Some(ref msg) = new_message {
-                                if session.claude_message.as_deref() != Some(msg) {
-                                    session.claude_message = Some(msg.clone());
-                                    message_changed = true;
-                                }
-                            }
-                        }
-                    }
-                    if message_changed {
-                        let _ = app_clone.emit(
-                            EVENT_CLAUDE_MESSAGE_CHANGED,
-                            serde_json::json!({
-                                "terminalId": terminal_id,
-                                "message": new_message,
-                            }),
-                        );
-                    }
+                if message_changed {
+                    let msg_payload = if cr.exited { None } else { new_message.clone() };
+                    let _ = app_clone.emit(
+                        EVENT_CLAUDE_MESSAGE_CHANGED,
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "message": msg_payload,
+                        }),
+                    );
                 }
                 if let Some(ref message) = cr.task_completed {
                     // Emit active:false BEFORE terminal-title-changed (emitted below at L346+).
