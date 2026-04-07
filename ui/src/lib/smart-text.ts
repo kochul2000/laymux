@@ -69,7 +69,9 @@ export function smartRemoveIndent(text: string): string {
 
 /**
  * Detect if the entire text (when all newlines are removed) forms a single URL.
- * If so, join lines by removing newlines.
+ * If so, join lines by removing newlines. Trailing whitespace is trimmed from
+ * each line before joining — terminal buffer lines are often padded to the
+ * terminal width with spaces.
  *
  * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
  * validate URL structure — in a clipboard-paste context, false positives
