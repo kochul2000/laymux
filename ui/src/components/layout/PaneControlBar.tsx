@@ -154,7 +154,7 @@ function BarContent({
 }) {
   return (
     <div
-      className="flex w-full items-center justify-end gap-0.5 px-1"
+      className="flex w-full items-center justify-end gap-0.5"
       onClick={(e) => e.stopPropagation()}
     >
       {actions.onChangeView && (
@@ -432,7 +432,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className="absolute right-1 top-1 z-20 flex items-center"
+              className="absolute right-0 top-0 z-10 flex items-center"
               style={{
                 height: BAR_H,
                 background: barBgHover,
