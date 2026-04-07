@@ -2,6 +2,7 @@
  * Test fixture: Claude Code OAuth URL from a 75-column terminal.
  *
  * Files (same directory):
+ *   right-pane-output.txt — raw PTY output (ANSI escape sequences)
  *   right-pane-human.txt  — what the user sees (lines padded to terminal width)
  *   right-pane-wrong.txt  — broken result (raw selection with newlines stripped)
  *   right-pane-right.txt  — expected clean URL
@@ -15,7 +16,10 @@ function read(name: string): string {
   return readFileSync(join(dir, name), "utf-8").replace(/\r\n/g, "\n");
 }
 
-/** Human-visible terminal output (75-col lines with CRLF). */
+/** Raw PTY output with ANSI escape sequences (cursor positioning, SGR colors, etc). */
+export const RAW_PTY_OUTPUT: string = read("right-pane-output.txt");
+
+/** Human-visible terminal output (75-col lines). */
 const humanText = read("right-pane-human.txt");
 
 /**
