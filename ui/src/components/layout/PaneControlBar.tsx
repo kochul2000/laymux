@@ -63,7 +63,7 @@ function BarBtn({
       data-testid={testId}
       onClick={onClick}
       title={title}
-      className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[11px]"
+      className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded px-0 text-[11px]"
       style={{
         height: BTN_H,
         minWidth: BTN_MIN_W,
@@ -409,7 +409,7 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
         {isPinned && !hasViewHeader && (
           <div
             data-testid="pane-control-bar"
-            className="ui-toolbar shrink-0"
+            className="ui-toolbar shrink-0 pr-1"
             style={{
               background: barBg,
               borderBottom: `1px solid ${borderClr}`,
@@ -432,14 +432,14 @@ export function PaneControlBar({ currentView, actions, hovered, children }: Pane
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className="absolute right-0 top-0 z-20 flex items-center"
+              className="absolute right-0 top-0 z-20 flex items-center pl-0.5 pr-1"
               style={{
                 height: BAR_H,
                 background: barBgHover,
                 backdropFilter: "blur(8px)",
                 borderBottom: `1px solid ${sepClr}`,
                 borderLeft: `1px solid ${sepClr}`,
-                borderRadius: "0 0 0 var(--radius-lg)",
+                borderRadius: 0,
               }}
             >
               <BarContent

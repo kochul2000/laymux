@@ -37,7 +37,7 @@ export function ViewHeader({ title, children, className, borderBottom = true, te
   return (
     <div
       data-testid={testId}
-      className={`ui-toolbar shrink-0 px-2 ${className ?? ""}`.trim()}
+      className={`ui-toolbar shrink-0 pl-2 pr-1 ${className ?? ""}`.trim()}
       style={{
         background: "var(--bg-surface)",
         ...(borderBottom ? { borderBottom: "1px solid var(--border)" } : {}),
