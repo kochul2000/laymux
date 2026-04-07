@@ -1,7 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useTerminalStore } from "@/stores/terminal-store";
-import { abbreviatePath, mntPathToWindows } from "@/lib/workspace-summary";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
 
@@ -30,7 +28,6 @@ interface PaneControlBarProps {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
-  paneId?: string;
   children: React.ReactNode;
 }
 
@@ -220,8 +217,6 @@ function BarContent({
           );
         })()}
 
-      <Sep />
-
       {actions.onSplitH && (
         <BarBtn testId="pane-control-split-h" onClick={actions.onSplitH} title="Split horizontal">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -366,30 +361,27 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
   );
 }
 
-// ─── Terminal info (CWD + branch) ───────────────────────
-function TerminalInfo({ paneId }: { paneId: string }) {
-  const inst = useTerminalStore((s) => s.instances.find((i) => i.id === `terminal-${paneId}`));
-  const cwd = inst?.cwd ? abbreviatePath(mntPathToWindows(inst.cwd)) : null;
-  const branch = inst?.branch || null;
-  if (!cwd && !branch) return null;
+// ─── View label map ─────────────────────────────────────
+const VIEW_LABELS: Partial<Record<ViewType, string>> = {
+  EmptyView: "Empty",
+  MemoView: "Memo",
+  IssueReporterView: "Issue Reporter",
+  FileExplorerView: "File Explorer",
+};
+
+// ─── Bar left section (view label) ──────────────────────
+function BarLabel({ viewType }: { viewType: ViewType }) {
+  const label = VIEW_LABELS[viewType] ?? null;
+  if (!label) return <div className="flex-1" />;
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[11px]">
-      {branch && (
-        <span className="shrink-0" style={{ color: "var(--green)" }}>
-          {branch}
-        </span>
-      )}
-      {cwd && (
-        <span className="truncate" style={{ color: "var(--text-secondary)" }}>
-          {cwd}
-        </span>
-      )}
+    <div className="flex min-w-0 flex-1 items-center text-[11px]">
+      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
     </div>
   );
 }
 
 // ─── Main component ─────────────────────────────────────
-export function PaneControlBar({ currentView, actions, hovered, paneId, children }: PaneControlBarProps) {
+export function PaneControlBar({ currentView, actions, hovered, children }: PaneControlBarProps) {
   const [mode, setMode] = useState<ControlBarMode>("hover");
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
@@ -403,6 +395,8 @@ export function PaneControlBar({ currentView, actions, hovered, paneId, children
       : isPinned
         ? "pane-control-pinned"
         : "pane-control-hover";
+
+  const hasBarLabel = currentView.type !== "TerminalView" && currentView.type !== "EmptyView";
 
   const paneControls = useMemo(
     () => (
@@ -440,9 +434,7 @@ export function PaneControlBar({ currentView, actions, hovered, paneId, children
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
-            {paneId && currentView.type === "TerminalView" && (
-              <TerminalInfo paneId={paneId} />
-            )}
+            <BarLabel viewType={currentView.type} />
             <BarContent
               currentView={currentView}
               actions={actions}
@@ -460,18 +452,19 @@ export function PaneControlBar({ currentView, actions, hovered, paneId, children
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className="absolute left-0 right-0 top-0 z-20 flex items-center pl-2 pr-1"
+              className={`absolute top-0 z-20 flex items-center pr-1 ${
+                hasBarLabel ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
+              }`}
               style={{
                 height: BAR_H,
                 background: barBgHover,
                 backdropFilter: "blur(8px)",
                 borderBottom: `1px solid ${sepClr}`,
+                ...(!hasBarLabel ? { borderLeft: `1px solid ${sepClr}` } : {}),
                 borderRadius: 0,
               }}
             >
-              {paneId && currentView.type === "TerminalView" && (
-                <TerminalInfo paneId={paneId} />
-              )}
+              {hasBarLabel && <BarLabel viewType={currentView.type} />}
               <BarContent
                 currentView={currentView}
                 actions={actions}
