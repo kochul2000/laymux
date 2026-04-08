@@ -164,7 +164,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           )}
           <button
             onClick={captureScreenshot}
-            className="hover-bg shrink-0 cursor-pointer rounded px-1 py-0.5 text-[10px] font-medium"
+            className="hover-bg flex shrink-0 cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium"
             style={{
               color: "var(--accent)",
               border: "1px solid var(--accent-20)",
