@@ -10,6 +10,7 @@ export interface LastCommandInfo {
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   claudeMessage?: string; // latest white-● status message from Claude Code output
   activity?: TerminalActivityInfo;
+  title?: string; // terminal title (used for Claude idle detection via ✳ prefix)
 }
 
 export interface TerminalSummaryInfo {
@@ -75,6 +76,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     outputActive: t.outputActive,
     claudeMessage: t.claudeMessage,
     activity: t.activity,
+    title: t.title,
   };
 }
 
@@ -171,6 +173,8 @@ export function computeWorkspaceSummaryFromBackend(
           timestamp: s.lastCommandAt,
           outputActive: false, // outputActive is driven by frontend DEC 2026 events
           claudeMessage: s.claudeMessage ?? undefined,
+          activity: s.activity as TerminalActivityInfo,
+          title: s.title ?? undefined,
         };
       }
     }
@@ -332,6 +336,7 @@ export function computeCommandStatus(
   outputActive: boolean | undefined,
   claudeMessage?: string,
   activity?: TerminalActivityInfo,
+  title?: string,
 ): CommandStatus {
   const raw: RawTerminalState = {
     exitCode,
@@ -339,7 +344,7 @@ export function computeCommandStatus(
     lastCommand: undefined,
     claudeMessage,
     activity,
-    title: undefined,
+    title,
   };
   const handler = getHandler(activity);
   const status = handler.computeStatus(raw);

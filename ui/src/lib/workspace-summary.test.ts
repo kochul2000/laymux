@@ -686,9 +686,15 @@ describe("computeCommandStatus", () => {
       expect(s.text).toBe("Task completed successfully");
     });
 
-    it("Claude idle (no synthetic exitCode, no prior): outputActive=false → —", () => {
-      // BUG CASE (pre-fix): Claude idle but exitCode was never set → —
-      // After fix: this shouldn't happen because task_completed always sets exitCode=0.
+    it("Claude idle with ✳ title: no exitCode → ✳ Claude accent", () => {
+      // Claude entered but no task completed yet. Title shows ✳ (idle prefix).
+      const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
+      expect(s.icon).toBe("✳");
+      expect(s.color).toBe("var(--claude)");
+    });
+
+    it("Claude idle without title: no exitCode → — (fallback)", () => {
+      // Edge case: title not yet received
       const s = computeCommandStatus(undefined, false, undefined, claudeActivity);
       expect(s.icon).toBe("—");
     });
