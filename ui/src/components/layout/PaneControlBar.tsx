@@ -387,8 +387,16 @@ function BarLabel({ viewType }: { viewType: ViewType }) {
 }
 
 // ─── Main component ─────────────────────────────────────
-export function PaneControlBar({ paneId, currentView, actions, hovered, children }: PaneControlBarProps) {
-  const mode = useUiStore((s) => paneId ? (s.barModes[paneId] ?? s.getBarMode(paneId)) : s.getBarMode("__fallback__"));
+export function PaneControlBar({
+  paneId,
+  currentView,
+  actions,
+  hovered,
+  children,
+}: PaneControlBarProps) {
+  const mode = useUiStore((s) =>
+    paneId ? (s.barModes[paneId] ?? s.getBarMode(paneId)) : s.getBarMode("__fallback__"),
+  );
   const setBarMode = useUiStore((s) => s.setBarMode);
   const setMode = useCallback(
     (m: ControlBarMode) => setBarMode(paneId ?? "__fallback__", m),

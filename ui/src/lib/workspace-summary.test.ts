@@ -552,10 +552,7 @@ describe("computeWorkspaceSummaryFromBackend", () => {
   });
 
   it("outputActive defaults to false (driven by frontend DEC 2026 events)", () => {
-    const summaries = [
-      makeBackendSummary({ id: "t1" }),
-      makeBackendSummary({ id: "t2" }),
-    ];
+    const summaries = [makeBackendSummary({ id: "t1" }), makeBackendSummary({ id: "t2" })];
     const result = computeWorkspaceSummaryFromBackend("ws-1", summaries);
     expect(result.terminalSummaries[0].outputActive).toBe(false);
     expect(result.terminalSummaries[1].outputActive).toBe(false);

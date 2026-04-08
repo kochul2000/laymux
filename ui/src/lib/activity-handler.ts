@@ -19,9 +19,7 @@ export interface RawTerminalState {
 export interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;
   computeStatusMessage(raw: RawTerminalState): string | undefined;
-  computeNotification(
-    raw: RawTerminalState,
-  ): { message: string; level: string } | null;
+  computeNotification(raw: RawTerminalState): { message: string; level: string } | null;
 }
 
 const handlers: Record<string, ActivityHandler> = {
