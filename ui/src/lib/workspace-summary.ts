@@ -64,13 +64,17 @@ export function getPortsForWorkspace(terminalPorts: Map<string, number[]>): numb
 }
 
 export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastCommandInfo | null {
-  const withCommand = terminals.filter((t) => t.lastCommand);
-  if (withCommand.length === 0) return null;
+  // Include terminals with lastCommand OR interactiveApp activity (which may
+  // have status data without shell integration, e.g. Claude in PowerShell).
+  const withStatus = terminals.filter(
+    (t) => t.lastCommand || t.activity?.type === "interactiveApp",
+  );
+  if (withStatus.length === 0) return null;
 
-  const sorted = [...withCommand].sort((a, b) => (b.lastCommandAt ?? 0) - (a.lastCommandAt ?? 0));
+  const sorted = [...withStatus].sort((a, b) => (b.lastCommandAt ?? 0) - (a.lastCommandAt ?? 0));
   const t = sorted[0];
   return {
-    command: t.lastCommand!,
+    command: t.lastCommand ?? "",
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,

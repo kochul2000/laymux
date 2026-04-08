@@ -312,15 +312,16 @@ function WorkspaceItem({
                 const termId = `terminal-${pane.id}`;
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
-                const tCmdStatus = ts.lastCommand
-                  ? computeCommandStatus(
-                      ts.lastExitCode,
-                      ts.outputActive,
-                      ts.claudeMessage,
-                      ts.activity,
-                      ts.title,
-                    )
-                  : null;
+                const tCmdStatus =
+                  ts.lastCommand || ts.activity?.type === "interactiveApp"
+                    ? computeCommandStatus(
+                        ts.lastExitCode,
+                        ts.outputActive,
+                        ts.claudeMessage,
+                        ts.activity,
+                        ts.title,
+                      )
+                    : null;
                 const actInfo = formatActivity(ts.activity);
                 return (
                   <div

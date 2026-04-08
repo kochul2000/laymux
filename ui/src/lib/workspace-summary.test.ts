@@ -313,6 +313,58 @@ describe("computeWorkspaceSummary - terminal summaries", () => {
   });
 });
 
+describe("getLastCommandForWorkspace — interactiveApp without lastCommand", () => {
+  it("includes Claude terminal with outputActive but no lastCommand", () => {
+    // PowerShell: no OSC 133;E → no lastCommand, but Claude activity exists
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        activity: { type: "interactiveApp", name: "Claude" },
+        outputActive: true,
+        lastCommandAt: 300,
+        claudeMessage: "Working on task",
+        title: "✢ Working on task",
+      }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result).not.toBeNull();
+    expect(result?.outputActive).toBe(true);
+    expect(result?.claudeMessage).toBe("Working on task");
+    expect(result?.activity?.name).toBe("Claude");
+  });
+
+  it("includes Claude terminal with exitCode but no lastCommand", () => {
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        activity: { type: "interactiveApp", name: "Claude" },
+        lastExitCode: 0,
+        lastCommandAt: 300,
+        claudeMessage: "Task completed",
+        title: "✳ Claude Code",
+      }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result).not.toBeNull();
+    expect(result?.exitCode).toBe(0);
+  });
+
+  it("prefers shell command with more recent timestamp over Claude without lastCommand", () => {
+    const terminals = [
+      makeTerminal({
+        id: "t1",
+        activity: { type: "interactiveApp", name: "Claude" },
+        lastCommandAt: 100,
+        lastExitCode: 0,
+        title: "✳ Claude Code",
+      }),
+      makeTerminal({ id: "t2", lastCommand: "npm test", lastExitCode: 0, lastCommandAt: 200 }),
+    ];
+    const result = getLastCommandForWorkspace(terminals);
+    expect(result?.command).toBe("npm test");
+  });
+});
+
 describe("getLastCommandForWorkspace — interactive app cleanup", () => {
   it("returns null when terminal had interactiveApp command that was cleared", () => {
     // After an interactive app exits, lastCommand should be cleared.
@@ -646,12 +698,30 @@ describe("computeCommandStatus", () => {
     // Scenario: User types "claude" → Claude enters → starts working → completes task → idles → works again
     const claudeActivity = { type: "interactiveApp" as const, name: "Claude" };
 
-    it("shell before Claude: no lastCommand → tCmdStatus is null (no icon)", () => {
-      // When lastCommand is undefined, WorkspaceSelectorView doesn't call computeCommandStatus.
-      // This is a display-level check, not a computeCommandStatus check.
-      // Verify computeCommandStatus would return — if called with undefined exitCode.
+    it("shell before Claude: no lastCommand, no activity → — (fallback)", () => {
+      // Shell terminal with no lastCommand: computeCommandStatus returns — (no data).
       const s = computeCommandStatus(undefined, false);
       expect(s.icon).toBe("—");
+    });
+
+    it("Claude interactiveApp without lastCommand: outputActive=true → ⏳", () => {
+      // PowerShell lacks OSC 133;E shell integration, so lastCommand is never set.
+      // But Claude's activity handler should still show status based on outputActive/exitCode.
+      const s = computeCommandStatus(undefined, true, undefined, claudeActivity);
+      expect(s.icon).toBe("⏳");
+    });
+
+    it("Claude interactiveApp without lastCommand: idle with ✳ → ✳", () => {
+      const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
+      expect(s.icon).toBe("✳");
+      expect(s.color).toBe("var(--claude)");
+    });
+
+    it("Claude interactiveApp without lastCommand: exitCode=0 → ✓", () => {
+      // Synthetic exitCode from task_completed, no lastCommand (PowerShell).
+      const s = computeCommandStatus(0, false, "Task done", claudeActivity);
+      expect(s.icon).toBe("✓");
+      expect(s.text).toBe("Task done");
     });
 
     it("Claude first working (no prior exitCode): outputActive=true → ⏳", () => {
