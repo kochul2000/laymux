@@ -174,6 +174,10 @@ pub struct AutomationConnection {
 /// Priority: env vars (`LX_AUTOMATION_PORT`, `LX_AUTOMATION_KEY`) first,
 /// then discovery file. When using discovery file, port and key are read
 /// from the same file to avoid cross-instance mismatch.
+///
+/// When running inside WSL and the discovery file is found via a Windows
+/// path (`/mnt/c/...`), the host is automatically resolved to the WSL
+/// gateway IP so that requests reach the Windows-side Automation API.
 pub fn resolve_connection() -> AutomationConnection {
     let host = std::env::var("LX_AUTOMATION_HOST").unwrap_or_else(|_| "127.0.0.1".into());
 
@@ -189,10 +193,26 @@ pub fn resolve_connection() -> AutomationConnection {
     }
 
     // Fall back to discovery file (port + key read together)
-    if let Some((port, key)) = read_discovery_file() {
+    if let Some(discovery) = read_discovery_file() {
+        // If host was not explicitly set via env var AND the file was found
+        // on a Windows mount path, use the WSL gateway IP instead of 127.0.0.1.
+        let effective_host = if std::env::var("LX_AUTOMATION_HOST").is_err()
+            && discovery.from_windows_mount
+        {
+            #[cfg(not(target_os = "windows"))]
+            {
+                wsl_gateway_ip().unwrap_or_else(|| host.clone())
+            }
+            #[cfg(target_os = "windows")]
+            {
+                host.clone()
+            }
+        } else {
+            host.clone()
+        };
         return AutomationConnection {
-            base_url: format!("http://{}:{}", host, port),
-            key: Some(key),
+            base_url: format!("http://{}:{}", effective_host, discovery.port),
+            key: Some(discovery.key),
         };
     }
 
@@ -204,16 +224,29 @@ pub fn resolve_connection() -> AutomationConnection {
     }
 }
 
+/// Result of reading a discovery file.
+struct DiscoveryResult {
+    port: String,
+    key: String,
+    /// True when the file was found under a `/mnt/` Windows mount path (WSL).
+    from_windows_mount: bool,
+}
+
 /// Read port and key from the discovery file (both from the same file).
-fn read_discovery_file() -> Option<(String, String)> {
+fn read_discovery_file() -> Option<DiscoveryResult> {
     let candidates = discovery_file_candidates();
-    for path in candidates {
+    for (path, from_windows_mount) in candidates {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
                 let port = parsed.get("port").and_then(|v| v.as_u64());
                 let key = parsed.get("key").and_then(|v| v.as_str());
                 if let (Some(port), Some(key)) = (port, key) {
-                    return Some((port.to_string(), key.to_string()));
+                    eprintln!("laymux-mcp: discovery file found at {}", path.display());
+                    return Some(DiscoveryResult {
+                        port: port.to_string(),
+                        key: key.to_string(),
+                        from_windows_mount,
+                    });
                 }
             }
         }
@@ -222,30 +255,163 @@ fn read_discovery_file() -> Option<(String, String)> {
 }
 
 /// Candidate paths for the discovery file (dev first, then release).
-fn discovery_file_candidates() -> Vec<std::path::PathBuf> {
+/// Returns (path, from_windows_mount) tuples.
+fn discovery_file_candidates() -> Vec<(std::path::PathBuf, bool)> {
     let mut paths = Vec::new();
 
     #[cfg(target_os = "windows")]
     if let Ok(appdata) = std::env::var("APPDATA") {
-        paths.push(
+        paths.push((
             std::path::PathBuf::from(&appdata)
                 .join("laymux-dev")
                 .join("automation.json"),
-        );
-        paths.push(
+            false,
+        ));
+        paths.push((
             std::path::PathBuf::from(&appdata)
                 .join("laymux")
                 .join("automation.json"),
-        );
+            false,
+        ));
     }
 
     #[cfg(not(target_os = "windows"))]
-    if let Ok(home) = std::env::var("HOME") {
-        paths.push(std::path::PathBuf::from(&home).join(".config/laymux-dev/automation.json"));
-        paths.push(std::path::PathBuf::from(&home).join(".config/laymux/automation.json"));
+    {
+        // Native Linux paths first
+        if let Ok(home) = std::env::var("HOME") {
+            paths.push((
+                std::path::PathBuf::from(&home).join(".config/laymux-dev/automation.json"),
+                false,
+            ));
+            paths.push((
+                std::path::PathBuf::from(&home).join(".config/laymux/automation.json"),
+                false,
+            ));
+        }
+
+        // WSL: try Windows APPDATA via /mnt/c mount
+        // WSLENV or /proc/version containing "microsoft" indicates WSL
+        if is_wsl() {
+            if let Some(appdata) = resolve_windows_appdata_in_wsl() {
+                paths.push((
+                    std::path::PathBuf::from(&appdata)
+                        .join("laymux-dev")
+                        .join("automation.json"),
+                    true,
+                ));
+                paths.push((
+                    std::path::PathBuf::from(&appdata)
+                        .join("laymux")
+                        .join("automation.json"),
+                    true,
+                ));
+            }
+        }
     }
 
     paths
+}
+
+/// Detect if running inside WSL.
+#[cfg(not(target_os = "windows"))]
+fn is_wsl() -> bool {
+    // WSLENV is set by WSL for interop
+    if std::env::var("WSLENV").is_ok() {
+        return true;
+    }
+    // /proc/version contains "microsoft" or "Microsoft" on WSL
+    if let Ok(ver) = std::fs::read_to_string("/proc/version") {
+        if ver.to_lowercase().contains("microsoft") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Resolve the Windows APPDATA path as seen from WSL (e.g., /mnt/c/Users/<user>/AppData/Roaming).
+#[cfg(not(target_os = "windows"))]
+fn resolve_windows_appdata_in_wsl() -> Option<String> {
+    // Try APPDATA env var if WSL interop passes it through
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        // Convert Windows path (C:\Users\...) to WSL path (/mnt/c/Users/...)
+        if let Some(wsl_path) = windows_to_wsl_path(&appdata) {
+            return Some(wsl_path);
+        }
+    }
+
+    // Try wslvar (from wslu package) to get Windows APPDATA
+    let output = std::process::Command::new("wslvar")
+        .arg("APPDATA")
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            let win_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Some(wsl_path) = windows_to_wsl_path(&win_path) {
+                return Some(wsl_path);
+            }
+        }
+    }
+
+    // Last resort: guess from /mnt/c/Users
+    if let Ok(home) = std::env::var("HOME") {
+        // e.g., /home/kochul → try /mnt/c/Users/kochul/AppData/Roaming
+        if let Some(user) = home.strip_prefix("/home/") {
+            let guess = format!("/mnt/c/Users/{}/AppData/Roaming", user);
+            if std::path::Path::new(&guess).is_dir() {
+                return Some(guess);
+            }
+        }
+    }
+
+    None
+}
+
+/// Convert a Windows path like `C:\Users\foo\AppData\Roaming` to `/mnt/c/Users/foo/AppData/Roaming`.
+fn windows_to_wsl_path(win_path: &str) -> Option<String> {
+    // Expected: "X:\..." or "X:/..."
+    let bytes = win_path.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && (bytes[1] == b':') {
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let rest = &win_path[2..].replace('\\', "/");
+        Some(format!("/mnt/{}{}", drive, rest))
+    } else {
+        None
+    }
+}
+
+/// Get the WSL gateway IP (Windows host) from the default route.
+#[cfg(not(target_os = "windows"))]
+fn wsl_gateway_ip() -> Option<String> {
+    // Method 1: default route gateway
+    if let Ok(output) = std::process::Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // "default via 172.23.48.1 dev eth0"
+            if let Some(ip) = stdout.split_whitespace().nth(2) {
+                if ip.contains('.') {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+
+    // Method 2: /etc/resolv.conf nameserver
+    if let Ok(content) = std::fs::read_to_string("/etc/resolv.conf") {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("nameserver") {
+                let ip = rest.trim();
+                if ip.contains('.') && ip != "127.0.0.1" {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 // -- HTTP client calls to Automation API --
@@ -416,5 +582,55 @@ mod tests {
             None,
         );
         assert!(resp["result"]["isError"].as_bool().unwrap_or(false));
+    }
+
+    #[test]
+    fn windows_to_wsl_path_backslash() {
+        let result = windows_to_wsl_path(r"C:\Users\kochul\AppData\Roaming");
+        assert_eq!(
+            result,
+            Some("/mnt/c/Users/kochul/AppData/Roaming".to_string())
+        );
+    }
+
+    #[test]
+    fn windows_to_wsl_path_forward_slash() {
+        let result = windows_to_wsl_path("D:/Projects/test");
+        assert_eq!(result, Some("/mnt/d/Projects/test".to_string()));
+    }
+
+    #[test]
+    fn windows_to_wsl_path_invalid() {
+        assert_eq!(windows_to_wsl_path("/home/user"), None);
+        assert_eq!(windows_to_wsl_path(""), None);
+        assert_eq!(windows_to_wsl_path("ab"), None);
+    }
+
+    #[test]
+    fn resolve_connection_env_vars_take_priority() {
+        // When both env vars are set, they should be used directly
+        std::env::set_var("LX_AUTOMATION_PORT", "19999");
+        std::env::set_var("LX_AUTOMATION_KEY", "test-key-123");
+        std::env::set_var("LX_AUTOMATION_HOST", "10.0.0.1");
+
+        let conn = resolve_connection();
+        assert_eq!(conn.base_url, "http://10.0.0.1:19999");
+        assert_eq!(conn.key.as_deref(), Some("test-key-123"));
+
+        // Clean up
+        std::env::remove_var("LX_AUTOMATION_PORT");
+        std::env::remove_var("LX_AUTOMATION_KEY");
+        std::env::remove_var("LX_AUTOMATION_HOST");
+    }
+
+    #[test]
+    fn discovery_file_json_parsing() {
+        let json_str = r#"{"port": 19281, "key": "abc-def", "pid": 1234, "version": "0.1.0"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let port = parsed.get("port").and_then(|v| v.as_u64());
+        let key = parsed.get("key").and_then(|v| v.as_str());
+
+        assert_eq!(port, Some(19281));
+        assert_eq!(key, Some("abc-def"));
     }
 }

@@ -10,6 +10,7 @@ import { GridEditToolbar } from "./GridEditToolbar";
 import { WorkspaceArea } from "./WorkspaceArea";
 import { SettingsView } from "@/components/views/SettingsView";
 import { NotificationPanel } from "@/components/views/NotificationPanel";
+import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
@@ -161,6 +162,8 @@ export function AppLayout() {
   const closeSettingsModal = useUiStore((s) => s.closeSettingsModal);
   const notificationPanelOpen = useUiStore((s) => s.notificationPanelOpen);
   const closeNotificationPanel = useUiStore((s) => s.closeNotificationPanel);
+  const connectionInfoModalOpen = useUiStore((s) => s.connectionInfoModalOpen);
+  const closeConnectionInfoModal = useUiStore((s) => s.closeConnectionInfoModal);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
   const notificationDismiss = useSettingsStore((s) => s.convenience.notificationDismiss);
@@ -368,6 +371,18 @@ export function AppLayout() {
           <div className="min-h-0 flex-1">
             <SettingsView />
           </div>
+        </ModalOverlay>
+      )}
+
+      {/* Connection Info Modal */}
+      {connectionInfoModalOpen && (
+        <ModalOverlay
+          testIdPrefix="connection-info-modal"
+          title="Connection Info"
+          onClose={closeConnectionInfoModal}
+          size="w-[480px]"
+        >
+          <ConnectionInfoModal />
         </ModalOverlay>
       )}
     </div>

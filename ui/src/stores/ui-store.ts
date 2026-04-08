@@ -25,6 +25,7 @@ function saveBarModes(modes: Record<string, ControlBarMode>) {
 interface UiState {
   settingsModalOpen: boolean;
   notificationPanelOpen: boolean;
+  connectionInfoModalOpen: boolean;
   /** External navigation target for SettingsView (e.g. "startup", "profile-0", "colorSchemes") */
   settingsNavTarget: string | null;
   /** Per-pane control bar mode, keyed by pane ID. Persisted via localStorage. */
@@ -37,6 +38,8 @@ interface UiState {
   toggleSettingsModal: () => void;
   toggleNotificationPanel: () => void;
   closeNotificationPanel: () => void;
+  toggleConnectionInfoModal: () => void;
+  closeConnectionInfoModal: () => void;
   setSettingsNavTarget: (target: string | null) => void;
   setBarMode: (paneId: string, mode: ControlBarMode) => void;
   getBarMode: (paneId: string) => ControlBarMode;
@@ -46,6 +49,7 @@ interface UiState {
 export const useUiStore = create<UiState>()((set, get) => ({
   settingsModalOpen: false,
   notificationPanelOpen: false,
+  connectionInfoModalOpen: false,
   settingsNavTarget: null,
   barModes: loadBarModes(),
   isAppFocused: true,
@@ -63,6 +67,13 @@ export const useUiStore = create<UiState>()((set, get) => ({
       settingsModalOpen: !state.notificationPanelOpen ? false : state.settingsModalOpen,
     })),
   closeNotificationPanel: () => set({ notificationPanelOpen: false }),
+  toggleConnectionInfoModal: () =>
+    set((state) => ({
+      connectionInfoModalOpen: !state.connectionInfoModalOpen,
+      settingsModalOpen: !state.connectionInfoModalOpen ? false : state.settingsModalOpen,
+      notificationPanelOpen: !state.connectionInfoModalOpen ? false : state.notificationPanelOpen,
+    })),
+  closeConnectionInfoModal: () => set({ connectionInfoModalOpen: false }),
   setSettingsNavTarget: (target) => set({ settingsNavTarget: target }),
   setBarMode: (paneId, mode) => {
     set((state) => {

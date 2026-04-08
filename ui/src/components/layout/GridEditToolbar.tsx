@@ -14,6 +14,7 @@ async function getWindow() {
 export function GridEditToolbar() {
   const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
+  const toggleConnectionInfoModal = useUiStore((s) => s.toggleConnectionInfoModal);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
   const layoutMode = useDockStore((s) => s.layoutMode);
@@ -192,6 +193,22 @@ export function GridEditToolbar() {
         </button>
 
         <div className="ui-sep" />
+
+        <button
+          data-testid="connection-info-btn"
+          onClick={toggleConnectionInfoModal}
+          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "none",
+            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
+            fontSize: "var(--fs-xs)",
+          }}
+          title="Connection Info"
+        >
+          {"\uE192"}
+        </button>
 
         <button
           data-testid="settings-gear-btn"

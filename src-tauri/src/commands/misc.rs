@@ -14,6 +14,26 @@ pub fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+pub fn get_automation_info(
+    state: State<Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    let port = state
+        .automation_port
+        .lock_or_err()?
+        .unwrap_or(0);
+    let key = state
+        .automation_key
+        .lock_or_err()?
+        .clone()
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "port": port,
+        "key": key,
+    }))
+}
+
+#[tauri::command]
 pub fn get_sync_group_terminals(
     group_name: String,
     state: State<Arc<AppState>>,
