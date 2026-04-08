@@ -63,7 +63,7 @@ describe("IssueReporterView", () => {
     expect(body.style.padding).toBe("20px 10px 5px 15px");
   });
 
-  it("replaces Save button with Edit button after successful submission", async () => {
+  it("keeps Save button enabled after successful submission", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
@@ -73,9 +73,9 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("issue-edit")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
-    expect(screen.queryByTestId("issue-submit")).not.toBeInTheDocument();
+    expect(screen.getByTestId("issue-submit")).not.toBeDisabled();
   });
 
   it("shows 'New Issue' button after successful submission", async () => {
@@ -126,7 +126,7 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Edit")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-link")).toBeInTheDocument();
     });
 
     const link = screen.getByTestId("issue-link");
@@ -321,7 +321,7 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Edit")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
 
     // Verify first call was create (no issueNumber)
@@ -332,13 +332,8 @@ describe("IssueReporterView", () => {
       issueNumber: null,
     });
 
-    // Click "Update" to re-enable editing
-    const updateBtn = screen.getByTestId("issue-edit");
-    expect(updateBtn).toBeInTheDocument();
+    // Form is still editable — modify body and re-submit
     mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
-    await user.click(updateBtn);
-
-    // Modify body and re-submit
     await user.clear(screen.getByTestId("issue-body"));
     await user.type(screen.getByTestId("issue-body"), "Updated body");
     await user.click(screen.getByTestId("issue-submit"));
@@ -363,12 +358,11 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Edit")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
 
-    // Click update to enable re-editing, then re-submit
+    // Re-submit (form is still editable, no Edit button needed)
     mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
-    await user.click(screen.getByTestId("issue-edit"));
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
@@ -412,7 +406,7 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("shows Edit button after save, then Save button after clicking Edit", async () => {
+  it("keeps form editable after save so user can re-save", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
@@ -422,14 +416,16 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Edit")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
 
-    // Click update to re-enable editing
-    await user.click(screen.getByTestId("issue-edit"));
-
-    // Button should show "Save" instead of "Save"
-    expect(screen.getByText("Save")).toBeInTheDocument();
+    // Save button is still present and enabled
+    const saveBtn = screen.getByTestId("issue-submit");
+    expect(saveBtn).toBeInTheDocument();
+    expect(saveBtn).not.toBeDisabled();
+    // Form fields are editable
+    expect(screen.getByTestId("issue-title")).not.toBeDisabled();
+    expect(screen.getByTestId("issue-body")).not.toBeDisabled();
   });
 
   describe("font settings", () => {

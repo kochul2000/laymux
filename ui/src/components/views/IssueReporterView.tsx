@@ -55,7 +55,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submittingRef.current || state === "success") return;
+    if (!title.trim() || submittingRef.current) return;
     submittingRef.current = true;
     setState("submitting");
     setResultMsg("");
@@ -67,7 +67,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         screenshotPath,
         issueNumber,
       });
-      setState("success");
+      setState("idle");
       setResultMsg(url);
       const num = extractIssueNumber(url);
       if (num !== null) setIssueNumber(num);
@@ -92,10 +92,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setResultMsg("");
     setState("idle");
     setIssueNumber(null);
-  };
-
-  const handleUpdate = () => {
-    setState("idle");
   };
 
   const ir = useSettingsStore((s) => s.issueReporter);
@@ -196,6 +192,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          disabled={state === "submitting"}
           placeholder="Issue title"
           className="mb-1 w-full rounded px-1 py-1 ui-focus-ring"
           style={{
@@ -212,6 +209,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           data-testid="issue-body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
+          disabled={state === "submitting"}
           placeholder="Describe the issue..."
           className="mb-1 min-h-0 w-full flex-1 resize-none rounded px-1 py-1 leading-relaxed"
           style={{
@@ -232,45 +230,29 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             borderRadius: "var(--radius-md)",
           }}
         >
-          {state === "success" ? (
-            <button
-              data-testid="issue-edit"
-              onClick={handleUpdate}
-              className="cursor-pointer px-1 py-1 text-xs font-medium"
-              style={{
-                background: "var(--accent)",
-                color: "var(--bg-base)",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-              }}
-            >
-              Edit
-            </button>
-          ) : (
-            <button
-              data-testid="issue-submit"
-              onClick={handleSubmit}
-              disabled={!title.trim() || state === "submitting"}
-              className="cursor-pointer px-1 py-1 text-xs font-medium"
-              style={{
-                background: "var(--accent)",
-                color: "var(--bg-base)",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-                opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
-                transition: "opacity 0.15s",
-              }}
-            >
-              {state === "submitting" ? "Saving..." : "Save"}
-              {state !== "submitting" && (
-                <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
-                  Ctrl+Enter
-                </span>
-              )}
-            </button>
-          )}
+          <button
+            data-testid="issue-submit"
+            onClick={handleSubmit}
+            disabled={!title.trim() || state === "submitting"}
+            className="cursor-pointer px-1 py-1 text-xs font-medium"
+            style={{
+              background: "var(--accent)",
+              color: "var(--bg-base)",
+              border: "none",
+              borderRadius: "var(--radius-md)",
+              opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
+              transition: "opacity 0.15s",
+            }}
+          >
+            {state === "submitting" ? "Saving..." : "Save"}
+            {state !== "submitting" && (
+              <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
+                Ctrl+Enter
+              </span>
+            )}
+          </button>
 
-          {(state === "success" || state === "error") && (
+          {(issueNumber !== null || state === "error") && (
             <button
               data-testid="issue-new-report"
               onClick={handleNewReport}
@@ -286,7 +268,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             </button>
           )}
 
-          {state === "success" && resultMsg && (
+          {issueNumber !== null && resultMsg && state === "idle" && (
             <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
               ✓
             </span>
@@ -299,7 +281,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         </div>
 
         {/* Issue link */}
-        {state === "success" && resultMsg && (
+        {issueNumber !== null && resultMsg && (
           <a
             data-testid="issue-link"
             href={resultMsg}
