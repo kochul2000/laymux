@@ -122,6 +122,7 @@ function WorkspaceItem({
 }) {
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
+  const claudeSettings = useSettingsStore((s) => s.claude);
 
   const cmdInfo = summary.lastCommand;
   const cmdStatus = cmdInfo
@@ -131,6 +132,8 @@ function WorkspaceItem({
         cmdInfo.claudeMessage,
         cmdInfo.activity,
         cmdInfo.title,
+        claudeSettings.statusMessageMode,
+        claudeSettings.statusMessageDelimiter,
       )
     : null;
 

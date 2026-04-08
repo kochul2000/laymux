@@ -1536,6 +1536,8 @@ function WorkspacesSection() {
 
 // -- Section: Claude Code --
 
+const DEFAULT_STATUS_MESSAGE_DELIMITER = " · ";
+
 function ClaudeSection() {
   const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
@@ -1637,6 +1639,86 @@ function ClaudeSection() {
             </div>
           </div>
         </div>
+
+        {/* Status Message Mode */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              상태 메시지 모드
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              워크스페이스 목록에 표시할 상태 소스
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="claude-status-message-mode-select"
+              className={inputCls}
+              value={claude.statusMessageMode}
+              onChange={(e) =>
+                updateClaude({
+                  statusMessageMode: e.target.value as
+                    | "bullet"
+                    | "title"
+                    | "bullet-title"
+                    | "title-bullet",
+                })
+              }
+            >
+              <option value="bullet-title">Bullet · Title (기본)</option>
+              <option value="title-bullet">Title · Bullet</option>
+              <option value="bullet">Bullet만</option>
+              <option value="title">Title만</option>
+            </FocusSelect>
+          </div>
+        </div>
+
+        {/* Status Message Delimiter */}
+        {(claude.statusMessageMode === "bullet-title" ||
+          claude.statusMessageMode === "title-bullet") && (
+          <div className="flex items-start gap-3 py-1.5">
+            <div className="w-36 shrink-0 pt-1">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                구분자
+              </span>
+              <p
+                className="mt-0.5 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
+                두 소스 사이 구분 텍스트
+              </p>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <FocusInput
+                  data-testid="claude-status-message-delimiter-input"
+                  className={inputCls}
+                  type="text"
+                  style={{ width: 100 }}
+                  value={claude.statusMessageDelimiter}
+                  onChange={(e) => updateClaude({ statusMessageDelimiter: e.target.value })}
+                />
+                {claude.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
+                  <button
+                    data-testid="claude-status-message-delimiter-reset"
+                    className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                    style={{ color: "var(--text-secondary)" }}
+                    onClick={() =>
+                      updateClaude({
+                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                      })
+                    }
+                  >
+                    기본값
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

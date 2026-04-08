@@ -339,6 +339,22 @@ pub enum ClaudeSyncCwdMode {
     Command,
 }
 
+/// Status message display mode for Claude Code in WorkspaceSelectorView.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[derive(Default)]
+pub enum ClaudeStatusMessageMode {
+    /// Show only bullet (white-●) message.
+    Bullet,
+    /// Show only title (spinner text) message.
+    Title,
+    /// Show title first, then bullet: "title · bullet".
+    TitleBullet,
+    /// Show bullet first, then title: "bullet · title" (default).
+    #[default]
+    BulletTitle,
+}
+
 /// Claude Code integration settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -353,6 +369,12 @@ pub struct ClaudeSettings {
     /// Set to 0 to disable the age filter (accept all sessions).
     #[serde(default = "default_session_max_age_hours")]
     pub session_max_age_hours: u64,
+    /// Status message display mode (default: "bullet-title").
+    #[serde(default)]
+    pub status_message_mode: ClaudeStatusMessageMode,
+    /// Delimiter between bullet and title when both are shown (default: " · ").
+    #[serde(default = "default_status_message_delimiter")]
+    pub status_message_delimiter: String,
 }
 
 impl Default for ClaudeSettings {
@@ -361,8 +383,14 @@ impl Default for ClaudeSettings {
             sync_cwd: ClaudeSyncCwdMode::default(),
             restore_session: true,
             session_max_age_hours: 24,
+            status_message_mode: ClaudeStatusMessageMode::default(),
+            status_message_delimiter: default_status_message_delimiter(),
         }
     }
+}
+
+fn default_status_message_delimiter() -> String {
+    " · ".to_string()
 }
 
 fn default_restore_session() -> bool {

@@ -4,6 +4,30 @@ import type { RawTerminalState, StatusResult } from "./activity-handler";
 /** U+2733 — Claude Code idle title prefix. */
 const CLAUDE_IDLE_PREFIX = "\u2733";
 
+/** Star-based working spinner prefixes (✶✻✽✢). */
+const WORKING_STAR_SPINNERS = ["\u2736", "\u273B", "\u273D", "\u2722"];
+
+/** Check if char is a Braille pattern (U+2800..U+28FF). */
+function isBraille(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code >= 0x2800 && code <= 0x28ff;
+}
+
+/**
+ * Extract a meaningful message from a Claude Code title by stripping spinner prefix.
+ * Returns undefined for idle titles (✳), non-Claude titles, or "Claude Code" text.
+ */
+function extractTitleMessage(title: string | undefined): string | undefined {
+  if (!title) return undefined;
+  const first = title.charAt(0);
+  // Must start with a working spinner (not idle ✳)
+  if (!WORKING_STAR_SPINNERS.includes(first) && !isBraille(first)) return undefined;
+  const stripped = title.slice(1).trim();
+  // Skip if the stripped text is just "Claude Code" — not informative
+  if (!stripped || stripped === "Claude Code") return undefined;
+  return stripped;
+}
+
 /**
  * Claude Code 전용 ActivityHandler.
  *
@@ -38,10 +62,31 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
   }
 
   /**
-   * Claude는 claudeMessage(white-● 상태 메시지)를 표시 텍스트로 반환.
-   * 셸 명령 텍스트 대신 "Reading file src/main.rs" 같은 태스크 설명을 보여준다.
+   * Claude 상태 메시지: statusMessageMode 설정에 따라 bullet/title을 조합.
+   * - "bullet": bullet만
+   * - "title": title만
+   * - "bullet-title": bullet + delimiter + title (기본)
+   * - "title-bullet": title + delimiter + bullet
    */
   computeStatusMessage(raw: RawTerminalState): string | undefined {
-    return raw.claudeMessage || undefined;
+    const bullet = raw.claudeMessage || undefined;
+    const titleMsg = extractTitleMessage(raw.title);
+    const mode = raw.statusMessageMode ?? "bullet-title";
+    const delimiter = raw.statusMessageDelimiter ?? " · ";
+
+    switch (mode) {
+      case "bullet":
+        return bullet;
+      case "title":
+        return titleMsg;
+      case "bullet-title":
+        if (bullet && titleMsg) return `${bullet}${delimiter}${titleMsg}`;
+        return bullet || titleMsg || undefined;
+      case "title-bullet":
+        if (bullet && titleMsg) return `${titleMsg}${delimiter}${bullet}`;
+        return titleMsg || bullet || undefined;
+      default:
+        return bullet || titleMsg || undefined;
+    }
   }
 }

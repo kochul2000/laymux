@@ -721,7 +721,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     largePasteWarning: true,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
-  claude: { syncCwd: "skip" as ClaudeSyncCwdMode, restoreSession: true, sessionMaxAgeHours: 24 },
+  claude: {
+    syncCwd: "skip" as ClaudeSyncCwdMode,
+    restoreSession: true,
+    sessionMaxAgeHours: 24,
+    statusMessageMode: "bullet-title" as const,
+    statusMessageDelimiter: " · ",
+  },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
@@ -926,6 +932,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           syncCwd: "skip" as ClaudeSyncCwdMode,
           restoreSession: true,
           sessionMaxAgeHours: 24,
+          statusMessageMode: "bullet-title" as const,
+          statusMessageDelimiter: " · ",
           ...(data.claude as Partial<ClaudeSettings>),
         }
       : undefined;

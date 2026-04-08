@@ -65,18 +65,134 @@ describe("ClaudeActivityHandler", () => {
   });
 
   describe("computeStatusMessage", () => {
-    it("returns claudeMessage as status text", () => {
+    it("returns claudeMessage when only bullet exists", () => {
       expect(handler.computeStatusMessage(raw({ claudeMessage: "Reading file src/main.rs" }))).toBe(
         "Reading file src/main.rs",
       );
     });
 
-    it("returns undefined when no claudeMessage", () => {
+    it("returns title message when only title exists (spinner stripped)", () => {
+      expect(handler.computeStatusMessage(raw({ title: "✢ Working on task" }))).toBe(
+        "Working on task",
+      );
+    });
+
+    it("returns title message with braille spinner stripped", () => {
+      expect(handler.computeStatusMessage(raw({ title: "⠐ Analyzing code" }))).toBe(
+        "Analyzing code",
+      );
+    });
+
+    it("combines bullet and title with · separator when both exist", () => {
+      expect(
+        handler.computeStatusMessage(
+          raw({ claudeMessage: "Reading file", title: "✢ Working on task" }),
+        ),
+      ).toBe("Reading file · Working on task");
+    });
+
+    it("combines bullet and braille title", () => {
+      expect(
+        handler.computeStatusMessage(
+          raw({ claudeMessage: "Editing files", title: "⠐ Fix the bug" }),
+        ),
+      ).toBe("Editing files · Fix the bug");
+    });
+
+    it("returns undefined when no claudeMessage and no title", () => {
       expect(handler.computeStatusMessage(raw())).toBeUndefined();
     });
 
-    it("returns undefined for empty claudeMessage", () => {
+    it("returns undefined for empty claudeMessage and no title", () => {
       expect(handler.computeStatusMessage(raw({ claudeMessage: "" }))).toBeUndefined();
+    });
+
+    it("skips title when it has no spinner prefix (plain title)", () => {
+      expect(handler.computeStatusMessage(raw({ title: "bash" }))).toBeUndefined();
+    });
+
+    it("skips idle title (✳ prefix) — not useful as status message", () => {
+      expect(handler.computeStatusMessage(raw({ title: "✳ Claude Code" }))).toBeUndefined();
+    });
+
+    it("bullet only when title is idle ✳", () => {
+      expect(
+        handler.computeStatusMessage(
+          raw({ claudeMessage: "Reading file", title: "✳ Claude Code" }),
+        ),
+      ).toBe("Reading file");
+    });
+
+    it("skips title when stripped text equals 'Claude Code'", () => {
+      expect(handler.computeStatusMessage(raw({ title: "✢ Claude Code" }))).toBeUndefined();
+    });
+
+    describe("statusMessageMode", () => {
+      const both = { claudeMessage: "Reading file", title: "✢ Working on task" };
+
+      it("bullet mode: only bullet", () => {
+        expect(handler.computeStatusMessage(raw({ ...both, statusMessageMode: "bullet" }))).toBe(
+          "Reading file",
+        );
+      });
+
+      it("bullet mode: undefined when no bullet", () => {
+        expect(
+          handler.computeStatusMessage(
+            raw({ title: "✢ Working on task", statusMessageMode: "bullet" }),
+          ),
+        ).toBeUndefined();
+      });
+
+      it("title mode: only title", () => {
+        expect(handler.computeStatusMessage(raw({ ...both, statusMessageMode: "title" }))).toBe(
+          "Working on task",
+        );
+      });
+
+      it("title mode: undefined when no spinner title", () => {
+        expect(
+          handler.computeStatusMessage(
+            raw({ claudeMessage: "Reading file", statusMessageMode: "title" }),
+          ),
+        ).toBeUndefined();
+      });
+
+      it("bullet-title mode (default): bullet · title", () => {
+        expect(
+          handler.computeStatusMessage(raw({ ...both, statusMessageMode: "bullet-title" })),
+        ).toBe("Reading file · Working on task");
+      });
+
+      it("title-bullet mode: title · bullet", () => {
+        expect(
+          handler.computeStatusMessage(raw({ ...both, statusMessageMode: "title-bullet" })),
+        ).toBe("Working on task · Reading file");
+      });
+
+      it("title-bullet mode: falls back to bullet when no title", () => {
+        expect(
+          handler.computeStatusMessage(
+            raw({ claudeMessage: "Reading file", statusMessageMode: "title-bullet" }),
+          ),
+        ).toBe("Reading file");
+      });
+
+      it("custom delimiter", () => {
+        expect(
+          handler.computeStatusMessage(
+            raw({ ...both, statusMessageMode: "bullet-title", statusMessageDelimiter: " | " }),
+          ),
+        ).toBe("Reading file | Working on task");
+      });
+
+      it("custom delimiter with title-bullet", () => {
+        expect(
+          handler.computeStatusMessage(
+            raw({ ...both, statusMessageMode: "title-bullet", statusMessageDelimiter: " — " }),
+          ),
+        ).toBe("Working on task — Reading file");
+      });
     });
   });
 
@@ -94,24 +210,38 @@ describe("ClaudeActivityHandler", () => {
       expect(s).toEqual({ icon: "✳", color: "var(--claude)" });
     });
 
-    it("working state: outputActive=true → ⏳ with claudeMessage", () => {
-      const state = raw({ outputActive: true, claudeMessage: "Editing files" });
+    it("working state: outputActive=true → ⏳ with combined message", () => {
+      const state = raw({
+        outputActive: true,
+        claudeMessage: "Editing files",
+        title: "✢ Working on task",
+      });
       const s = handler.computeStatus(state);
       const m = handler.computeStatusMessage(state);
       expect(s.icon).toBe("⏳");
+      expect(m).toBe("Editing files · Working on task");
+    });
+
+    it("working state: bullet only when no spinner title", () => {
+      const state = raw({ outputActive: true, claudeMessage: "Editing files" });
+      const m = handler.computeStatusMessage(state);
       expect(m).toBe("Editing files");
     });
 
-    it("thinking with spinner title: outputActive=true → ⏳", () => {
+    it("thinking with spinner title only → title message", () => {
       const state = raw({ outputActive: true, title: "✢ Working on task" });
       const s = handler.computeStatus(state);
+      const m = handler.computeStatusMessage(state);
       expect(s.icon).toBe("⏳");
+      expect(m).toBe("Working on task");
     });
 
-    it("thinking with braille spinner: outputActive=true → ⏳", () => {
+    it("thinking with braille spinner only → title message", () => {
       const state = raw({ outputActive: true, title: "⠐ Analyzing code" });
       const s = handler.computeStatus(state);
+      const m = handler.computeStatusMessage(state);
       expect(s.icon).toBe("⏳");
+      expect(m).toBe("Analyzing code");
     });
 
     it("task completed: exitCode=0, claudeMessage → ✓ with message", () => {

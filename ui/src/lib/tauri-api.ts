@@ -118,6 +118,7 @@ export interface ConvenienceSettings {
 }
 
 export type ClaudeSyncCwdMode = "skip" | "command";
+export type ClaudeStatusMessageMode = "bullet" | "title" | "title-bullet" | "bullet-title";
 
 export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
@@ -125,6 +126,10 @@ export interface ClaudeSettings {
   restoreSession: boolean;
   /** Maximum age (hours) for Claude session files. 0 = no limit. Default: 24. */
   sessionMaxAgeHours: number;
+  /** Status message display mode (default: "bullet-title"). */
+  statusMessageMode: ClaudeStatusMessageMode;
+  /** Delimiter between bullet and title when both shown (default: " · "). */
+  statusMessageDelimiter: string;
 }
 
 export interface IssueReporterSettings {

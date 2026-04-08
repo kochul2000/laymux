@@ -1,6 +1,7 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
+import type { ClaudeStatusMessageMode } from "@/lib/tauri-api";
 import { getHandler, type RawTerminalState } from "./activity-handler";
 
 export interface LastCommandInfo {
@@ -341,6 +342,8 @@ export function computeCommandStatus(
   claudeMessage?: string,
   activity?: TerminalActivityInfo,
   title?: string,
+  statusMessageMode?: ClaudeStatusMessageMode,
+  statusMessageDelimiter?: string,
 ): CommandStatus {
   const raw: RawTerminalState = {
     exitCode,
@@ -349,6 +352,8 @@ export function computeCommandStatus(
     claudeMessage,
     activity,
     title,
+    statusMessageMode,
+    statusMessageDelimiter,
   };
   const handler = getHandler(activity);
   const status = handler.computeStatus(raw);

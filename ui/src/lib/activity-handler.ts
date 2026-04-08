@@ -1,4 +1,5 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import type { ClaudeStatusMessageMode } from "@/lib/tauri-api";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 
@@ -14,6 +15,10 @@ export interface RawTerminalState {
   claudeMessage: string | undefined;
   activity: TerminalActivityInfo | undefined;
   title: string | undefined;
+  /** Claude status message display mode (default: "bullet-title"). */
+  statusMessageMode?: ClaudeStatusMessageMode;
+  /** Delimiter between bullet and title (default: " · "). */
+  statusMessageDelimiter?: string;
 }
 
 export interface ActivityHandler {
