@@ -1,22 +1,10 @@
-import type {
-  ActivityHandler,
-  RawTerminalState,
-  StatusResult,
-} from "./activity-handler";
+import { ShellActivityHandler } from "./shell-activity-handler";
 
-export class ClaudeActivityHandler implements ActivityHandler {
-  computeStatus(raw: RawTerminalState): StatusResult {
-    if (raw.outputActive) return { icon: "⏳", color: "var(--yellow)" };
-    if (raw.exitCode === 0) return { icon: "✓", color: "var(--green)" };
-    if (raw.exitCode !== undefined) return { icon: "✗", color: "var(--red)" };
-    return { icon: "—", color: "var(--text-secondary)" };
-  }
-
-  computeStatusMessage(raw: RawTerminalState): string | undefined {
-    return raw.claudeMessage || undefined;
-  }
-
-  computeNotification(_raw: RawTerminalState): null {
-    return null;
-  }
-}
+/**
+ * Claude Code 전용 ActivityHandler.
+ *
+ * 현재는 ShellActivityHandler와 동일하지만, activity 타입에 따라
+ * 핸들러가 교체되는 seam을 제공한다. 향후 Claude 전용 분기가 필요하면
+ * 해당 메서드만 오버라이드한다.
+ */
+export class ClaudeActivityHandler extends ShellActivityHandler {}
