@@ -14,13 +14,8 @@ pub fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-pub fn get_automation_info(
-    state: State<Arc<AppState>>,
-) -> Result<serde_json::Value, String> {
-    let port = state
-        .automation_port
-        .lock_or_err()?
-        .unwrap_or(0);
+pub fn get_automation_info(state: State<Arc<AppState>>) -> Result<serde_json::Value, String> {
+    let port = state.automation_port.lock_or_err()?.unwrap_or(0);
     let key = state
         .automation_key
         .lock_or_err()?
@@ -253,6 +248,7 @@ pub async fn submit_github_issue(
     title: String,
     body: String,
     screenshot_path: Option<String>,
+    issue_number: Option<u64>,
 ) -> Result<String, String> {
     let settings = crate::settings::load_settings();
     let shell_prefix = &settings.issue_reporter.shell;
@@ -273,17 +269,61 @@ pub async fn submit_github_issue(
         }
     }
 
-    let output = gh_command(shell_prefix)
-        .args(["issue", "create", "--title", &title, "--body", &full_body])
-        .output()
-        .map_err(|e| format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?"))?;
+    if let Some(num) = issue_number {
+        // Update existing issue
+        let num_str = num.to_string();
+        let output = gh_command(shell_prefix)
+            .args([
+                "issue", "edit", &num_str, "--title", &title, "--body", &full_body,
+            ])
+            .output()
+            .map_err(|e| {
+                format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
+            })?;
 
-    if output.status.success() {
-        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(url)
+        if output.status.success() {
+            // gh issue edit outputs the issue URL to stdout
+            let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if url.is_empty() {
+                // Some gh versions don't output URL on edit; construct it
+                let repo_url = get_repo_url(shell_prefix).unwrap_or_default();
+                Ok(format!("{repo_url}/issues/{num}"))
+            } else {
+                Ok(url)
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(format!("gh issue edit failed: {stderr}"))
+        }
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(format!("gh issue create failed: {stderr}"))
+        // Create new issue
+        let output = gh_command(shell_prefix)
+            .args(["issue", "create", "--title", &title, "--body", &full_body])
+            .output()
+            .map_err(|e| {
+                format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
+            })?;
+
+        if output.status.success() {
+            let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(url)
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(format!("gh issue create failed: {stderr}"))
+        }
+    }
+}
+
+/// Get the GitHub repo URL (e.g., https://github.com/owner/repo)
+fn get_repo_url(shell_prefix: &str) -> Result<String, String> {
+    let output = gh_command(shell_prefix)
+        .args(["repo", "view", "--json", "url", "-q", ".url"])
+        .output()
+        .map_err(|e| format!("gh repo view failed: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err("Failed to get repo URL".into())
     }
 }
 

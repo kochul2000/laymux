@@ -11,6 +11,12 @@ interface IssueReporterViewProps {
   isFocused?: boolean;
 }
 
+/** Extract issue number from a GitHub issue URL like https://github.com/owner/repo/issues/123 */
+function extractIssueNumber(url: string): number | null {
+  const match = url.match(/\/issues\/(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
 export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -19,6 +25,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [state, setState] = useState<SubmitState>("idle");
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
+  const [issueNumber, setIssueNumber] = useState<number | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
@@ -48,7 +55,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submittingRef.current || state === "success") return;
+    if (!title.trim() || submittingRef.current) return;
     submittingRef.current = true;
     setState("submitting");
     setResultMsg("");
@@ -58,9 +65,12 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         title: title.trim(),
         body,
         screenshotPath,
+        issueNumber,
       });
-      setState("success");
+      setState("idle");
       setResultMsg(url);
+      const num = extractIssueNumber(url);
+      if (num !== null) setIssueNumber(num);
     } catch (e) {
       setState("error");
       setResultMsg(String(e));
@@ -81,6 +91,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setBody("");
     setResultMsg("");
     setState("idle");
+    setIssueNumber(null);
   };
 
   const ir = useSettingsStore((s) => s.issueReporter);
@@ -155,7 +166,10 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               borderRadius: "var(--radius-md)",
             }}
           >
-            Recapture
+            <span style={{ fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'" }}>
+              {"\uE722"}
+            </span>{" "}
+            Capture
           </button>
         </div>
 
@@ -181,6 +195,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          disabled={state === "submitting"}
           placeholder="Issue title"
           className="mb-1 w-full rounded px-1 py-1 ui-focus-ring"
           style={{
@@ -197,6 +212,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           data-testid="issue-body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
+          disabled={state === "submitting"}
           placeholder="Describe the issue..."
           className="mb-1 min-h-0 w-full flex-1 resize-none rounded px-1 py-1 leading-relaxed"
           style={{
@@ -220,30 +236,22 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           <button
             data-testid="issue-submit"
             onClick={handleSubmit}
-            disabled={!title.trim() || state === "submitting" || state === "success"}
+            disabled={!title.trim() || state === "submitting"}
             className="cursor-pointer px-1 py-1 text-xs font-medium"
             style={{
-              background: state === "success" ? "var(--green)" : "var(--accent)",
+              background: "var(--accent)",
               color: "var(--bg-base)",
               border: "none",
               borderRadius: "var(--radius-md)",
-              opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
+              opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
               transition: "opacity 0.15s",
             }}
+            title="Ctrl+Enter"
           >
-            {state === "submitting"
-              ? "Submitting..."
-              : state === "success"
-                ? "Submitted!"
-                : "Submit Issue"}
-            {state !== "submitting" && state !== "success" && (
-              <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
-                Ctrl+Enter
-              </span>
-            )}
+            {state === "submitting" ? "Saving..." : "Save"}
           </button>
 
-          {(state === "success" || state === "error") && (
+          {(issueNumber !== null || state === "error") && (
             <button
               data-testid="issue-new-report"
               onClick={handleNewReport}
@@ -255,11 +263,11 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
                 borderRadius: "var(--radius-md)",
               }}
             >
-              New Report
+              New Issue
             </button>
           )}
 
-          {state === "success" && resultMsg && (
+          {issueNumber !== null && resultMsg && state === "idle" && (
             <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
               ✓
             </span>
@@ -272,7 +280,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         </div>
 
         {/* Issue link */}
-        {state === "success" && resultMsg && (
+        {issueNumber !== null && resultMsg && (
           <a
             data-testid="issue-link"
             href={resultMsg}
