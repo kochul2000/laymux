@@ -63,7 +63,7 @@ describe("IssueReporterView", () => {
     expect(body.style.padding).toBe("20px 10px 5px 15px");
   });
 
-  it("disables submit button after successful submission", async () => {
+  it("replaces Save button with Edit button after successful submission", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
@@ -73,11 +73,12 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("issue-submit")).toBeDisabled();
+      expect(screen.getByTestId("issue-edit")).toBeInTheDocument();
     });
+    expect(screen.queryByTestId("issue-submit")).not.toBeInTheDocument();
   });
 
-  it("shows 'New Report' button after successful submission", async () => {
+  it("shows 'New Issue' button after successful submission", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
@@ -91,7 +92,7 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("resets form when 'New Report' is clicked", async () => {
+  it("resets form when 'New Issue' is clicked", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
@@ -109,9 +110,9 @@ describe("IssueReporterView", () => {
 
     expect(screen.getByTestId("issue-title")).toHaveValue("");
     expect(screen.getByTestId("issue-body")).toHaveValue("");
-    // Button text should be back to "Submit Issue" (not "Submitted!")
-    expect(screen.getByText("Submit Issue")).toBeInTheDocument();
-    // "New Report" button should be gone
+    // Button text should be back to "Save" (not "Edit")
+    expect(screen.getByText("Save")).toBeInTheDocument();
+    // "New Issue" button should be gone
     expect(screen.queryByTestId("issue-new-report")).not.toBeInTheDocument();
   });
 
@@ -125,7 +126,7 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+      expect(screen.getByText("Edit")).toBeInTheDocument();
     });
 
     const link = screen.getByTestId("issue-link");
@@ -148,7 +149,7 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     expect(screen.getByTestId("issue-submit")).toBeDisabled();
-    expect(screen.getByText("Submitting...")).toBeInTheDocument();
+    expect(screen.getByText("Saving...")).toBeInTheDocument();
   });
 
   it("disables submit button after error and allows retry", async () => {
@@ -166,7 +167,7 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("shows 'New Report' button after error for clearing form", async () => {
+  it("shows 'New Issue' button after error for clearing form", async () => {
     const user = userEvent.setup();
     mockInvoke.mockRejectedValueOnce(new Error("Network error"));
 
@@ -180,11 +181,11 @@ describe("IssueReporterView", () => {
       expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
 
-    // Clicking New Report should clear form
+    // Clicking New Issue should clear form
     await user.click(screen.getByTestId("issue-new-report"));
     expect(screen.getByTestId("issue-title")).toHaveValue("");
     expect(screen.getByTestId("issue-body")).toHaveValue("");
-    expect(screen.getByText("Submit Issue")).toBeInTheDocument();
+    expect(screen.getByText("Save")).toBeInTheDocument();
   });
 
   it("prevents double submission with rapid clicks", async () => {
@@ -320,7 +321,7 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+      expect(screen.getByText("Edit")).toBeInTheDocument();
     });
 
     // Verify first call was create (no issueNumber)
@@ -332,7 +333,7 @@ describe("IssueReporterView", () => {
     });
 
     // Click "Update" to re-enable editing
-    const updateBtn = screen.getByTestId("issue-update");
+    const updateBtn = screen.getByTestId("issue-edit");
     expect(updateBtn).toBeInTheDocument();
     mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
     await user.click(updateBtn);
@@ -362,12 +363,12 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+      expect(screen.getByText("Edit")).toBeInTheDocument();
     });
 
     // Click update to enable re-editing, then re-submit
     mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
-    await user.click(screen.getByTestId("issue-update"));
+    await user.click(screen.getByTestId("issue-edit"));
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
@@ -380,7 +381,7 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("resets issueNumber when 'New Report' is clicked", async () => {
+  it("resets issueNumber when 'New Issue' is clicked", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
@@ -393,7 +394,7 @@ describe("IssueReporterView", () => {
       expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
     });
 
-    // Click New Report to reset
+    // Click New Issue to reset
     await user.click(screen.getByTestId("issue-new-report"));
 
     // Submit again — should be a new creation (no issueNumber)
@@ -411,7 +412,7 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("shows 'Update' button text when re-submitting existing issue", async () => {
+  it("shows Edit button after save, then Save button after clicking Edit", async () => {
     const user = userEvent.setup();
     mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
@@ -421,14 +422,14 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+      expect(screen.getByText("Edit")).toBeInTheDocument();
     });
 
     // Click update to re-enable editing
-    await user.click(screen.getByTestId("issue-update"));
+    await user.click(screen.getByTestId("issue-edit"));
 
-    // Button should show "Update Issue" instead of "Submit Issue"
-    expect(screen.getByText("Update Issue")).toBeInTheDocument();
+    // Button should show "Save" instead of "Save"
+    expect(screen.getByText("Save")).toBeInTheDocument();
   });
 
   describe("font settings", () => {

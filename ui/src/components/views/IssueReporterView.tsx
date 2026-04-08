@@ -232,47 +232,41 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
             borderRadius: "var(--radius-md)",
           }}
         >
-          <button
-            data-testid="issue-submit"
-            onClick={handleSubmit}
-            disabled={!title.trim() || state === "submitting" || state === "success"}
-            className="cursor-pointer px-1 py-1 text-xs font-medium"
-            style={{
-              background: state === "success" ? "var(--green)" : "var(--accent)",
-              color: "var(--bg-base)",
-              border: "none",
-              borderRadius: "var(--radius-md)",
-              opacity: !title.trim() || state === "submitting" || state === "success" ? 0.4 : 1,
-              transition: "opacity 0.15s",
-            }}
-          >
-            {state === "submitting"
-              ? "Submitting..."
-              : state === "success"
-                ? "Submitted!"
-                : issueNumber !== null
-                  ? "Update Issue"
-                  : "Submit Issue"}
-            {state !== "submitting" && state !== "success" && (
-              <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
-                Ctrl+Enter
-              </span>
-            )}
-          </button>
-
-          {state === "success" && issueNumber !== null && (
+          {state === "success" ? (
             <button
-              data-testid="issue-update"
+              data-testid="issue-edit"
               onClick={handleUpdate}
               className="cursor-pointer px-1 py-1 text-xs font-medium"
               style={{
-                background: "transparent",
-                color: "var(--accent)",
-                border: "1px solid var(--accent-20)",
+                background: "var(--accent)",
+                color: "var(--bg-base)",
+                border: "none",
                 borderRadius: "var(--radius-md)",
               }}
             >
-              Update
+              Edit
+            </button>
+          ) : (
+            <button
+              data-testid="issue-submit"
+              onClick={handleSubmit}
+              disabled={!title.trim() || state === "submitting"}
+              className="cursor-pointer px-1 py-1 text-xs font-medium"
+              style={{
+                background: "var(--accent)",
+                color: "var(--bg-base)",
+                border: "none",
+                borderRadius: "var(--radius-md)",
+                opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
+                transition: "opacity 0.15s",
+              }}
+            >
+              {state === "submitting" ? "Saving..." : "Save"}
+              {state !== "submitting" && (
+                <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
+                  Ctrl+Enter
+                </span>
+              )}
             </button>
           )}
 
@@ -288,7 +282,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
                 borderRadius: "var(--radius-md)",
               }}
             >
-              New Report
+              New Issue
             </button>
           )}
 
