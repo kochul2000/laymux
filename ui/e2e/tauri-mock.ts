@@ -153,6 +153,7 @@ export const TAURI_MOCK_SCRIPT = `
         case 'mark_notifications_read':
         case 'get_terminal_cwds':
         case 'get_terminal_states':
+        case 'set_terminal_cwd_send':
         case 'set_terminal_cwd_receive':
         case 'update_terminal_sync_group':
           return Promise.resolve(null);

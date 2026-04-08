@@ -15,6 +15,7 @@ import {
   onTerminalOutput,
   smartPaste,
   clipboardWriteText,
+  setTerminalCwdSend,
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
@@ -504,6 +505,7 @@ export function TerminalView({
             terminal.cols,
             terminal.rows,
             syncGroup,
+            cwdSendRef.current,
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
             startupOverride,
@@ -568,6 +570,11 @@ export function TerminalView({
     useTerminalStore.getState().updateInstanceInfo(instanceId, { syncGroup });
     updateTerminalSyncGroup(instanceId, syncGroup).catch(() => {});
   }, [instanceId, syncGroup]);
+
+  // Update backend when cwdSend changes
+  useEffect(() => {
+    setTerminalCwdSend(instanceId, cwdSend).catch(() => {});
+  }, [instanceId, cwdSend]);
 
   // Update backend when cwdReceive changes
   useEffect(() => {

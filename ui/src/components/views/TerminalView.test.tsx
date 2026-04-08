@@ -108,6 +108,7 @@ const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "" });
 const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
+const mockSetTerminalCwdSend = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
 const mockLoadTerminalOutputCache = vi
@@ -122,6 +123,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
   clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
+  setTerminalCwdSend: (...args: unknown[]) => mockSetTerminalCwdSend(...args),
   setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
@@ -173,7 +175,8 @@ describe("TerminalView", () => {
         80,
         24,
         "grp",
-        true,
+        true, // cwdSend
+        true, // cwdReceive
         undefined,
         undefined,
       );
@@ -848,7 +851,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           "/home/user/project",
           undefined,
         );
@@ -875,7 +879,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           undefined,
           undefined,
         );
@@ -903,7 +908,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           undefined,
           undefined,
         );
@@ -929,7 +935,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           "/home/user/project",
           "claude --resume abc123-session-id",
         );
@@ -958,7 +965,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           undefined,
           undefined,
         );
@@ -984,7 +992,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend
+          true, // cwdReceive
           "/home/user/project",
           undefined,
         );
@@ -1051,14 +1060,15 @@ describe("TerminalView", () => {
       );
 
       await vi.waitFor(() => {
-        // cwdReceive is passed directly to createTerminalSession — no separate call needed
+        // cwdSend and cwdReceive are passed directly to createTerminalSession
         expect(mockCreateTerminalSession).toHaveBeenCalledWith(
           "t-cwd1",
           "PowerShell",
           80,
           24,
           "default",
-          false,
+          true, // cwdSend default
+          false, // cwdReceive
           undefined,
           undefined,
         );
@@ -1082,7 +1092,8 @@ describe("TerminalView", () => {
           80,
           24,
           "default",
-          true,
+          true, // cwdSend default
+          true, // cwdReceive
           undefined,
           undefined,
         );

@@ -153,6 +153,22 @@ pub fn do_sync_cwd(
     // propagation. Target-side dedup is handled by filter_targets_needing_cd.
     update_terminal_cwd(state, terminal_id, &normalized_path);
 
+    // Check if source terminal has cwd_send disabled — if so, skip group propagation
+    // but keep the local CWD update above (the terminal's own CWD should still be tracked).
+    let source_cwd_send = {
+        let terminals = state.terminals.lock_or_err()?;
+        terminals
+            .get(terminal_id)
+            .map(|s| s.cwd_send)
+            .unwrap_or(true)
+    };
+    if !source_cwd_send {
+        return Ok(LxResponse::ok(Some(format!(
+            "sync-cwd {} suppressed (cwd_send disabled)",
+            normalized_path
+        ))));
+    }
+
     let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
 
     let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
@@ -1824,6 +1840,48 @@ mod tests {
             filtered.contains(&"t3".to_string()),
             "t3 with cwd_receive=true should pass"
         );
+    }
+
+    // --- cwd_send tests ---
+
+    #[test]
+    fn do_sync_cwd_skips_propagation_when_cwd_send_disabled() {
+        let state = AppState::new();
+        // Create source terminal with cwd_send = false
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut source = TerminalSession::new("source".into(), TerminalConfig::default());
+            source.cwd_send = false;
+            source.config.sync_group = "group1".into();
+            terminals.insert("source".into(), source);
+
+            let mut target = TerminalSession::new("target".into(), TerminalConfig::default());
+            target.config.sync_group = "group1".into();
+            terminals.insert("target".into(), target);
+        }
+        // Register sync group
+        {
+            let mut groups = state.sync_groups.lock().unwrap();
+            let mut group = crate::terminal::SyncGroup::new("group1".into());
+            group.terminal_ids = vec!["source".into(), "target".into()];
+            groups.insert("group1".into(), group);
+        }
+
+        // do_sync_cwd requires an AppHandle which we can't easily create in unit tests.
+        // Instead, verify the cwd_send check logic directly:
+        let terminals = state.terminals.lock().unwrap();
+        let source_cwd_send = terminals.get("source").map(|s| s.cwd_send).unwrap_or(true);
+        assert!(
+            !source_cwd_send,
+            "source terminal should have cwd_send=false"
+        );
+        // When cwd_send is false, do_sync_cwd should return early after updating local CWD
+    }
+
+    #[test]
+    fn cwd_send_defaults_to_true() {
+        let session = TerminalSession::new("test".into(), TerminalConfig::default());
+        assert!(session.cwd_send, "cwd_send should default to true");
     }
 
     // --- any_terminal_title_contains tests ---

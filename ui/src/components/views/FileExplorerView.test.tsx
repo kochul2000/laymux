@@ -7,7 +7,8 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 // --- Mocks ---
 
-let cwdCallback: ((data: { terminalId: string; cwd: string }) => void) | null = null;
+let cwdCallback: ((data: { terminalId: string; cwd: string; cwdSend?: boolean }) => void) | null =
+  null;
 
 vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
@@ -17,10 +18,12 @@ vi.mock("@/lib/tauri-api", () => ({
   listDirectory: vi.fn().mockResolvedValue([]),
   onTerminalCwdChanged: vi
     .fn()
-    .mockImplementation((cb: (data: { terminalId: string; cwd: string }) => void) => {
-      cwdCallback = cb;
-      return Promise.resolve(vi.fn());
-    }),
+    .mockImplementation(
+      (cb: (data: { terminalId: string; cwd: string; cwdSend?: boolean }) => void) => {
+        cwdCallback = cb;
+        return Promise.resolve(vi.fn());
+      },
+    ),
   handleLxMessage: vi.fn().mockResolvedValue({ success: true, error: null }),
 }));
 
@@ -295,6 +298,62 @@ describe("FileExplorerView", () => {
       await vi.runAllTimersAsync();
     });
 
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
+  });
+
+  it("ignores terminal CWD change when source has cwdSend=false", async () => {
+    // Register a terminal in the syncGroup
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-1",
+      profile: "WSL",
+      syncGroup: "ws-1",
+      workspaceId: "ws-1",
+    });
+
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    // Simulate terminal CWD change event with cwdSend=false
+    act(() => {
+      cwdCallback?.({ terminalId: "terminal-1", cwd: "/home/user/other", cwdSend: false });
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // listDirectory should NOT be called because source terminal has cwdSend disabled
+    expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("accepts terminal CWD change when source has cwdSend=true", async () => {
+    // Register a terminal in the syncGroup
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-1",
+      profile: "WSL",
+      syncGroup: "ws-1",
+      workspaceId: "ws-1",
+    });
+
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    // Simulate terminal CWD change event with cwdSend=true (explicit)
+    act(() => {
+      cwdCallback?.({ terminalId: "terminal-1", cwd: "/home/user/other", cwdSend: true });
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // listDirectory SHOULD be called because cwdSend is true
     expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
   });
 

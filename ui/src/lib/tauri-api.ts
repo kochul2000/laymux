@@ -22,6 +22,7 @@ export async function createTerminalSession(
   cols: number,
   rows: number,
   syncGroup: string,
+  cwdSend: boolean = true,
   cwdReceive: boolean = true,
   cwd?: string,
   startupCommandOverride?: string,
@@ -32,6 +33,7 @@ export async function createTerminalSession(
     cols,
     rows,
     syncGroup,
+    cwdSend,
     cwdReceive,
     cwd: cwd ?? null,
     startupCommandOverride: startupCommandOverride ?? null,
@@ -383,6 +385,11 @@ export async function readFileForViewer(
   return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
 }
 
+/** Update whether a terminal sends CWD changes to other terminals. */
+export async function setTerminalCwdSend(terminalId: string, send: boolean): Promise<void> {
+  return invoke("set_terminal_cwd_send", { terminalId, send });
+}
+
 /** Update whether a terminal accepts CWD sync from other terminals. */
 export async function setTerminalCwdReceive(terminalId: string, receive: boolean): Promise<void> {
   return invoke("set_terminal_cwd_receive", { terminalId, receive });
@@ -611,11 +618,14 @@ export async function getTerminalCwds(): Promise<Record<string, string>> {
 
 /** Listen for CWD change events detected directly from PTY output in the backend. */
 export function onTerminalCwdChanged(
-  callback: (data: { terminalId: string; cwd: string }) => void,
+  callback: (data: { terminalId: string; cwd: string; cwdSend?: boolean }) => void,
 ): Promise<UnlistenFn> {
-  return listen<{ terminalId: string; cwd: string }>("terminal-cwd-changed", (event) => {
-    callback(event.payload);
-  });
+  return listen<{ terminalId: string; cwd: string; cwdSend?: boolean }>(
+    "terminal-cwd-changed",
+    (event) => {
+      callback(event.payload);
+    },
+  );
 }
 
 export interface TerminalTitleChangedData {

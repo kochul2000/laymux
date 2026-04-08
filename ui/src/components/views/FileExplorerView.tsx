@@ -195,6 +195,8 @@ export function FileExplorerView({
     let cancelled = false;
     const promise = onTerminalCwdChanged((data) => {
       if (cancelled) return;
+      // Skip if source terminal has cwdSend disabled
+      if (data.cwdSend === false) return;
       // Check if the changed terminal belongs to our syncGroup
       const terminal = useTerminalStore.getState().instances.find((t) => t.id === data.terminalId);
       if (!terminal || terminal.syncGroup !== syncGroup) return;
