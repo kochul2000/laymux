@@ -106,7 +106,7 @@ pub fn create_terminal_session(
     let terminal_id = id.clone();
     let app_clone = app.clone();
     let state_for_pty = Arc::clone(&*state);
-    let burst = &settings.terminal.output_activity_burst;
+    let burst = settings.terminal.output_activity_burst.sanitized();
     let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
         burst.window_ms,
         burst.threshold,

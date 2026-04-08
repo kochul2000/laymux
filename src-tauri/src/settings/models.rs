@@ -393,7 +393,7 @@ fn default_burst_window_ms() -> u64 {
     2000
 }
 fn default_burst_threshold() -> u64 {
-    3
+    6
 }
 fn default_burst_throttle_ms() -> u64 {
     1000
@@ -420,6 +420,18 @@ impl Default for OutputActivityBurstSettings {
             window_ms: default_burst_window_ms(),
             threshold: default_burst_threshold(),
             throttle_ms: default_burst_throttle_ms(),
+        }
+    }
+}
+
+impl OutputActivityBurstSettings {
+    /// Clamp values to safe ranges. Called at usage site to guard against
+    /// invalid user input (e.g., threshold=0 or window_ms=0).
+    pub fn sanitized(&self) -> Self {
+        Self {
+            window_ms: self.window_ms.max(100),
+            threshold: self.threshold.max(2),
+            throttle_ms: self.throttle_ms.max(100),
         }
     }
 }

@@ -1,8 +1,9 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::{
     ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FileExplorerSettings,
-    FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings, Profile,
-    ProfileDefaults, Settings, TerminalSettings, Workspace, WorkspacePane, WorkspacePaneView,
+    FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
+    OutputActivityBurstSettings, Profile, ProfileDefaults, Settings, TerminalSettings, Workspace,
+    WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -1976,4 +1977,64 @@ fn settings_json_with_extra_fields_ignored() {
         assert_eq!(font.size, 14);
     }
     // Either way, it shouldn't panic
+}
+
+// ============================================================================
+// OutputActivityBurst Sanitization Tests
+// ============================================================================
+
+#[test]
+fn burst_settings_sanitize_clamps_zero_threshold() {
+    let bad = OutputActivityBurstSettings {
+        window_ms: 2000,
+        threshold: 0,
+        throttle_ms: 1000,
+    };
+    let safe = bad.sanitized();
+    assert!(safe.threshold >= 2, "threshold must be ≥2 to filter false positives");
+}
+
+#[test]
+fn burst_settings_sanitize_clamps_zero_window() {
+    let bad = OutputActivityBurstSettings {
+        window_ms: 0,
+        threshold: 3,
+        throttle_ms: 1000,
+    };
+    let safe = bad.sanitized();
+    assert!(safe.window_ms >= 100, "window_ms must be ≥100");
+}
+
+#[test]
+fn burst_settings_sanitize_clamps_zero_throttle() {
+    let bad = OutputActivityBurstSettings {
+        window_ms: 2000,
+        threshold: 3,
+        throttle_ms: 0,
+    };
+    let safe = bad.sanitized();
+    assert!(safe.throttle_ms >= 100, "throttle_ms must be ≥100");
+}
+
+#[test]
+fn burst_settings_sanitize_preserves_valid_values() {
+    let good = OutputActivityBurstSettings {
+        window_ms: 5000,
+        threshold: 5,
+        throttle_ms: 2000,
+    };
+    let safe = good.sanitized();
+    assert_eq!(safe.window_ms, 5000);
+    assert_eq!(safe.threshold, 5);
+    assert_eq!(safe.throttle_ms, 2000);
+}
+
+#[test]
+fn burst_settings_deserialize_with_invalid_values() {
+    let json = r#"{"windowMs": 0, "threshold": 1, "throttleMs": 50}"#;
+    let parsed: OutputActivityBurstSettings = serde_json::from_str(json).unwrap();
+    let safe = parsed.sanitized();
+    assert!(safe.window_ms >= 100);
+    assert!(safe.threshold >= 2);
+    assert!(safe.throttle_ms >= 100);
 }
