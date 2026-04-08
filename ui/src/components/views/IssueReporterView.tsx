@@ -243,13 +243,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
               transition: "opacity 0.15s",
             }}
+            title="Ctrl+Enter"
           >
             {state === "submitting" ? "Saving..." : "Save"}
-            {state !== "submitting" && (
-              <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
-                Ctrl+Enter
-              </span>
-            )}
           </button>
 
           {(issueNumber !== null || state === "error") && (
