@@ -166,7 +166,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               borderRadius: "var(--radius-md)",
             }}
           >
-            Recapture
+            Capture
           </button>
         </div>
 
