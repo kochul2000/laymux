@@ -238,7 +238,12 @@ describe("PaneControlBar", () => {
   it("persists mode per paneId in ui-store", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
-      <PaneControlBar paneId="pane-abc" currentView={defaultView} actions={defaultActions} hovered={true}>
+      <PaneControlBar
+        paneId="pane-abc"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={true}
+      >
         <div>content</div>
       </PaneControlBar>,
     );
@@ -251,7 +256,12 @@ describe("PaneControlBar", () => {
 
     // Re-render — mode should be restored from store
     render(
-      <PaneControlBar paneId="pane-abc" currentView={defaultView} actions={defaultActions} hovered={false}>
+      <PaneControlBar
+        paneId="pane-abc"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+      >
         <div>content</div>
       </PaneControlBar>,
     );
@@ -265,7 +275,12 @@ describe("PaneControlBar", () => {
       convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
     }));
     render(
-      <PaneControlBar paneId="pane-new" currentView={defaultView} actions={defaultActions} hovered={true}>
+      <PaneControlBar
+        paneId="pane-new"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={true}
+      >
         <div>content</div>
       </PaneControlBar>,
     );
@@ -278,7 +293,12 @@ describe("PaneControlBar", () => {
       convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
     }));
     render(
-      <PaneControlBar paneId="pane-new2" currentView={defaultView} actions={defaultActions} hovered={false}>
+      <PaneControlBar
+        paneId="pane-new2"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+      >
         <div>content</div>
       </PaneControlBar>,
     );

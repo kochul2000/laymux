@@ -560,12 +560,9 @@ export function onClaudeTerminalDetected(
 export function onTerminalOutputActivity(
   callback: (data: { terminalId: string; active?: boolean }) => void,
 ): Promise<UnlistenFn> {
-  return listen<{ terminalId: string; active?: boolean }>(
-    "terminal-output-activity",
-    (event) => {
-      callback(event.payload);
-    },
-  );
+  return listen<{ terminalId: string; active?: boolean }>("terminal-output-activity", (event) => {
+    callback(event.payload);
+  });
 }
 
 /** Listen for Claude Code white-● message changes from the backend. */

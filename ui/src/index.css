@@ -14,7 +14,7 @@
   --accent-08: rgba(137, 180, 250, 0.08);
   --accent-06: rgba(137, 180, 250, 0.06);
   --orange-15: rgba(217, 119, 87, 0.15);
-  --claude: #D97757;
+  --claude: #d97757;
   --green: #a6e3a1;
   --red: #f38ba8;
   --border: #313244;
@@ -83,7 +83,6 @@
     width: 0;
     height: 0;
   }
-
 }
 
 /* EmptyView: xterm-like overlay scrollbar (override global hide) */

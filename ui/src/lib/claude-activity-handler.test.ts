@@ -66,9 +66,9 @@ describe("ClaudeActivityHandler", () => {
 
   describe("computeStatusMessage", () => {
     it("returns claudeMessage as status text", () => {
-      expect(
-        handler.computeStatusMessage(raw({ claudeMessage: "Reading file src/main.rs" })),
-      ).toBe("Reading file src/main.rs");
+      expect(handler.computeStatusMessage(raw({ claudeMessage: "Reading file src/main.rs" }))).toBe(
+        "Reading file src/main.rs",
+      );
     });
 
     it("returns undefined when no claudeMessage", () => {
@@ -83,9 +83,7 @@ describe("ClaudeActivityHandler", () => {
   describe("computeNotification", () => {
     it("returns null (Rust handles notifications)", () => {
       expect(handler.computeNotification(raw())).toBeNull();
-      expect(
-        handler.computeNotification(raw({ exitCode: 0, claudeMessage: "Done" })),
-      ).toBeNull();
+      expect(handler.computeNotification(raw({ exitCode: 0, claudeMessage: "Done" }))).toBeNull();
     });
   });
 

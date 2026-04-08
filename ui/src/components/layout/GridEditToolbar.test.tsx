@@ -71,5 +71,4 @@ describe("GridEditToolbar", () => {
 
     expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
   });
-
 });

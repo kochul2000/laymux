@@ -125,7 +125,13 @@ function WorkspaceItem({
 
   const cmdInfo = summary.lastCommand;
   const cmdStatus = cmdInfo
-    ? computeCommandStatus(cmdInfo.exitCode, cmdInfo.outputActive, cmdInfo.claudeMessage, cmdInfo.activity, cmdInfo.title)
+    ? computeCommandStatus(
+        cmdInfo.exitCode,
+        cmdInfo.outputActive,
+        cmdInfo.claudeMessage,
+        cmdInfo.activity,
+        cmdInfo.title,
+      )
     : null;
 
   return (
@@ -307,7 +313,13 @@ function WorkspaceItem({
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
                 const tCmdStatus = ts.lastCommand
-                  ? computeCommandStatus(ts.lastExitCode, ts.outputActive, ts.claudeMessage, ts.activity, ts.title)
+                  ? computeCommandStatus(
+                      ts.lastExitCode,
+                      ts.outputActive,
+                      ts.claudeMessage,
+                      ts.activity,
+                      ts.title,
+                    )
                   : null;
                 const actInfo = formatActivity(ts.activity);
                 return (
@@ -958,13 +970,13 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Separator between creation panel and list */}
-      <div
-        className="mb-1 border-t"
-        style={{ borderColor: "var(--border)", opacity: 0.5 }}
-      />
+      <div className="mb-1 border-t" style={{ borderColor: "var(--border)", opacity: 0.5 }} />
 
       {/* Sort order toggle */}
-      <div className="px-2 pb-1 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
+      <div
+        className="px-2 pb-1 flex items-center justify-between"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
         <SectionLabel>Workspaces</SectionLabel>
         <button
           data-testid="sort-order-toggle"
@@ -1118,7 +1130,10 @@ export function WorkspaceSelectorView() {
       </div>
 
       {showNotifPanel && (
-        <div className="empty-view-scroll overflow-y-auto" style={{ minHeight: "80px", maxHeight: "200px" }}>
+        <div
+          className="empty-view-scroll overflow-y-auto"
+          style={{ minHeight: "80px", maxHeight: "200px" }}
+        >
           <NotificationPanel embedded />
         </div>
       )}

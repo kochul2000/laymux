@@ -20,7 +20,13 @@ interface ViewHeaderProps {
  *
  * Context 없이도 독립적으로 동작한다 (Dock 등).
  */
-export function ViewHeader({ title, children, className, borderBottom = true, testId }: ViewHeaderProps) {
+export function ViewHeader({
+  title,
+  children,
+  className,
+  borderBottom = true,
+  testId,
+}: ViewHeaderProps) {
   const ctx = usePaneControl();
   const registerHeader = ctx?.registerHeader;
   const unregisterHeader = ctx?.unregisterHeader;
@@ -45,7 +51,9 @@ export function ViewHeader({ title, children, className, borderBottom = true, te
     >
       <div className="flex min-w-0 flex-1 items-center">
         {title && (
-          <span style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}>
+          <span
+            style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
+          >
             {title}
           </span>
         )}

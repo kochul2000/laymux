@@ -6,11 +6,7 @@ import {
   transformPasteContent,
   trimSelectionTrailingWhitespace,
 } from "./smart-text";
-import {
-  RAW_XTERM_SELECTION,
-  WRONG_RESULT,
-  CLEAN_URL,
-} from "./__fixtures__/right-pane-fixture";
+import { RAW_XTERM_SELECTION, WRONG_RESULT, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
 
 // ============================================================
 // trimSelectionTrailingWhitespace
@@ -324,7 +320,6 @@ describe("transformPasteContent", () => {
 // Real terminal buffer: Claude Code OAuth URL (75-col padded lines)
 // ============================================================
 describe("right-pane fixture: terminal-padded multi-line URL", () => {
-
   const pasteOpts = { removeIndent: true, removeLineBreak: true };
 
   it("문제 재현: raw xterm selection에서 newline만 제거하면 URL에 공백이 포함됨", () => {

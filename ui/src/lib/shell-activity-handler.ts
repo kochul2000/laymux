@@ -1,8 +1,4 @@
-import type {
-  ActivityHandler,
-  RawTerminalState,
-  StatusResult,
-} from "./activity-handler";
+import type { ActivityHandler, RawTerminalState, StatusResult } from "./activity-handler";
 
 export class ShellActivityHandler implements ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult {
