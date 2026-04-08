@@ -39,12 +39,31 @@ describe("IssueReporterView", () => {
     });
   });
 
-  it("renders the form", () => {
+  it("renders the form without auto-capturing screenshot", () => {
     render(<IssueReporterView />);
     expect(screen.getByTestId("issue-reporter-view")).toBeInTheDocument();
     expect(screen.getByTestId("issue-title")).toBeInTheDocument();
     expect(screen.getByTestId("issue-body")).toBeInTheDocument();
     expect(screen.getByTestId("issue-submit")).toBeInTheDocument();
+    // Should show "No screenshot" instead of auto-capturing
+    expect(screen.getByText("No screenshot")).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("captures screenshot only when Capture button is clicked", async () => {
+    const user = userEvent.setup();
+    render(<IssueReporterView />);
+
+    // Initially no screenshot
+    expect(screen.getByText("No screenshot")).toBeInTheDocument();
+
+    // Click Capture button
+    await user.click(screen.getByText("Capture"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Screenshot captured")).toBeInTheDocument();
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("applies default padding (8px) from settings", () => {
@@ -246,7 +265,7 @@ describe("IssueReporterView", () => {
       expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "",
-        screenshotPath: "/tmp/screenshot.png",
+        screenshotPath: null,
         issueNumber: null,
       });
     });
@@ -267,7 +286,7 @@ describe("IssueReporterView", () => {
       expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "Some description",
-        screenshotPath: "/tmp/screenshot.png",
+        screenshotPath: null,
         issueNumber: null,
       });
     });
@@ -334,7 +353,7 @@ describe("IssueReporterView", () => {
     expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
       title: "Test issue",
       body: "Original body",
-      screenshotPath: "/tmp/screenshot.png",
+      screenshotPath: null,
       issueNumber: null,
     });
 
@@ -348,7 +367,7 @@ describe("IssueReporterView", () => {
       expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "Updated body",
-        screenshotPath: "/tmp/screenshot.png",
+        screenshotPath: null,
         issueNumber: 42,
       });
     });
@@ -375,7 +394,7 @@ describe("IssueReporterView", () => {
       expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "",
-        screenshotPath: "/tmp/screenshot.png",
+        screenshotPath: null,
         issueNumber: 123,
       });
     });
@@ -406,7 +425,7 @@ describe("IssueReporterView", () => {
       expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "New issue",
         body: "",
-        screenshotPath: "/tmp/screenshot.png",
+        screenshotPath: null,
         issueNumber: null,
       });
     });

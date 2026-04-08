@@ -30,10 +30,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
 
-  useEffect(() => {
-    captureScreenshot();
-  }, []);
-
   // Auto-focus title input when view receives focus
   useEffect(() => {
     if (isFocused) {
