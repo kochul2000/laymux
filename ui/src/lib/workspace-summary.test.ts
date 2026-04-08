@@ -505,10 +505,10 @@ describe("formatActivity", () => {
     expect(result.color).toBe("var(--accent)");
   });
 
-  it("returns Claude brand color (#D97757) for Claude app", () => {
+  it("returns Claude brand color for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
     expect(result.label).toBe("Claude");
-    expect(result.color).toBe("#D97757");
+    expect(result.color).toBe("var(--claude)");
   });
 });
 
@@ -608,17 +608,25 @@ describe("computeCommandStatus", () => {
     expect(s.color).toBe("var(--text-secondary)");
   });
 
-  // claudeMessage → text field (app-agnostic, just passes through)
-  it("returns claudeMessage as text when outputActive", () => {
-    const s = computeCommandStatus(undefined, true, "모든 테스트 통과했습니다.");
+  // claudeMessage → text field (only with Claude activity)
+  it("returns claudeMessage as text when Claude activity + outputActive", () => {
+    const claude = { type: "interactiveApp" as const, name: "Claude" };
+    const s = computeCommandStatus(undefined, true, "모든 테스트 통과했습니다.", claude);
     expect(s.icon).toBe("⏳");
     expect(s.text).toBe("모든 테스트 통과했습니다.");
   });
 
-  it("returns claudeMessage as text for success", () => {
-    const s = computeCommandStatus(0, false, "1235개 테스트 모두 통과했습니다.");
+  it("returns claudeMessage as text for Claude success", () => {
+    const claude = { type: "interactiveApp" as const, name: "Claude" };
+    const s = computeCommandStatus(0, false, "1235개 테스트 모두 통과했습니다.", claude);
     expect(s.icon).toBe("✓");
     expect(s.text).toBe("1235개 테스트 모두 통과했습니다.");
+  });
+
+  it("shell ignores claudeMessage (uses command text directly)", () => {
+    // Shell handler does not return claudeMessage as text override
+    const s = computeCommandStatus(0, false, "some message");
+    expect(s.text).toBeUndefined();
   });
 
   it("returns undefined text when no claudeMessage", () => {
@@ -627,7 +635,8 @@ describe("computeCommandStatus", () => {
   });
 
   it("returns undefined text for empty string claudeMessage", () => {
-    const s = computeCommandStatus(0, false, "");
+    const claude = { type: "interactiveApp" as const, name: "Claude" };
+    const s = computeCommandStatus(0, false, "", claude);
     expect(s.text).toBeUndefined();
   });
 
@@ -638,6 +647,7 @@ describe("computeCommandStatus", () => {
 
   describe("Claude lifecycle: command status icon transitions", () => {
     // Scenario: User types "claude" → Claude enters → starts working → completes task → idles → works again
+    const claudeActivity = { type: "interactiveApp" as const, name: "Claude" };
 
     it("shell before Claude: no lastCommand → tCmdStatus is null (no icon)", () => {
       // When lastCommand is undefined, WorkspaceSelectorView doesn't call computeCommandStatus.
@@ -650,7 +660,7 @@ describe("computeCommandStatus", () => {
     it("Claude first working (no prior exitCode): outputActive=true → ⏳", () => {
       // User typed "claude", Claude starts working, DEC 2026 burst fires.
       // exitCode is still undefined (no previous shell command completed).
-      const s = computeCommandStatus(undefined, true);
+      const s = computeCommandStatus(undefined, true, undefined, claudeActivity);
       expect(s.icon).toBe("⏳");
       expect(s.color).toBe("var(--yellow)");
     });
@@ -658,19 +668,19 @@ describe("computeCommandStatus", () => {
     it("Claude first working (prior exitCode=0): outputActive=true → ⏳", () => {
       // User ran a shell command before "claude", so exitCode=0 lingered.
       // DEC 2026 burst fires → outputActive takes priority.
-      const s = computeCommandStatus(0, true);
+      const s = computeCommandStatus(0, true, undefined, claudeActivity);
       expect(s.icon).toBe("⏳");
     });
 
     it("Claude first working (prior exitCode=1): outputActive=true → ⏳", () => {
       // Prior command failed. outputActive still takes priority.
-      const s = computeCommandStatus(1, true);
+      const s = computeCommandStatus(1, true, undefined, claudeActivity);
       expect(s.icon).toBe("⏳");
     });
 
     it("Claude task completed (synthetic exitCode=0): outputActive=false → ✓", () => {
       // working→idle transition: Rust sets exitCode=0, active:false clears outputActive.
-      const s = computeCommandStatus(0, false, "Task completed successfully");
+      const s = computeCommandStatus(0, false, "Task completed successfully", claudeActivity);
       expect(s.icon).toBe("✓");
       expect(s.color).toBe("var(--green)");
       expect(s.text).toBe("Task completed successfully");
@@ -679,32 +689,34 @@ describe("computeCommandStatus", () => {
     it("Claude idle (no synthetic exitCode, no prior): outputActive=false → —", () => {
       // BUG CASE (pre-fix): Claude idle but exitCode was never set → —
       // After fix: this shouldn't happen because task_completed always sets exitCode=0.
-      const s = computeCommandStatus(undefined, false);
+      const s = computeCommandStatus(undefined, false, undefined, claudeActivity);
       expect(s.icon).toBe("—");
     });
 
     it("Claude working again after task completion: outputActive=true, exitCode=0 → ⏳", () => {
       // CRITICAL: After task_completed set exitCode=0, Claude starts new task.
       // DEC 2026 burst sets outputActive=true. outputActive MUST take priority over exitCode=0.
-      const s = computeCommandStatus(0, true, "Analyzing code...");
+      const s = computeCommandStatus(0, true, "Analyzing code...", claudeActivity);
       expect(s.icon).toBe("⏳");
       expect(s.color).toBe("var(--yellow)");
       expect(s.text).toBe("Analyzing code...");
     });
 
     it("Claude second task completed: exitCode=0, outputActive=false → ✓", () => {
-      const s = computeCommandStatus(0, false, "Tests passed");
+      const s = computeCommandStatus(0, false, "Tests passed", claudeActivity);
       expect(s.icon).toBe("✓");
       expect(s.text).toBe("Tests passed");
     });
 
     it("Claude exited (shell precmd fires exitCode=0): same as normal ✓", () => {
       // When Claude exits, shell issues OSC 133;D with real exitCode.
+      // activity is no longer Claude at this point (reset to shell)
       const s = computeCommandStatus(0, false);
       expect(s.icon).toBe("✓");
     });
 
     it("Claude exited with error (exitCode=1): ✗", () => {
+      // activity is no longer Claude at this point (reset to shell)
       const s = computeCommandStatus(1, false);
       expect(s.icon).toBe("✗");
       expect(s.color).toBe("var(--red)");
@@ -713,7 +725,7 @@ describe("computeCommandStatus", () => {
     it("DEC 2026 burst during outputActive=true with non-zero exitCode → still ⏳", () => {
       // Edge case: prior command failed, then Claude starts working.
       // outputActive (priority 1) overrides exitCode (priority 2/3).
-      const s = computeCommandStatus(127, true);
+      const s = computeCommandStatus(127, true, undefined, claudeActivity);
       expect(s.icon).toBe("⏳");
     });
   });

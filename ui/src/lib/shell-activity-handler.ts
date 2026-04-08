@@ -12,8 +12,8 @@ export class ShellActivityHandler implements ActivityHandler {
     return { icon: "—", color: "var(--text-secondary)" };
   }
 
-  computeStatusMessage(raw: RawTerminalState): string | undefined {
-    return raw.claudeMessage || undefined;
+  computeStatusMessage(_raw: RawTerminalState): string | undefined {
+    return undefined;
   }
 
   computeNotification(_raw: RawTerminalState): null {

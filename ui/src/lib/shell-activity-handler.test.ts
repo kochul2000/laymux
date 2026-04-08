@@ -55,18 +55,10 @@ describe("ShellActivityHandler", () => {
   });
 
   describe("computeStatusMessage", () => {
-    it("returns undefined when no claudeMessage", () => {
+    it("always returns undefined (shell uses command text directly)", () => {
       expect(handler.computeStatusMessage(raw())).toBeUndefined();
-    });
-
-    it("returns claudeMessage when present", () => {
-      expect(handler.computeStatusMessage(raw({ claudeMessage: "Building..." }))).toBe(
-        "Building...",
-      );
-    });
-
-    it("returns undefined for empty string", () => {
-      expect(handler.computeStatusMessage(raw({ claudeMessage: "" }))).toBeUndefined();
+      expect(handler.computeStatusMessage(raw({ claudeMessage: "Building..." }))).toBeUndefined();
+      expect(handler.computeStatusMessage(raw({ lastCommand: "npm test" }))).toBeUndefined();
     });
   });
 
