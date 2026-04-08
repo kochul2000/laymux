@@ -166,6 +166,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               borderRadius: "var(--radius-md)",
             }}
           >
+            <span style={{ fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'" }}>
+              {"\uE722"}
+            </span>{" "}
             Capture
           </button>
         </div>
