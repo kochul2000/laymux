@@ -1,6 +1,7 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
+import { getHandler, type RawTerminalState } from "./activity-handler";
 
 export interface LastCommandInfo {
   command: string;
@@ -8,6 +9,7 @@ export interface LastCommandInfo {
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
   claudeMessage?: string; // latest white-● status message from Claude Code output
+  activity?: TerminalActivityInfo;
 }
 
 export interface TerminalSummaryInfo {
@@ -72,6 +74,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
     claudeMessage: t.claudeMessage,
+    activity: t.activity,
   };
 }
 
@@ -319,27 +322,29 @@ export interface CommandStatus {
 }
 
 /**
- * Compute final command status display from raw terminal states (universal, app-agnostic).
+ * Compute final command status display via ActivityHandler delegation.
  *
- * 4-state rule:
- *   1. outputActive === true          → ⏳ yellow (screen updating)
- *   2. exitCode === 0                 → ✓ green  (OSC success)
- *   3. exitCode !== undefined (≠ 0)   → ✗ red    (OSC failure)
- *   4. otherwise                      → — gray   (idle/waiting)
- *
- * claudeMessage only sets the text field — never affects icon/color.
+ * Delegates to the appropriate handler based on activity type (§15.5).
+ * Default (no activity) uses ShellActivityHandler with the 4-state rule.
  */
 export function computeCommandStatus(
   exitCode: number | undefined,
   outputActive: boolean | undefined,
   claudeMessage?: string,
+  activity?: TerminalActivityInfo,
 ): CommandStatus {
-  // Intentionally uses || (not ??) to also convert empty string "" to undefined
-  const text = claudeMessage || undefined;
-  if (outputActive) return { icon: "⏳", color: "var(--yellow)", text };
-  if (exitCode === 0) return { icon: "✓", color: "var(--green)", text };
-  if (exitCode !== undefined) return { icon: "✗", color: "var(--red)", text };
-  return { icon: "—", color: "var(--text-secondary)", text };
+  const raw: RawTerminalState = {
+    exitCode,
+    outputActive: outputActive ?? false,
+    lastCommand: undefined,
+    claudeMessage,
+    activity,
+    title: undefined,
+  };
+  const handler = getHandler(activity);
+  const status = handler.computeStatus(raw);
+  const text = handler.computeStatusMessage(raw);
+  return { ...status, text };
 }
 
 export function formatRelativeTime(ts: number): string {

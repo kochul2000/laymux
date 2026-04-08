@@ -520,4 +520,201 @@ describe("useSyncEvents", () => {
     vi.advanceTimersByTime(3000);
     vi.useRealTimers();
   });
+
+  // ── Claude state transition: full event sequence tests ──
+  // These simulate the exact event sequence that Rust PTY callback emits
+  // during Claude lifecycle transitions, verifying frontend state at each step.
+
+  describe("Claude lifecycle event sequences", () => {
+    function setupClaudeTerminal() {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "WSL",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      // Simulate: user typed "claude" → OSC 133 E detected → command recorded
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        lastCommand: "claude",
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+    }
+
+    function getInst() {
+      return useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    }
+
+    it("task_completed event sequence: active:false → exitCode=0 preserves interactiveApp", () => {
+      setupClaudeTerminal();
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        outputActive: true, // was working (DEC 2026 burst)
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      const cmdStatusCb = mockOnCommandStatus.mock.calls[0][0];
+
+      // Step 1: Rust emits active:false (task_completed)
+      activityCb({ terminalId: "t1", active: false });
+      expect(getInst()?.outputActive).toBe(false);
+
+      // Step 2: Rust emits command-status with exitCode=0 (synthetic)
+      cmdStatusCb({ terminalId: "t1", exitCode: 0 });
+      expect(getInst()?.lastExitCode).toBe(0);
+      // Activity MUST remain interactiveApp
+      expect(getInst()?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    });
+
+    it("after task_completed, DEC 2026 burst re-enables outputActive", () => {
+      vi.useFakeTimers();
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      const cmdStatusCb = mockOnCommandStatus.mock.calls[0][0];
+
+      // Phase 1: task_completed
+      activityCb({ terminalId: "t1", active: false });
+      cmdStatusCb({ terminalId: "t1", exitCode: 0 });
+      expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
+
+      // Phase 2: Claude starts new task → DEC 2026 burst fires
+      activityCb({ terminalId: "t1" }); // active: undefined = true (default)
+      expect(getInst()?.outputActive).toBe(true);
+
+      // Verify: outputActive=true + exitCode=0 → computeCommandStatus should give ⏳
+      // (outputActive priority 1 > exitCode priority 2)
+
+      vi.useRealTimers();
+    });
+
+    it("DEC 2026 burst auto-resets after 2s timeout", () => {
+      vi.useFakeTimers();
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+
+      // DEC 2026 burst fires
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+
+      // 2s passes with no new events → auto-reset
+      vi.advanceTimersByTime(2100);
+      expect(getInst()?.outputActive).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    it("rapid DEC 2026 bursts keep outputActive=true (timer resets)", () => {
+      vi.useFakeTimers();
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+
+      // Burst 1
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+
+      // 1.5s later: another burst (resets timer)
+      vi.advanceTimersByTime(1500);
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+
+      // 1.5s later: still active (only 1.5s since last burst, < 2s timeout)
+      vi.advanceTimersByTime(1500);
+      expect(getInst()?.outputActive).toBe(true);
+
+      // 0.6s later: timer expires (2.1s since last burst)
+      vi.advanceTimersByTime(600);
+      expect(getInst()?.outputActive).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    it("active:false cancels pending DEC 2026 timer", () => {
+      vi.useFakeTimers();
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+
+      // DEC 2026 burst fires → outputActive=true + timer started
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+
+      // active:false arrives → immediate deactivation + timer cancelled
+      activityCb({ terminalId: "t1", active: false });
+      expect(getInst()?.outputActive).toBe(false);
+
+      // Original timer would have fired here, but was cancelled
+      vi.advanceTimersByTime(3000);
+      expect(getInst()?.outputActive).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    it("full cycle: idle → working → task_completed → working again → task_completed", () => {
+      vi.useFakeTimers();
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      const cmdStatusCb = mockOnCommandStatus.mock.calls[0][0];
+
+      // ── Cycle 1: first task ──
+
+      // Claude starts working (DEC 2026 burst)
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+      // State: outputActive=true, exitCode=undefined → ⏳
+
+      // Claude completes task (task_completed events)
+      activityCb({ terminalId: "t1", active: false });
+      cmdStatusCb({ terminalId: "t1", exitCode: 0 });
+      expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
+      // State: outputActive=false, exitCode=0 → ✓
+
+      // ── Cycle 2: second task ──
+
+      // Claude starts working again (DEC 2026 burst)
+      activityCb({ terminalId: "t1" });
+      expect(getInst()?.outputActive).toBe(true);
+      // State: outputActive=true, exitCode=0 → ⏳ (outputActive takes priority)
+
+      // Claude completes second task
+      activityCb({ terminalId: "t1", active: false });
+      cmdStatusCb({ terminalId: "t1", exitCode: 0 });
+      expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
+      expect(getInst()?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+      // State: outputActive=false, exitCode=0 → ✓
+
+      vi.useRealTimers();
+    });
+
+    it("exitCode=0 from task_completed does NOT change activity to shell", () => {
+      setupClaudeTerminal();
+
+      renderHook(() => useSyncEvents());
+
+      const cmdStatusCb = mockOnCommandStatus.mock.calls[0][0];
+
+      // Synthetic exitCode=0 from task_completed (command=undefined)
+      cmdStatusCb({ terminalId: "t1", exitCode: 0 });
+
+      // Activity MUST remain interactiveApp, NOT shell
+      expect(getInst()?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+      expect(getInst()?.lastExitCode).toBe(0);
+    });
+  });
 });
