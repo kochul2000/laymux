@@ -11,6 +11,12 @@ interface IssueReporterViewProps {
   isFocused?: boolean;
 }
 
+/** Extract issue number from a GitHub issue URL like https://github.com/owner/repo/issues/123 */
+function extractIssueNumber(url: string): number | null {
+  const match = url.match(/\/issues\/(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
 export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -19,6 +25,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [state, setState] = useState<SubmitState>("idle");
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
+  const [issueNumber, setIssueNumber] = useState<number | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
@@ -58,9 +65,12 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         title: title.trim(),
         body,
         screenshotPath,
+        issueNumber,
       });
       setState("success");
       setResultMsg(url);
+      const num = extractIssueNumber(url);
+      if (num !== null) setIssueNumber(num);
     } catch (e) {
       setState("error");
       setResultMsg(String(e));
@@ -80,6 +90,11 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setTitle("");
     setBody("");
     setResultMsg("");
+    setState("idle");
+    setIssueNumber(null);
+  };
+
+  const handleUpdate = () => {
     setState("idle");
   };
 
@@ -235,13 +250,31 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               ? "Submitting..."
               : state === "success"
                 ? "Submitted!"
-                : "Submit Issue"}
+                : issueNumber !== null
+                  ? "Update Issue"
+                  : "Submit Issue"}
             {state !== "submitting" && state !== "success" && (
               <span className="ml-2 text-[10px] opacity-50" style={{ fontWeight: "normal" }}>
                 Ctrl+Enter
               </span>
             )}
           </button>
+
+          {state === "success" && issueNumber !== null && (
+            <button
+              data-testid="issue-update"
+              onClick={handleUpdate}
+              className="cursor-pointer px-1 py-1 text-xs font-medium"
+              style={{
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent-20)",
+                borderRadius: "var(--radius-md)",
+              }}
+            >
+              Update
+            </button>
+          )}
 
           {(state === "success" || state === "error") && (
             <button

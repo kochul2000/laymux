@@ -240,6 +240,7 @@ describe("IssueReporterView", () => {
         title: "Test issue",
         body: "",
         screenshotPath: "/tmp/screenshot.png",
+        issueNumber: null,
       });
     });
   });
@@ -260,6 +261,7 @@ describe("IssueReporterView", () => {
         title: "Test issue",
         body: "Some description",
         screenshotPath: "/tmp/screenshot.png",
+        issueNumber: null,
       });
     });
   });
@@ -304,6 +306,129 @@ describe("IssueReporterView", () => {
 
     warnSpy.mockRestore();
     windowOpenSpy.mockRestore();
+  });
+
+  it("passes issueNumber on re-submit after successful creation (update mode)", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+
+    render(<IssueReporterView />);
+
+    // First submission (create)
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.type(screen.getByTestId("issue-body"), "Original body");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+    });
+
+    // Verify first call was create (no issueNumber)
+    expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+      title: "Test issue",
+      body: "Original body",
+      screenshotPath: "/tmp/screenshot.png",
+      issueNumber: null,
+    });
+
+    // Click "Update" to re-enable editing
+    const updateBtn = screen.getByTestId("issue-update");
+    expect(updateBtn).toBeInTheDocument();
+    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+    await user.click(updateBtn);
+
+    // Modify body and re-submit
+    await user.clear(screen.getByTestId("issue-body"));
+    await user.type(screen.getByTestId("issue-body"), "Updated body");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+        title: "Test issue",
+        body: "Updated body",
+        screenshotPath: "/tmp/screenshot.png",
+        issueNumber: 42,
+      });
+    });
+  });
+
+  it("extracts issue number from GitHub URL", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+    });
+
+    // Click update to enable re-editing, then re-submit
+    mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
+    await user.click(screen.getByTestId("issue-update"));
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+        title: "Test issue",
+        body: "",
+        screenshotPath: "/tmp/screenshot.png",
+        issueNumber: 123,
+      });
+    });
+  });
+
+  it("resets issueNumber when 'New Report' is clicked", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-new-report")).toBeInTheDocument();
+    });
+
+    // Click New Report to reset
+    await user.click(screen.getByTestId("issue-new-report"));
+
+    // Submit again — should be a new creation (no issueNumber)
+    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/99");
+    await user.type(screen.getByTestId("issue-title"), "New issue");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+        title: "New issue",
+        body: "",
+        screenshotPath: "/tmp/screenshot.png",
+        issueNumber: null,
+      });
+    });
+  });
+
+  it("shows 'Update' button text when re-submitting existing issue", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+
+    render(<IssueReporterView />);
+
+    await user.type(screen.getByTestId("issue-title"), "Test issue");
+    await user.click(screen.getByTestId("issue-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Submitted!")).toBeInTheDocument();
+    });
+
+    // Click update to re-enable editing
+    await user.click(screen.getByTestId("issue-update"));
+
+    // Button should show "Update Issue" instead of "Submit Issue"
+    expect(screen.getByText("Update Issue")).toBeInTheDocument();
   });
 
   describe("font settings", () => {
