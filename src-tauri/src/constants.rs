@@ -52,24 +52,6 @@ pub const STATUS_MESSAGE_SCAN_BYTES: usize = 500;
 /// Shell commands never use it, making it a high-confidence activity signal.
 pub const DEC_SYNC_OUTPUT_SET: &[u8] = b"\x1b[?2026h";
 
-/// Throttle interval for output activity events (milliseconds).
-/// At most one `terminal-output-activity` event per terminal per interval.
-pub const OUTPUT_ACTIVITY_THROTTLE_MS: u64 = 1000;
-
-/// Time window (ms) for counting DEC 2026h events to determine sustained activity.
-/// Single events (focus redraw, keystroke echo) are filtered out; only sustained
-/// TUI rendering (multiple frames within this window) triggers outputActive.
-///
-/// **Coupled with frontend**: `OUTPUT_ACTIVE_RESET_MS` in `useSyncEvents.ts` must
-/// match this value. If the frontend reset timer is shorter, outputActive flickers
-/// between DEC 2026 events. If longer, ⏳ persists after TUI stops.
-pub const DEC2026_BURST_WINDOW_MS: u64 = 2000;
-
-/// Minimum number of DEC 2026h events within `DEC2026_BURST_WINDOW_MS` to
-/// consider the terminal as actively producing output. Focus redraw and
-/// keystroke echo produce 1 event each; real TUI activity produces many per second.
-pub const DEC2026_BURST_THRESHOLD: u64 = 3;
-
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
 /// notifications are enabled even without observing a user command.
@@ -123,22 +105,6 @@ mod tests {
         assert!(!chunk
             .windows(DEC_SYNC_OUTPUT_SET.len())
             .any(|w| w == DEC_SYNC_OUTPUT_SET));
-    }
-
-    #[test]
-    fn burst_threshold_requires_multiple_events() {
-        assert!(
-            DEC2026_BURST_THRESHOLD >= 2,
-            "Threshold must be ≥2 to filter single-event false positives (focus, keystroke echo)"
-        );
-    }
-
-    #[test]
-    fn burst_window_is_positive() {
-        assert!(
-            DEC2026_BURST_WINDOW_MS > 0,
-            "Burst window must be positive"
-        );
     }
 
     #[test]

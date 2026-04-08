@@ -106,10 +106,11 @@ pub fn create_terminal_session(
     let terminal_id = id.clone();
     let app_clone = app.clone();
     let state_for_pty = Arc::clone(&*state);
+    let burst = &settings.terminal.output_activity_burst;
     let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
-        DEC2026_BURST_WINDOW_MS,
-        DEC2026_BURST_THRESHOLD,
-        OUTPUT_ACTIVITY_THROTTLE_MS,
+        burst.window_ms,
+        burst.threshold,
+        burst.throttle_ms,
     ));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {

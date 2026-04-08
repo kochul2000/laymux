@@ -387,6 +387,51 @@ fn default_scrollbar_style() -> String {
     "overlay".to_string()
 }
 
+// ── Terminal settings ──
+
+fn default_burst_window_ms() -> u64 {
+    2000
+}
+fn default_burst_threshold() -> u64 {
+    3
+}
+fn default_burst_throttle_ms() -> u64 {
+    1000
+}
+
+/// DEC 2026 burst detection parameters for TUI output activity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputActivityBurstSettings {
+    /// Sliding window size (ms) for counting DEC 2026h events.
+    #[serde(default = "default_burst_window_ms")]
+    pub window_ms: u64,
+    /// Minimum events within window to trigger activity.
+    #[serde(default = "default_burst_threshold")]
+    pub threshold: u64,
+    /// Minimum interval (ms) between emitted activity events per terminal.
+    #[serde(default = "default_burst_throttle_ms")]
+    pub throttle_ms: u64,
+}
+
+impl Default for OutputActivityBurstSettings {
+    fn default() -> Self {
+        Self {
+            window_ms: default_burst_window_ms(),
+            threshold: default_burst_threshold(),
+            throttle_ms: default_burst_throttle_ms(),
+        }
+    }
+}
+
+/// Terminal behavior settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSettings {
+    #[serde(default)]
+    pub output_activity_burst: OutputActivityBurstSettings,
+}
+
 /// Convenience feature settings (smart paste, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -696,6 +741,8 @@ pub struct Settings {
     #[serde(default)]
     pub docks: Vec<DockSetting>,
     #[serde(default)]
+    pub terminal: TerminalSettings,
+    #[serde(default)]
     pub convenience: ConvenienceSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
@@ -786,6 +833,7 @@ impl Default for Settings {
                 size: default_dock_size(),
                 panes: Vec::new(),
             }],
+            terminal: TerminalSettings::default(),
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
             memo: MemoSettings::default(),
