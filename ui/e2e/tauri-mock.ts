@@ -59,6 +59,7 @@ export const TAURI_MOCK_SCRIPT = `
           return Promise.resolve({
             font: { face: 'Consolas', size: 14 },
             defaultProfile: 'PowerShell',
+            convenience: { defaultControlBarMode: 'hover' },
             profiles: [
               { name: 'PowerShell', commandLine: 'powershell.exe', colorScheme: '', startingDirectory: '', hidden: false },
               { name: 'WSL', commandLine: 'wsl.exe', colorScheme: '', startingDirectory: '', hidden: false },
@@ -134,6 +135,9 @@ export const TAURI_MOCK_SCRIPT = `
 
         case 'get_git_branch':
           return Promise.resolve('main');
+
+        case 'get_automation_info':
+          return Promise.resolve({ port: 19280, key: 'mock-key' });
 
         case 'load_terminal_output_cache':
           // Return test cache data if configured, otherwise empty

@@ -373,7 +373,7 @@ describe("WorkspaceSelectorView", () => {
 
     render(<WorkspaceSelectorView />);
     await user.click(screen.getByTestId("toggle-notification-panel"));
-    expect(screen.getByTestId("notification-panel")).toBeInTheDocument();
+    expect(screen.getByText("Test notification")).toBeInTheDocument();
   });
 
   it("shows multiple layout cards when multiple layouts exist", () => {

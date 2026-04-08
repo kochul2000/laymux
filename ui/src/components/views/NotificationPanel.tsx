@@ -118,7 +118,12 @@ export function NotificationPanel({ workspaceId, embedded }: NotificationPanelPr
       </div>
     );
 
-  if (embedded) return content;
+  if (embedded)
+    return (
+      <div data-testid="notification-panel" style={{ color: "var(--text-primary)" }}>
+        {content}
+      </div>
+    );
 
   return (
     <ViewShell testId="notification-panel" style={{ color: "var(--text-primary)" }}>

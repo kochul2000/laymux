@@ -11,8 +11,14 @@ const mockFetch = vi.fn().mockResolvedValue({
 });
 global.fetch = mockFetch;
 
-// Mock @tauri-apps/api/core
-const mockInvoke = vi.fn();
+// Mock @tauri-apps/api/core — route get_automation_info, delegate rest to mockSubmitInvoke
+const mockSubmitInvoke = vi.fn();
+const mockInvoke = vi.fn((cmd: string, ...rest: unknown[]) => {
+  if (cmd === "get_automation_info") {
+    return Promise.resolve({ port: 19280, key: "mock-key" });
+  }
+  return mockSubmitInvoke(cmd, ...rest);
+});
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
@@ -65,7 +71,7 @@ describe("IssueReporterView", () => {
 
   it("keeps Save button enabled after successful submission", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView />);
 
@@ -80,7 +86,7 @@ describe("IssueReporterView", () => {
 
   it("shows 'New Issue' button after successful submission", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView />);
 
@@ -94,7 +100,7 @@ describe("IssueReporterView", () => {
 
   it("resets form when 'New Issue' is clicked", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView />);
 
@@ -118,7 +124,7 @@ describe("IssueReporterView", () => {
 
   it("opens issue URL in system browser when clicked", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView />);
 
@@ -141,7 +147,7 @@ describe("IssueReporterView", () => {
   it("disables submit button during submission", async () => {
     const user = userEvent.setup();
     // Make invoke hang to test the submitting state
-    mockInvoke.mockImplementation(() => new Promise(() => {}));
+    mockSubmitInvoke.mockImplementation(() => new Promise(() => {}));
 
     render(<IssueReporterView />);
 
@@ -154,7 +160,7 @@ describe("IssueReporterView", () => {
 
   it("disables submit button after error and allows retry", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockRejectedValueOnce(new Error("Network error"));
+    mockSubmitInvoke.mockRejectedValueOnce(new Error("Network error"));
 
     render(<IssueReporterView />);
 
@@ -169,7 +175,7 @@ describe("IssueReporterView", () => {
 
   it("shows 'New Issue' button after error for clearing form", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockRejectedValueOnce(new Error("Network error"));
+    mockSubmitInvoke.mockRejectedValueOnce(new Error("Network error"));
 
     render(<IssueReporterView />);
 
@@ -191,7 +197,7 @@ describe("IssueReporterView", () => {
   it("prevents double submission with rapid clicks", async () => {
     const user = userEvent.setup();
     let resolveSubmit: (value: string) => void;
-    mockInvoke.mockImplementation(
+    mockSubmitInvoke.mockImplementation(
       () =>
         new Promise<string>((resolve) => {
           resolveSubmit = resolve;
@@ -208,7 +214,7 @@ describe("IssueReporterView", () => {
     await user.click(btn);
 
     // Should only invoke once despite two clicks
-    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(mockSubmitInvoke).toHaveBeenCalledTimes(1);
 
     // Resolve to clean up pending promise
     await act(async () => {
@@ -229,7 +235,7 @@ describe("IssueReporterView", () => {
 
   it("submits issue with Ctrl+Enter from title input", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView isFocused={true} />);
 
@@ -237,7 +243,7 @@ describe("IssueReporterView", () => {
     await user.keyboard("{Control>}{Enter}{/Control}");
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+      expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "",
         screenshotPath: "/tmp/screenshot.png",
@@ -248,7 +254,7 @@ describe("IssueReporterView", () => {
 
   it("submits issue with Ctrl+Enter from body textarea", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
 
     render(<IssueReporterView isFocused={true} />);
 
@@ -258,7 +264,7 @@ describe("IssueReporterView", () => {
     await user.keyboard("{Control>}{Enter}{/Control}");
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+      expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "Some description",
         screenshotPath: "/tmp/screenshot.png",
@@ -275,12 +281,12 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-body"));
     await user.keyboard("{Control>}{Enter}{/Control}");
 
-    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(mockSubmitInvoke).not.toHaveBeenCalled();
   });
 
   it("awaits shell open and handles errors gracefully", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+    mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
     mockShellOpen.mockRejectedValueOnce(new Error("shell open failed"));
 
     render(<IssueReporterView />);
@@ -311,7 +317,7 @@ describe("IssueReporterView", () => {
 
   it("passes issueNumber on re-submit after successful creation (update mode)", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
     render(<IssueReporterView />);
 
@@ -325,7 +331,7 @@ describe("IssueReporterView", () => {
     });
 
     // Verify first call was create (no issueNumber)
-    expect(mockInvoke).toHaveBeenCalledWith("submit_github_issue", {
+    expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
       title: "Test issue",
       body: "Original body",
       screenshotPath: "/tmp/screenshot.png",
@@ -333,13 +339,13 @@ describe("IssueReporterView", () => {
     });
 
     // Form is still editable — modify body and re-submit
-    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
     await user.clear(screen.getByTestId("issue-body"));
     await user.type(screen.getByTestId("issue-body"), "Updated body");
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+      expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "Updated body",
         screenshotPath: "/tmp/screenshot.png",
@@ -350,7 +356,7 @@ describe("IssueReporterView", () => {
 
   it("extracts issue number from GitHub URL", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
 
     render(<IssueReporterView />);
 
@@ -362,11 +368,11 @@ describe("IssueReporterView", () => {
     });
 
     // Re-submit (form is still editable, no Edit button needed)
-    mockInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/owner/repo/issues/123");
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+      expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "Test issue",
         body: "",
         screenshotPath: "/tmp/screenshot.png",
@@ -377,7 +383,7 @@ describe("IssueReporterView", () => {
 
   it("resets issueNumber when 'New Issue' is clicked", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
     render(<IssueReporterView />);
 
@@ -392,12 +398,12 @@ describe("IssueReporterView", () => {
     await user.click(screen.getByTestId("issue-new-report"));
 
     // Submit again — should be a new creation (no issueNumber)
-    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/99");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/repo/issues/99");
     await user.type(screen.getByTestId("issue-title"), "New issue");
     await user.click(screen.getByTestId("issue-submit"));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
+      expect(mockSubmitInvoke).toHaveBeenLastCalledWith("submit_github_issue", {
         title: "New issue",
         body: "",
         screenshotPath: "/tmp/screenshot.png",
@@ -408,7 +414,7 @@ describe("IssueReporterView", () => {
 
   it("keeps form editable after save so user can re-save", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
+    mockSubmitInvoke.mockResolvedValueOnce("https://github.com/repo/issues/42");
 
     render(<IssueReporterView />);
 

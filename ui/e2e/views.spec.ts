@@ -70,6 +70,64 @@ test.describe("EmptyView", () => {
   });
 });
 
+test.describe("IssueReporterView", () => {
+  test("screenshot is captured on mount and preview is shown", async ({ appPage: page }) => {
+    // Intercept the screenshot API call
+    await page.route("**/api/v1/screenshot", (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: "/tmp/test-screenshot.png",
+          dataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        }),
+      });
+    });
+
+    // Switch pane to IssueReporterView
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-view-select").selectOption("IssueReporterView");
+
+    // Wait for the view to appear
+    await expect(page.getByTestId("issue-reporter-view")).toBeVisible();
+
+    // Screenshot should be captured — "Screenshot captured" text should appear
+    await expect(page.getByText("Screenshot captured")).toBeVisible({ timeout: 5000 });
+
+    // Preview image should be visible
+    await expect(page.locator("img[alt='Screenshot preview']")).toBeVisible();
+  });
+
+  test("capture button re-takes screenshot", async ({ appPage: page }) => {
+    let captureCount = 0;
+    await page.route("**/api/v1/screenshot", (route) => {
+      captureCount++;
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: `/tmp/screenshot-${captureCount}.png`,
+          dataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        }),
+      });
+    });
+
+    // Switch pane to IssueReporterView
+    await hoverPane(page, 0);
+    await page.getByTestId("pane-control-view-select").selectOption("IssueReporterView");
+    await expect(page.getByText("Screenshot captured")).toBeVisible({ timeout: 5000 });
+
+    // Click the Capture button to re-take
+    await page.getByRole("button", { name: /^\s*\uE722\s*Capture$/ }).click();
+    await expect(page.getByText("Screenshot captured")).toBeVisible({ timeout: 5000 });
+
+    // Should have been called at least twice (mount + manual)
+    expect(captureCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
 test.describe("SettingsView (via dock)", () => {
   test.beforeEach(async ({ appPage: page }) => {
     // Wait for session persistence to finish loading before interacting

@@ -1,5 +1,13 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock TerminalView to avoid Tauri IPC dependency
+vi.mock("@/components/views/TerminalView", () => ({
+  TerminalView: (props: { instanceId: string }) => (
+    <div data-testid={`mock-terminal-${props.instanceId}`}>MockTerminal</div>
+  ),
+}));
+
 import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
