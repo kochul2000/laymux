@@ -862,6 +862,7 @@ export function TerminalView({
       ? false
       : cursorBlink;
   const nativeCursorHidden = isOverlayCaretActivity(activity);
+  const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape]);
@@ -895,14 +896,23 @@ export function TerminalView({
         : resolvedTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
-      const cursorOptions = toXtermCursorOptions(cursorShape);
-      term.options.cursorBlink = effectiveCursorBlink;
-      term.options.cursorStyle = cursorOptions.cursorStyle;
-      if (cursorOptions.cursorWidth !== undefined) {
-        term.options.cursorWidth = cursorOptions.cursorWidth;
-      }
-      if (cursorOptions.cursorWidth === undefined) {
-        delete (term.options as { cursorWidth?: number }).cursorWidth;
+      if (nativeCursorHidden) {
+        // Keep xterm's internal cursor renderer on its least disruptive path.
+        // The visible caret is provided by the overlay, so block/invert rendering
+        // only creates repaint artifacts on the active text cell.
+        term.options.cursorBlink = false;
+        term.options.cursorStyle = "bar";
+        term.options.cursorWidth = 1;
+      } else {
+        const cursorOptions = toXtermCursorOptions(cursorShape);
+        term.options.cursorBlink = effectiveNativeCursorBlink;
+        term.options.cursorStyle = cursorOptions.cursorStyle;
+        if (cursorOptions.cursorWidth !== undefined) {
+          term.options.cursorWidth = cursorOptions.cursorWidth;
+        }
+        if (cursorOptions.cursorWidth === undefined) {
+          delete (term.options as { cursorWidth?: number }).cursorWidth;
+        }
       }
       fitAddonRef.current?.fit();
       term.refresh(0, term.rows - 1);
@@ -914,7 +924,7 @@ export function TerminalView({
     colorSchemes,
     font,
     cursorShape,
-    effectiveCursorBlink,
+    effectiveNativeCursorBlink,
     nativeCursorHidden,
   ]);
 

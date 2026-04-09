@@ -285,6 +285,9 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(container).toHaveClass("terminal-native-cursor-hidden");
     });
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
 
     rerender(<TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />);
     act(() => {
@@ -296,6 +299,9 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(container).toHaveClass("terminal-native-cursor-hidden");
     });
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
   it("hides the xterm cursor only during synchronized output frames", async () => {
@@ -344,7 +350,7 @@ describe("TerminalView", () => {
     });
   });
 
-  it("keeps profile cursor blink while Codex is active when codex override is disabled", async () => {
+  it("keeps native xterm cursor blink disabled in overlay mode even when codex override is disabled", async () => {
     useSettingsStore.getState().setCodex({ disableCursorBlink: false });
 
     render(<TerminalView instanceId="t-codex-blink-disabled" profile="PowerShell" syncGroup="" />);
@@ -356,7 +362,8 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(createdTerminals[0].options.cursorBlink).toBe(true);
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+      expect(createdTerminals[0].options.cursorStyle).toBe("bar");
     });
   });
 
