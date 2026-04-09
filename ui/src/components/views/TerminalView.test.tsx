@@ -24,6 +24,7 @@ const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => bo
   capturedKeyHandler = handler;
 });
 const mockWrite = vi.fn();
+const mockRefresh = vi.fn();
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     constructor(options: Record<string, unknown> = {}) {
@@ -44,6 +45,7 @@ vi.mock("@xterm/xterm", () => ({
     hasSelection = mockHasSelection;
     getSelection = mockGetSelection;
     clearSelection = mockClearSelection;
+    refresh = mockRefresh;
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
@@ -181,6 +183,22 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(createdTerminals[0].options.cursorStyle).toBe("underline");
       expect("cursorWidth" in createdTerminals[0].options).toBe(false);
+    });
+  });
+
+  it("refreshes and refits existing terminal when settings change", async () => {
+    render(<TerminalView instanceId="t-settings-refresh" profile="PowerShell" syncGroup="" />);
+
+    act(() => {
+      useSettingsStore.getState().updateProfile(0, {
+        cursorShape: "underscore",
+        cursorBlink: false,
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(mockFit).toHaveBeenCalled();
+      expect(mockRefresh).toHaveBeenCalledWith(0, 23);
     });
   });
 

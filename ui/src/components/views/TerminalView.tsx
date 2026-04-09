@@ -722,6 +722,8 @@ export function TerminalView({
       if (cursorOptions.cursorWidth === undefined) {
         delete (term.options as { cursorWidth?: number }).cursorWidth;
       }
+      fitAddonRef.current?.fit();
+      term.refresh(0, term.rows - 1);
     } catch {
       /* xterm mock may not support options setter */
     }
