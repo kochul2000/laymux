@@ -1,5 +1,4 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
-import type { ClaudeStatusMessageMode } from "@/lib/tauri-api";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 
@@ -8,16 +7,18 @@ export interface StatusResult {
   color: string;
 }
 
+export type ActivityStatusMessageMode = "bullet" | "title" | "title-bullet" | "bullet-title";
+
 export interface RawTerminalState {
   exitCode: number | undefined;
   outputActive: boolean;
   lastCommand: string | undefined;
-  claudeMessage: string | undefined;
+  activityMessage: string | undefined;
   activity: TerminalActivityInfo | undefined;
   title: string | undefined;
-  /** Claude status message display mode (default: "bullet-title"). */
-  statusMessageMode?: ClaudeStatusMessageMode;
-  /** Delimiter between bullet and title (default: " · "). */
+  /** Activity status message display mode. */
+  statusMessageMode?: ActivityStatusMessageMode;
+  /** Delimiter between bullet and title. */
   statusMessageDelimiter?: string;
 }
 
@@ -27,11 +28,18 @@ export interface ActivityHandler {
   computeNotification(raw: RawTerminalState): { message: string; level: string } | null;
 }
 
-const handlers: Record<string, ActivityHandler> = {
-  default: new ShellActivityHandler(),
-  Claude: new ClaudeActivityHandler(),
-};
+const defaultHandler = new ShellActivityHandler();
+const interactiveAppHandlers = new Map<string, ActivityHandler>();
+
+export function registerActivityHandler(activityName: string, handler: ActivityHandler): void {
+  interactiveAppHandlers.set(activityName, handler);
+}
+
+registerActivityHandler("Claude", new ClaudeActivityHandler());
 
 export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {
-  return (activity?.name ? handlers[activity.name] : undefined) ?? handlers.default;
+  if (activity?.type === "interactiveApp" && activity.name) {
+    return interactiveAppHandlers.get(activity.name) ?? defaultHandler;
+  }
+  return defaultHandler;
 }

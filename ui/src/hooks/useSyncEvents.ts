@@ -78,7 +78,7 @@ export function useSyncEvents() {
       onClaudeMessageChanged((data) => {
         if (cancelled) return;
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
-          claudeMessage: data.message,
+          activityMessage: data.message,
         });
       }),
     );

@@ -322,14 +322,14 @@ describe("getLastCommandForWorkspace — interactiveApp without lastCommand", ()
         activity: { type: "interactiveApp", name: "Claude" },
         outputActive: true,
         lastCommandAt: 300,
-        claudeMessage: "Working on task",
+        activityMessage: "Working on task",
         title: "✢ Working on task",
       }),
     ];
     const result = getLastCommandForWorkspace(terminals);
     expect(result).not.toBeNull();
     expect(result?.outputActive).toBe(true);
-    expect(result?.claudeMessage).toBe("Working on task");
+    expect(result?.activityMessage).toBe("Working on task");
     expect(result?.activity?.name).toBe("Claude");
   });
 
@@ -340,7 +340,7 @@ describe("getLastCommandForWorkspace — interactiveApp without lastCommand", ()
         activity: { type: "interactiveApp", name: "Claude" },
         lastExitCode: 0,
         lastCommandAt: 300,
-        claudeMessage: "Task completed",
+        activityMessage: "Task completed",
         title: "✳ Claude Code",
       }),
     ];
@@ -657,33 +657,33 @@ describe("computeCommandStatus", () => {
     expect(s.color).toBe("var(--text-secondary)");
   });
 
-  // claudeMessage → text field (only with Claude activity)
-  it("returns claudeMessage as text when Claude activity + outputActive", () => {
+  // activityMessage -> text field (only with Claude activity)
+  it("returns activityMessage as text when Claude activity + outputActive", () => {
     const claude = { type: "interactiveApp" as const, name: "Claude" };
     const s = computeCommandStatus(undefined, true, "모든 테스트 통과했습니다.", claude);
     expect(s.icon).toBe("⏳");
     expect(s.text).toBe("모든 테스트 통과했습니다.");
   });
 
-  it("returns claudeMessage as text for Claude success", () => {
+  it("returns activityMessage as text for Claude success", () => {
     const claude = { type: "interactiveApp" as const, name: "Claude" };
     const s = computeCommandStatus(0, false, "1235개 테스트 모두 통과했습니다.", claude);
     expect(s.icon).toBe("✓");
     expect(s.text).toBe("1235개 테스트 모두 통과했습니다.");
   });
 
-  it("shell ignores claudeMessage (uses command text directly)", () => {
-    // Shell handler does not return claudeMessage as text override
+  it("shell ignores activityMessage (uses command text directly)", () => {
+    // Shell handler does not return activityMessage as text override
     const s = computeCommandStatus(0, false, "some message");
     expect(s.text).toBeUndefined();
   });
 
-  it("returns undefined text when no claudeMessage", () => {
+  it("returns undefined text when no activityMessage", () => {
     const s = computeCommandStatus(0, false);
     expect(s.text).toBeUndefined();
   });
 
-  it("returns undefined text for empty string claudeMessage", () => {
+  it("returns undefined text for empty string activityMessage", () => {
     const claude = { type: "interactiveApp" as const, name: "Claude" };
     const s = computeCommandStatus(0, false, "", claude);
     expect(s.text).toBeUndefined();
