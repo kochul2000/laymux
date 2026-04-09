@@ -20,6 +20,7 @@ import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import type { WorkspacePane } from "@/stores/types";
+import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { persistSession } from "@/lib/persist-session";
 
 /** Abbreviate profile/view labels to max 3 characters. */
@@ -36,6 +37,32 @@ const LABEL_ABBREV: Record<string, string> = {
 function isWindowsProfile(profile: string): boolean {
   const lower = profile.toLowerCase();
   return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
+}
+
+function getStatusDisplaySettings(
+  activity: TerminalActivityInfo | undefined,
+  claudeSettings: ReturnType<typeof useSettingsStore.getState>["claude"],
+  codexSettings: ReturnType<typeof useSettingsStore.getState>["codex"],
+): {
+  mode: "bullet" | "title" | "title-bullet" | "bullet-title" | undefined;
+  delimiter: string | undefined;
+} {
+  if (activity?.type !== "interactiveApp") {
+    return { mode: undefined, delimiter: undefined };
+  }
+  if (activity.name === "Claude") {
+    return {
+      mode: claudeSettings.statusMessageMode,
+      delimiter: claudeSettings.statusMessageDelimiter,
+    };
+  }
+  if (activity.name === "Codex") {
+    return {
+      mode: codexSettings.statusMessageMode,
+      delimiter: codexSettings.statusMessageDelimiter,
+    };
+  }
+  return { mode: undefined, delimiter: undefined };
 }
 
 function shortLabel(label: string): string {
@@ -123,8 +150,14 @@ function WorkspaceItem({
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
   const claudeSettings = useSettingsStore((s) => s.claude);
+  const codexSettings = useSettingsStore((s) => s.codex);
 
   const cmdInfo = summary.lastCommand;
+  const cmdStatusSettings = getStatusDisplaySettings(
+    cmdInfo?.activity,
+    claudeSettings,
+    codexSettings,
+  );
   const cmdStatus = cmdInfo
     ? computeCommandStatus(
         cmdInfo.exitCode,
@@ -132,8 +165,8 @@ function WorkspaceItem({
         cmdInfo.activityMessage,
         cmdInfo.activity,
         cmdInfo.title,
-        claudeSettings.statusMessageMode,
-        claudeSettings.statusMessageDelimiter,
+        cmdStatusSettings.mode,
+        cmdStatusSettings.delimiter,
       )
     : null;
 
@@ -315,6 +348,11 @@ function WorkspaceItem({
                 const termId = `terminal-${pane.id}`;
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
                 if (!ts) return null;
+                const paneStatusSettings = getStatusDisplaySettings(
+                  ts.activity,
+                  claudeSettings,
+                  codexSettings,
+                );
                 const tCmdStatus =
                   ts.lastCommand || ts.activity?.type === "interactiveApp"
                     ? computeCommandStatus(
@@ -323,6 +361,8 @@ function WorkspaceItem({
                         ts.activityMessage,
                         ts.activity,
                         ts.title,
+                        paneStatusSettings.mode,
+                        paneStatusSettings.delimiter,
                       )
                     : null;
                 const actInfo = formatActivity(ts.activity);

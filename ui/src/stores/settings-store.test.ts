@@ -417,6 +417,35 @@ describe("settings-store", () => {
     expect(claude.syncCwd).toBe("skip");
   });
 
+  it("has default codex settings", () => {
+    const { codex } = useSettingsStore.getState();
+    expect(codex.statusMessageMode).toBe("bullet-title");
+    expect(codex.statusMessageDelimiter).toBe(" · ");
+  });
+
+  it("setCodex updates status message mode", () => {
+    useSettingsStore.getState().setCodex({ statusMessageMode: "bullet-title" });
+    expect(useSettingsStore.getState().codex.statusMessageMode).toBe("bullet-title");
+  });
+
+  it("loadFromSettings loads codex settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      codex: { statusMessageMode: "bullet", statusMessageDelimiter: " | " },
+    });
+    const { codex } = useSettingsStore.getState();
+    expect(codex.statusMessageMode).toBe("bullet");
+    expect(codex.statusMessageDelimiter).toBe(" | ");
+  });
+
+  it("loadFromSettings fills missing codex fields with defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      codex: {} as any,
+    });
+    const { codex } = useSettingsStore.getState();
+    expect(codex.statusMessageMode).toBe("bullet-title");
+    expect(codex.statusMessageDelimiter).toBe(" · ");
+  });
+
   // -- Scrollbar style settings --
 
   it("has default scrollbarStyle as overlay", () => {

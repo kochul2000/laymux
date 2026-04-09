@@ -4,6 +4,7 @@ import { TerminalView, _resetWebglStagger } from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -181,6 +182,176 @@ describe("TerminalView", () => {
         undefined,
       );
     });
+  });
+
+  it("detects Codex from banner output without command-status", async () => {
+    render(<TerminalView instanceId="t-codex" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(">- OpenAI Codex (v0.118.0)\r\n"));
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
+  it("marks Codex approval prompts as input pending", async () => {
+    render(<TerminalView instanceId="t-codex-prompt" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-prompt", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
+    ).toBe(CODEX_INPUT_PENDING_MARKER);
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("• continuing after approval\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
+    ).toBe("continuing after approval");
+  });
+
+  it("detects Codex approval prompts split across output chunks", async () => {
+    render(<TerminalView instanceId="t-codex-split" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-split", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("Would you like to run the fol"));
+      onOutput?.(new TextEncoder().encode("lowing command?\r\nPress enter to con"));
+      onOutput?.(new TextEncoder().encode("firm or esc to cancel\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.activityMessage,
+    ).toBe(CODEX_INPUT_PENDING_MARKER);
+  });
+
+  it("parses Codex footer status messages from output", async () => {
+    render(<TerminalView instanceId="t-codex-footer" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-footer", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("gpt-5.4 medium · 93% left · C:\\Users\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-footer")?.activityMessage,
+    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("prefers Codex assistant replies over footer status lines", async () => {
+    render(<TerminalView instanceId="t-codex-reply" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-reply", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "> hello\r\n• Hello.\r\n> Improve documentation in @filename\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-reply")?.activityMessage,
+    ).toBe("Hello.");
+  });
+
+  it("does not let Codex footer overwrite the last assistant reply", async () => {
+    render(<TerminalView instanceId="t-codex-sticky-reply" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-sticky-reply", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("> hello\r\n• Hello.\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-sticky-reply")
+        ?.activityMessage,
+    ).toBe("Hello.");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode("> what did you say\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n"),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-sticky-reply")
+        ?.activityMessage,
+    ).toBe("Hello.");
   });
 
   it("registers onData handler to write to terminal", () => {

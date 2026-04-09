@@ -159,6 +159,7 @@ async function persistSessionCore(): Promise<void> {
     convenience: { ...settingsState.convenience },
     workspaceDisplay: { ...settingsState.workspaceDisplay },
     claude: { ...settingsState.claude },
+    codex: { ...settingsState.codex },
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },

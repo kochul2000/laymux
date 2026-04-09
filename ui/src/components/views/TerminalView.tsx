@@ -25,7 +25,16 @@ import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme"
 import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
-import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
+import {
+  CODEX_INPUT_PENDING_MARKER,
+  detectCodexConversationMessageFromOutput,
+  detectCodexInputPendingFromOutput,
+  detectCodexStatusMessageFromOutput,
+  isCodexFooterStatusLine,
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectActivityFromOutput,
+} from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -319,10 +328,13 @@ export function TerminalView({
     let cancelled = false;
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
+    let recentOutputTail = "";
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
       terminal.write(data);
       const text = streamDecoder.decode(data, { stream: true });
+      const combinedText = (recentOutputTail + text).slice(-1024);
+      recentOutputTail = combinedText;
 
       // OSC parsing and hook dispatch are now handled entirely in the Rust
       // PTY callback (iter_osc_events + match_hooks + dispatch_osc_action).
@@ -332,6 +344,48 @@ export function TerminalView({
       const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       if (inst?.activity?.type === "running") {
         idleDetector.recordOutput();
+      }
+
+      const outputActivity = detectActivityFromOutput(combinedText);
+      if (outputActivity) {
+        const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+        if (
+          current?.activity?.type !== "interactiveApp" ||
+          current.activity.name !== outputActivity.name
+        ) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: outputActivity });
+        }
+      }
+
+      const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
+        const codexConversationMessage = detectCodexConversationMessageFromOutput(combinedText);
+        const codexStatusMessage = detectCodexStatusMessageFromOutput(combinedText);
+        const currentMessage = current.activityMessage;
+        const currentIsFooter =
+          !!currentMessage &&
+          currentMessage !== CODEX_INPUT_PENDING_MARKER &&
+          isCodexFooterStatusLine(currentMessage);
+        const nextCodexMessage =
+          codexConversationMessage ??
+          (currentIsFooter || !currentMessage ? codexStatusMessage : undefined);
+        if (
+          current.activityMessage === CODEX_INPUT_PENDING_MARKER &&
+          text.trim() &&
+          !detectCodexInputPendingFromOutput(text)
+        ) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: nextCodexMessage,
+          });
+        } else if (detectCodexInputPendingFromOutput(combinedText)) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: CODEX_INPUT_PENDING_MARKER,
+          });
+        } else if (nextCodexMessage && current.activityMessage !== nextCodexMessage) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: nextCodexMessage,
+          });
+        }
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
@@ -468,6 +522,7 @@ export function TerminalView({
         if (paneId) {
           registerTerminalSerializer(paneId, () => serializeAddon.serialize());
         }
+        registerTerminalSerializer(instanceId, () => serializeAddon.serialize());
 
         fitAddon.fit();
         openedRef.current = true;
@@ -554,6 +609,7 @@ export function TerminalView({
       if (paneId) {
         unregisterTerminalSerializer(paneId);
       }
+      unregisterTerminalSerializer(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

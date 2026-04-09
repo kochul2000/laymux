@@ -171,6 +171,7 @@ fn settings_round_trip_with_full_config() {
         terminal: TerminalSettings::default(),
         convenience: ConvenienceSettings::default(),
         claude: ClaudeSettings::default(),
+        codex: Default::default(),
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
@@ -1991,7 +1992,10 @@ fn burst_settings_sanitize_clamps_zero_threshold() {
         throttle_ms: 1000,
     };
     let safe = bad.sanitized();
-    assert!(safe.threshold >= 2, "threshold must be ≥2 to filter false positives");
+    assert!(
+        safe.threshold >= 2,
+        "threshold must be ≥2 to filter false positives"
+    );
 }
 
 #[test]

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand } from "./activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectActivityFromOutput,
+  detectCodexConversationMessageFromOutput,
+  detectCodexStatusMessageFromOutput,
+} from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -20,6 +26,14 @@ describe("detectActivityFromTitle", () => {
     });
   });
 
+  it("detects Codex title variants", () => {
+    expect(detectActivityFromTitle("OpenAI Codex")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromTitle("codex")).toBeUndefined();
+  });
+
   it("detects nvim as neovim", () => {
     expect(detectActivityFromTitle("nvim")).toEqual({ type: "interactiveApp", name: "neovim" });
   });
@@ -34,7 +48,7 @@ describe("detectActivityFromTitle", () => {
 
   it("does not false-positive on app names embedded in words", () => {
     expect(detectActivityFromTitle("Review current directory structure")).toBeUndefined();
-    expect(detectActivityFromTitle("✳ Review code changes")).toBeUndefined();
+    expect(detectActivityFromTitle("⠋Review code changes")).toBeUndefined();
     expect(detectActivityFromTitle("navigation helper")).toBeUndefined();
     expect(detectActivityFromTitle("environment variables")).toBeUndefined();
   });
@@ -95,7 +109,6 @@ describe("detectActivityFromCommand", () => {
   });
 
   it("detects python (not python3 script.py style)", () => {
-    // 'python' bare is interactive REPL
     expect(detectActivityFromCommand("python")).toEqual({ type: "interactiveApp", name: "python" });
   });
 
@@ -127,7 +140,79 @@ describe("detectActivityFromCommand", () => {
     expect(detectActivityFromCommand("claude")).toEqual({ type: "interactiveApp", name: "Claude" });
   });
 
+  it("detects codex as Codex", () => {
+    expect(detectActivityFromCommand("codex")).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(detectActivityFromCommand("codex.exe")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromCommand("node /opt/codex/bin/codex.js")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromCommand("npx @openai/codex --model gpt-5")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromCommand("sudo codex --full-auto")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+  });
+
   it("returns undefined for empty command", () => {
     expect(detectActivityFromCommand("")).toBeUndefined();
+  });
+});
+
+describe("detectActivityFromOutput", () => {
+  it("detects Codex banner text", () => {
+    expect(
+      detectActivityFromOutput(
+        ">- OpenAI Codex (v0.118.0)\r\nmodel: gpt-5.4 medium\r\ndirectory: C:\\Users\r\n",
+      ),
+    ).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
+  it("ignores unrelated output", () => {
+    expect(detectActivityFromOutput("PS C:\\Users\\kochul> dir")).toBeUndefined();
+  });
+
+  it("does not misclassify plain output mentions of OpenAI Codex", () => {
+    expect(
+      detectActivityFromOutput("README.md: OpenAI Codex is available in this repository\r\n"),
+    ).toBeUndefined();
+  });
+});
+
+describe("detectCodexStatusMessageFromOutput", () => {
+  it("parses the Codex footer status line", () => {
+    expect(
+      detectCodexStatusMessageFromOutput(
+        "Use /skills to list available skills\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("ignores unrelated footer lines", () => {
+    expect(detectCodexStatusMessageFromOutput("PS C:\\Users> codex\r\n")).toBeUndefined();
+  });
+});
+
+describe("detectCodexConversationMessageFromOutput", () => {
+  it("prefers the latest assistant bullet reply", () => {
+    expect(
+      detectCodexConversationMessageFromOutput(
+        "> hello\r\n• Hello.\r\n> Improve documentation\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBe("Hello.");
+  });
+
+  it("ignores tool execution bullets", () => {
+    expect(
+      detectCodexConversationMessageFromOutput(
+        "• Ran Get-ChildItem\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBeUndefined();
   });
 });

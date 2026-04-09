@@ -19,6 +19,7 @@ use crate::terminal::{TerminalActivity, TerminalStateInfo};
 /// (e.g., "vim" should not match "environment").
 pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
     ("Claude Code", "Claude"),
+    ("OpenAI Codex", "Codex"),
     ("nvim", "neovim"),
     ("vim", "vim"),
     ("vi", "vim"),
@@ -171,6 +172,73 @@ fn is_word_match(text: &str, pattern: &str) -> bool {
     false
 }
 
+pub(crate) fn is_codex_spinner_title(title: &str) -> bool {
+    let first = title.chars().next().unwrap_or_default() as u32;
+    (0x2800..=0x28ff).contains(&first)
+}
+
+fn recent_buffer_contains(recent: &[u8], needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    !needle.is_empty() && recent.windows(needle.len()).any(|window| window == needle)
+}
+
+pub fn is_codex_terminal_from_buffer(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> bool {
+    if let Ok(known) = state.known_codex_terminals.lock_or_err() {
+        if known.contains(terminal_id) {
+            return true;
+        }
+    }
+
+    let Some(buf) = buffer else {
+        return false;
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return false;
+    }
+
+    let detected = osc::any_terminal_title_contains(&recent, "OpenAI Codex")
+        || recent_buffer_contains(&recent, "OpenAI Codex");
+    if detected {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.insert(terminal_id.to_string());
+        }
+    }
+    detected
+}
+
+pub fn detect_interactive_app_from_live_title(
+    state: &AppState,
+    terminal_id: &str,
+    title: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> Option<String> {
+    if let Some(name) = detect_interactive_app_from_title(title) {
+        if name == "Codex" {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+        }
+        return Some(name);
+    }
+
+    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
+        if known.contains(terminal_id) {
+            return Some("Claude".to_string());
+        }
+    }
+
+    if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
+        return Some("Codex".to_string());
+    }
+
+    None
+}
+
 /// Detect the activity state of a terminal from its output buffer.
 pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> TerminalActivity {
     let Some(buf) = buffer else {
@@ -194,8 +262,31 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
 }
 
 /// Detect full terminal state (activity) for a single terminal.
-pub fn detect_terminal_state(buffer: Option<&TerminalOutputBuffer>) -> TerminalStateInfo {
+pub fn detect_terminal_state(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> TerminalStateInfo {
     let activity = detect_terminal_activity(buffer);
+
+    let Some(buf) = buffer else {
+        return TerminalStateInfo { activity };
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return TerminalStateInfo { activity };
+    }
+
+    if let Some(title) = osc::extract_last_terminal_title(&recent) {
+        if let Some(name) =
+            detect_interactive_app_from_live_title(state, terminal_id, &title, buffer)
+        {
+            return TerminalStateInfo {
+                activity: TerminalActivity::InteractiveApp { name },
+            };
+        }
+    }
+
     TerminalStateInfo { activity }
 }
 
@@ -207,7 +298,7 @@ pub fn detect_all_terminal_states(
     if let Ok(buffers) = state.output_buffers.lock_or_err() {
         if let Ok(terminals) = state.terminals.lock_or_err() {
             for id in terminals.keys() {
-                let info = detect_terminal_state(buffers.get(id));
+                let info = detect_terminal_state(state, id, buffers.get(id));
                 result.insert(id.clone(), info);
             }
         }
@@ -323,6 +414,12 @@ mod tests {
     }
 
     #[test]
+    fn detect_interactive_app_codex() {
+        let data = b"\x1b]0;OpenAI Codex\x07";
+        assert_eq!(detect_interactive_app(data), Some("Codex".to_string()));
+    }
+
+    #[test]
     fn detect_interactive_app_vim() {
         let data = b"\x1b]2;vim - main.rs\x07";
         assert_eq!(detect_interactive_app(data), Some("vim".to_string()));
@@ -407,6 +504,55 @@ mod tests {
     }
 
     #[test]
+    fn title_codex_detected() {
+        assert_eq!(
+            detect_interactive_app_from_title("OpenAI Codex"),
+            Some("Codex".to_string())
+        );
+        assert_eq!(detect_interactive_app_from_title("codex"), None);
+    }
+
+    #[test]
+    fn codex_spinner_title_preserved_after_explicit_detection() {
+        let state = AppState::new();
+        let mut explicit = TerminalOutputBuffer::default();
+        explicit.push(b"\x1b]0;OpenAI Codex\x07");
+        assert_eq!(
+            detect_terminal_state(&state, "t1", Some(&explicit)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push("\x1b]0;\u{280b} laymux\x07".as_bytes());
+        assert_eq!(
+            detect_terminal_state(&state, "t1", Some(&spinner)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn codex_spinner_title_detected_from_banner_output() {
+        let state = AppState::new();
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push(b">- OpenAI Codex (v0.118.0)\r\n");
+        spinner.push("\x1b]0;\u{280b} laymux\x07".as_bytes());
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, "t1", "\u{280b} laymux", Some(&spinner)),
+            Some("Codex".to_string())
+        );
+        assert_eq!(
+            detect_terminal_state(&state, "t1", Some(&spinner)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn title_claude_with_prefix() {
         // ✳ Claude Code (idle indicator)
         assert_eq!(
@@ -445,11 +591,7 @@ mod tests {
         assert!(is_claude_terminal_from_buffer(&state, tid, None));
 
         // Remove (simulates Claude exit detection)
-        state
-            .known_claude_terminals
-            .lock()
-            .unwrap()
-            .remove(tid);
+        state.known_claude_terminals.lock().unwrap().remove(tid);
         assert!(!is_claude_terminal_from_buffer(&state, tid, None));
     }
 
@@ -486,7 +628,7 @@ mod tests {
     #[test]
     fn burst_window_expired_resets_count() {
         let detector = BurstDetector::new(0, 3, 0); // 0ms window → always expired
-        // Each hit resets the window, so count never accumulates past 1
+                                                    // Each hit resets the window, so count never accumulates past 1
         assert!(!detector.record_hit());
         assert!(!detector.record_hit());
         assert!(!detector.record_hit());

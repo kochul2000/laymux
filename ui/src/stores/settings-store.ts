@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   ClaudeSyncCwdMode,
   ClaudeSettings,
+  CodexSettings,
   FileExplorerSettings,
   IssueReporterSettings,
   MemoSettings,
@@ -280,6 +281,7 @@ interface SettingsState {
   convenience: ConvenienceSettings;
   workspaceDisplay: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
+  codex: CodexSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
@@ -293,6 +295,7 @@ interface SettingsState {
   setConvenience: (data: Partial<ConvenienceSettings>) => void;
   setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
+  setCodex: (data: Partial<CodexSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
@@ -329,6 +332,7 @@ interface SettingsState {
         | "convenience"
         | "workspaceDisplay"
         | "claude"
+        | "codex"
         | "memo"
         | "issueReporter"
         | "fileExplorer"
@@ -728,6 +732,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
+  codex: {
+    statusMessageMode: "bullet-title" as const,
+    statusMessageDelimiter: " · ",
+  },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
@@ -750,6 +758,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setClaude: (data) =>
     set((state) => ({
       claude: { ...state.claude, ...data },
+    })),
+
+  setCodex: (data) =>
+    set((state) => ({
+      codex: { ...state.codex, ...data },
     })),
 
   setMemo: (data) =>
@@ -937,6 +950,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...(data.claude as Partial<ClaudeSettings>),
         }
       : undefined;
+    const codex = data.codex
+      ? {
+          statusMessageMode: "bullet-title" as const,
+          statusMessageDelimiter: " · ",
+          ...(data.codex as Partial<CodexSettings>),
+        }
+      : undefined;
     // Ensure appFont has all fields (backwards compat)
     const appFont = data.appFont
       ? { ...DEFAULT_APP_FONT, ...data.appFont, weight: data.appFont.weight ?? "normal" }
@@ -980,6 +1000,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(convenience ? { convenience } : {}),
       ...(workspaceDisplay ? { workspaceDisplay } : {}),
       ...(claude ? { claude } : {}),
+      ...(codex ? { codex } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),

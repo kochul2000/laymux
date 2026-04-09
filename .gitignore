@@ -1,6 +1,7 @@
 # Rust
 /target/
 src-tauri/target/
+src-tauri/target-review/
 
 # Node
 node_modules/

@@ -24,6 +24,7 @@ const mockOnTerminalOutputActivity = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
+const mockGetTerminalSerializeMap = vi.fn();
 
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
@@ -44,6 +45,10 @@ vi.mock("./useOsNotification", () => ({
   sendDesktopNotification: (...args: unknown[]) => mockSendDesktopNotification(...args),
 }));
 
+vi.mock("@/lib/terminal-serialize-registry", () => ({
+  getTerminalSerializeMap: () => mockGetTerminalSerializeMap(),
+}));
+
 describe("useSyncEvents", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -62,6 +67,7 @@ describe("useSyncEvents", () => {
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
     mockOnTerminalOutputActivity.mockResolvedValue(unlisten);
+    mockGetTerminalSerializeMap.mockReturnValue(new Map());
   });
 
   it("registers sync-cwd listener on mount", () => {
@@ -474,6 +480,121 @@ describe("useSyncEvents", () => {
     expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
   });
 
+  it("detects Codex from command text without calling Claude marker", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", command: "codex" });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("preserves Codex activity when title no longer contains app name", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "⠋ laymux",
+      interactiveApp: null,
+      notifyGateArmed: false,
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(instance?.outputActive).toBe(true);
+  });
+
+  it("stores Codex spinner title text as activityMessage", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "⠋ planning changes",
+      interactiveApp: "Codex",
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activityMessage).toBe("planning changes");
+  });
+
+  it("does not clear an existing Codex activityMessage on plain title changes", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+      activityMessage: "gpt-5.4 medium · 93% left · C:\\Users",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "C:\\Users",
+      interactiveApp: "Codex",
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activityMessage).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("returns Codex terminal to shell on exitCode", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+      lastCommand: "codex",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", exitCode: 0 });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "shell" });
+    expect(instance?.lastExitCode).toBe(0);
+  });
+
   it("clears outputActive immediately on active:false event (app-agnostic)", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
@@ -558,6 +679,7 @@ describe("useSyncEvents", () => {
       // Step 1: Rust emits active:false (task_completed)
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       // Step 2: Rust emits command-status with exitCode=0 (synthetic)
       cmdStatusCb({ terminalId: "t1", exitCode: 0 });
@@ -606,6 +728,7 @@ describe("useSyncEvents", () => {
       // 2s passes with no new events → auto-reset
       vi.advanceTimersByTime(2100);
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       vi.useRealTimers();
     });
@@ -634,6 +757,7 @@ describe("useSyncEvents", () => {
       // 0.6s later: timer expires (2.1s since last burst)
       vi.advanceTimersByTime(600);
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       vi.useRealTimers();
     });
@@ -653,6 +777,7 @@ describe("useSyncEvents", () => {
       // active:false arrives → immediate deactivation + timer cancelled
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       // Original timer would have fired here, but was cancelled
       vi.advanceTimersByTime(3000);
@@ -715,6 +840,121 @@ describe("useSyncEvents", () => {
       // Activity MUST remain interactiveApp, NOT shell
       expect(getInst()?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
       expect(getInst()?.lastExitCode).toBe(0);
+    });
+
+    it("marks Codex success when outputActive transitions to false", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.outputActive).toBe(false);
+      expect(instance?.lastExitCode).toBe(0);
+      expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].terminalId).toBe("t1");
+      expect(notifications[0].level).toBe("success");
+      expect(notifications[0].message).toBe("Codex task completed");
+    });
+
+    it("reparses the Codex screen snapshot when success is detected", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+        activityMessage: "Working (1s · esc to interrupt)",
+      });
+      mockGetTerminalSerializeMap.mockReturnValue(
+        new Map([
+          [
+            "t1",
+            () =>
+              "> hello\r\n• Hello.\r\n> good!!\r\n• Yes.\r\n> Summarize recent commits\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+          ],
+        ]),
+      );
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.activityMessage).toBe("Yes.");
+      expect(instance?.lastExitCode).toBe(0);
+    });
+
+    it("marks Codex success when outputActive times out", () => {
+      vi.useFakeTimers();
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1" });
+      expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.outputActive).toBe(
+        true,
+      );
+
+      vi.advanceTimersByTime(2100);
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.outputActive).toBe(false);
+      expect(instance?.lastExitCode).toBe(0);
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message).toBe("Codex task completed");
+
+      vi.useRealTimers();
+    });
+
+    it("uses awaiting-input notification message for Codex approval prompts", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+        activityMessage: "__codex_input_pending__",
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message).toBe("Codex is awaiting input");
+      expect(notifications[0].level).toBe("success");
     });
   });
 });

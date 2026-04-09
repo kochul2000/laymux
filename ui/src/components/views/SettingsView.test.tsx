@@ -831,6 +831,33 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
   });
 
+  it("shows Codex nav button", () => {
+    render(<SettingsView />);
+    expect(screen.getByTestId("nav-codex")).toBeInTheDocument();
+  });
+
+  it("renders Codex section with status message mode", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    expect(screen.getAllByText("Codex").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("codex-status-message-mode-select")).toBeInTheDocument();
+  });
+
+  it("changing codex status message mode updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const select = screen.getByTestId("codex-status-message-mode-select");
+    await user.selectOptions(select, "bullet-title");
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().codex.statusMessageMode).toBe("bullet-title");
+  });
+
   // -- Discard --
 
   it("has a discard button", () => {
