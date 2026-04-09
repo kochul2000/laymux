@@ -423,6 +423,9 @@ function AppearanceFields({
               {resetBtn("cursorBlink")}
             </div>
           </SettingRow>
+          <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+            Cursor changes apply to new terminals.
+          </p>
           <SettingRow label="Opacity">
             <div className="flex items-center gap-2">
               <input

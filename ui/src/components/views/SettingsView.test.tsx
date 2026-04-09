@@ -268,6 +268,7 @@ describe("SettingsView", () => {
     // Appearance fields
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Cursor Blink")).toBeInTheDocument();
+    expect(screen.getByText("Cursor changes apply to new terminals.")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
     expect(screen.getByText("Padding")).toBeInTheDocument();
     // Advanced fields
