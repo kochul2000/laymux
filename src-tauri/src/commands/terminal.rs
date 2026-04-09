@@ -551,6 +551,11 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         known.remove(&id);
     }
 
+    // Clean up Codex terminal tracking
+    if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+        known.remove(&id);
+    }
+
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
         notifs.retain(|n| n.terminal_id != id);

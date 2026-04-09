@@ -16,6 +16,7 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 1. `terminals`
 /// 2. `output_buffers`
 /// 3. `known_claude_terminals`
+/// 4. `known_codex_terminals`
 /// 4. `notifications`
 /// 5. `sync_groups`
 /// 6. `propagated_terminals`
@@ -44,6 +45,10 @@ pub struct AppState {
     /// or when the terminal session closes.
     /// Both backend (CWD skip) and frontend (activity display) consume this state.
     pub known_claude_terminals: Arc<Mutex<HashSet<String>>>,
+    /// Single source of truth for Codex terminal detection.
+    /// Populated proactively by the PTY output callback and frontend command detection.
+    /// Removed when the terminal session closes.
+    pub known_codex_terminals: Arc<Mutex<HashSet<String>>>,
     /// Single source of truth for terminal notifications.
     /// Stored in backend so `get_terminal_summaries` can return unread counts.
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
@@ -64,6 +69,7 @@ impl AppState {
             automation_key: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
+            known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
         }
@@ -109,6 +115,13 @@ mod tests {
     fn known_claude_terminals_starts_empty() {
         let state = AppState::new();
         let known = state.known_claude_terminals.lock().unwrap();
+        assert!(known.is_empty());
+    }
+
+    #[test]
+    fn known_codex_terminals_starts_empty() {
+        let state = AppState::new();
+        let known = state.known_codex_terminals.lock().unwrap();
         assert!(known.is_empty());
     }
 

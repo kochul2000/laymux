@@ -59,7 +59,7 @@ registerInteractiveApp("Claude", {
 registerInteractiveApp("Codex", {
   handler: new CodexActivityHandler(),
   commands: ["codex"],
-  titlePatterns: ["OpenAI Codex", "codex"],
+  titlePatterns: ["OpenAI Codex"],
 });
 
 export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {

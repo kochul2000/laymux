@@ -1273,9 +1273,10 @@ mod tests {
     #[test]
     fn detect_state_activity_only() {
         use crate::terminal::TerminalActivity;
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ ");
-        let state_info = activity::detect_terminal_state(Some(&buf));
+        let state_info = activity::detect_terminal_state(&state, "t1", Some(&buf));
         assert_eq!(state_info.activity, TerminalActivity::Shell);
     }
 

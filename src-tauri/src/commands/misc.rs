@@ -478,7 +478,8 @@ pub fn get_terminal_summaries_inner(
         let Some(session) = terminals.get(tid.as_str()) else {
             continue;
         };
-        let state_info = activity::detect_terminal_state(buffers.get(tid.as_str()));
+        let state_info =
+            activity::detect_terminal_state(state, tid.as_str(), buffers.get(tid.as_str()));
         let is_claude = known_claude.contains(tid.as_str());
         let term_notifs: Vec<&TerminalNotification> = notifications
             .iter()

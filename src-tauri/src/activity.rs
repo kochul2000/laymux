@@ -20,7 +20,6 @@ use crate::terminal::{TerminalActivity, TerminalStateInfo};
 pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
     ("Claude Code", "Claude"),
     ("OpenAI Codex", "Codex"),
-    ("codex", "Codex"),
     ("nvim", "neovim"),
     ("vim", "vim"),
     ("vi", "vim"),
@@ -173,6 +172,11 @@ fn is_word_match(text: &str, pattern: &str) -> bool {
     false
 }
 
+pub(crate) fn is_codex_spinner_title(title: &str) -> bool {
+    let first = title.chars().next().unwrap_or_default() as u32;
+    (0x2800..=0x28ff).contains(&first)
+}
+
 /// Detect the activity state of a terminal from its output buffer.
 pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> TerminalActivity {
     let Some(buf) = buffer else {
@@ -196,8 +200,51 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
 }
 
 /// Detect full terminal state (activity) for a single terminal.
-pub fn detect_terminal_state(buffer: Option<&TerminalOutputBuffer>) -> TerminalStateInfo {
+pub fn detect_terminal_state(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> TerminalStateInfo {
     let activity = detect_terminal_activity(buffer);
+
+    let Some(buf) = buffer else {
+        return TerminalStateInfo { activity };
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return TerminalStateInfo { activity };
+    }
+
+    if osc::any_terminal_title_contains(&recent, "OpenAI Codex") {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.insert(terminal_id.to_string());
+        }
+    }
+
+    if let Some(title) = osc::extract_last_terminal_title(&recent) {
+        if detect_interactive_app_from_title(&title).is_some_and(|name| name == "Codex") {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+            return TerminalStateInfo {
+                activity: TerminalActivity::InteractiveApp {
+                    name: "Codex".to_string(),
+                },
+            };
+        }
+        if is_codex_spinner_title(&title) {
+            if let Ok(known) = state.known_codex_terminals.lock_or_err() {
+                if known.contains(terminal_id) {
+                    return TerminalStateInfo {
+                        activity: TerminalActivity::InteractiveApp {
+                            name: "Codex".to_string(),
+                        },
+                    };
+                }
+            }
+        }
+    }
+
     TerminalStateInfo { activity }
 }
 
@@ -209,7 +256,7 @@ pub fn detect_all_terminal_states(
     if let Ok(buffers) = state.output_buffers.lock_or_err() {
         if let Ok(terminals) = state.terminals.lock_or_err() {
             for id in terminals.keys() {
-                let info = detect_terminal_state(buffers.get(id));
+                let info = detect_terminal_state(state, id, buffers.get(id));
                 result.insert(id.clone(), info);
             }
         }
@@ -420,9 +467,28 @@ mod tests {
             detect_interactive_app_from_title("OpenAI Codex"),
             Some("Codex".to_string())
         );
+        assert_eq!(detect_interactive_app_from_title("codex"), None);
+    }
+
+    #[test]
+    fn codex_spinner_title_preserved_after_explicit_detection() {
+        let state = AppState::new();
+        let mut explicit = TerminalOutputBuffer::default();
+        explicit.push(b"\x1b]0;OpenAI Codex\x07");
         assert_eq!(
-            detect_interactive_app_from_title("codex"),
-            Some("Codex".to_string())
+            detect_terminal_state(&state, "t1", Some(&explicit)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push("\x1b]0;\u{280b} laymux\x07".as_bytes());
+        assert_eq!(
+            detect_terminal_state(&state, "t1", Some(&spinner)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
         );
     }
 

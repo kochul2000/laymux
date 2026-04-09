@@ -25,10 +25,7 @@ describe("detectActivityFromTitle", () => {
       type: "interactiveApp",
       name: "Codex",
     });
-    expect(detectActivityFromTitle("codex")).toEqual({
-      type: "interactiveApp",
-      name: "Codex",
-    });
+    expect(detectActivityFromTitle("codex")).toBeUndefined();
   });
 
   it("detects nvim as neovim", () => {
