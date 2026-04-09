@@ -52,4 +52,21 @@ describe("CodexActivityHandler", () => {
       color: "var(--green)",
     });
   });
+
+  it("returns spinner title text by default", () => {
+    expect(handler.computeStatusMessage(raw({ title: "⠋ laymux" }))).toBe("laymux");
+  });
+
+  it("supports configurable title-bullet formatting", () => {
+    expect(
+      handler.computeStatusMessage(
+        raw({
+          title: "⠋ laymux",
+          activityMessage: "Planning",
+          statusMessageMode: "title-bullet",
+          statusMessageDelimiter: " | ",
+        }),
+      ),
+    ).toBe("laymux | Planning");
+  });
 });

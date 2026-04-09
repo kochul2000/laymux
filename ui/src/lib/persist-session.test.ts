@@ -253,6 +253,22 @@ describe("persistSession", () => {
 
       expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
     });
+
+    it("codex settings survive round-trip", async () => {
+      useSettingsStore.getState().setCodex({
+        statusMessageMode: "title-bullet",
+        statusMessageDelimiter: " | ",
+      });
+
+      await persistSession();
+
+      const saved = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+      useSettingsStore.getState().loadFromSettings(saved);
+
+      expect(useSettingsStore.getState().codex.statusMessageMode).toBe("title-bullet");
+      expect(useSettingsStore.getState().codex.statusMessageDelimiter).toBe(" | ");
+    });
   });
 
   it("preserves dock panes with view config through save", async () => {

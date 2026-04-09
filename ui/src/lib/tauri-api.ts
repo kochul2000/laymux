@@ -121,6 +121,7 @@ export interface ConvenienceSettings {
 
 export type ClaudeSyncCwdMode = "skip" | "command";
 export type ClaudeStatusMessageMode = "bullet" | "title" | "title-bullet" | "bullet-title";
+export type CodexStatusMessageMode = ClaudeStatusMessageMode;
 
 export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
@@ -130,6 +131,13 @@ export interface ClaudeSettings {
   sessionMaxAgeHours: number;
   /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: ClaudeStatusMessageMode;
+  /** Delimiter between bullet and title when both shown (default: " · "). */
+  statusMessageDelimiter: string;
+}
+
+export interface CodexSettings {
+  /** Status message display mode (default: "title"). */
+  statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
   statusMessageDelimiter: string;
 }
@@ -232,6 +240,7 @@ export interface Settings {
   convenience: ConvenienceSettings;
   workspaceDisplay?: WorkspaceDisplaySettings;
   claude: ClaudeSettings;
+  codex?: CodexSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;

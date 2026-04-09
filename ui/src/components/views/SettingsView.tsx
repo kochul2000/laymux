@@ -1724,6 +1724,100 @@ function ClaudeSection() {
   );
 }
 
+function CodexSection() {
+  const storeCodex = useSettingsStore((s) => s.codex);
+  const setCodex = useSettingsStore((s) => s.setCodex);
+  const [codex, setDraftCodex] = useDraft("codex", storeCodex, (v) => setCodex(v));
+  const updateCodex = (partial: Partial<typeof codex>) =>
+    setDraftCodex((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>Codex</SectionTitle>
+
+      <div style={cardStyle} className="p-4">
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              상태 메시지 모드
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              워크스페이스 목록에서 Codex 상태 텍스트 표시 방식
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusSelect
+              data-testid="codex-status-message-mode-select"
+              className={inputCls}
+              value={codex.statusMessageMode}
+              onChange={(e) =>
+                updateCodex({
+                  statusMessageMode: e.target.value as
+                    | "bullet"
+                    | "title"
+                    | "bullet-title"
+                    | "title-bullet",
+                })
+              }
+            >
+              <option value="title">Title만 (기본)</option>
+              <option value="bullet-title">Bullet · Title</option>
+              <option value="title-bullet">Title · Bullet</option>
+              <option value="bullet">Bullet만</option>
+            </FocusSelect>
+          </div>
+        </div>
+
+        {(codex.statusMessageMode === "bullet-title" ||
+          codex.statusMessageMode === "title-bullet") && (
+          <div className="flex items-start gap-3 py-1.5">
+            <div className="w-36 shrink-0 pt-1">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                구분자
+              </span>
+              <p
+                className="mt-0.5 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
+                두 텍스트 사이 구분 문자열
+              </p>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <FocusInput
+                  data-testid="codex-status-message-delimiter-input"
+                  className={inputCls}
+                  type="text"
+                  style={{ width: 100 }}
+                  value={codex.statusMessageDelimiter}
+                  onChange={(e) => updateCodex({ statusMessageDelimiter: e.target.value })}
+                />
+                {codex.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
+                  <button
+                    data-testid="codex-status-message-delimiter-reset"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    style={{ color: "var(--text-secondary)" }}
+                    onClick={() =>
+                      updateCodex({
+                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                      })
+                    }
+                  >
+                    기본값
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // -- Section: Issue Reporter --
 
 function FileExplorerSection() {
@@ -2890,6 +2984,16 @@ export function SettingsView() {
             Claude Code
           </button>
           <button
+            data-testid="nav-codex"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("codex")}
+            onClick={() => setActiveNav("codex")}
+            onMouseEnter={() => setNavHover("codex")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Codex
+          </button>
+          <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("memo")}
@@ -3008,6 +3112,7 @@ export function SettingsView() {
             {activeNav === "convenience" && <ConvenienceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "claude" && <ClaudeSection />}
+            {activeNav === "codex" && <CodexSection />}
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}

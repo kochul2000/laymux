@@ -97,6 +97,9 @@ export function useSessionPersistence() {
           ...(rawSettings.claude
             ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings }
             : {}),
+          ...(rawSettings.codex
+            ? { codex: rawSettings.codex as import("@/lib/tauri-api").CodexSettings }
+            : {}),
           ...(rawSettings.issueReporter
             ? {
                 issueReporter:

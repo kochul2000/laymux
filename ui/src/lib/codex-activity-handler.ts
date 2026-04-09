@@ -4,6 +4,7 @@ import { ShellActivityHandler } from "./shell-activity-handler";
 
 const BRAILLE_SPINNER_RANGE_START = 0x2800;
 const BRAILLE_SPINNER_RANGE_END = 0x28ff;
+const DEFAULT_STATUS_MESSAGE_DELIMITER = " · ";
 
 function startsWithBrailleSpinner(title: string | undefined): boolean {
   if (!title) return false;
@@ -13,6 +14,12 @@ function startsWithBrailleSpinner(title: string | undefined): boolean {
 
 function isInputPending(activityMessage: string | undefined): boolean {
   return activityMessage === CODEX_INPUT_PENDING_MARKER;
+}
+
+function extractTitleMessage(title: string | undefined): string | undefined {
+  if (!startsWithBrailleSpinner(title) || !title) return undefined;
+  const stripped = title.slice(1).trim();
+  return stripped || undefined;
 }
 
 export class CodexActivityHandler extends ShellActivityHandler {
@@ -42,6 +49,24 @@ export class CodexActivityHandler extends ShellActivityHandler {
     if (isInputPending(raw.activityMessage)) {
       return undefined;
     }
-    return super.computeStatusMessage(raw);
+    const bullet = raw.activityMessage || undefined;
+    const titleMsg = extractTitleMessage(raw.title);
+    const mode = raw.statusMessageMode ?? "title";
+    const delimiter = raw.statusMessageDelimiter ?? DEFAULT_STATUS_MESSAGE_DELIMITER;
+
+    switch (mode) {
+      case "bullet":
+        return bullet;
+      case "title":
+        return titleMsg;
+      case "bullet-title":
+        if (bullet && titleMsg) return `${bullet}${delimiter}${titleMsg}`;
+        return bullet || titleMsg || undefined;
+      case "title-bullet":
+        if (bullet && titleMsg) return `${titleMsg}${delimiter}${bullet}`;
+        return titleMsg || bullet || undefined;
+      default:
+        return titleMsg || bullet || undefined;
+    }
   }
 }
