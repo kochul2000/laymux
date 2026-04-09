@@ -137,6 +137,10 @@ describe("detectActivityFromCommand", () => {
 
   it("detects codex as Codex", () => {
     expect(detectActivityFromCommand("codex")).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(detectActivityFromCommand("codex.exe")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
     expect(detectActivityFromCommand("sudo codex --full-auto")).toEqual({
       type: "interactiveApp",
       name: "Codex",

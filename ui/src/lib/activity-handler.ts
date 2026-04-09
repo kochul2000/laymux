@@ -86,7 +86,8 @@ function getBasename(command: string): string | undefined {
   if (first === "sudo" && trimmed.split(/\s+/).length > 1) {
     first = trimmed.split(/\s+/)[1];
   }
-  return first.split("/").pop() ?? first;
+  const basename = first.split("/").pop() ?? first;
+  return basename.replace(/\.(exe|cmd|bat)$/i, "");
 }
 
 export function detectRegisteredActivityFromTitle(title: string): TerminalActivityInfo | undefined {
