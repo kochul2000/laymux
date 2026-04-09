@@ -254,7 +254,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("Hidden")).toBeInTheDocument();
   });
 
-  it("profile Additional Settings tab shows Font, Appearance and Advanced fields", async () => {
+  it("profile Additional Settings tab shows Font, Appearance, Cursor and Advanced fields", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
     await navigateToProfile(user, "PowerShell");
@@ -266,11 +266,16 @@ describe("SettingsView", () => {
     expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
-    expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
-    expect(screen.getByText("Cursor Blink")).toBeInTheDocument();
-    expect(screen.getByText("Cursor changes apply to new terminals.")).toBeInTheDocument();
+    expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getByText("Color Scheme")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
     expect(screen.getByText("Padding")).toBeInTheDocument();
+    // Cursor fields
+    expect(screen.getByText("Cursor")).toBeInTheDocument();
+    expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
+    expect(screen.getByText("Cursor Blink")).toBeInTheDocument();
+    expect(screen.getByText("Interactive Cursor Stability")).toBeInTheDocument();
+    expect(screen.getByText("Cursor changes apply to new terminals.")).toBeInTheDocument();
     // Advanced fields
     expect(screen.getByText("Scrollback Lines")).toBeInTheDocument();
     expect(screen.getByText("Bell Style")).toBeInTheDocument();
@@ -548,13 +553,14 @@ describe("SettingsView", () => {
 
   // -- Defaults page --
 
-  it("shows Defaults page with Appearance and Advanced sections", async () => {
+  it("shows Defaults page with Appearance, Cursor and Advanced sections", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
     await user.click(screen.getByTestId("nav-profile-defaults"));
     expect(screen.getByText("Profile Defaults")).toBeInTheDocument();
-    // Content area has Appearance heading (h4) and Advanced heading (h4)
+    expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getByText("Cursor")).toBeInTheDocument();
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Scrollback Lines")).toBeInTheDocument();
   });
@@ -646,6 +652,20 @@ describe("SettingsView", () => {
     await user.click(screen.getByTestId("save-settings-btn"));
 
     expect(useSettingsStore.getState().profileDefaults.cursorBlink).toBe(false);
+  });
+
+  it("updates profileDefaults interactive cursor stability after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const toggle = screen.getByTestId("stabilize-interactive-cursor-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().profileDefaults.stabilizeInteractiveCursor).toBe(false);
   });
 
   it("shows settings.json shortcut in sidebar", () => {

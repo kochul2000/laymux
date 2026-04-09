@@ -338,13 +338,12 @@ function AppearanceFields({
   defaults,
   showReset,
 }: {
-  data: Pick<Profile, "colorScheme" | "cursorShape" | "cursorBlink" | "opacity" | "padding">;
+  data: Pick<Profile, "colorScheme" | "opacity" | "padding">;
   onChange: (d: Partial<Profile>) => void;
   colorSchemes: { name: string }[];
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
-  const supportedCursorShape = toSupportedCursorShape(data.cursorShape);
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
   const resetBtn = (key: keyof ProfileDefaults) =>
@@ -391,41 +390,6 @@ function AppearanceFields({
               {resetBtn("colorScheme")}
             </div>
           </SettingRow>
-          <SettingRow label="Cursor Shape">
-            <div className="flex items-center">
-              <select
-                data-testid="cursor-shape-select"
-                value={supportedCursorShape}
-                onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
-                className={inputCls}
-                style={inputStyle}
-              >
-                <option value="bar">Bar |</option>
-                <option value="underscore">Underscore _</option>
-                <option value="filledBox">Filled Box &#9608;</option>
-              </select>
-              {resetBtn("cursorShape")}
-            </div>
-          </SettingRow>
-          <SettingRow label="Cursor Blink">
-            <div className="flex items-center gap-2">
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  data-testid="cursor-blink-toggle"
-                  type="checkbox"
-                  checked={data.cursorBlink}
-                  onChange={(e) => onChange({ cursorBlink: e.target.checked })}
-                />
-                <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                  Enable blinking cursor
-                </span>
-              </label>
-              {resetBtn("cursorBlink")}
-            </div>
-          </SettingRow>
-          <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
-            Cursor changes apply to new terminals.
-          </p>
           <SettingRow label="Opacity">
             <div className="flex items-center gap-2">
               <input
@@ -479,6 +443,102 @@ function AppearanceFields({
         </div>
       </div>
     </>
+  );
+}
+
+function CursorFields({
+  data,
+  onChange,
+  defaults,
+  showReset,
+}: {
+  data: Pick<Profile, "cursorShape" | "cursorBlink" | "stabilizeInteractiveCursor">;
+  onChange: (d: Partial<Profile>) => void;
+  defaults?: ProfileDefaults;
+  showReset?: boolean;
+}) {
+  const supportedCursorShape = toSupportedCursorShape(data.cursorShape);
+  const isDefault = (key: keyof ProfileDefaults) =>
+    defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
+  const resetBtn = (key: keyof ProfileDefaults) =>
+    showReset && defaults && !isDefault(key) ? (
+      <button
+        onClick={() => onChange({ [key]: defaults[key] })}
+        className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
+        style={{
+          color: "var(--accent)",
+          background: "var(--accent-10)",
+          border: "none",
+          cursor: "pointer",
+        }}
+        title="Reset to default"
+      >
+        Reset
+      </button>
+    ) : null;
+
+  return (
+    <div style={cardStyle} className="mb-3">
+      <div className="px-4 py-2">
+        <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+          Cursor
+        </h4>
+        <SettingRow label="Cursor Shape">
+          <div className="flex items-center">
+            <select
+              data-testid="cursor-shape-select"
+              value={supportedCursorShape}
+              onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
+              className={inputCls}
+              style={inputStyle}
+            >
+              <option value="bar">Bar |</option>
+              <option value="underscore">Underscore _</option>
+              <option value="filledBox">Filled Box &#9608;</option>
+            </select>
+            {resetBtn("cursorShape")}
+          </div>
+        </SettingRow>
+        <SettingRow label="Cursor Blink">
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="cursor-blink-toggle"
+                type="checkbox"
+                checked={data.cursorBlink}
+                onChange={(e) => onChange({ cursorBlink: e.target.checked })}
+              />
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                Enable blinking cursor
+              </span>
+            </label>
+            {resetBtn("cursorBlink")}
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="Interactive Cursor Stability"
+          desc="Use the stabilized cursor path for redraw-heavy interactive apps like Codex and Claude."
+        >
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="stabilize-interactive-cursor-toggle"
+                type="checkbox"
+                checked={data.stabilizeInteractiveCursor}
+                onChange={(e) => onChange({ stabilizeInteractiveCursor: e.target.checked })}
+              />
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                Enable stable interactive cursor
+              </span>
+            </label>
+            {resetBtn("stabilizeInteractiveCursor")}
+          </div>
+        </SettingRow>
+        <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+          Cursor changes apply to new terminals.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -703,6 +763,7 @@ function DefaultsSection() {
         onChange={updateDefaults}
         colorSchemes={colorSchemes}
       />
+      <CursorFields data={draftDefaults} onChange={updateDefaults} />
 
       <AdvancedFields data={draftDefaults} onChange={updateDefaults} />
     </div>
@@ -857,6 +918,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
             defaults={profileDefaults}
             showReset
           />
+          <CursorFields data={profile} onChange={update} defaults={profileDefaults} showReset />
           <AdvancedFields data={profile} onChange={update} defaults={profileDefaults} showReset />
         </>
       )}

@@ -1,6 +1,6 @@
 import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TerminalView, _resetWebglStagger } from "./TerminalView";
+import { TerminalView, _resetWebglStagger, shouldEnableTerminalWebgl } from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -18,13 +18,30 @@ const mockPaste = vi.fn();
 const mockHasSelection = vi.fn().mockReturnValue(false);
 const mockGetSelection = vi.fn().mockReturnValue("");
 const mockClearSelection = vi.fn();
+const mockOnCursorMove = vi.fn().mockReturnValue({ dispose: vi.fn() });
+const mockOnWriteParsed = vi.fn().mockReturnValue({ dispose: vi.fn() });
+const mockOnRender = vi.fn().mockReturnValue({ dispose: vi.fn() });
 const createdTerminals: Array<{ options: Record<string, unknown> }> = [];
+const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
-const mockWrite = vi.fn();
+const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
+  callback?.();
+});
 const mockRefresh = vi.fn();
+const mockRegisterCsiHandler = vi.fn();
+const csiHandlers = new Map<
+  string,
+  (params: readonly (number | number[])[]) => boolean | Promise<boolean>
+>();
+const mockRequestAnimationFrame = vi.fn((callback: FrameRequestCallback) =>
+  window.setTimeout(() => callback(performance.now()), 0),
+);
+const mockCancelAnimationFrame = vi.fn((handle: number) => window.clearTimeout(handle));
+vi.stubGlobal("requestAnimationFrame", mockRequestAnimationFrame);
+vi.stubGlobal("cancelAnimationFrame", mockCancelAnimationFrame);
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     constructor(options: Record<string, unknown> = {}) {
@@ -38,6 +55,9 @@ vi.mock("@xterm/xterm", () => ({
     onTitleChange = mockOnTitleChange;
     onSelectionChange = mockOnSelectionChange;
     onKey = mockOnKey;
+    onCursorMove = mockOnCursorMove;
+    onWriteParsed = mockOnWriteParsed;
+    onRender = mockOnRender;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     focus = mockFocus;
     blur = mockBlur;
@@ -49,6 +69,20 @@ vi.mock("@xterm/xterm", () => ({
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
+    element = document.createElement("div");
+    buffer = { active: { cursorX: 0, cursorY: 0 } };
+    modes = mockModes;
+    parser = {
+      registerCsiHandler: mockRegisterCsiHandler.mockImplementation(
+        (
+          id: { prefix?: string; final: string },
+          callback: (params: readonly (number | number[])[]) => boolean | Promise<boolean>,
+        ) => {
+          csiHandlers.set(`${id.prefix ?? ""}:${id.final}`, callback);
+          return { dispose: vi.fn() };
+        },
+      ),
+    };
     cols = 80;
     rows = 24;
     options: Record<string, unknown>;
@@ -147,6 +181,8 @@ describe("TerminalView", () => {
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
+    csiHandlers.clear();
+    mockModes.synchronizedOutputMode = false;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -238,7 +274,107 @@ describe("TerminalView", () => {
     });
   });
 
-  it("keeps profile cursor blink while Codex is active when codex override is disabled", async () => {
+  it("uses overlay caret mode for Codex and Claude", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-overlay-mode");
+    expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-mode", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-native-cursor-hidden");
+    });
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
+
+    rerender(<TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />);
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-mode", {
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-native-cursor-hidden");
+    });
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
+  });
+
+  it("uses the configured cursor color for the overlay caret", async () => {
+    useSettingsStore.getState().updateProfile(0, { colorScheme: "One Half Light" });
+
+    render(<TerminalView instanceId="t-overlay-color" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-overlay-color");
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-color", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveStyle({ "--terminal-overlay-caret-color": "#4F525D" });
+    });
+  });
+
+  it("hides the xterm cursor only during synchronized output frames", async () => {
+    render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-sync-cursor");
+    expect(container).not.toHaveClass("terminal-sync-output-active");
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    expect(container).toHaveClass("terminal-sync-output-active");
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    expect(container).not.toHaveClass("terminal-sync-output-active");
+  });
+
+  it("tracks xterm synchronizedOutputMode after terminal.write", async () => {
+    render(<TerminalView instanceId="t-sync-write" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    const container = screen.getByTestId("terminal-view-t-sync-write");
+    mockModes.synchronizedOutputMode = true;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("\x1b[?2026hframe"));
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-sync-output-active");
+    });
+
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-sync-output-active");
+    });
+    expect(mockRequestAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("keeps native xterm cursor blink disabled in overlay mode even when codex override is disabled", async () => {
     useSettingsStore.getState().setCodex({ disableCursorBlink: false });
 
     render(<TerminalView instanceId="t-codex-blink-disabled" profile="PowerShell" syncGroup="" />);
@@ -250,7 +386,27 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(createdTerminals[0].options.cursorBlink).toBe(true);
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+      expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    });
+  });
+
+  it("falls back to native xterm cursor when interactive cursor stability is disabled", async () => {
+    useSettingsStore.getState().updateProfile(0, { stabilizeInteractiveCursor: false });
+
+    render(<TerminalView instanceId="t-native-cursor-mode" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-native-cursor-mode");
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-native-cursor-mode", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+      expect(createdTerminals[0].options.cursorStyle).toBe("bar");
     });
   });
 
@@ -1472,5 +1628,11 @@ describe("TerminalView", () => {
 
       vi.useRealTimers();
     });
+  });
+});
+
+describe("shouldEnableTerminalWebgl", () => {
+  it("keeps WebGL enabled", () => {
+    expect(shouldEnableTerminalWebgl()).toBe(true);
   });
 });

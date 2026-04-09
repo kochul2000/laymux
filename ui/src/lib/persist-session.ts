@@ -80,6 +80,7 @@ async function persistSessionCore(): Promise<void> {
       hidden: p.hidden,
       cursorShape: p.cursorShape,
       cursorBlink: p.cursorBlink,
+      stabilizeInteractiveCursor: p.stabilizeInteractiveCursor,
       padding: p.padding,
       scrollbackLines: p.scrollbackLines,
       opacity: p.opacity,

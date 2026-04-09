@@ -5,7 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
@@ -80,6 +80,20 @@ export function _resetWebglStagger(): void {
   webglInitCount = 0;
 }
 
+function hasDecModeParam(params: readonly (number | number[])[], mode: number): boolean {
+  return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
+}
+
+export function shouldEnableTerminalWebgl(): boolean {
+  return true;
+}
+
+function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
+  return (
+    activity?.type === "interactiveApp" && (activity.name === "Codex" || activity.name === "Claude")
+  );
+}
+
 interface TerminalViewProps {
   instanceId: string;
   paneId?: string;
@@ -113,11 +127,16 @@ export function TerminalView({
   lastClaudeSession,
   startupCommandOverride,
 }: TerminalViewProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const overlayCaretRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
+  const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
+  const stabilizeInteractiveCursorRef = useRef(true);
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
   onKeyboardActivityRef.current = onKeyboardActivity;
   isFocusedRef.current = isFocused;
@@ -129,6 +148,8 @@ export function TerminalView({
   cwdReceiveRef.current = cwdReceive;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
+  const syncOutputActiveRef = useRef(false);
+  const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
@@ -205,6 +226,144 @@ export function TerminalView({
     );
 
     terminalRef.current = terminal;
+
+    const setSyncOutputCursorVisibility = (active: boolean) => {
+      syncOutputActiveRef.current = active;
+      const host = wrapperRef.current;
+      if (host) {
+        host.classList.toggle("terminal-sync-output-active", active);
+      }
+    };
+    let overlayCaretFrame: number | undefined;
+    const updateOverlayCaret = () => {
+      const overlay = overlayCaretRef.current;
+      const host = wrapperRef.current;
+      const term = terminalRef.current;
+      if (!overlay || !host || !term) return;
+
+      if (
+        !openedRef.current ||
+        !isFocusedRef.current ||
+        !stabilizeInteractiveCursorRef.current ||
+        !isOverlayCaretActivity(activityRef.current)
+      ) {
+        overlay.style.opacity = "0";
+        return;
+      }
+
+      const screen = term.element?.querySelector(".xterm-screen") as HTMLElement | null;
+      const canvas = term.element?.querySelector(
+        ".xterm-screen canvas",
+      ) as HTMLCanvasElement | null;
+      const targetRect = canvas?.getBoundingClientRect() ?? screen?.getBoundingClientRect();
+      const hostRect = host.getBoundingClientRect();
+      if (!targetRect || term.cols <= 0 || term.rows <= 0) {
+        overlay.style.opacity = "0";
+        return;
+      }
+
+      const cellWidth = targetRect.width / term.cols;
+      const cellHeight = targetRect.height / term.rows;
+      if (
+        !Number.isFinite(cellWidth) ||
+        !Number.isFinite(cellHeight) ||
+        cellWidth <= 0 ||
+        cellHeight <= 0
+      ) {
+        overlay.style.opacity = "0";
+        return;
+      }
+
+      const cursorX = term.buffer.active.cursorX;
+      const cursorY = term.buffer.active.cursorY;
+      overlay.style.opacity = "1";
+      overlay.style.width = `${Math.max(2, Math.round(cellWidth * 0.1))}px`;
+      overlay.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
+      overlay.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + cursorX * cellWidth)}px, ${Math.round(
+        targetRect.top - hostRect.top + cursorY * cellHeight,
+      )}px)`;
+    };
+    const scheduleOverlayCaretUpdate = () => {
+      if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
+      overlayCaretFrame = requestAnimationFrame(() => {
+        overlayCaretFrame = undefined;
+        updateOverlayCaret();
+      });
+    };
+    overlayCaretUpdaterRef.current = scheduleOverlayCaretUpdate;
+    let syncOutputMonitorFrame: number | undefined;
+    const stopSyncOutputMonitor = () => {
+      if (syncOutputMonitorFrame !== undefined) {
+        cancelAnimationFrame(syncOutputMonitorFrame);
+        syncOutputMonitorFrame = undefined;
+      }
+    };
+    const monitorSyncOutputMode = () => {
+      const active = Boolean(
+        (terminal as Terminal & { modes?: { synchronizedOutputMode?: boolean } }).modes
+          ?.synchronizedOutputMode,
+      );
+      setSyncOutputCursorVisibility(active);
+      if (active && !cancelled) {
+        syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
+      } else {
+        syncOutputMonitorFrame = undefined;
+      }
+    };
+    const startSyncOutputMonitor = () => {
+      const active = Boolean(
+        (terminal as Terminal & { modes?: { synchronizedOutputMode?: boolean } }).modes
+          ?.synchronizedOutputMode,
+      );
+      if (!active) {
+        setSyncOutputCursorVisibility(false);
+        stopSyncOutputMonitor();
+        return;
+      }
+      if (syncOutputMonitorFrame === undefined) {
+        setSyncOutputCursorVisibility(true);
+        syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
+      }
+    };
+
+    const parser = (
+      terminal as Terminal & {
+        parser?: {
+          registerCsiHandler?: (
+            id: { prefix?: string; final: string },
+            callback: (params: readonly (number | number[])[]) => boolean | Promise<boolean>,
+          ) => { dispose(): void };
+        };
+      }
+    ).parser;
+
+    const syncOutputSetDisposable = parser?.registerCsiHandler?.(
+      { prefix: "?", final: "h" },
+      (params) => {
+        if (hasDecModeParam(params, 2026)) {
+          setSyncOutputCursorVisibility(true);
+        }
+        return false;
+      },
+    );
+    const syncOutputResetDisposable = parser?.registerCsiHandler?.(
+      { prefix: "?", final: "l" },
+      (params) => {
+        if (hasDecModeParam(params, 2026)) {
+          setSyncOutputCursorVisibility(false);
+        }
+        return false;
+      },
+    );
+    const cursorMoveDisposable = terminal.onCursorMove(() => {
+      scheduleOverlayCaretUpdate();
+    });
+    const writeParsedDisposable = terminal.onWriteParsed(() => {
+      scheduleOverlayCaretUpdate();
+    });
+    const renderDisposable = terminal.onRender(() => {
+      scheduleOverlayCaretUpdate();
+    });
 
     // Custom key event handler: IDE shortcuts + smart paste interception.
     // Returning false prevents xterm from consuming the event.
@@ -343,7 +502,9 @@ export function TerminalView({
     let recentOutputTail = "";
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
-      terminal.write(data);
+      terminal.write(data, () => {
+        startSyncOutputMonitor();
+      });
       const text = streamDecoder.decode(data, { stream: true });
       const combinedText = (recentOutputTail + text).slice(-1024);
       recentOutputTail = combinedText;
@@ -514,18 +675,20 @@ export function TerminalView({
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
         // Stagger creation to prevent simultaneous GPU context init crash.
-        const delay = webglInitCount * WEBGL_STAGGER_MS;
-        webglInitCount++;
-        webglTimer = setTimeout(() => {
-          if (cancelled) return;
-          try {
-            const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
-            terminal.loadAddon(webgl);
-            webgl.onContextLoss(() => webgl.dispose());
-          } catch {
-            // WebGL not available — fall back to default renderer
-          }
-        }, delay);
+        if (shouldUseWebgl) {
+          const delay = webglInitCount * WEBGL_STAGGER_MS;
+          webglInitCount++;
+          webglTimer = setTimeout(() => {
+            if (cancelled) return;
+            try {
+              const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
+              terminal.loadAddon(webgl);
+              webgl.onContextLoss(() => webgl.dispose());
+            } catch {
+              // WebGL not available — fall back to default renderer
+            }
+          }, delay);
+        }
         // Load SerializeAddon for session persistence
         const serializeAddon = new SerializeAddon();
         terminal.loadAddon(serializeAddon);
@@ -538,6 +701,7 @@ export function TerminalView({
 
         fitAddon.fit();
         openedRef.current = true;
+        scheduleOverlayCaretUpdate();
         if (isFocusedRef.current) {
           terminal.focus();
         }
@@ -602,6 +766,7 @@ export function TerminalView({
         }
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
+        scheduleOverlayCaretUpdate();
       }
     });
     if (containerRef.current) {
@@ -618,6 +783,15 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
+      overlayCaretUpdaterRef.current = null;
+      stopSyncOutputMonitor();
+      syncOutputSetDisposable?.dispose();
+      syncOutputResetDisposable?.dispose();
+      cursorMoveDisposable?.dispose();
+      writeParsedDisposable?.dispose();
+      renderDisposable?.dispose();
+      setSyncOutputCursorVisibility(false);
       if (paneId) {
         unregisterTerminalSerializer(paneId);
       }
@@ -657,6 +831,7 @@ export function TerminalView({
       } else {
         terminalRef.current?.blur();
       }
+      overlayCaretUpdaterRef.current?.();
     }
   }, [isFocused]);
 
@@ -669,6 +844,7 @@ export function TerminalView({
   const font = useSettingsStore((s) => s.resolveFont(profile));
   const codexSettings = useSettingsStore((s) => s.codex);
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
+  activityRef.current = activity;
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
     return (
@@ -681,13 +857,26 @@ export function TerminalView({
       prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? defaultProfileDefaults.cursorBlink
     );
   });
+  const stabilizeInteractiveCursor = useSettingsStore((s) => {
+    const prof = s.profiles?.find((p) => p.name === profile);
+    return (
+      prof?.stabilizeInteractiveCursor ??
+      s.profileDefaults?.stabilizeInteractiveCursor ??
+      defaultProfileDefaults.stabilizeInteractiveCursor
+    );
+  });
+  stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
   const effectiveCursorBlink =
     codexSettings.disableCursorBlink &&
     activity?.type === "interactiveApp" &&
     activity.name === "Codex"
       ? false
       : cursorBlink;
-
+  const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
+  const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
+  useEffect(() => {
+    overlayCaretUpdaterRef.current?.();
+  }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;
@@ -700,31 +889,56 @@ export function TerminalView({
       background: "#0C0C0C",
       foreground: "#F0F0F0",
       cursor: "#FFFFFF",
+      cursorAccent: "#0C0C0C",
       selectionBackground: "#232042",
     };
 
     const fontFamily = `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
     try {
-      term.options.theme = scheme
+      const resolvedTheme = scheme
         ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
         : defaultTheme;
+      term.options.theme = nativeCursorHidden
+        ? {
+            ...resolvedTheme,
+            cursor: "rgba(0, 0, 0, 0)",
+            cursorAccent: "rgba(0, 0, 0, 0)",
+          }
+        : resolvedTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
-      const cursorOptions = toXtermCursorOptions(cursorShape);
-      term.options.cursorBlink = effectiveCursorBlink;
-      term.options.cursorStyle = cursorOptions.cursorStyle;
-      if (cursorOptions.cursorWidth !== undefined) {
-        term.options.cursorWidth = cursorOptions.cursorWidth;
-      }
-      if (cursorOptions.cursorWidth === undefined) {
-        delete (term.options as { cursorWidth?: number }).cursorWidth;
+      if (nativeCursorHidden) {
+        // Keep xterm's internal cursor renderer on its least disruptive path.
+        // The visible caret is provided by the overlay, so block/invert rendering
+        // only creates repaint artifacts on the active text cell.
+        term.options.cursorBlink = false;
+        term.options.cursorStyle = "bar";
+        term.options.cursorWidth = 1;
+      } else {
+        const cursorOptions = toXtermCursorOptions(cursorShape);
+        term.options.cursorBlink = effectiveNativeCursorBlink;
+        term.options.cursorStyle = cursorOptions.cursorStyle;
+        if (cursorOptions.cursorWidth !== undefined) {
+          term.options.cursorWidth = cursorOptions.cursorWidth;
+        }
+        if (cursorOptions.cursorWidth === undefined) {
+          delete (term.options as { cursorWidth?: number }).cursorWidth;
+        }
       }
       fitAddonRef.current?.fit();
       term.refresh(0, term.rows - 1);
     } catch {
       /* xterm mock may not support options setter */
     }
-  }, [currentSchemeName, colorSchemes, font, cursorShape, effectiveCursorBlink]);
+  }, [
+    currentSchemeName,
+    colorSchemes,
+    font,
+    cursorShape,
+    effectiveNativeCursorBlink,
+    nativeCursorHidden,
+    stabilizeInteractiveCursor,
+  ]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
   const scrollbarStyleForEffect = useSettingsStore(
@@ -741,6 +955,13 @@ export function TerminalView({
       /* xterm mock may not support options setter */
     }
   }, [scrollbarStyleForEffect]);
+
+  const overlayCaretColor = (() => {
+    const scheme = currentSchemeName
+      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+      : undefined;
+    return scheme?.cursorColor || "#FFFFFF";
+  })();
 
   // Resolve terminal background for padding area
   const termBg = (() => {
@@ -764,14 +985,22 @@ export function TerminalView({
 
   return (
     <div
+      ref={wrapperRef}
       data-testid={`terminal-view-${instanceId}`}
-      className={`h-full w-full ${scrollbarClass}`}
+      className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
       style={{
+        ["--terminal-overlay-caret-color" as const]: overlayCaretColor,
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
       }}
     >
       <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={overlayCaretRef}
+        data-testid={`terminal-overlay-caret-${instanceId}`}
+        className="terminal-overlay-caret pointer-events-none absolute"
+        style={{ opacity: 0 }}
+      />
     </div>
   );
 }

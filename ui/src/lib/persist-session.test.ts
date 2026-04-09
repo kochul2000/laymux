@@ -159,6 +159,7 @@ describe("persistSession", () => {
         hidden: true,
         cursorShape: "filledBox",
         cursorBlink: false,
+        stabilizeInteractiveCursor: false,
         padding: { top: 4, right: 4, bottom: 4, left: 4 },
         scrollbackLines: 5000,
         opacity: 80,

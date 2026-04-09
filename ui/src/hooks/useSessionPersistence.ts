@@ -51,6 +51,8 @@ export function useSessionPersistence() {
               cursorShape: (p.cursorShape ??
                 "bar") as import("@/stores/settings-store").CursorShape,
               cursorBlink: p.cursorBlink ?? defaultProfileDefaults.cursorBlink,
+              stabilizeInteractiveCursor:
+                p.stabilizeInteractiveCursor ?? defaultProfileDefaults.stabilizeInteractiveCursor,
               padding: p.padding ?? { top: 8, right: 8, bottom: 8, left: 8 },
               scrollbackLines: p.scrollbackLines ?? 9001,
               opacity: p.opacity ?? 100,
