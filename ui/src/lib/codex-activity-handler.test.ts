@@ -57,7 +57,7 @@ describe("CodexActivityHandler", () => {
     expect(handler.computeStatusMessage(raw({ title: "⠋laymux" }))).toBe("laymux");
   });
 
-  it("falls back to activity message when title mode has no spinner title", () => {
+  it("keeps title mode strict when no spinner title is present", () => {
     expect(
       handler.computeStatusMessage(
         raw({
@@ -65,7 +65,7 @@ describe("CodexActivityHandler", () => {
           statusMessageMode: "title",
         }),
       ),
-    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+    ).toBeUndefined();
   });
 
   it("supports configurable title-bullet formatting", () => {

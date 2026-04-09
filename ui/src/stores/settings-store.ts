@@ -733,7 +733,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageDelimiter: " · ",
   },
   codex: {
-    statusMessageMode: "title" as const,
+    statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
   memo: { ...DEFAULT_MEMO },
@@ -952,7 +952,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     const codex = data.codex
       ? {
-          statusMessageMode: "title" as const,
+          statusMessageMode: "bullet-title" as const,
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),
         }

@@ -62,7 +62,7 @@ export class CodexActivityHandler extends ShellActivityHandler {
       case "bullet":
         return bullet;
       case "title":
-        return titleMsg || bullet || undefined;
+        return titleMsg;
       case "bullet-title":
         if (bullet && titleMsg) return `${bullet}${delimiter}${titleMsg}`;
         return bullet || titleMsg || undefined;

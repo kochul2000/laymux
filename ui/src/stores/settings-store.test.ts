@@ -419,7 +419,7 @@ describe("settings-store", () => {
 
   it("has default codex settings", () => {
     const { codex } = useSettingsStore.getState();
-    expect(codex.statusMessageMode).toBe("title");
+    expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
 
@@ -442,7 +442,7 @@ describe("settings-store", () => {
       codex: {} as any,
     });
     const { codex } = useSettingsStore.getState();
-    expect(codex.statusMessageMode).toBe("title");
+    expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
 
