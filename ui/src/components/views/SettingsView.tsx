@@ -10,7 +10,6 @@ import {
   type Profile,
   type ProfileDefaults,
   type CursorShape,
-  type SupportedCursorShape,
   type BellStyle,
   type CloseOnExit,
   type AntialiasingMode,
@@ -19,6 +18,7 @@ import {
 } from "@/stores/settings-store";
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
+import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
 
@@ -344,12 +344,7 @@ function AppearanceFields({
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
-  const supportedCursorShape: SupportedCursorShape =
-    data.cursorShape === "underscore" ||
-    data.cursorShape === "filledBox" ||
-    data.cursorShape === "bar"
-      ? data.cursorShape
-      : "filledBox";
+  const supportedCursorShape = toSupportedCursorShape(data.cursorShape);
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
   const resetBtn = (key: keyof ProfileDefaults) =>
@@ -401,9 +396,7 @@ function AppearanceFields({
               <select
                 data-testid="cursor-shape-select"
                 value={supportedCursorShape}
-                onChange={(e) =>
-                  onChange({ cursorShape: e.target.value as SupportedCursorShape as CursorShape })
-                }
+                onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
                 className={inputCls}
                 style={inputStyle}
               >

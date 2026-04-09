@@ -6,11 +6,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
-import {
-  useSettingsStore,
-  type CursorShape,
-  type SupportedCursorShape,
-} from "@/stores/settings-store";
+import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
+import { toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
   writeToTerminal,
@@ -56,32 +53,6 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 const LARGE_PASTE_THRESHOLD = 5120;
 
 const textEncoder = new TextEncoder();
-
-function toSupportedCursorShape(shape: CursorShape): SupportedCursorShape {
-  switch (shape) {
-    case "bar":
-    case "underscore":
-    case "filledBox":
-      return shape;
-    default:
-      return "filledBox";
-  }
-}
-
-function toXtermCursorOptions(shape: CursorShape): {
-  cursorStyle: "bar" | "underline" | "block";
-  cursorWidth?: number;
-} {
-  switch (toSupportedCursorShape(shape)) {
-    case "bar":
-      return { cursorStyle: "bar", cursorWidth: 1 };
-    case "underscore":
-      return { cursorStyle: "underline" };
-    case "filledBox":
-    default:
-      return { cursorStyle: "block" };
-  }
-}
 
 /**
  * Check if a large paste should be blocked. Returns true if the user cancelled.
@@ -192,9 +163,13 @@ export function TerminalView({
 
     const resolvedFont = settingsState.resolveFont(profile);
     const resolvedCursorShape =
-      profileConfig?.cursorShape || settingsState.profileDefaults?.cursorShape || "bar";
+      profileConfig?.cursorShape ||
+      settingsState.profileDefaults?.cursorShape ||
+      defaultProfileDefaults.cursorShape;
     const resolvedCursorBlink =
-      profileConfig?.cursorBlink ?? settingsState.profileDefaults?.cursorBlink ?? true;
+      profileConfig?.cursorBlink ??
+      settingsState.profileDefaults?.cursorBlink ??
+      defaultProfileDefaults.cursorBlink;
     const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
     const terminal = new Terminal({
       cursorBlink: resolvedCursorBlink,
@@ -696,11 +671,15 @@ export function TerminalView({
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
-    return prof?.cursorShape || s.profileDefaults?.cursorShape || "bar";
+    return (
+      prof?.cursorShape || s.profileDefaults?.cursorShape || defaultProfileDefaults.cursorShape
+    );
   });
   const cursorBlink = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
-    return prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? true;
+    return (
+      prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? defaultProfileDefaults.cursorBlink
+    );
   });
   const effectiveCursorBlink =
     codexSettings.disableCursorBlink &&
@@ -732,9 +711,17 @@ export function TerminalView({
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
       const cursorOptions = toXtermCursorOptions(cursorShape);
-      term.options.cursorBlink = effectiveCursorBlink;
-      term.options.cursorStyle = cursorOptions.cursorStyle;
-      term.options.cursorWidth = cursorOptions.cursorWidth;
+      term.options = {
+        ...term.options,
+        cursorBlink: effectiveCursorBlink,
+        cursorStyle: cursorOptions.cursorStyle,
+        ...(cursorOptions.cursorWidth !== undefined
+          ? { cursorWidth: cursorOptions.cursorWidth }
+          : {}),
+      };
+      if (cursorOptions.cursorWidth === undefined) {
+        delete (term.options as { cursorWidth?: number }).cursorWidth;
+      }
     } catch {
       /* xterm mock may not support options setter */
     }

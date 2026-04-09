@@ -167,6 +167,23 @@ describe("TerminalView", () => {
     expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
+  it("clears cursorWidth when switching away from bar cursor", async () => {
+    render(<TerminalView instanceId="t-cursor-width" profile="PowerShell" syncGroup="" />);
+
+    expect(createdTerminals).toHaveLength(1);
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+
+    act(() => {
+      useSettingsStore.getState().updateProfile(0, { cursorShape: "underscore" });
+    });
+
+    await vi.waitFor(() => {
+      expect(createdTerminals[0].options.cursorStyle).toBe("underline");
+      expect("cursorWidth" in createdTerminals[0].options).toBe(false);
+    });
+  });
+
   it("disables cursor blink while Codex is active when codex override is enabled", async () => {
     render(<TerminalView instanceId="t-codex-blink" profile="PowerShell" syncGroup="" />);
 

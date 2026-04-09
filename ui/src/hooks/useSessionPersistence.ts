@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   useSettingsStore,
   makeDefaultColorScheme,
+  defaultProfileDefaults,
   type WorkspaceSortOrder,
 } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
@@ -49,7 +50,7 @@ export function useSessionPersistence() {
               hidden: p.hidden ?? false,
               cursorShape: (p.cursorShape ??
                 "bar") as import("@/stores/settings-store").CursorShape,
-              cursorBlink: p.cursorBlink ?? true,
+              cursorBlink: p.cursorBlink ?? defaultProfileDefaults.cursorBlink,
               padding: p.padding ?? { top: 8, right: 8, bottom: 8, left: 8 },
               scrollbackLines: p.scrollbackLines ?? 9001,
               opacity: p.opacity ?? 100,
