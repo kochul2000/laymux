@@ -240,6 +240,32 @@ describe("TerminalView", () => {
     ).toBeUndefined();
   });
 
+  it("detects Codex approval prompts split across output chunks", async () => {
+    render(<TerminalView instanceId="t-codex-split" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-split", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("Would you like to run the fol"));
+      onOutput?.(new TextEncoder().encode("lowing command?\r\nPress enter to con"));
+      onOutput?.(new TextEncoder().encode("firm or esc to cancel\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.activityMessage,
+    ).toBe(CODEX_INPUT_PENDING_MARKER);
+  });
+
   it("registers onData handler to write to terminal", () => {
     render(<TerminalView instanceId="t5" profile="PowerShell" syncGroup="" />);
 

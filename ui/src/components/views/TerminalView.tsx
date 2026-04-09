@@ -325,10 +325,13 @@ export function TerminalView({
     let cancelled = false;
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
+    let recentOutputTail = "";
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
       terminal.write(data);
       const text = streamDecoder.decode(data, { stream: true });
+      const combinedText = (recentOutputTail + text).slice(-1024);
+      recentOutputTail = combinedText;
 
       // OSC parsing and hook dispatch are now handled entirely in the Rust
       // PTY callback (iter_osc_events + match_hooks + dispatch_osc_action).
@@ -340,7 +343,7 @@ export function TerminalView({
         idleDetector.recordOutput();
       }
 
-      const outputActivity = detectActivityFromOutput(text);
+      const outputActivity = detectActivityFromOutput(combinedText);
       if (outputActivity) {
         const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
         if (
@@ -353,13 +356,17 @@ export function TerminalView({
 
       const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
-        if (detectCodexInputPendingFromOutput(text)) {
-          useTerminalStore.getState().updateInstanceInfo(instanceId, {
-            activityMessage: CODEX_INPUT_PENDING_MARKER,
-          });
-        } else if (current.activityMessage === CODEX_INPUT_PENDING_MARKER && text.trim()) {
+        if (
+          current.activityMessage === CODEX_INPUT_PENDING_MARKER &&
+          text.trim() &&
+          !detectCodexInputPendingFromOutput(text)
+        ) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: undefined,
+          });
+        } else if (detectCodexInputPendingFromOutput(combinedText)) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: CODEX_INPUT_PENDING_MARKER,
           });
         }
       }

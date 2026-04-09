@@ -55,8 +55,15 @@ export function detectCodexInputPendingFromOutput(text: string): boolean {
   return (
     text.includes("Would you like to run the following command?") ||
     text.includes("Press enter to confirm or esc to cancel") ||
+    text.includes("command?") ||
+    text.includes("confirm or esc to cancel") ||
+    text.includes("esc to cancel") ||
+    text.includes("to cancel") ||
+    text.includes("Reason:") ||
+    text.includes("Would you like to run") ||
     text.includes("Yes, proceed") ||
-    text.includes("No, and tell Codex what to do differently")
+    text.includes("No, and tell Codex what to do differently") ||
+    text.includes("tell Codex what to do differently")
   );
 }
 
