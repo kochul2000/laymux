@@ -16,7 +16,7 @@ function isInputPending(activityMessage: string | undefined): boolean {
   return activityMessage === CODEX_INPUT_PENDING_MARKER;
 }
 
-function extractTitleMessage(title: string | undefined): string | undefined {
+export function extractCodexTitleMessage(title: string | undefined): string | undefined {
   if (!startsWithBrailleSpinner(title) || !title) return undefined;
   const stripped = title.slice(1).trim();
   return stripped || undefined;
@@ -50,9 +50,13 @@ export class CodexActivityHandler extends ShellActivityHandler {
       return undefined;
     }
     const bullet = raw.activityMessage || undefined;
-    const titleMsg = extractTitleMessage(raw.title);
+    const titleMsg = extractCodexTitleMessage(raw.title);
     const mode = raw.statusMessageMode ?? "title";
     const delimiter = raw.statusMessageDelimiter ?? DEFAULT_STATUS_MESSAGE_DELIMITER;
+
+    if (bullet && titleMsg && bullet === titleMsg) {
+      return bullet;
+    }
 
     switch (mode) {
       case "bullet":

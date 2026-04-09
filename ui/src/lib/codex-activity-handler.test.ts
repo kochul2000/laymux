@@ -69,4 +69,16 @@ describe("CodexActivityHandler", () => {
       ),
     ).toBe("laymux | Planning");
   });
+
+  it("deduplicates identical bullet and title messages", () => {
+    expect(
+      handler.computeStatusMessage(
+        raw({
+          title: "⠋ laymux",
+          activityMessage: "laymux",
+          statusMessageMode: "bullet-title",
+        }),
+      ),
+    ).toBe("laymux");
+  });
 });

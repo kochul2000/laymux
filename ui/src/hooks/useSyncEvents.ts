@@ -19,6 +19,7 @@ import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
 import { CODEX_INPUT_PENDING_MARKER, detectActivityFromCommand } from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
+import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
@@ -186,6 +187,13 @@ export function useSyncEvents() {
           !handler.shouldPreserveActivityOnTitleReset?.(raw)
         ) {
           updates.activity = { type: "shell" };
+        }
+
+        const codexActivity =
+          (detectedActivity ?? currentActivity)?.type === "interactiveApp" &&
+          (detectedActivity ?? currentActivity).name === "Codex";
+        if (codexActivity && instance?.activityMessage !== CODEX_INPUT_PENDING_MARKER) {
+          updates.activityMessage = extractCodexTitleMessage(data.title);
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);

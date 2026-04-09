@@ -518,6 +518,30 @@ describe("useSyncEvents", () => {
     expect(instance?.outputActive).toBe(true);
   });
 
+  it("stores Codex spinner title text as activityMessage", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "⠋ planning changes",
+      interactiveApp: "Codex",
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activityMessage).toBe("planning changes");
+  });
+
   it("returns Codex terminal to shell on exitCode", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
