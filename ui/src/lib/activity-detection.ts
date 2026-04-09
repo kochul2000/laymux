@@ -80,7 +80,12 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
 
 /** Detect interactive app from raw output text when command/title signals are unavailable. */
 export function detectActivityFromOutput(text: string): TerminalActivityInfo | undefined {
-  if (text.includes("OpenAI Codex")) {
+  const lines = normalizeOutputLines(text);
+  const hasCodexBanner = lines.some((line) => /^>[-\s]*OpenAI Codex \(v[^\s)]+\)$/i.test(line));
+  const hasCodexSessionMetadata = lines.some(
+    (line) => /^model:\s+/i.test(line) || /^directory:\s+/i.test(line),
+  );
+  if (hasCodexBanner && hasCodexSessionMetadata) {
     return { type: "interactiveApp", name: "Codex" };
   }
   return undefined;

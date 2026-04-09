@@ -167,14 +167,21 @@ describe("detectActivityFromCommand", () => {
 
 describe("detectActivityFromOutput", () => {
   it("detects Codex banner text", () => {
-    expect(detectActivityFromOutput(">- OpenAI Codex (v0.118.0)\r\n")).toEqual({
-      type: "interactiveApp",
-      name: "Codex",
-    });
+    expect(
+      detectActivityFromOutput(
+        ">- OpenAI Codex (v0.118.0)\r\nmodel: gpt-5.4 medium\r\ndirectory: C:\\Users\r\n",
+      ),
+    ).toEqual({ type: "interactiveApp", name: "Codex" });
   });
 
   it("ignores unrelated output", () => {
     expect(detectActivityFromOutput("PS C:\\Users\\kochul> dir")).toBeUndefined();
+  });
+
+  it("does not misclassify plain output mentions of OpenAI Codex", () => {
+    expect(
+      detectActivityFromOutput("README.md: OpenAI Codex is available in this repository\r\n"),
+    ).toBeUndefined();
   });
 });
 

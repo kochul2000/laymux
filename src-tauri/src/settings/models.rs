@@ -401,6 +401,47 @@ fn default_session_max_age_hours() -> u64 {
     24
 }
 
+/// Status message display mode for Codex in WorkspaceSelectorView.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[derive(Default)]
+pub enum CodexStatusMessageMode {
+    /// Show only bullet/assistant message.
+    Bullet,
+    /// Show only title/spinner text.
+    Title,
+    /// Show title first, then bullet.
+    TitleBullet,
+    /// Show bullet first, then title (default).
+    #[default]
+    BulletTitle,
+}
+
+/// Codex integration settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSettings {
+    /// Status message display mode (default: "bullet-title").
+    #[serde(default)]
+    pub status_message_mode: CodexStatusMessageMode,
+    /// Delimiter between bullet and title when both are shown (default: " · ").
+    #[serde(default = "default_codex_status_message_delimiter")]
+    pub status_message_delimiter: String,
+}
+
+impl Default for CodexSettings {
+    fn default() -> Self {
+        Self {
+            status_message_mode: CodexStatusMessageMode::default(),
+            status_message_delimiter: default_codex_status_message_delimiter(),
+        }
+    }
+}
+
+fn default_codex_status_message_delimiter() -> String {
+    " · ".to_string()
+}
+
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -787,6 +828,8 @@ pub struct Settings {
     #[serde(default)]
     pub claude: ClaudeSettings,
     #[serde(default)]
+    pub codex: CodexSettings,
+    #[serde(default)]
     pub memo: MemoSettings,
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
@@ -876,6 +919,7 @@ impl Default for Settings {
             terminal: TerminalSettings::default(),
             convenience: ConvenienceSettings::default(),
             claude: ClaudeSettings::default(),
+            codex: CodexSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),

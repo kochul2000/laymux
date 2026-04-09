@@ -201,6 +201,26 @@ mod tests {
     }
 
     #[test]
+    fn codex_settings_round_trip() {
+        let json = r#"{
+          "codex": {
+            "statusMessageMode": "title-bullet",
+            "statusMessageDelimiter": " | "
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            settings.codex.status_message_mode,
+            CodexStatusMessageMode::TitleBullet
+        );
+        assert_eq!(settings.codex.status_message_delimiter, " | ");
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"codex\""));
+        assert!(serialized.contains("\"statusMessageMode\":\"title-bullet\""));
+    }
+
+    #[test]
     fn migrate_cmd_profile_to_powershell_in_workspace_panes() {
         let mut settings = Settings::default();
         settings.workspaces = vec![Workspace {
