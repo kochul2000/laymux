@@ -474,6 +474,72 @@ describe("useSyncEvents", () => {
     expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
   });
 
+  it("detects Codex from command text without calling Claude marker", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", command: "codex" });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(mockMarkClaudeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("preserves Codex activity when title no longer contains app name", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "⠋ laymux",
+      interactiveApp: null,
+      notifyGateArmed: false,
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(instance?.outputActive).toBe(true);
+  });
+
+  it("returns Codex terminal to shell on exitCode", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+      lastCommand: "codex",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    callback({ terminalId: "t1", exitCode: 0 });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "shell" });
+    expect(instance?.lastExitCode).toBe(0);
+  });
+
   it("clears outputActive immediately on active:false event (app-agnostic)", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",

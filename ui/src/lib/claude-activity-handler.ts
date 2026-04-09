@@ -21,6 +21,10 @@ function extractTitleMessage(title: string | undefined): string | undefined {
 }
 
 export class ClaudeActivityHandler extends ShellActivityHandler {
+  shouldPreserveActivityOnExitCode(): boolean {
+    return true;
+  }
+
   computeStatus(raw: RawTerminalState): StatusResult {
     if (raw.outputActive || raw.exitCode !== undefined) {
       return super.computeStatus(raw);

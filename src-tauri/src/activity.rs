@@ -19,6 +19,8 @@ use crate::terminal::{TerminalActivity, TerminalStateInfo};
 /// (e.g., "vim" should not match "environment").
 pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
     ("Claude Code", "Claude"),
+    ("OpenAI Codex", "Codex"),
+    ("codex", "Codex"),
     ("nvim", "neovim"),
     ("vim", "vim"),
     ("vi", "vim"),
@@ -323,6 +325,12 @@ mod tests {
     }
 
     #[test]
+    fn detect_interactive_app_codex() {
+        let data = b"\x1b]0;OpenAI Codex\x07";
+        assert_eq!(detect_interactive_app(data), Some("Codex".to_string()));
+    }
+
+    #[test]
     fn detect_interactive_app_vim() {
         let data = b"\x1b]2;vim - main.rs\x07";
         assert_eq!(detect_interactive_app(data), Some("vim".to_string()));
@@ -407,6 +415,18 @@ mod tests {
     }
 
     #[test]
+    fn title_codex_detected() {
+        assert_eq!(
+            detect_interactive_app_from_title("OpenAI Codex"),
+            Some("Codex".to_string())
+        );
+        assert_eq!(
+            detect_interactive_app_from_title("codex"),
+            Some("Codex".to_string())
+        );
+    }
+
+    #[test]
     fn title_claude_with_prefix() {
         // ✳ Claude Code (idle indicator)
         assert_eq!(
@@ -445,11 +465,7 @@ mod tests {
         assert!(is_claude_terminal_from_buffer(&state, tid, None));
 
         // Remove (simulates Claude exit detection)
-        state
-            .known_claude_terminals
-            .lock()
-            .unwrap()
-            .remove(tid);
+        state.known_claude_terminals.lock().unwrap().remove(tid);
         assert!(!is_claude_terminal_from_buffer(&state, tid, None));
     }
 
@@ -486,7 +502,7 @@ mod tests {
     #[test]
     fn burst_window_expired_resets_count() {
         let detector = BurstDetector::new(0, 3, 0); // 0ms window → always expired
-        // Each hit resets the window, so count never accumulates past 1
+                                                    // Each hit resets the window, so count never accumulates past 1
         assert!(!detector.record_hit());
         assert!(!detector.record_hit());
         assert!(!detector.record_hit());

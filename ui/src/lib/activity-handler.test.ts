@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { getHandler } from "./activity-handler";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
+import { CodexActivityHandler } from "./codex-activity-handler";
 
 describe("getHandler", () => {
   it("returns ShellActivityHandler for undefined activity", () => {
@@ -25,6 +26,12 @@ describe("getHandler", () => {
   it("returns ShellActivityHandler for unknown app name", () => {
     expect(getHandler({ type: "interactiveApp", name: "vim" })).toBeInstanceOf(
       ShellActivityHandler,
+    );
+  });
+
+  it("returns CodexActivityHandler for Codex interactiveApp", () => {
+    expect(getHandler({ type: "interactiveApp", name: "Codex" })).toBeInstanceOf(
+      CodexActivityHandler,
     );
   });
 });

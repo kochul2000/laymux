@@ -1,8 +1,11 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import {
+  detectRegisteredActivityFromCommand,
+  detectRegisteredActivityFromTitle,
+} from "./activity-handler";
 
-/** Known interactive apps: [titlePattern, displayName, commandName?] */
-const INTERACTIVE_APPS: { title: string; command: string; name: string }[] = [
-  { title: "Claude Code", command: "claude", name: "Claude" },
+/** Known interactive apps without dedicated provider handlers. */
+const STATIC_INTERACTIVE_APPS: { title: string; command: string; name: string }[] = [
   { title: "nvim", command: "nvim", name: "neovim" },
   { title: "vim", command: "vim", name: "vim" },
   { title: "vi", command: "vi", name: "vim" },
@@ -18,11 +21,14 @@ const INTERACTIVE_APPS: { title: string; command: string; name: string }[] = [
 
 /** Detect interactive app from terminal title (OSC 0/2). */
 export function detectActivityFromTitle(title: string): TerminalActivityInfo | undefined {
+  const registered = detectRegisteredActivityFromTitle(title);
+  if (registered) return registered;
+
   // Skip path-like titles (e.g. "//wsl.localhost/.../python_projects")
   // These can false-positive on app names embedded in directory names
   if (title.includes("/") || title.includes("\\")) return undefined;
 
-  for (const app of INTERACTIVE_APPS) {
+  for (const app of STATIC_INTERACTIVE_APPS) {
     // Use word boundary matching to avoid false positives
     // e.g. "vi" should not match "Review", "vim" should not match "environment"
     const pattern = new RegExp(
@@ -37,6 +43,9 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
 
 /** Detect interactive app from command text (OSC 133 E). */
 export function detectActivityFromCommand(command: string): TerminalActivityInfo | undefined {
+  const registered = detectRegisteredActivityFromCommand(command);
+  if (registered) return registered;
+
   const trimmed = command.trim();
   if (!trimmed) return undefined;
 
@@ -45,10 +54,10 @@ export function detectActivityFromCommand(command: string): TerminalActivityInfo
   if (first === "sudo" && trimmed.split(/\s+/).length > 1) {
     first = trimmed.split(/\s+/)[1];
   }
-  // Strip path prefix: /usr/bin/vim → vim
+  // Strip path prefix: /usr/bin/vim -> vim
   const basename = first.split("/").pop() ?? first;
 
-  for (const app of INTERACTIVE_APPS) {
+  for (const app of STATIC_INTERACTIVE_APPS) {
     if (basename === app.command) {
       return { type: "interactiveApp", name: app.name };
     }

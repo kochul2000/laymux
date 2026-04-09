@@ -20,6 +20,17 @@ describe("detectActivityFromTitle", () => {
     });
   });
 
+  it("detects Codex title variants", () => {
+    expect(detectActivityFromTitle("OpenAI Codex")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromTitle("codex")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+  });
+
   it("detects nvim as neovim", () => {
     expect(detectActivityFromTitle("nvim")).toEqual({ type: "interactiveApp", name: "neovim" });
   });
@@ -125,6 +136,14 @@ describe("detectActivityFromCommand", () => {
 
   it("detects claude as Claude", () => {
     expect(detectActivityFromCommand("claude")).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("detects codex as Codex", () => {
+    expect(detectActivityFromCommand("codex")).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(detectActivityFromCommand("sudo codex --full-auto")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
   });
 
   it("returns undefined for empty command", () => {

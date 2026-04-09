@@ -689,6 +689,13 @@ describe("computeCommandStatus", () => {
     expect(s.text).toBeUndefined();
   });
 
+  it("returns running status for Codex braille spinner title", () => {
+    const codex = { type: "interactiveApp" as const, name: "Codex" };
+    const s = computeCommandStatus(undefined, false, undefined, codex, "⠋ laymux");
+    expect(s.icon).toBe("⏳");
+    expect(s.color).toBe("var(--yellow)");
+  });
+
   // ── Claude state transition scenarios ──
   // These test the 4-state rule across all Claude lifecycle phases.
   // computeCommandStatus itself is app-agnostic; these scenarios verify that

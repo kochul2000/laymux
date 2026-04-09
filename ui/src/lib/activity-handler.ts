@@ -1,6 +1,7 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
+import { CodexActivityHandler } from "./codex-activity-handler";
 
 export interface StatusResult {
   icon: string;
@@ -26,20 +27,89 @@ export interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;
   computeStatusMessage(raw: RawTerminalState): string | undefined;
   computeNotification(raw: RawTerminalState): { message: string; level: string } | null;
+  shouldPreserveActivityOnTitleReset?(raw: RawTerminalState): boolean;
+  shouldPreserveActivityOnExitCode?(raw: RawTerminalState): boolean;
+  isActiveTitle?(title: string | undefined): boolean;
 }
+
+type InteractiveAppRegistration = {
+  handler: ActivityHandler;
+  commands?: string[];
+  titlePatterns?: string[];
+};
 
 const defaultHandler = new ShellActivityHandler();
-const interactiveAppHandlers = new Map<string, ActivityHandler>();
+const interactiveApps = new Map<string, InteractiveAppRegistration>();
 
-export function registerActivityHandler(activityName: string, handler: ActivityHandler): void {
-  interactiveAppHandlers.set(activityName, handler);
+function registerInteractiveApp(
+  activityName: string,
+  registration: ActivityHandler | InteractiveAppRegistration,
+): void {
+  interactiveApps.set(
+    activityName,
+    "computeStatus" in registration ? { handler: registration } : registration,
+  );
 }
 
-registerActivityHandler("Claude", new ClaudeActivityHandler());
+registerInteractiveApp("Claude", {
+  handler: new ClaudeActivityHandler(),
+  commands: ["claude"],
+  titlePatterns: ["Claude Code"],
+});
+registerInteractiveApp("Codex", {
+  handler: new CodexActivityHandler(),
+  commands: ["codex"],
+  titlePatterns: ["OpenAI Codex", "codex"],
+});
 
 export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {
   if (activity?.type === "interactiveApp" && activity.name) {
-    return interactiveAppHandlers.get(activity.name) ?? defaultHandler;
+    return interactiveApps.get(activity.name)?.handler ?? defaultHandler;
   }
   return defaultHandler;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchTitlePattern(title: string, pattern: string): boolean {
+  if (title === pattern) return true;
+  return new RegExp(`(?:^|[\\s\\-:])${escapeRegExp(pattern)}(?:$|[\\s\\-:])`).test(title);
+}
+
+function getBasename(command: string): string | undefined {
+  const trimmed = command.trim();
+  if (!trimmed) return undefined;
+
+  let first = trimmed.split(/\s+/)[0];
+  if (first === "sudo" && trimmed.split(/\s+/).length > 1) {
+    first = trimmed.split(/\s+/)[1];
+  }
+  return first.split("/").pop() ?? first;
+}
+
+export function detectRegisteredActivityFromTitle(title: string): TerminalActivityInfo | undefined {
+  if (!title || title.includes("/") || title.includes("\\")) return undefined;
+
+  for (const [name, registration] of interactiveApps) {
+    if (registration.titlePatterns?.some((pattern) => matchTitlePattern(title, pattern))) {
+      return { type: "interactiveApp", name };
+    }
+  }
+  return undefined;
+}
+
+export function detectRegisteredActivityFromCommand(
+  command: string,
+): TerminalActivityInfo | undefined {
+  const basename = getBasename(command);
+  if (!basename) return undefined;
+
+  for (const [name, registration] of interactiveApps) {
+    if (registration.commands?.includes(basename)) {
+      return { type: "interactiveApp", name };
+    }
+  }
+  return undefined;
 }

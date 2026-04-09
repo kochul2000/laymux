@@ -19,6 +19,10 @@ function raw(overrides: Partial<RawTerminalState> = {}): RawTerminalState {
 describe("ClaudeActivityHandler", () => {
   const handler = new ClaudeActivityHandler();
 
+  it("preserves activity on exitCode for Claude sub-commands", () => {
+    expect(handler.shouldPreserveActivityOnExitCode(raw({ exitCode: 0 }))).toBe(true);
+  });
+
   describe("computeStatus", () => {
     it("returns pending while output is active", () => {
       expect(handler.computeStatus(raw({ outputActive: true }))).toEqual({
