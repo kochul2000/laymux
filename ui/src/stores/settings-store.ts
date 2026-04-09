@@ -114,6 +114,9 @@ export type {
   TerminalLocation,
 } from "../lib/sync-cwd-config";
 
+/** Full Windows Terminal-compatible cursor shape union persisted in settings.json.
+ * The xterm.js UI only renders a narrower subset via SupportedCursorShape.
+ */
 export type CursorShape =
   | "bar"
   | "underscore"
@@ -477,6 +480,34 @@ function cloneInheritedValue<T>(value: T): T {
   return value;
 }
 
+function inheritedValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((value, index) => inheritedValuesEqual(value, b[index]));
+  }
+
+  if (typeof a === "object" && typeof b === "object") {
+    const aEntries = Object.entries(a as Record<string, unknown>).sort(([ak], [bk]) =>
+      ak.localeCompare(bk),
+    );
+    const bEntries = Object.entries(b as Record<string, unknown>).sort(([ak], [bk]) =>
+      ak.localeCompare(bk),
+    );
+
+    if (aEntries.length !== bEntries.length) return false;
+    return aEntries.every(
+      ([aKey, aValue], index) =>
+        aKey === bEntries[index][0] && inheritedValuesEqual(aValue, bEntries[index][1]),
+    );
+  }
+
+  return false;
+}
+
 /** Windows Terminal built-in color schemes (identical format to settings.json). */
 export const builtinColorSchemes: ColorScheme[] = [
   {
@@ -816,7 +847,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         for (const key of changedKeys) {
           const prevValue = prevDefaults[key];
           const profileValue = profile[key as keyof Profile];
-          if (JSON.stringify(profileValue) !== JSON.stringify(prevValue)) continue;
+          if (!inheritedValuesEqual(profileValue, prevValue)) continue;
 
           if (nextProfile === profile) nextProfile = { ...profile };
           (nextProfile as unknown as Record<string, unknown>)[key] = cloneInheritedValue(

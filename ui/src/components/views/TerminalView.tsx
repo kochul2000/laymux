@@ -711,14 +711,11 @@ export function TerminalView({
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
       const cursorOptions = toXtermCursorOptions(cursorShape);
-      term.options = {
-        ...term.options,
-        cursorBlink: effectiveCursorBlink,
-        cursorStyle: cursorOptions.cursorStyle,
-        ...(cursorOptions.cursorWidth !== undefined
-          ? { cursorWidth: cursorOptions.cursorWidth }
-          : {}),
-      };
+      term.options.cursorBlink = effectiveCursorBlink;
+      term.options.cursorStyle = cursorOptions.cursorStyle;
+      if (cursorOptions.cursorWidth !== undefined) {
+        term.options.cursorWidth = cursorOptions.cursorWidth;
+      }
       if (cursorOptions.cursorWidth === undefined) {
         delete (term.options as { cursorWidth?: number }).cursorWidth;
       }

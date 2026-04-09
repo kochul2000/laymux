@@ -54,6 +54,19 @@ describe("settings-store", () => {
     expect(profile.cursorBlink).toBe(false);
   });
 
+  it("propagates inherited object defaults even when key order differs", () => {
+    useSettingsStore.getState().updateProfile(0, {
+      padding: { left: 8, bottom: 8, right: 8, top: 8 },
+    });
+
+    useSettingsStore.getState().setProfileDefaults({
+      padding: { top: 10, right: 12, bottom: 14, left: 16 },
+    });
+
+    const profile = useSettingsStore.getState().profiles[0];
+    expect(profile.padding).toEqual({ top: 10, right: 12, bottom: 14, left: 16 });
+  });
+
   it("updates default profile", () => {
     useSettingsStore.getState().setDefaultProfile("WSL");
     expect(useSettingsStore.getState().defaultProfile).toBe("WSL");
