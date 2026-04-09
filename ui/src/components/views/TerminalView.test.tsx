@@ -303,11 +303,17 @@ describe("TerminalView", () => {
     expect(onOutput).toBeTypeOf("function");
 
     act(() => {
-      onOutput?.(new TextEncoder().encode(">- OpenAI Codex (v0.118.0)\r\n"));
+      onOutput?.(
+        new TextEncoder().encode(
+          ">- OpenAI Codex (v0.118.0)\r\nmodel: gpt-5.4 medium\r\ndirectory: C:\\Users\\kochul\r\n",
+        ),
+      );
     });
 
-    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
-    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    await vi.waitFor(() => {
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
+      expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    });
   });
 
   it("marks Codex approval prompts as input pending", async () => {
