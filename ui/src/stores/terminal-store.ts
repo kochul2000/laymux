@@ -25,8 +25,8 @@ export interface TerminalInstance {
   activity?: TerminalActivityInfo;
   /** True if terminal is actively producing output. */
   outputActive?: boolean;
-  /** Latest white-● status message from Claude Code output. */
-  claudeMessage?: string;
+  /** Latest provider-specific activity status message. */
+  activityMessage?: string;
 }
 
 interface TerminalStoreState {
@@ -56,7 +56,7 @@ interface TerminalStoreState {
         | "activity"
         | "outputActive"
         | "syncGroup"
-        | "claudeMessage"
+        | "activityMessage"
       >
     >,
   ) => void;

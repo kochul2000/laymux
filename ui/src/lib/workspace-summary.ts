@@ -1,15 +1,18 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
-import type { ClaudeStatusMessageMode } from "@/lib/tauri-api";
-import { getHandler, type RawTerminalState } from "./activity-handler";
+import {
+  getHandler,
+  type ActivityStatusMessageMode,
+  type RawTerminalState,
+} from "./activity-handler";
 
 export interface LastCommandInfo {
   command: string;
   exitCode: number | undefined; // undefined = still running
   timestamp: number;
   outputActive?: boolean; // true = terminal still producing output (e.g. subprocess running)
-  claudeMessage?: string; // latest white-● status message from Claude Code output
+  activityMessage?: string; // latest provider-specific activity status message
   activity?: TerminalActivityInfo;
   title?: string; // terminal title (used for Claude idle detection via ✳ prefix)
 }
@@ -27,7 +30,7 @@ export interface TerminalSummaryInfo {
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
   hasUnreadNotification: boolean;
-  claudeMessage: string | undefined;
+  activityMessage: string | undefined;
 }
 
 export interface WorkspaceSummary {
@@ -79,7 +82,7 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
     exitCode: t.lastExitCode,
     timestamp: t.lastCommandAt ?? t.lastActivityAt,
     outputActive: t.outputActive,
-    claudeMessage: t.claudeMessage,
+    activityMessage: t.activityMessage,
     activity: t.activity,
     title: t.title,
   };
@@ -87,8 +90,8 @@ export function getLastCommandForWorkspace(terminals: TerminalInstance[]): LastC
 
 /** Max display length for shell commands in workspace summary. */
 export const CMD_TRUNCATE_LEN = 30;
-/** Max display length for Claude status messages (longer than shell commands). */
-export const CLAUDE_MSG_TRUNCATE_LEN = 50;
+/** Max display length for activity status messages (longer than shell commands). */
+export const ACTIVITY_MSG_TRUNCATE_LEN = 50;
 
 export function formatCommand(cmd: string, maxLen = CMD_TRUNCATE_LEN): string {
   const trimmed = cmd.trim();
@@ -132,7 +135,7 @@ export function computeWorkspaceSummary(
       activity: t.activity,
       outputActive: t.outputActive ?? false,
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
-      claudeMessage: t.claudeMessage,
+      activityMessage: t.activityMessage,
     })),
   };
 }
@@ -160,7 +163,7 @@ export function computeWorkspaceSummaryFromBackend(
     activity: s.activity as TerminalActivityInfo,
     outputActive: false, // outputActive is driven by frontend DEC 2026 events, not backend
     hasUnreadNotification: s.unreadNotificationCount > 0,
-    claudeMessage: s.claudeMessage ?? undefined,
+    activityMessage: s.claudeMessage ?? undefined,
   }));
 
   // Workspace-level aggregation
@@ -177,7 +180,7 @@ export function computeWorkspaceSummaryFromBackend(
           exitCode: s.lastExitCode ?? undefined,
           timestamp: s.lastCommandAt,
           outputActive: false, // outputActive is driven by frontend DEC 2026 events
-          claudeMessage: s.claudeMessage ?? undefined,
+          activityMessage: s.claudeMessage ?? undefined,
           activity: s.activity as TerminalActivityInfo,
           title: s.title ?? undefined,
         };
@@ -242,25 +245,25 @@ export function abbreviatePath(cwd: string, ellipsis: "start" | "end" = "start")
     path = fileMatch[1];
   }
 
-  // Strip WSL UNC prefix: //wsl.localhost/Distro/... → /...
+  // Strip WSL UNC prefix: //wsl.localhost/Distro/... -> /...
   const wslMatch = path.match(/^\/\/wsl\.localhost\/[^/]+(\/.*)/);
   if (wslMatch) {
     path = wslMatch[1];
   }
 
-  // Normalize forward slashes for Windows drive paths: C:/Users → C:\Users
+  // Normalize forward slashes for Windows drive paths: C:/Users -> C:\Users
   if (/^[A-Za-z]:\//.test(path)) {
     path = path.replace(/\//g, "\\");
   }
 
-  // Abbreviate Unix/WSL home directory: /home/user/... → ~/...
+  // Abbreviate Unix/WSL home directory: /home/user/... -> ~/...
   const unixHome = path.match(/^\/home\/[^/]+(\/.*)?$/);
   if (unixHome) {
     const rest = unixHome[1] ?? "";
     return rest ? "~" + rest : "~";
   }
 
-  // Abbreviate Windows home directory: C:\Users\name\... → ~/...
+  // Abbreviate Windows home directory: C:\Users\name\... -> ~/...
   const winHome = path.match(/^[A-Za-z]:\\Users\\[^\\]+(\\.*)?$/);
   if (winHome) {
     const rest = winHome[1] ?? "";
@@ -327,29 +330,29 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
 export interface CommandStatus {
   icon: string; // "⏳" | "✓" | "✗" | "—"
   color: string; // CSS color value
-  text?: string; // display text override (e.g., Claude ● message)
+  text?: string; // display text override (e.g., Claude activity message)
 }
 
 /**
  * Compute final command status display via ActivityHandler delegation.
  *
- * Delegates to the appropriate handler based on activity type (§15.5).
+ * Delegates to the appropriate handler based on activity type.
  * Default (no activity) uses ShellActivityHandler with the 4-state rule.
  */
 export function computeCommandStatus(
   exitCode: number | undefined,
   outputActive: boolean | undefined,
-  claudeMessage?: string,
+  activityMessage?: string,
   activity?: TerminalActivityInfo,
   title?: string,
-  statusMessageMode?: ClaudeStatusMessageMode,
+  statusMessageMode?: ActivityStatusMessageMode,
   statusMessageDelimiter?: string,
 ): CommandStatus {
   const raw: RawTerminalState = {
     exitCode,
     outputActive: outputActive ?? false,
     lastCommand: undefined,
-    claudeMessage,
+    activityMessage,
     activity,
     title,
     statusMessageMode,

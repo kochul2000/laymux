@@ -297,7 +297,7 @@ describe("useSyncEvents", () => {
     expect(mockOnClaudeMessageChanged).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("updates terminal claudeMessage on claude-message-changed event", () => {
+  it("updates terminal activityMessage on claude-message-changed event", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
       profile: "WSL",
@@ -311,7 +311,7 @@ describe("useSyncEvents", () => {
     callback({ terminalId: "t1", message: "모든 테스트 통과했습니다." });
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
-    expect(instance?.claudeMessage).toBe("모든 테스트 통과했습니다.");
+    expect(instance?.activityMessage).toBe("모든 테스트 통과했습니다.");
   });
 
   it("calls markClaudeTerminal when command text detects Claude", () => {

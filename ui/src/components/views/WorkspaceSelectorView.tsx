@@ -10,7 +10,7 @@ import {
   abbreviatePath,
   mntPathToWindows,
   formatCommand,
-  CLAUDE_MSG_TRUNCATE_LEN,
+  ACTIVITY_MSG_TRUNCATE_LEN,
   formatRelativeTime,
   formatActivity,
 } from "@/lib/workspace-summary";
@@ -129,7 +129,7 @@ function WorkspaceItem({
     ? computeCommandStatus(
         cmdInfo.exitCode,
         cmdInfo.outputActive,
-        cmdInfo.claudeMessage,
+        cmdInfo.activityMessage,
         cmdInfo.activity,
         cmdInfo.title,
         claudeSettings.statusMessageMode,
@@ -320,7 +320,7 @@ function WorkspaceItem({
                     ? computeCommandStatus(
                         ts.lastExitCode,
                         ts.outputActive,
-                        ts.claudeMessage,
+                        ts.activityMessage,
                         ts.activity,
                         ts.title,
                       )
@@ -548,7 +548,7 @@ function WorkspaceItem({
             <span className="truncate" style={{ color: "var(--text-secondary)" }}>
               {formatCommand(
                 cmdStatus?.text ?? cmdInfo.command,
-                cmdStatus?.text ? CLAUDE_MSG_TRUNCATE_LEN : undefined,
+                cmdStatus?.text ? ACTIVITY_MSG_TRUNCATE_LEN : undefined,
               )}
             </span>
             <span style={{ color: "var(--text-secondary)", opacity: 0.4 }}>

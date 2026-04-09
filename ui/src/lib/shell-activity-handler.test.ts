@@ -7,7 +7,7 @@ function raw(overrides: Partial<RawTerminalState> = {}): RawTerminalState {
     exitCode: undefined,
     outputActive: false,
     lastCommand: undefined,
-    claudeMessage: undefined,
+    activityMessage: undefined,
     activity: undefined,
     title: undefined,
     ...overrides,
@@ -57,7 +57,7 @@ describe("ShellActivityHandler", () => {
   describe("computeStatusMessage", () => {
     it("always returns undefined (shell uses command text directly)", () => {
       expect(handler.computeStatusMessage(raw())).toBeUndefined();
-      expect(handler.computeStatusMessage(raw({ claudeMessage: "Building..." }))).toBeUndefined();
+      expect(handler.computeStatusMessage(raw({ activityMessage: "Building..." }))).toBeUndefined();
       expect(handler.computeStatusMessage(raw({ lastCommand: "npm test" }))).toBeUndefined();
     });
   });
