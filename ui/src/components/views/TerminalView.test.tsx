@@ -4,6 +4,7 @@ import { TerminalView, _resetWebglStagger } from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -201,6 +202,42 @@ describe("TerminalView", () => {
 
     const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
     expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
+  it("marks Codex approval prompts as input pending", async () => {
+    render(<TerminalView instanceId="t-codex-prompt" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-prompt", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\nPress enter to confirm or esc to cancel\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
+    ).toBe(CODEX_INPUT_PENDING_MARKER);
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("• continuing after approval\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
+    ).toBeUndefined();
   });
 
   it("registers onData handler to write to terminal", () => {

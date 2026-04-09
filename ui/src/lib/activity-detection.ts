@@ -4,6 +4,8 @@ import {
   detectRegisteredActivityFromTitle,
 } from "./activity-handler";
 
+export const CODEX_INPUT_PENDING_MARKER = "__codex_input_pending__";
+
 /** Known interactive apps without dedicated provider handlers. */
 const STATIC_INTERACTIVE_APPS: { title: string; command: string; name: string }[] = [
   { title: "nvim", command: "nvim", name: "neovim" },
@@ -47,6 +49,15 @@ export function detectActivityFromOutput(text: string): TerminalActivityInfo | u
     return { type: "interactiveApp", name: "Codex" };
   }
   return undefined;
+}
+
+export function detectCodexInputPendingFromOutput(text: string): boolean {
+  return (
+    text.includes("Would you like to run the following command?") ||
+    text.includes("Press enter to confirm or esc to cancel") ||
+    text.includes("Yes, proceed") ||
+    text.includes("No, and tell Codex what to do differently")
+  );
 }
 
 /** Detect interactive app from command text (OSC 133 E). */

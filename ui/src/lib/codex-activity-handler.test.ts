@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CodexActivityHandler } from "./codex-activity-handler";
 import type { RawTerminalState } from "./activity-handler";
+import { CODEX_INPUT_PENDING_MARKER } from "./activity-detection";
+import { CodexActivityHandler } from "./codex-activity-handler";
 
 function raw(overrides: Partial<RawTerminalState> = {}): RawTerminalState {
   return {
@@ -34,6 +35,21 @@ describe("CodexActivityHandler", () => {
     expect(handler.computeStatus(raw({ title: "⠋ laymux" }))).toEqual({
       icon: "⏳",
       color: "var(--yellow)",
+    });
+  });
+
+  it("treats input pending as success even while output is active", () => {
+    expect(
+      handler.computeStatus(
+        raw({
+          outputActive: true,
+          activityMessage: CODEX_INPUT_PENDING_MARKER,
+          title: "⠋ laymux",
+        }),
+      ),
+    ).toEqual({
+      icon: "✓",
+      color: "var(--green)",
     });
   });
 });

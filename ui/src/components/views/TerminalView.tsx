@@ -26,6 +26,8 @@ import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/sm
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
+  CODEX_INPUT_PENDING_MARKER,
+  detectCodexInputPendingFromOutput,
   detectActivityFromTitle,
   detectActivityFromCommand,
   detectActivityFromOutput,
@@ -346,6 +348,19 @@ export function TerminalView({
           current.activity.name !== outputActivity.name
         ) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: outputActivity });
+        }
+      }
+
+      const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
+        if (detectCodexInputPendingFromOutput(text)) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: CODEX_INPUT_PENDING_MARKER,
+          });
+        } else if (current.activityMessage === CODEX_INPUT_PENDING_MARKER && text.trim()) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: undefined,
+          });
         }
       }
 
