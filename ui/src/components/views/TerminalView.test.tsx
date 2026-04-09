@@ -189,7 +189,6 @@ describe("TerminalView", () => {
   it("refreshes and refits existing terminal when settings change", async () => {
     render(<TerminalView instanceId="t-settings-refresh" profile="PowerShell" syncGroup="" />);
 
-    mockWrite.mockClear();
     act(() => {
       useSettingsStore.getState().updateProfile(0, {
         cursorShape: "underscore",
@@ -200,7 +199,6 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockFit).toHaveBeenCalled();
       expect(mockRefresh).toHaveBeenCalledWith(0, 23);
-      expect(mockWrite).toHaveBeenCalledWith("\x1b[4 q");
     });
   });
 

@@ -25,15 +25,3 @@ export function toXtermCursorOptions(shape: CursorShape): {
       return { cursorStyle: "block" };
   }
 }
-
-export function toCursorStyleEscape(shape: CursorShape, blink: boolean): string {
-  switch (toSupportedCursorShape(shape)) {
-    case "bar":
-      return `\x1b[${blink ? 5 : 6} q`;
-    case "underscore":
-      return `\x1b[${blink ? 3 : 4} q`;
-    case "filledBox":
-    default:
-      return `\x1b[${blink ? 1 : 2} q`;
-  }
-}

@@ -7,7 +7,7 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
-import { toCursorStyleEscape, toXtermCursorOptions } from "@/lib/cursor-settings";
+import { toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
   writeToTerminal,
@@ -722,9 +722,6 @@ export function TerminalView({
       if (cursorOptions.cursorWidth === undefined) {
         delete (term.options as { cursorWidth?: number }).cursorWidth;
       }
-      // Some shells/apps set DECSCUSR, which overrides xterm's raw cursor options.
-      // Re-emit the current user preference so existing terminals update immediately.
-      term.write(toCursorStyleEscape(cursorShape, effectiveCursorBlink));
       fitAddonRef.current?.fit();
       term.refresh(0, term.rows - 1);
     } catch {
