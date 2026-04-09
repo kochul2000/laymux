@@ -134,6 +134,7 @@ export interface ProfileDefaults {
   colorScheme: string;
   cursorShape: CursorShape;
   cursorBlink: boolean;
+  stabilizeInteractiveCursor: boolean;
   padding: PaddingSettings;
   scrollbackLines: number;
   opacity: number;
@@ -159,6 +160,7 @@ export interface Profile {
   hidden: boolean;
   cursorShape: CursorShape;
   cursorBlink: boolean;
+  stabilizeInteractiveCursor: boolean;
   padding: PaddingSettings;
   scrollbackLines: number;
   opacity: number;
@@ -188,6 +190,7 @@ export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
   "colorScheme",
   "cursorShape",
   "cursorBlink",
+  "stabilizeInteractiveCursor",
   "padding",
   "scrollbackLines",
   "opacity",
@@ -401,6 +404,7 @@ export const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
   cursorShape: "bar",
   cursorBlink: true,
+  stabilizeInteractiveCursor: true,
   padding: { ...defaultPadding },
   scrollbackLines: 9001,
   opacity: 100,

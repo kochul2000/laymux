@@ -367,6 +367,25 @@ describe("TerminalView", () => {
     });
   });
 
+  it("falls back to native xterm cursor when interactive cursor stability is disabled", async () => {
+    useSettingsStore.getState().updateProfile(0, { stabilizeInteractiveCursor: false });
+
+    render(<TerminalView instanceId="t-native-cursor-mode" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-native-cursor-mode");
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-native-cursor-mode", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+      expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    });
+  });
+
   it("registers terminal instance in store on mount", () => {
     render(<TerminalView instanceId="t2" profile="WSL" syncGroup="project-a" />);
     const instances = useTerminalStore.getState().instances;

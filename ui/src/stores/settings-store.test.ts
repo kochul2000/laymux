@@ -11,6 +11,7 @@ describe("settings-store", () => {
     expect(profileDefaults.font.face).toBe("Cascadia Mono");
     expect(profileDefaults.font.size).toBe(14);
     expect(profileDefaults.font.weight).toBe("normal");
+    expect(profileDefaults.stabilizeInteractiveCursor).toBe(true);
   });
 
   it("has default profiles", () => {
@@ -39,11 +40,13 @@ describe("settings-store", () => {
     useSettingsStore.getState().setProfileDefaults({
       cursorBlink: false,
       cursorShape: "filledBox",
+      stabilizeInteractiveCursor: false,
     });
 
     const profile = useSettingsStore.getState().profiles[0];
     expect(profile.cursorBlink).toBe(false);
     expect(profile.cursorShape).toBe("filledBox");
+    expect(profile.stabilizeInteractiveCursor).toBe(false);
   });
 
   it("does not overwrite profile values that differ from previous defaults", () => {
@@ -114,6 +117,7 @@ describe("settings-store", () => {
       hidden: false,
       cursorShape: "bar",
       cursorBlink: true,
+      stabilizeInteractiveCursor: true,
       padding: { top: 8, right: 8, bottom: 8, left: 8 },
       scrollbackLines: 9001,
       opacity: 100,
@@ -152,6 +156,7 @@ describe("settings-store", () => {
           hidden: false,
           cursorShape: "bar",
           cursorBlink: true,
+          stabilizeInteractiveCursor: true,
           padding: { top: 8, right: 8, bottom: 8, left: 8 },
           scrollbackLines: 9001,
           opacity: 100,
@@ -325,6 +330,7 @@ describe("settings-store", () => {
           hidden: false,
           cursorShape: "bar",
           cursorBlink: true,
+          stabilizeInteractiveCursor: true,
           padding: { top: 8, right: 8, bottom: 8, left: 8 },
           scrollbackLines: 9001,
           opacity: 100,

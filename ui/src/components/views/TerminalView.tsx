@@ -136,6 +136,7 @@ export function TerminalView({
   const openedRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
+  const stabilizeInteractiveCursorRef = useRef(true);
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
   onKeyboardActivityRef.current = onKeyboardActivity;
   isFocusedRef.current = isFocused;
@@ -243,6 +244,7 @@ export function TerminalView({
       if (
         !openedRef.current ||
         !isFocusedRef.current ||
+        !stabilizeInteractiveCursorRef.current ||
         !isOverlayCaretActivity(activityRef.current)
       ) {
         overlay.style.opacity = "0";
@@ -855,17 +857,26 @@ export function TerminalView({
       prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? defaultProfileDefaults.cursorBlink
     );
   });
+  const stabilizeInteractiveCursor = useSettingsStore((s) => {
+    const prof = s.profiles?.find((p) => p.name === profile);
+    return (
+      prof?.stabilizeInteractiveCursor ??
+      s.profileDefaults?.stabilizeInteractiveCursor ??
+      defaultProfileDefaults.stabilizeInteractiveCursor
+    );
+  });
+  stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
   const effectiveCursorBlink =
     codexSettings.disableCursorBlink &&
     activity?.type === "interactiveApp" &&
     activity.name === "Codex"
       ? false
       : cursorBlink;
-  const nativeCursorHidden = isOverlayCaretActivity(activity);
+  const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
-  }, [activity, isFocused, font, cursorShape]);
+  }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;
@@ -926,6 +937,7 @@ export function TerminalView({
     cursorShape,
     effectiveNativeCursorBlink,
     nativeCursorHidden,
+    stabilizeInteractiveCursor,
   ]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes

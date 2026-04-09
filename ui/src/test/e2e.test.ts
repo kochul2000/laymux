@@ -606,6 +606,7 @@ function makeTestProfile(overrides: {
     startupCommand: "",
     cursorShape: "bar",
     cursorBlink: true,
+    stabilizeInteractiveCursor: true,
     padding: { top: 8, right: 8, bottom: 8, left: 8 },
     scrollbackLines: 9001,
     opacity: 100,

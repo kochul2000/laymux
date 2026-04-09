@@ -209,6 +209,7 @@ export interface ProfileDefaults {
   colorScheme?: string;
   cursorShape?: string;
   cursorBlink?: boolean;
+  stabilizeInteractiveCursor?: boolean;
   padding?: PaddingSettings;
   scrollbackLines?: number;
   opacity?: number;
@@ -289,6 +290,7 @@ export interface Profile {
   hidden: boolean;
   cursorShape?: string;
   cursorBlink?: boolean;
+  stabilizeInteractiveCursor?: boolean;
   padding?: PaddingSettings;
   scrollbackLines?: number;
   opacity?: number;
