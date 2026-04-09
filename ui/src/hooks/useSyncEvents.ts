@@ -17,8 +17,9 @@ import {
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import { detectActivityFromCommand } from "@/lib/activity-detection";
+import { CODEX_INPUT_PENDING_MARKER, detectActivityFromCommand } from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
+import { resolveWorkspaceId } from "@/lib/workspace-utils";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -27,20 +28,46 @@ export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  const markInteractiveAppSuccessOnIdle = useCallback((terminalId: string) => {
-    const instance = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
-    if (
-      !instance?.outputActive ||
-      instance.activity?.type !== "interactiveApp" ||
-      instance.activity.name !== "Codex"
-    ) {
-      return;
-    }
-    useTerminalStore.getState().updateInstanceInfo(terminalId, {
-      lastExitCode: 0,
-      lastCommandAt: Date.now(),
+  const notifyInteractiveAppSuccessOnIdle = useCallback((terminalId: string, message: string) => {
+    const workspaceId = resolveWorkspaceId(terminalId);
+    useNotificationStore.getState().addNotification({
+      terminalId,
+      workspaceId,
+      message,
+      level: "success",
     });
+
+    const { activeWorkspaceId } = useWorkspaceStore.getState();
+    const ideFocused = document.hasFocus();
+    if (!ideFocused || activeWorkspaceId !== workspaceId) {
+      sendDesktopNotification("Laymux", message);
+    }
   }, []);
+
+  const markInteractiveAppSuccessOnIdle = useCallback(
+    (terminalId: string) => {
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+      if (
+        !instance?.outputActive ||
+        instance.activity?.type !== "interactiveApp" ||
+        instance.activity.name !== "Codex"
+      ) {
+        return;
+      }
+
+      const message =
+        instance.activityMessage === CODEX_INPUT_PENDING_MARKER
+          ? "Codex is awaiting input"
+          : "Codex task completed";
+
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        lastExitCode: 0,
+        lastCommandAt: Date.now(),
+      });
+      notifyInteractiveAppSuccessOnIdle(terminalId, message);
+    },
+    [notifyInteractiveAppSuccessOnIdle],
+  );
 
   const debouncedPersistCwd = useCallback(() => {
     if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);

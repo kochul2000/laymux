@@ -808,6 +808,11 @@ describe("useSyncEvents", () => {
       expect(instance?.outputActive).toBe(false);
       expect(instance?.lastExitCode).toBe(0);
       expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].terminalId).toBe("t1");
+      expect(notifications[0].level).toBe("success");
+      expect(notifications[0].message).toBe("Codex task completed");
     });
 
     it("marks Codex success when outputActive times out", () => {
@@ -834,8 +839,35 @@ describe("useSyncEvents", () => {
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
       expect(instance?.outputActive).toBe(false);
       expect(instance?.lastExitCode).toBe(0);
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message).toBe("Codex task completed");
 
       vi.useRealTimers();
+    });
+
+    it("uses awaiting-input notification message for Codex approval prompts", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+        activityMessage: "__codex_input_pending__",
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const notifications = useNotificationStore.getState().notifications;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].message).toBe("Codex is awaiting input");
+      expect(notifications[0].level).toBe("success");
     });
   });
 });
