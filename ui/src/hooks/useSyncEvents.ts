@@ -17,10 +17,16 @@ import {
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
-import { CODEX_INPUT_PENDING_MARKER, detectActivityFromCommand } from "@/lib/activity-detection";
+import {
+  CODEX_INPUT_PENDING_MARKER,
+  detectActivityFromCommand,
+  detectCodexConversationMessageFromOutput,
+  detectCodexStatusMessageFromOutput,
+} from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
+import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 
 const CWD_PERSIST_DEBOUNCE_MS = 2000;
 const OUTPUT_ACTIVE_RESET_MS = 2000;
@@ -28,6 +34,16 @@ const OUTPUT_ACTIVE_RESET_MS = 2000;
 export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  const parseCodexSnapshotMessage = useCallback((terminalId: string): string | undefined => {
+    const snapshot = getTerminalSerializeMap().get(terminalId)?.();
+    if (!snapshot) return undefined;
+    return (
+      detectCodexConversationMessageFromOutput(snapshot) ??
+      detectCodexStatusMessageFromOutput(snapshot) ??
+      undefined
+    );
+  }, []);
 
   const notifyInteractiveAppSuccessOnIdle = useCallback((terminalId: string, message: string) => {
     const workspaceId = resolveWorkspaceId(terminalId);
@@ -61,13 +77,19 @@ export function useSyncEvents() {
           ? "Codex is awaiting input"
           : "Codex task completed";
 
+      const snapshotMessage =
+        instance.activityMessage === CODEX_INPUT_PENDING_MARKER
+          ? undefined
+          : parseCodexSnapshotMessage(terminalId);
+
       useTerminalStore.getState().updateInstanceInfo(terminalId, {
         lastExitCode: 0,
         lastCommandAt: Date.now(),
+        activityMessage: snapshotMessage ?? instance.activityMessage,
       });
       notifyInteractiveAppSuccessOnIdle(terminalId, message);
     },
-    [notifyInteractiveAppSuccessOnIdle],
+    [notifyInteractiveAppSuccessOnIdle, parseCodexSnapshotMessage],
   );
 
   const debouncedPersistCwd = useCallback(() => {
@@ -189,11 +211,14 @@ export function useSyncEvents() {
           updates.activity = { type: "shell" };
         }
 
+        const resolvedActivity = detectedActivity ?? currentActivity;
         const codexActivity =
-          (detectedActivity ?? currentActivity)?.type === "interactiveApp" &&
-          (detectedActivity ?? currentActivity).name === "Codex";
+          resolvedActivity?.type === "interactiveApp" && resolvedActivity.name === "Codex";
         if (codexActivity && instance?.activityMessage !== CODEX_INPUT_PENDING_MARKER) {
-          updates.activityMessage = extractCodexTitleMessage(data.title);
+          const titleMessage = extractCodexTitleMessage(data.title);
+          if (titleMessage !== undefined || !instance?.activityMessage) {
+            updates.activityMessage = titleMessage;
+          }
         }
 
         updateInstanceInfo(data.terminalId, updates as Parameters<typeof updateInstanceInfo>[1]);

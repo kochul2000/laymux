@@ -19,7 +19,7 @@ describe("CodexActivityHandler", () => {
   const handler = new CodexActivityHandler();
 
   it("preserves activity when title stops matching explicit Codex name", () => {
-    expect(handler.shouldPreserveActivityOnTitleReset(raw({ title: "⠋ laymux" }))).toBe(true);
+    expect(handler.shouldPreserveActivityOnTitleReset(raw({ title: "⠋laymux" }))).toBe(true);
   });
 
   it("returns to shell on exitCode", () => {
@@ -27,12 +27,12 @@ describe("CodexActivityHandler", () => {
   });
 
   it("treats braille title spinner as active", () => {
-    expect(handler.isActiveTitle("⠋ laymux")).toBe(true);
+    expect(handler.isActiveTitle("⠋laymux")).toBe(true);
     expect(handler.isActiveTitle("laymux")).toBe(false);
   });
 
   it("uses running status for braille spinner title without outputActive event", () => {
-    expect(handler.computeStatus(raw({ title: "⠋ laymux" }))).toEqual({
+    expect(handler.computeStatus(raw({ title: "⠋laymux" }))).toEqual({
       icon: "⏳",
       color: "var(--yellow)",
     });
@@ -44,7 +44,7 @@ describe("CodexActivityHandler", () => {
         raw({
           outputActive: true,
           activityMessage: CODEX_INPUT_PENDING_MARKER,
-          title: "⠋ laymux",
+          title: "⠋laymux",
         }),
       ),
     ).toEqual({
@@ -54,14 +54,25 @@ describe("CodexActivityHandler", () => {
   });
 
   it("returns spinner title text by default", () => {
-    expect(handler.computeStatusMessage(raw({ title: "⠋ laymux" }))).toBe("laymux");
+    expect(handler.computeStatusMessage(raw({ title: "⠋laymux" }))).toBe("laymux");
+  });
+
+  it("falls back to activity message when title mode has no spinner title", () => {
+    expect(
+      handler.computeStatusMessage(
+        raw({
+          activityMessage: "gpt-5.4 medium · 93% left · C:\\Users",
+          statusMessageMode: "title",
+        }),
+      ),
+    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
   });
 
   it("supports configurable title-bullet formatting", () => {
     expect(
       handler.computeStatusMessage(
         raw({
-          title: "⠋ laymux",
+          title: "⠋laymux",
           activityMessage: "Planning",
           statusMessageMode: "title-bullet",
           statusMessageDelimiter: " | ",
@@ -74,7 +85,7 @@ describe("CodexActivityHandler", () => {
     expect(
       handler.computeStatusMessage(
         raw({
-          title: "⠋ laymux",
+          title: "⠋laymux",
           activityMessage: "laymux",
           statusMessageMode: "bullet-title",
         }),

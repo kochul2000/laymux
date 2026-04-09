@@ -3,6 +3,8 @@ import {
   detectActivityFromTitle,
   detectActivityFromCommand,
   detectActivityFromOutput,
+  detectCodexConversationMessageFromOutput,
+  detectCodexStatusMessageFromOutput,
 } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
@@ -46,7 +48,7 @@ describe("detectActivityFromTitle", () => {
 
   it("does not false-positive on app names embedded in words", () => {
     expect(detectActivityFromTitle("Review current directory structure")).toBeUndefined();
-    expect(detectActivityFromTitle("✳ Review code changes")).toBeUndefined();
+    expect(detectActivityFromTitle("⠋Review code changes")).toBeUndefined();
     expect(detectActivityFromTitle("navigation helper")).toBeUndefined();
     expect(detectActivityFromTitle("environment variables")).toBeUndefined();
   });
@@ -107,7 +109,6 @@ describe("detectActivityFromCommand", () => {
   });
 
   it("detects python (not python3 script.py style)", () => {
-    // 'python' bare is interactive REPL
     expect(detectActivityFromCommand("python")).toEqual({ type: "interactiveApp", name: "python" });
   });
 
@@ -174,5 +175,37 @@ describe("detectActivityFromOutput", () => {
 
   it("ignores unrelated output", () => {
     expect(detectActivityFromOutput("PS C:\\Users\\kochul> dir")).toBeUndefined();
+  });
+});
+
+describe("detectCodexStatusMessageFromOutput", () => {
+  it("parses the Codex footer status line", () => {
+    expect(
+      detectCodexStatusMessageFromOutput(
+        "Use /skills to list available skills\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("ignores unrelated footer lines", () => {
+    expect(detectCodexStatusMessageFromOutput("PS C:\\Users> codex\r\n")).toBeUndefined();
+  });
+});
+
+describe("detectCodexConversationMessageFromOutput", () => {
+  it("prefers the latest assistant bullet reply", () => {
+    expect(
+      detectCodexConversationMessageFromOutput(
+        "> hello\r\n• Hello.\r\n> Improve documentation\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBe("Hello.");
+  });
+
+  it("ignores tool execution bullets", () => {
+    expect(
+      detectCodexConversationMessageFromOutput(
+        "• Ran Get-ChildItem\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+      ),
+    ).toBeUndefined();
   });
 });

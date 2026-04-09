@@ -237,7 +237,7 @@ describe("TerminalView", () => {
 
     expect(
       useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
-    ).toBeUndefined();
+    ).toBe("continuing after approval");
   });
 
   it("detects Codex approval prompts split across output chunks", async () => {
@@ -264,6 +264,94 @@ describe("TerminalView", () => {
     expect(
       useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.activityMessage,
     ).toBe(CODEX_INPUT_PENDING_MARKER);
+  });
+
+  it("parses Codex footer status messages from output", async () => {
+    render(<TerminalView instanceId="t-codex-footer" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-footer", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("gpt-5.4 medium · 93% left · C:\\Users\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-footer")?.activityMessage,
+    ).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
+  it("prefers Codex assistant replies over footer status lines", async () => {
+    render(<TerminalView instanceId="t-codex-reply" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-reply", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "> hello\r\n• Hello.\r\n> Improve documentation in @filename\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-reply")?.activityMessage,
+    ).toBe("Hello.");
+  });
+
+  it("does not let Codex footer overwrite the last assistant reply", async () => {
+    render(<TerminalView instanceId="t-codex-sticky-reply" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-sticky-reply", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("> hello\r\n• Hello.\r\n"));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-sticky-reply")
+        ?.activityMessage,
+    ).toBe("Hello.");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode("> what did you say\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n"),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-codex-sticky-reply")
+        ?.activityMessage,
+    ).toBe("Hello.");
   });
 
   it("registers onData handler to write to terminal", () => {

@@ -24,6 +24,7 @@ const mockOnTerminalOutputActivity = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
+const mockGetTerminalSerializeMap = vi.fn();
 
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
@@ -44,6 +45,10 @@ vi.mock("./useOsNotification", () => ({
   sendDesktopNotification: (...args: unknown[]) => mockSendDesktopNotification(...args),
 }));
 
+vi.mock("@/lib/terminal-serialize-registry", () => ({
+  getTerminalSerializeMap: () => mockGetTerminalSerializeMap(),
+}));
+
 describe("useSyncEvents", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -62,6 +67,7 @@ describe("useSyncEvents", () => {
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
     mockOnTerminalOutputActivity.mockResolvedValue(unlisten);
+    mockGetTerminalSerializeMap.mockReturnValue(new Map());
   });
 
   it("registers sync-cwd listener on mount", () => {
@@ -542,6 +548,31 @@ describe("useSyncEvents", () => {
     expect(instance?.activityMessage).toBe("planning changes");
   });
 
+  it("does not clear an existing Codex activityMessage on plain title changes", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+      activityMessage: "gpt-5.4 medium · 93% left · C:\\Users",
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    callback({
+      terminalId: "t1",
+      title: "C:\\Users",
+      interactiveApp: "Codex",
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activityMessage).toBe("gpt-5.4 medium · 93% left · C:\\Users");
+  });
+
   it("returns Codex terminal to shell on exitCode", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
@@ -837,6 +868,38 @@ describe("useSyncEvents", () => {
       expect(notifications[0].terminalId).toBe("t1");
       expect(notifications[0].level).toBe("success");
       expect(notifications[0].message).toBe("Codex task completed");
+    });
+
+    it("reparses the Codex screen snapshot when success is detected", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+        activityMessage: "Working (1s · esc to interrupt)",
+      });
+      mockGetTerminalSerializeMap.mockReturnValue(
+        new Map([
+          [
+            "t1",
+            () =>
+              "> hello\r\n• Hello.\r\n> good!!\r\n• Yes.\r\n> Summarize recent commits\r\ngpt-5.4 medium · 93% left · C:\\Users\r\n",
+          ],
+        ]),
+      );
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.activityMessage).toBe("Yes.");
+      expect(instance?.lastExitCode).toBe(0);
     });
 
     it("marks Codex success when outputActive times out", () => {

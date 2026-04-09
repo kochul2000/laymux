@@ -27,7 +27,10 @@ import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
+  detectCodexConversationMessageFromOutput,
   detectCodexInputPendingFromOutput,
+  detectCodexStatusMessageFromOutput,
+  isCodexFooterStatusLine,
   detectActivityFromTitle,
   detectActivityFromCommand,
   detectActivityFromOutput,
@@ -356,17 +359,31 @@ export function TerminalView({
 
       const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
+        const codexConversationMessage = detectCodexConversationMessageFromOutput(combinedText);
+        const codexStatusMessage = detectCodexStatusMessageFromOutput(combinedText);
+        const currentMessage = current.activityMessage;
+        const currentIsFooter =
+          !!currentMessage &&
+          currentMessage !== CODEX_INPUT_PENDING_MARKER &&
+          isCodexFooterStatusLine(currentMessage);
+        const nextCodexMessage =
+          codexConversationMessage ??
+          (currentIsFooter || !currentMessage ? codexStatusMessage : undefined);
         if (
           current.activityMessage === CODEX_INPUT_PENDING_MARKER &&
           text.trim() &&
           !detectCodexInputPendingFromOutput(text)
         ) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
-            activityMessage: undefined,
+            activityMessage: nextCodexMessage,
           });
         } else if (detectCodexInputPendingFromOutput(combinedText)) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: CODEX_INPUT_PENDING_MARKER,
+          });
+        } else if (nextCodexMessage && current.activityMessage !== nextCodexMessage) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: nextCodexMessage,
           });
         }
       }
@@ -505,6 +522,7 @@ export function TerminalView({
         if (paneId) {
           registerTerminalSerializer(paneId, () => serializeAddon.serialize());
         }
+        registerTerminalSerializer(instanceId, () => serializeAddon.serialize());
 
         fitAddon.fit();
         openedRef.current = true;
@@ -591,6 +609,7 @@ export function TerminalView({
       if (paneId) {
         unregisterTerminalSerializer(paneId);
       }
+      unregisterTerminalSerializer(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
