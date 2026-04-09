@@ -35,6 +35,25 @@ describe("settings-store", () => {
     expect(profileDefaults.font.weight).toBe("normal");
   });
 
+  it("propagates updated profileDefaults to profiles still using previous defaults", () => {
+    useSettingsStore.getState().setProfileDefaults({
+      cursorBlink: false,
+      cursorShape: "filledBox",
+    });
+
+    const profile = useSettingsStore.getState().profiles[0];
+    expect(profile.cursorBlink).toBe(false);
+    expect(profile.cursorShape).toBe("filledBox");
+  });
+
+  it("does not overwrite profile values that differ from previous defaults", () => {
+    useSettingsStore.getState().updateProfile(0, { cursorBlink: false });
+    useSettingsStore.getState().setProfileDefaults({ cursorBlink: true });
+
+    const profile = useSettingsStore.getState().profiles[0];
+    expect(profile.cursorBlink).toBe(false);
+  });
+
   it("updates default profile", () => {
     useSettingsStore.getState().setDefaultProfile("WSL");
     expect(useSettingsStore.getState().defaultProfile).toBe("WSL");

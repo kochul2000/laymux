@@ -202,6 +202,25 @@ describe("TerminalView", () => {
     });
   });
 
+  it("updates an existing terminal when profile defaults change", async () => {
+    render(<TerminalView instanceId="t-defaults-refresh" profile="PowerShell" syncGroup="" />);
+
+    expect(createdTerminals[0].options.cursorBlink).toBe(true);
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+
+    act(() => {
+      useSettingsStore.getState().setProfileDefaults({
+        cursorBlink: false,
+        cursorShape: "filledBox",
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+      expect(createdTerminals[0].options.cursorStyle).toBe("block");
+    });
+  });
+
   it("disables cursor blink while Codex is active when codex override is enabled", async () => {
     render(<TerminalView instanceId="t-codex-blink" profile="PowerShell" syncGroup="" />);
 

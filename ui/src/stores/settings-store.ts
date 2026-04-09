@@ -471,6 +471,12 @@ export function makeDefaultColorScheme(): ColorScheme {
   };
 }
 
+function cloneInheritedValue<T>(value: T): T {
+  if (Array.isArray(value)) return [...value] as T;
+  if (value && typeof value === "object") return { ...(value as Record<string, unknown>) } as T;
+  return value;
+}
+
 /** Windows Terminal built-in color schemes (identical format to settings.json). */
 export const builtinColorSchemes: ColorScheme[] = [
   {
@@ -799,9 +805,33 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setViewOrder: (viewOrder) => set({ viewOrder }),
 
   setProfileDefaults: (data) =>
-    set((state) => ({
-      profileDefaults: { ...state.profileDefaults, ...data },
-    })),
+    set((state) => {
+      const prevDefaults = state.profileDefaults;
+      const nextDefaults = { ...prevDefaults, ...data };
+      const changedKeys = INHERITABLE_KEYS.filter((key) => key in data);
+
+      const profiles = state.profiles.map((profile) => {
+        let nextProfile = profile;
+
+        for (const key of changedKeys) {
+          const prevValue = prevDefaults[key];
+          const profileValue = profile[key as keyof Profile];
+          if (JSON.stringify(profileValue) !== JSON.stringify(prevValue)) continue;
+
+          if (nextProfile === profile) nextProfile = { ...profile };
+          (nextProfile as unknown as Record<string, unknown>)[key] = cloneInheritedValue(
+            nextDefaults[key],
+          );
+        }
+
+        return nextProfile;
+      });
+
+      return {
+        profileDefaults: nextDefaults,
+        profiles,
+      };
+    }),
 
   addProfile: (profile) => set((state) => ({ profiles: [...state.profiles, profile] })),
 
