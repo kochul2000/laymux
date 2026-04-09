@@ -121,6 +121,7 @@ export type CursorShape =
   | "emptyBox"
   | "doubleUnderscore"
   | "vintage";
+export type SupportedCursorShape = "bar" | "underscore" | "filledBox";
 export type BellStyle = "audible" | "none" | "window" | "taskbar" | "all";
 export type CloseOnExit = "automatic" | "graceful" | "always" | "never";
 export type AntialiasingMode = "grayscale" | "cleartype" | "aliased";
@@ -129,6 +130,7 @@ export type AntialiasingMode = "grayscale" | "cleartype" | "aliased";
 export interface ProfileDefaults {
   colorScheme: string;
   cursorShape: CursorShape;
+  cursorBlink: boolean;
   padding: PaddingSettings;
   scrollbackLines: number;
   opacity: number;
@@ -153,6 +155,7 @@ export interface Profile {
   startingDirectory: string;
   hidden: boolean;
   cursorShape: CursorShape;
+  cursorBlink: boolean;
   padding: PaddingSettings;
   scrollbackLines: number;
   opacity: number;
@@ -181,6 +184,7 @@ export interface Keybinding {
 export const INHERITABLE_KEYS: (keyof ProfileDefaults)[] = [
   "colorScheme",
   "cursorShape",
+  "cursorBlink",
   "padding",
   "scrollbackLines",
   "opacity",
@@ -393,6 +397,7 @@ export const FALLBACK_PROFILE = "PowerShell";
 export const defaultProfileDefaults: ProfileDefaults = {
   colorScheme: "CampbellClear",
   cursorShape: "bar",
+  cursorBlink: true,
   padding: { ...defaultPadding },
   scrollbackLines: 9001,
   opacity: 100,

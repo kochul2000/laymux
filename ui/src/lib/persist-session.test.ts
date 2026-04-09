@@ -158,6 +158,7 @@ describe("persistSession", () => {
         startingDirectory: "~/projects",
         hidden: true,
         cursorShape: "filledBox",
+        cursorBlink: false,
         padding: { top: 4, right: 4, bottom: 4, left: 4 },
         scrollbackLines: 5000,
         opacity: 80,
@@ -187,6 +188,7 @@ describe("persistSession", () => {
       expect(profile.startingDirectory).toBe("~/projects");
       expect(profile.hidden).toBe(true);
       expect(profile.cursorShape).toBe("filledBox");
+      expect(profile.cursorBlink).toBe(false);
       expect(profile.padding).toEqual({ top: 4, right: 4, bottom: 4, left: 4 });
       expect(profile.scrollbackLines).toBe(5000);
       expect(profile.opacity).toBe(80);

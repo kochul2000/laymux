@@ -18,6 +18,7 @@ const mockPaste = vi.fn();
 const mockHasSelection = vi.fn().mockReturnValue(false);
 const mockGetSelection = vi.fn().mockReturnValue("");
 const mockClearSelection = vi.fn();
+const createdTerminals: Array<{ options: Record<string, unknown> }> = [];
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
@@ -25,6 +26,10 @@ const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => bo
 const mockWrite = vi.fn();
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
+    constructor(options: Record<string, unknown> = {}) {
+      this.options = { ...options };
+      createdTerminals.push(this);
+    }
     open = vi.fn();
     write = mockWrite;
     onData = mockOnData;
@@ -44,7 +49,7 @@ vi.mock("@xterm/xterm", () => ({
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     cols = 80;
     rows = 24;
-    options: Record<string, unknown> = {};
+    options: Record<string, unknown>;
   },
 }));
 
@@ -139,6 +144,7 @@ describe("TerminalView", () => {
     capturedKeyHandler = null;
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
+    createdTerminals.length = 0;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -146,6 +152,19 @@ describe("TerminalView", () => {
   it("renders terminal container", () => {
     render(<TerminalView instanceId="t1" profile="PowerShell" syncGroup="default" />);
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
+  });
+
+  it("applies cursor shape and blink from profile settings", () => {
+    useSettingsStore.getState().updateProfile(0, {
+      cursorShape: "underscore",
+      cursorBlink: false,
+    });
+
+    render(<TerminalView instanceId="t-cursor-settings" profile="PowerShell" syncGroup="" />);
+
+    expect(createdTerminals).toHaveLength(1);
+    expect(createdTerminals[0].options.cursorStyle).toBe("underline");
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
   it("registers terminal instance in store on mount", () => {

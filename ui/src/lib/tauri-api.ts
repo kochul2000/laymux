@@ -207,6 +207,7 @@ export interface WorkspaceDisplaySettings {
 export interface ProfileDefaults {
   colorScheme?: string;
   cursorShape?: string;
+  cursorBlink?: boolean;
   padding?: PaddingSettings;
   scrollbackLines?: number;
   opacity?: number;
@@ -286,6 +287,7 @@ export interface Profile {
   startingDirectory: string;
   hidden: boolean;
   cursorShape?: string;
+  cursorBlink?: boolean;
   padding?: PaddingSettings;
   scrollbackLines?: number;
   opacity?: number;

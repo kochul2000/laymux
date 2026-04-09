@@ -6,7 +6,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import {
+  useSettingsStore,
+  type CursorShape,
+  type SupportedCursorShape,
+} from "@/stores/settings-store";
 import {
   createTerminalSession,
   writeToTerminal,
@@ -52,6 +56,32 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 const LARGE_PASTE_THRESHOLD = 5120;
 
 const textEncoder = new TextEncoder();
+
+function toSupportedCursorShape(shape: CursorShape): SupportedCursorShape {
+  switch (shape) {
+    case "bar":
+    case "underscore":
+    case "filledBox":
+      return shape;
+    default:
+      return "filledBox";
+  }
+}
+
+function toXtermCursorOptions(shape: CursorShape): {
+  cursorStyle: "bar" | "underline" | "block";
+  cursorWidth?: number;
+} {
+  switch (toSupportedCursorShape(shape)) {
+    case "bar":
+      return { cursorStyle: "bar", cursorWidth: 1 };
+    case "underscore":
+      return { cursorStyle: "underline" };
+    case "filledBox":
+    default:
+      return { cursorStyle: "block" };
+  }
+}
 
 /**
  * Check if a large paste should be blocked. Returns true if the user cancelled.
@@ -161,8 +191,15 @@ export function TerminalView({
     const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
 
     const resolvedFont = settingsState.resolveFont(profile);
+    const resolvedCursorShape =
+      profileConfig?.cursorShape || settingsState.profileDefaults?.cursorShape || "bar";
+    const resolvedCursorBlink =
+      profileConfig?.cursorBlink ?? settingsState.profileDefaults?.cursorBlink ?? true;
+    const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: resolvedCursorBlink,
+      cursorStyle: cursorOptions.cursorStyle,
+      ...(cursorOptions.cursorWidth ? { cursorWidth: cursorOptions.cursorWidth } : {}),
       fontSize: resolvedFont.size,
       fontFamily: `'${resolvedFont.face}', 'Cascadia Mono', 'Consolas', monospace`,
       theme,
@@ -655,6 +692,14 @@ export function TerminalView({
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
   const font = useSettingsStore((s) => s.resolveFont(profile));
+  const cursorShape = useSettingsStore((s) => {
+    const prof = s.profiles?.find((p) => p.name === profile);
+    return prof?.cursorShape || s.profileDefaults?.cursorShape || "bar";
+  });
+  const cursorBlink = useSettingsStore((s) => {
+    const prof = s.profiles?.find((p) => p.name === profile);
+    return prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? true;
+  });
 
   useEffect(() => {
     const term = terminalRef.current;
@@ -678,10 +723,14 @@ export function TerminalView({
         : defaultTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
+      const cursorOptions = toXtermCursorOptions(cursorShape);
+      term.options.cursorBlink = cursorBlink;
+      term.options.cursorStyle = cursorOptions.cursorStyle;
+      term.options.cursorWidth = cursorOptions.cursorWidth;
     } catch {
       /* xterm mock may not support options setter */
     }
-  }, [currentSchemeName, colorSchemes, font]);
+  }, [currentSchemeName, colorSchemes, font, cursorShape, cursorBlink]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
   const scrollbarStyleForEffect = useSettingsStore(

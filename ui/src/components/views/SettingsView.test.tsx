@@ -267,6 +267,7 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
+    expect(screen.getByText("Cursor Blink")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
     expect(screen.getByText("Padding")).toBeInTheDocument();
     // Advanced fields
@@ -289,9 +290,9 @@ describe("SettingsView", () => {
     expect(options).toContain("bar");
     expect(options).toContain("underscore");
     expect(options).toContain("filledBox");
-    expect(options).toContain("emptyBox");
-    expect(options).toContain("doubleUnderscore");
-    expect(options).toContain("vintage");
+    expect(options).not.toContain("emptyBox");
+    expect(options).not.toContain("doubleUnderscore");
+    expect(options).not.toContain("vintage");
   });
 
   it("updates profile padding", async () => {
@@ -630,6 +631,20 @@ describe("SettingsView", () => {
     await user.click(saveBtn);
 
     expect(useSettingsStore.getState().profileDefaults.cursorShape).toBe("filledBox");
+  });
+
+  it("updates profileDefaults cursor blink after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+    const toggle = screen.getByTestId("cursor-blink-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().profileDefaults.cursorBlink).toBe(false);
   });
 
   it("shows settings.json shortcut in sidebar", () => {

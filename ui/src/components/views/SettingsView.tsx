@@ -10,6 +10,7 @@ import {
   type Profile,
   type ProfileDefaults,
   type CursorShape,
+  type SupportedCursorShape,
   type BellStyle,
   type CloseOnExit,
   type AntialiasingMode,
@@ -337,12 +338,18 @@ function AppearanceFields({
   defaults,
   showReset,
 }: {
-  data: Pick<Profile, "colorScheme" | "cursorShape" | "opacity" | "padding">;
+  data: Pick<Profile, "colorScheme" | "cursorShape" | "cursorBlink" | "opacity" | "padding">;
   onChange: (d: Partial<Profile>) => void;
   colorSchemes: { name: string }[];
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
+  const supportedCursorShape: SupportedCursorShape =
+    data.cursorShape === "underscore" ||
+    data.cursorShape === "filledBox" ||
+    data.cursorShape === "bar"
+      ? data.cursorShape
+      : "filledBox";
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
   const resetBtn = (key: keyof ProfileDefaults) =>
@@ -393,19 +400,34 @@ function AppearanceFields({
             <div className="flex items-center">
               <select
                 data-testid="cursor-shape-select"
-                value={data.cursorShape}
-                onChange={(e) => onChange({ cursorShape: e.target.value as CursorShape })}
+                value={supportedCursorShape}
+                onChange={(e) =>
+                  onChange({ cursorShape: e.target.value as SupportedCursorShape as CursorShape })
+                }
                 className={inputCls}
                 style={inputStyle}
               >
                 <option value="bar">Bar |</option>
                 <option value="underscore">Underscore _</option>
                 <option value="filledBox">Filled Box &#9608;</option>
-                <option value="emptyBox">Empty Box &#9744;</option>
-                <option value="doubleUnderscore">Double Underscore &#818;&#818;</option>
-                <option value="vintage">Vintage (bottom 25%)</option>
               </select>
               {resetBtn("cursorShape")}
+            </div>
+          </SettingRow>
+          <SettingRow label="Cursor Blink">
+            <div className="flex items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  data-testid="cursor-blink-toggle"
+                  type="checkbox"
+                  checked={data.cursorBlink}
+                  onChange={(e) => onChange({ cursorBlink: e.target.checked })}
+                />
+                <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                  Enable blinking cursor
+                </span>
+              </label>
+              {resetBtn("cursorBlink")}
             </div>
           </SettingRow>
           <SettingRow label="Opacity">

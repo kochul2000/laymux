@@ -79,6 +79,7 @@ async function persistSessionCore(): Promise<void> {
       startingDirectory: p.startingDirectory,
       hidden: p.hidden,
       cursorShape: p.cursorShape,
+      cursorBlink: p.cursorBlink,
       padding: p.padding,
       scrollbackLines: p.scrollbackLines,
       opacity: p.opacity,
