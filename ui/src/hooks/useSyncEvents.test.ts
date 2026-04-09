@@ -624,6 +624,7 @@ describe("useSyncEvents", () => {
       // Step 1: Rust emits active:false (task_completed)
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
 
       // Step 2: Rust emits command-status with exitCode=0 (synthetic)
       cmdStatusCb({ terminalId: "t1", exitCode: 0 });
@@ -672,6 +673,7 @@ describe("useSyncEvents", () => {
       // 2s passes with no new events → auto-reset
       vi.advanceTimersByTime(2100);
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
 
       vi.useRealTimers();
     });
@@ -700,6 +702,7 @@ describe("useSyncEvents", () => {
       // 0.6s later: timer expires (2.1s since last burst)
       vi.advanceTimersByTime(600);
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
 
       vi.useRealTimers();
     });
@@ -719,6 +722,7 @@ describe("useSyncEvents", () => {
       // active:false arrives → immediate deactivation + timer cancelled
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
+      expect(getInst()?.lastExitCode).toBe(0);
 
       // Original timer would have fired here, but was cancelled
       vi.advanceTimersByTime(3000);
@@ -781,6 +785,57 @@ describe("useSyncEvents", () => {
       // Activity MUST remain interactiveApp, NOT shell
       expect(getInst()?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
       expect(getInst()?.lastExitCode).toBe(0);
+    });
+
+    it("marks Codex success when outputActive transitions to false", () => {
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+        outputActive: true,
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", active: false });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.outputActive).toBe(false);
+      expect(instance?.lastExitCode).toBe(0);
+      expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    });
+
+    it("marks Codex success when outputActive times out", () => {
+      vi.useFakeTimers();
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1" });
+      expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.outputActive).toBe(
+        true,
+      );
+
+      vi.advanceTimersByTime(2100);
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.outputActive).toBe(false);
+      expect(instance?.lastExitCode).toBe(0);
+
+      vi.useRealTimers();
     });
   });
 });

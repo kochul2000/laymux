@@ -27,6 +27,21 @@ export function useSyncEvents() {
   const cwdPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputActiveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  const markInteractiveAppSuccessOnIdle = useCallback((terminalId: string) => {
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === terminalId);
+    if (
+      !instance?.outputActive ||
+      instance.activity?.type !== "interactiveApp" ||
+      !["Claude", "Codex"].includes(instance.activity.name ?? "")
+    ) {
+      return;
+    }
+    useTerminalStore.getState().updateInstanceInfo(terminalId, {
+      lastExitCode: 0,
+      lastCommandAt: Date.now(),
+    });
+  }, []);
+
   const debouncedPersistCwd = useCallback(() => {
     if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
     cwdPersistTimerRef.current = setTimeout(() => {
@@ -34,26 +49,34 @@ export function useSyncEvents() {
     }, CWD_PERSIST_DEBOUNCE_MS);
   }, []);
 
-  const resetOutputActiveSoon = useCallback((terminalId: string) => {
-    const prev = outputActiveTimers.current.get(terminalId);
-    if (prev) clearTimeout(prev);
-    outputActiveTimers.current.set(
-      terminalId,
-      setTimeout(() => {
-        useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
-        outputActiveTimers.current.delete(terminalId);
-      }, OUTPUT_ACTIVE_RESET_MS),
-    );
-  }, []);
+  const resetOutputActiveSoon = useCallback(
+    (terminalId: string) => {
+      const prev = outputActiveTimers.current.get(terminalId);
+      if (prev) clearTimeout(prev);
+      outputActiveTimers.current.set(
+        terminalId,
+        setTimeout(() => {
+          markInteractiveAppSuccessOnIdle(terminalId);
+          useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
+          outputActiveTimers.current.delete(terminalId);
+        }, OUTPUT_ACTIVE_RESET_MS),
+      );
+    },
+    [markInteractiveAppSuccessOnIdle],
+  );
 
-  const clearOutputActive = useCallback((terminalId: string) => {
-    useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
-    const timer = outputActiveTimers.current.get(terminalId);
-    if (timer) {
-      clearTimeout(timer);
-      outputActiveTimers.current.delete(terminalId);
-    }
-  }, []);
+  const clearOutputActive = useCallback(
+    (terminalId: string) => {
+      markInteractiveAppSuccessOnIdle(terminalId);
+      useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
+      const timer = outputActiveTimers.current.get(terminalId);
+      if (timer) {
+        clearTimeout(timer);
+        outputActiveTimers.current.delete(terminalId);
+      }
+    },
+    [markInteractiveAppSuccessOnIdle],
+  );
 
   const markOutputActive = useCallback(
     (terminalId: string) => {
