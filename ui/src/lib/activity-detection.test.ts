@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { detectActivityFromTitle, detectActivityFromCommand } from "./activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectActivityFromOutput,
+} from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
   it("detects vim from title", () => {
@@ -141,6 +145,14 @@ describe("detectActivityFromCommand", () => {
       type: "interactiveApp",
       name: "Codex",
     });
+    expect(detectActivityFromCommand("node /opt/codex/bin/codex.js")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+    expect(detectActivityFromCommand("npx @openai/codex --model gpt-5")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
     expect(detectActivityFromCommand("sudo codex --full-auto")).toEqual({
       type: "interactiveApp",
       name: "Codex",
@@ -149,5 +161,18 @@ describe("detectActivityFromCommand", () => {
 
   it("returns undefined for empty command", () => {
     expect(detectActivityFromCommand("")).toBeUndefined();
+  });
+});
+
+describe("detectActivityFromOutput", () => {
+  it("detects Codex banner text", () => {
+    expect(detectActivityFromOutput(">- OpenAI Codex (v0.118.0)\r\n")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
+  });
+
+  it("ignores unrelated output", () => {
+    expect(detectActivityFromOutput("PS C:\\Users\\kochul> dir")).toBeUndefined();
   });
 });

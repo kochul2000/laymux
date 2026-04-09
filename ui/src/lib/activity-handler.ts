@@ -35,6 +35,7 @@ export interface ActivityHandler {
 type InteractiveAppRegistration = {
   handler: ActivityHandler;
   commands?: string[];
+  commandPatterns?: RegExp[];
   titlePatterns?: string[];
 };
 
@@ -59,6 +60,11 @@ registerInteractiveApp("Claude", {
 registerInteractiveApp("Codex", {
   handler: new CodexActivityHandler(),
   commands: ["codex"],
+  commandPatterns: [
+    /@openai\/codex/i,
+    /(?:^|[\\/])codex(?:\.js)?$/i,
+    /\bcodex\s+(?:exec|resume)\b/i,
+  ],
   titlePatterns: ["OpenAI Codex"],
 });
 
@@ -104,11 +110,15 @@ export function detectRegisteredActivityFromTitle(title: string): TerminalActivi
 export function detectRegisteredActivityFromCommand(
   command: string,
 ): TerminalActivityInfo | undefined {
-  const basename = getBasename(command);
-  if (!basename) return undefined;
+  const trimmed = command.trim();
+  if (!trimmed) return undefined;
 
+  const basename = getBasename(command);
   for (const [name, registration] of interactiveApps) {
-    if (registration.commands?.includes(basename)) {
+    if (basename && registration.commands?.includes(basename)) {
+      return { type: "interactiveApp", name };
+    }
+    if (registration.commandPatterns?.some((pattern) => pattern.test(trimmed))) {
       return { type: "interactiveApp", name };
     }
   }

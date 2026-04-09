@@ -41,6 +41,14 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
   return undefined;
 }
 
+/** Detect interactive app from raw output text when command/title signals are unavailable. */
+export function detectActivityFromOutput(text: string): TerminalActivityInfo | undefined {
+  if (text.includes("OpenAI Codex")) {
+    return { type: "interactiveApp", name: "Codex" };
+  }
+  return undefined;
+}
+
 /** Detect interactive app from command text (OSC 133 E). */
 export function detectActivityFromCommand(command: string): TerminalActivityInfo | undefined {
   const registered = detectRegisteredActivityFromCommand(command);

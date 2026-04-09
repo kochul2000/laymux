@@ -183,6 +183,26 @@ describe("TerminalView", () => {
     });
   });
 
+  it("detects Codex from banner output without command-status", async () => {
+    render(<TerminalView instanceId="t-codex" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(">- OpenAI Codex (v0.118.0)\r\n"));
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
   it("registers onData handler to write to terminal", () => {
     render(<TerminalView instanceId="t5" profile="PowerShell" syncGroup="" />);
 

@@ -25,7 +25,11 @@ import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme"
 import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
-import { detectActivityFromTitle, detectActivityFromCommand } from "@/lib/activity-detection";
+import {
+  detectActivityFromTitle,
+  detectActivityFromCommand,
+  detectActivityFromOutput,
+} from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -332,6 +336,17 @@ export function TerminalView({
       const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
       if (inst?.activity?.type === "running") {
         idleDetector.recordOutput();
+      }
+
+      const outputActivity = detectActivityFromOutput(text);
+      if (outputActivity) {
+        const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
+        if (
+          current?.activity?.type !== "interactiveApp" ||
+          current.activity.name !== outputActivity.name
+        ) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: outputActivity });
+        }
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
