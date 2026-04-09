@@ -177,6 +177,68 @@ pub(crate) fn is_codex_spinner_title(title: &str) -> bool {
     (0x2800..=0x28ff).contains(&first)
 }
 
+fn recent_buffer_contains(recent: &[u8], needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    !needle.is_empty() && recent.windows(needle.len()).any(|window| window == needle)
+}
+
+pub fn is_codex_terminal_from_buffer(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> bool {
+    if let Ok(known) = state.known_codex_terminals.lock_or_err() {
+        if known.contains(terminal_id) {
+            return true;
+        }
+    }
+
+    let Some(buf) = buffer else {
+        return false;
+    };
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    if recent.is_empty() {
+        return false;
+    }
+
+    let detected = osc::any_terminal_title_contains(&recent, "OpenAI Codex")
+        || recent_buffer_contains(&recent, "OpenAI Codex");
+    if detected {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.insert(terminal_id.to_string());
+        }
+    }
+    detected
+}
+
+pub fn detect_interactive_app_from_live_title(
+    state: &AppState,
+    terminal_id: &str,
+    title: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> Option<String> {
+    if let Some(name) = detect_interactive_app_from_title(title) {
+        if name == "Codex" {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+        }
+        return Some(name);
+    }
+
+    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
+        if known.contains(terminal_id) {
+            return Some("Claude".to_string());
+        }
+    }
+
+    if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
+        return Some("Codex".to_string());
+    }
+
+    None
+}
+
 /// Detect the activity state of a terminal from its output buffer.
 pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> TerminalActivity {
     let Some(buf) = buffer else {
@@ -215,33 +277,13 @@ pub fn detect_terminal_state(
         return TerminalStateInfo { activity };
     }
 
-    if osc::any_terminal_title_contains(&recent, "OpenAI Codex") {
-        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-            known.insert(terminal_id.to_string());
-        }
-    }
-
     if let Some(title) = osc::extract_last_terminal_title(&recent) {
-        if detect_interactive_app_from_title(&title).is_some_and(|name| name == "Codex") {
-            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-                known.insert(terminal_id.to_string());
-            }
+        if let Some(name) =
+            detect_interactive_app_from_live_title(state, terminal_id, &title, buffer)
+        {
             return TerminalStateInfo {
-                activity: TerminalActivity::InteractiveApp {
-                    name: "Codex".to_string(),
-                },
+                activity: TerminalActivity::InteractiveApp { name },
             };
-        }
-        if is_codex_spinner_title(&title) {
-            if let Ok(known) = state.known_codex_terminals.lock_or_err() {
-                if known.contains(terminal_id) {
-                    return TerminalStateInfo {
-                        activity: TerminalActivity::InteractiveApp {
-                            name: "Codex".to_string(),
-                        },
-                    };
-                }
-            }
         }
     }
 
@@ -484,6 +526,24 @@ mod tests {
 
         let mut spinner = TerminalOutputBuffer::default();
         spinner.push("\x1b]0;\u{280b} laymux\x07".as_bytes());
+        assert_eq!(
+            detect_terminal_state(&state, "t1", Some(&spinner)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn codex_spinner_title_detected_from_banner_output() {
+        let state = AppState::new();
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push(b">- OpenAI Codex (v0.118.0)\r\n");
+        spinner.push("\x1b]0;\u{280b} laymux\x07".as_bytes());
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, "t1", "\u{280b} laymux", Some(&spinner)),
+            Some("Codex".to_string())
+        );
         assert_eq!(
             detect_terminal_state(&state, "t1", Some(&spinner)).activity,
             TerminalActivity::InteractiveApp {
