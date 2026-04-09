@@ -131,6 +131,7 @@ pub fn run() {
             commands::mark_notifications_read,
             commands::smart_paste,
             commands::clipboard_write_text,
+            commands::set_terminal_cwd_send,
             commands::set_terminal_cwd_receive,
             commands::update_terminal_sync_group,
             commands::save_terminal_output_cache,

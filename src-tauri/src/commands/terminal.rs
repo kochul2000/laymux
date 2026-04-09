@@ -22,6 +22,7 @@ pub fn create_terminal_session(
     cols: u16,
     rows: u16,
     sync_group: String,
+    cwd_send: Option<bool>,
     cwd_receive: Option<bool>,
     cwd: Option<String>,
     startup_command_override: Option<String>,
@@ -86,6 +87,7 @@ pub fn create_terminal_session(
     };
 
     let mut session = TerminalSession::new(id.clone(), config);
+    session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
 
     // Check for duplicate
@@ -189,23 +191,17 @@ pub fn create_terminal_session(
                     false
                 };
 
-                let cr = claude_activity::process_claude_title(
-                    &event.data,
-                    was_detected,
-                    was_working,
-                );
+                let cr =
+                    claude_activity::process_claude_title(&event.data, was_detected, was_working);
 
                 if cr.entered {
                     pty_cb_state
                         .claude_detected
                         .store(true, std::sync::atomic::Ordering::Relaxed);
-                    if let Ok(mut known) =
-                        state_for_pty.known_claude_terminals.lock_or_err()
-                    {
+                    if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                         known.insert(terminal_id.clone());
                     }
-                    let _ = app_clone
-                        .emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
+                    let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
                 }
 
                 // Determine claude_message before acquiring the terminals lock
@@ -262,9 +258,7 @@ pub fn create_terminal_session(
                         .claude_detected
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     // known_claude_terminals lock (#3) — separate from terminals (#1)
-                    if let Ok(mut known) =
-                        state_for_pty.known_claude_terminals.lock_or_err()
-                    {
+                    if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                         known.remove(&terminal_id);
                     }
                 }
@@ -360,8 +354,10 @@ pub fn create_terminal_session(
                 let raw_cwd = &event.data;
                 let normalized = path_utils::normalize_wsl_path(raw_cwd);
                 let mut changed = false;
+                let mut source_cwd_send = true;
                 if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                     if let Some(session) = terms.get_mut(&terminal_id) {
+                        source_cwd_send = session.cwd_send;
                         if session.cwd.as_deref() != Some(&normalized) {
                             if session.wsl_distro.is_none() {
                                 if let Some(distro) =
@@ -381,6 +377,7 @@ pub fn create_terminal_session(
                         serde_json::json!({
                             "terminalId": terminal_id,
                             "cwd": normalized,
+                            "cwdSend": source_cwd_send,
                         }),
                     );
                 }
@@ -577,6 +574,19 @@ pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<b
 pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
     let known = state.known_claude_terminals.lock_or_err()?;
     Ok(known.contains(&id))
+}
+
+#[tauri::command]
+pub fn set_terminal_cwd_send(
+    terminal_id: String,
+    send: bool,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let mut terminals = state.terminals.lock_or_err()?;
+    if let Some(session) = terminals.get_mut(&terminal_id) {
+        session.cwd_send = send;
+    }
+    Ok(())
 }
 
 #[tauri::command]

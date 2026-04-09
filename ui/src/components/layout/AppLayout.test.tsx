@@ -14,6 +14,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
   smartPaste: vi.fn().mockResolvedValue({ pasteType: "none", content: "" }),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  setTerminalCwdSend: vi.fn().mockResolvedValue(undefined),
   setTerminalCwdReceive: vi.fn().mockResolvedValue(undefined),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: vi.fn().mockResolvedValue(undefined),
