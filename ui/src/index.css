@@ -172,7 +172,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  background: #ffffff;
+  background: var(--terminal-overlay-caret-color, #ffffff);
   will-change: transform;
   z-index: 3;
 }

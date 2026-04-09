@@ -291,11 +291,11 @@ export function TerminalView({
       });
     };
     overlayCaretUpdaterRef.current = scheduleOverlayCaretUpdate;
-    let syncOutputMonitorTimer: ReturnType<typeof setTimeout> | undefined;
+    let syncOutputMonitorFrame: number | undefined;
     const stopSyncOutputMonitor = () => {
-      if (syncOutputMonitorTimer !== undefined) {
-        clearTimeout(syncOutputMonitorTimer);
-        syncOutputMonitorTimer = undefined;
+      if (syncOutputMonitorFrame !== undefined) {
+        cancelAnimationFrame(syncOutputMonitorFrame);
+        syncOutputMonitorFrame = undefined;
       }
     };
     const monitorSyncOutputMode = () => {
@@ -305,9 +305,9 @@ export function TerminalView({
       );
       setSyncOutputCursorVisibility(active);
       if (active && !cancelled) {
-        syncOutputMonitorTimer = setTimeout(monitorSyncOutputMode, 0);
+        syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       } else {
-        syncOutputMonitorTimer = undefined;
+        syncOutputMonitorFrame = undefined;
       }
     };
     const startSyncOutputMonitor = () => {
@@ -320,9 +320,9 @@ export function TerminalView({
         stopSyncOutputMonitor();
         return;
       }
-      if (syncOutputMonitorTimer === undefined) {
+      if (syncOutputMonitorFrame === undefined) {
         setSyncOutputCursorVisibility(true);
-        syncOutputMonitorTimer = setTimeout(monitorSyncOutputMode, 0);
+        syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       }
     };
 
@@ -956,6 +956,13 @@ export function TerminalView({
     }
   }, [scrollbarStyleForEffect]);
 
+  const overlayCaretColor = (() => {
+    const scheme = currentSchemeName
+      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+      : undefined;
+    return scheme?.cursorColor || "#FFFFFF";
+  })();
+
   // Resolve terminal background for padding area
   const termBg = (() => {
     const scheme = currentSchemeName
@@ -982,6 +989,7 @@ export function TerminalView({
       data-testid={`terminal-view-${instanceId}`}
       className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
       style={{
+        ["--terminal-overlay-caret-color" as const]: overlayCaretColor,
         background: termBg,
         padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
       }}

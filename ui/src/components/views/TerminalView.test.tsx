@@ -36,6 +36,12 @@ const csiHandlers = new Map<
   string,
   (params: readonly (number | number[])[]) => boolean | Promise<boolean>
 >();
+const mockRequestAnimationFrame = vi.fn((callback: FrameRequestCallback) =>
+  window.setTimeout(() => callback(performance.now()), 0),
+);
+const mockCancelAnimationFrame = vi.fn((handle: number) => window.clearTimeout(handle));
+vi.stubGlobal("requestAnimationFrame", mockRequestAnimationFrame);
+vi.stubGlobal("cancelAnimationFrame", mockCancelAnimationFrame);
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     constructor(options: Record<string, unknown> = {}) {
@@ -304,6 +310,23 @@ describe("TerminalView", () => {
     expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
+  it("uses the configured cursor color for the overlay caret", async () => {
+    useSettingsStore.getState().updateProfile(0, { colorScheme: "One Half Light" });
+
+    render(<TerminalView instanceId="t-overlay-color" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-overlay-color");
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-color", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveStyle({ "--terminal-overlay-caret-color": "#4F525D" });
+    });
+  });
+
   it("hides the xterm cursor only during synchronized output frames", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 
@@ -348,6 +371,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(container).not.toHaveClass("terminal-sync-output-active");
     });
+    expect(mockRequestAnimationFrame).toHaveBeenCalled();
   });
 
   it("keeps native xterm cursor blink disabled in overlay mode even when codex override is disabled", async () => {
