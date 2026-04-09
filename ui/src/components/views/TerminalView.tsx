@@ -692,6 +692,8 @@ export function TerminalView({
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
   const font = useSettingsStore((s) => s.resolveFont(profile));
+  const codexSettings = useSettingsStore((s) => s.codex);
+  const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
     return prof?.cursorShape || s.profileDefaults?.cursorShape || "bar";
@@ -700,6 +702,12 @@ export function TerminalView({
     const prof = s.profiles?.find((p) => p.name === profile);
     return prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? true;
   });
+  const effectiveCursorBlink =
+    codexSettings.disableCursorBlink &&
+    activity?.type === "interactiveApp" &&
+    activity.name === "Codex"
+      ? false
+      : cursorBlink;
 
   useEffect(() => {
     const term = terminalRef.current;
@@ -724,13 +732,13 @@ export function TerminalView({
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
       const cursorOptions = toXtermCursorOptions(cursorShape);
-      term.options.cursorBlink = cursorBlink;
+      term.options.cursorBlink = effectiveCursorBlink;
       term.options.cursorStyle = cursorOptions.cursorStyle;
       term.options.cursorWidth = cursorOptions.cursorWidth;
     } catch {
       /* xterm mock may not support options setter */
     }
-  }, [currentSchemeName, colorSchemes, font, cursorShape, cursorBlink]);
+  }, [currentSchemeName, colorSchemes, font, cursorShape, effectiveCursorBlink]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
   const scrollbarStyleForEffect = useSettingsStore(

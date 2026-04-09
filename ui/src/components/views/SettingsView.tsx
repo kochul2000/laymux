@@ -1758,6 +1758,20 @@ function CodexSection() {
       <SectionTitle>Codex</SectionTitle>
 
       <div style={cardStyle} className="p-4">
+        <SettingRow label="Cursor Blink Override">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              data-testid="codex-disable-cursor-blink-toggle"
+              type="checkbox"
+              checked={codex.disableCursorBlink}
+              onChange={(e) => updateCodex({ disableCursorBlink: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              Disable cursor blinking while Codex is active
+            </span>
+          </label>
+        </SettingRow>
+
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>

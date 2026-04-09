@@ -167,6 +167,39 @@ describe("TerminalView", () => {
     expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
+  it("disables cursor blink while Codex is active when codex override is enabled", async () => {
+    render(<TerminalView instanceId="t-codex-blink" profile="PowerShell" syncGroup="" />);
+
+    expect(createdTerminals).toHaveLength(1);
+    expect(createdTerminals[0].options.cursorBlink).toBe(true);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-codex-blink", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
+    });
+  });
+
+  it("keeps profile cursor blink while Codex is active when codex override is disabled", async () => {
+    useSettingsStore.getState().setCodex({ disableCursorBlink: false });
+
+    render(<TerminalView instanceId="t-codex-blink-disabled" profile="PowerShell" syncGroup="" />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-codex-blink-disabled", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(createdTerminals[0].options.cursorBlink).toBe(true);
+    });
+  });
+
   it("registers terminal instance in store on mount", () => {
     render(<TerminalView instanceId="t2" profile="WSL" syncGroup="project-a" />);
     const instances = useTerminalStore.getState().instances;

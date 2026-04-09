@@ -140,6 +140,7 @@ export interface CodexSettings {
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
   statusMessageDelimiter: string;
+  disableCursorBlink: boolean;
 }
 
 export interface IssueReporterSettings {
