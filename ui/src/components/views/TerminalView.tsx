@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -983,16 +983,20 @@ export function TerminalView({
   const scrollbarStyle = useSettingsStore((s) => s.convenience.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
+  const wrapperStyle: CSSProperties & {
+    "--terminal-overlay-caret-color": string;
+  } = {
+    "--terminal-overlay-caret-color": overlayCaretColor,
+    background: termBg,
+    padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
+  };
+
   return (
     <div
       ref={wrapperRef}
       data-testid={`terminal-view-${instanceId}`}
       className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
-      style={{
-        ["--terminal-overlay-caret-color" as const]: overlayCaretColor,
-        background: termBg,
-        padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
-      }}
+      style={wrapperStyle}
     >
       <div ref={containerRef} className="h-full w-full" />
       <div
