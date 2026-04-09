@@ -149,3 +149,30 @@
  *   - separate: width = 14, FitAddon reserves scrollbar space
  * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
  */
+
+.terminal-sync-output-active .xterm-cursor-layer,
+.terminal-sync-output-active .xterm-cursor {
+  opacity: 0 !important;
+}
+
+.terminal-sync-output-active .xterm-helper-textarea {
+  caret-color: transparent !important;
+}
+
+.terminal-native-cursor-hidden .xterm-cursor-layer,
+.terminal-native-cursor-hidden .xterm-cursor {
+  opacity: 0 !important;
+}
+
+.terminal-native-cursor-hidden .xterm-helper-textarea {
+  caret-color: transparent !important;
+}
+
+.terminal-overlay-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: #ffffff;
+  will-change: transform;
+  z-index: 3;
+}

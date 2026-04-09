@@ -1,6 +1,6 @@
 import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TerminalView, _resetWebglStagger } from "./TerminalView";
+import { TerminalView, _resetWebglStagger, shouldEnableTerminalWebgl } from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -18,13 +18,24 @@ const mockPaste = vi.fn();
 const mockHasSelection = vi.fn().mockReturnValue(false);
 const mockGetSelection = vi.fn().mockReturnValue("");
 const mockClearSelection = vi.fn();
+const mockOnCursorMove = vi.fn().mockReturnValue({ dispose: vi.fn() });
+const mockOnWriteParsed = vi.fn().mockReturnValue({ dispose: vi.fn() });
+const mockOnRender = vi.fn().mockReturnValue({ dispose: vi.fn() });
 const createdTerminals: Array<{ options: Record<string, unknown> }> = [];
+const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
-const mockWrite = vi.fn();
+const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
+  callback?.();
+});
 const mockRefresh = vi.fn();
+const mockRegisterCsiHandler = vi.fn();
+const csiHandlers = new Map<
+  string,
+  (params: readonly (number | number[])[]) => boolean | Promise<boolean>
+>();
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     constructor(options: Record<string, unknown> = {}) {
@@ -38,6 +49,9 @@ vi.mock("@xterm/xterm", () => ({
     onTitleChange = mockOnTitleChange;
     onSelectionChange = mockOnSelectionChange;
     onKey = mockOnKey;
+    onCursorMove = mockOnCursorMove;
+    onWriteParsed = mockOnWriteParsed;
+    onRender = mockOnRender;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     focus = mockFocus;
     blur = mockBlur;
@@ -49,6 +63,20 @@ vi.mock("@xterm/xterm", () => ({
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
+    element = document.createElement("div");
+    buffer = { active: { cursorX: 0, cursorY: 0 } };
+    modes = mockModes;
+    parser = {
+      registerCsiHandler: mockRegisterCsiHandler.mockImplementation(
+        (
+          id: { prefix?: string; final: string },
+          callback: (params: readonly (number | number[])[]) => boolean | Promise<boolean>,
+        ) => {
+          csiHandlers.set(`${id.prefix ?? ""}:${id.final}`, callback);
+          return { dispose: vi.fn() };
+        },
+      ),
+    };
     cols = 80;
     rows = 24;
     options: Record<string, unknown>;
@@ -147,6 +175,8 @@ describe("TerminalView", () => {
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
+    csiHandlers.clear();
+    mockModes.synchronizedOutputMode = false;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -235,6 +265,82 @@ describe("TerminalView", () => {
 
     await vi.waitFor(() => {
       expect(createdTerminals[0].options.cursorBlink).toBe(false);
+    });
+  });
+
+  it("uses overlay caret mode for Codex and Claude", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />,
+    );
+
+    const container = screen.getByTestId("terminal-view-t-overlay-mode");
+    expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-mode", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-native-cursor-hidden");
+    });
+
+    rerender(<TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />);
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-mode", {
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-native-cursor-hidden");
+    });
+  });
+
+  it("hides the xterm cursor only during synchronized output frames", async () => {
+    render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-sync-cursor");
+    expect(container).not.toHaveClass("terminal-sync-output-active");
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    expect(container).toHaveClass("terminal-sync-output-active");
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    expect(container).not.toHaveClass("terminal-sync-output-active");
+  });
+
+  it("tracks xterm synchronizedOutputMode after terminal.write", async () => {
+    render(<TerminalView instanceId="t-sync-write" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    const container = screen.getByTestId("terminal-view-t-sync-write");
+    mockModes.synchronizedOutputMode = true;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("\x1b[?2026hframe"));
+    });
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-sync-output-active");
+    });
+
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-sync-output-active");
     });
   });
 
@@ -1472,5 +1578,11 @@ describe("TerminalView", () => {
 
       vi.useRealTimers();
     });
+  });
+});
+
+describe("shouldEnableTerminalWebgl", () => {
+  it("keeps WebGL enabled", () => {
+    expect(shouldEnableTerminalWebgl()).toBe(true);
   });
 });
