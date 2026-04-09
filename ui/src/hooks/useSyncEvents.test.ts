@@ -624,7 +624,7 @@ describe("useSyncEvents", () => {
       // Step 1: Rust emits active:false (task_completed)
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
-      expect(getInst()?.lastExitCode).toBe(0);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       // Step 2: Rust emits command-status with exitCode=0 (synthetic)
       cmdStatusCb({ terminalId: "t1", exitCode: 0 });
@@ -673,7 +673,7 @@ describe("useSyncEvents", () => {
       // 2s passes with no new events → auto-reset
       vi.advanceTimersByTime(2100);
       expect(getInst()?.outputActive).toBe(false);
-      expect(getInst()?.lastExitCode).toBe(0);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       vi.useRealTimers();
     });
@@ -702,7 +702,7 @@ describe("useSyncEvents", () => {
       // 0.6s later: timer expires (2.1s since last burst)
       vi.advanceTimersByTime(600);
       expect(getInst()?.outputActive).toBe(false);
-      expect(getInst()?.lastExitCode).toBe(0);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       vi.useRealTimers();
     });
@@ -722,7 +722,7 @@ describe("useSyncEvents", () => {
       // active:false arrives → immediate deactivation + timer cancelled
       activityCb({ terminalId: "t1", active: false });
       expect(getInst()?.outputActive).toBe(false);
-      expect(getInst()?.lastExitCode).toBe(0);
+      expect(getInst()?.lastExitCode).toBeUndefined();
 
       // Original timer would have fired here, but was cancelled
       vi.advanceTimersByTime(3000);

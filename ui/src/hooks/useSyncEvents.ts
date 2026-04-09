@@ -32,7 +32,7 @@ export function useSyncEvents() {
     if (
       !instance?.outputActive ||
       instance.activity?.type !== "interactiveApp" ||
-      !["Claude", "Codex"].includes(instance.activity.name ?? "")
+      instance.activity.name !== "Codex"
     ) {
       return;
     }
