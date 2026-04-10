@@ -103,25 +103,46 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   // Lazy copy on select: remember selected text, copy on deselect / blur / Ctrl+C
   const pendingCopyRef = useRef<string | null>(null);
+  const flushedGuardRef = useRef(false);
 
   const flushPendingCopy = useCallback(() => {
     if (pendingCopyRef.current) {
       clipboardWriteText(pendingCopyRef.current).catch(() => {});
       pendingCopyRef.current = null;
+      // Prevent selectionchange from re-storing the same text right after flush
+      flushedGuardRef.current = true;
+      requestAnimationFrame(() => {
+        flushedGuardRef.current = false;
+      });
     }
+  }, []);
+
+  const discardPendingCopy = useCallback(() => {
+    pendingCopyRef.current = null;
+    flushedGuardRef.current = true;
+    requestAnimationFrame(() => {
+      flushedGuardRef.current = false;
+    });
   }, []);
 
   // Track selection changes (covers drag, double-click, triple-click, keyboard select)
   useEffect(() => {
     if (!memo.copyOnSelect) return;
     const onSelectionChange = () => {
+      if (flushedGuardRef.current) return;
       const textarea = textareaRef.current;
-      if (!textarea || document.activeElement !== textarea) return;
+      if (!textarea) return;
+      const isFocused = document.activeElement === textarea;
+      if (!isFocused) {
+        // Focus left textarea → flush whatever was pending
+        if (pendingCopyRef.current) flushPendingCopy();
+        return;
+      }
       const selectedText = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
       if (selectedText) {
         pendingCopyRef.current = selectedText;
       } else if (pendingCopyRef.current) {
-        // Selection cleared → flush pending
+        // Selection cleared within textarea → flush
         flushPendingCopy();
       }
     };
@@ -131,8 +152,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   // Rule 3: paste event discards pending (user is replacing content with clipboard)
   const handlePaste = useCallback(() => {
-    pendingCopyRef.current = null;
-  }, []);
+    discardPendingCopy();
+  }, [discardPendingCopy]);
 
   // Flush pending copy when focus leaves memo: window blur (external app)
   // or click outside textarea (dock/sidebar/other pane)
