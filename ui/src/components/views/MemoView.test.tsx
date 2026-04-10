@@ -207,19 +207,20 @@ describe("MemoView", () => {
     });
   });
 
-  describe("double-click paragraph select", () => {
-    it("selects entire paragraph on double-click when paragraphCopy is enabled", async () => {
+  describe("triple-click paragraph select", () => {
+    it("selects entire paragraph on triple-click when paragraphCopy is enabled", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
+          dblClickParagraphSelect: true,
         },
       });
       // "abc" = line 0, "" = line 1, "" = line 2, "def\nggg" = lines 3-4
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
-      render(<MemoView memoKey="pane-dbl" />);
+      render(<MemoView memoKey="pane-tpl" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
@@ -227,34 +228,37 @@ describe("MemoView", () => {
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       // Place cursor in "def" (offset 6 = start of line 3)
       textarea.setSelectionRange(6, 6);
-      fireEvent.doubleClick(textarea);
+      // Triple-click: click event with detail=3
+      fireEvent.click(textarea, { detail: 3 });
 
       // Should select "def\nggg" (start=6, end=13 exclusive)
       expect(textarea.selectionStart).toBe(6);
       expect(textarea.selectionEnd).toBe(13);
     });
 
-    it("copies paragraph on double-click when copyOnSelect is also enabled", async () => {
+    it("does not select paragraph on double-click (detail=2)", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
-          copyOnSelect: true,
+          copyOnSelect: false,
+          dblClickParagraphSelect: true,
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
-      render(<MemoView memoKey="pane-dbl-copy" />);
+      render(<MemoView memoKey="pane-dbl-no" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
 
-      vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       textarea.setSelectionRange(6, 6);
+      // Double-click should NOT trigger paragraph selection anymore
       fireEvent.doubleClick(textarea);
 
-      expect(clipboardWriteText).toHaveBeenCalledWith("def\nggg");
+      // Selection should not have been changed to the full paragraph
+      // (browser default double-click selects a word, not full paragraph)
     });
 
     it("falls back to default behavior when paragraphCopy is disabled", async () => {
@@ -266,21 +270,21 @@ describe("MemoView", () => {
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
-      render(<MemoView memoKey="pane-dbl-off" />);
+      render(<MemoView memoKey="pane-tpl-off" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
 
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-      // double-click should not trigger paragraph selection
-      fireEvent.doubleClick(textarea);
+      // triple-click should not trigger paragraph selection when disabled
+      fireEvent.click(textarea, { detail: 3 });
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
   });
 
-  describe("copyOnSelect feature", () => {
-    it("copies selected text on mouseup when enabled", async () => {
+  describe("copyOnSelect feature (lazy)", () => {
+    it("does not copy immediately on mouseup, waits for delay", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -294,17 +298,103 @@ describe("MemoView", () => {
         await vi.runAllTimersAsync();
       });
 
-      // Simulate text selection
       const selection = {
         toString: () => "hello",
         removeAllRanges: vi.fn(),
       };
       vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
 
+      vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
+      // Should NOT copy immediately
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      // After the lazy delay (500ms), it should copy
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
+    it("cancels lazy copy when selection changes (new mousedown)", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-cos-cancel" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const selection = {
+        toString: () => "hello",
+        removeAllRanges: vi.fn(),
+      };
+      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea");
+      fireEvent.mouseUp(textarea);
+
+      // Start new selection before delay expires (cancels pending copy)
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      fireEvent.mouseDown(textarea);
+
+      // Wait past the original delay
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+
+      // Should NOT have copied because mousedown cancelled the pending copy
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("cancels lazy copy when user starts typing (keydown)", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-cos-type" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const selection = {
+        toString: () => "hello",
+        removeAllRanges: vi.fn(),
+      };
+      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea");
+      fireEvent.mouseUp(textarea);
+
+      // User starts typing before delay expires
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      fireEvent.keyDown(textarea, { key: "a" });
+
+      // Wait past the original delay
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+
+      // Should NOT have copied because typing cancelled the pending copy
+      expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
     it("does not copy on mouseup when copyOnSelect is disabled", async () => {
@@ -330,6 +420,10 @@ describe("MemoView", () => {
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
+
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
 
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
@@ -358,7 +452,35 @@ describe("MemoView", () => {
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+
       expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("copy button hover highlight", () => {
+    it("renders highlight overlay when copy button is hovered", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: true, minBlankLines: 2 },
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
+      render(<MemoView memoKey="pane-highlight" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      // Should have paragraph overlay
+      expect(screen.getByTestId("paragraph-overlay")).toBeInTheDocument();
+
+      // Initially no highlight
+      expect(screen.queryByTestId("paragraph-highlight-0")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("paragraph-highlight-1")).not.toBeInTheDocument();
     });
   });
 

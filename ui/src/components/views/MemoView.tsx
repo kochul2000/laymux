@@ -7,6 +7,7 @@ import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
 
 const DEBOUNCE_MS = 300;
+const LAZY_COPY_DELAY_MS = 500;
 
 interface MemoViewProps {
   memoKey: string;
@@ -101,19 +102,51 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     setHoveredParagraph(null);
   }, []);
 
-  // Copy on select feature
+  // Lazy copy on select: schedule clipboard write after delay, cancel if user acts
+  const lazyCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelLazyCopy = useCallback(() => {
+    if (lazyCopyTimerRef.current) {
+      clearTimeout(lazyCopyTimerRef.current);
+      lazyCopyTimerRef.current = null;
+    }
+  }, []);
+
   const handleMouseUp = useCallback(() => {
     if (!memo.copyOnSelect) return;
     const selection = window.getSelection();
     const selectedText = selection?.toString() ?? "";
-    if (selectedText) {
-      clipboardWriteText(selectedText).catch(() => {});
-    }
-  }, [memo.copyOnSelect]);
+    if (!selectedText) return;
 
-  // Double-click to select paragraph
-  const handleDoubleClick = useCallback(
+    cancelLazyCopy();
+    lazyCopyTimerRef.current = setTimeout(() => {
+      // Re-check selection is still present at copy time
+      const currentSelection = window.getSelection()?.toString() ?? "";
+      if (currentSelection) {
+        clipboardWriteText(currentSelection).catch(() => {});
+      }
+      lazyCopyTimerRef.current = null;
+    }, LAZY_COPY_DELAY_MS);
+  }, [memo.copyOnSelect, cancelLazyCopy]);
+
+  // Cancel lazy copy on mousedown (new selection) or keydown (typing to replace)
+  const handleMouseDown = useCallback(() => {
+    cancelLazyCopy();
+  }, [cancelLazyCopy]);
+
+  const handleKeyDown = useCallback(() => {
+    cancelLazyCopy();
+  }, [cancelLazyCopy]);
+
+  // Cleanup lazy copy timer on unmount
+  useEffect(() => {
+    return () => cancelLazyCopy();
+  }, [cancelLazyCopy]);
+
+  // Triple-click to select paragraph (changed from double-click)
+  const handleClick = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
+      if (e.detail !== 3) return; // Only handle triple-click
       if (!showParagraphOverlay || !memo.dblClickParagraphSelect) return;
       const textarea = textareaRef.current;
       if (!textarea) return;
@@ -150,16 +183,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
         endOffset += lines[i].length + (i < para.endLine ? 1 : 0);
       }
 
-      // Prevent default word selection and select paragraph instead
+      // Prevent default line selection and select paragraph instead
       e.preventDefault();
       textarea.setSelectionRange(startOffset, endOffset);
-
-      // Copy if copyOnSelect is enabled
-      if (memo.copyOnSelect) {
-        clipboardWriteText(para.text).catch(() => {});
-      }
     },
-    [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs, memo.copyOnSelect],
+    [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
   );
 
   return (
@@ -172,8 +200,10 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           value={text}
           onChange={handleChange}
           onMouseUp={handleMouseUp}
+          onMouseDown={handleMouseDown}
+          onKeyDown={handleKeyDown}
           onMouseMove={handleMouseMove}
-          onDoubleClick={handleDoubleClick}
+          onClick={handleClick}
           className="h-full w-full resize-none border-none outline-none"
           style={{
             background: "var(--bg-base)",
@@ -221,7 +251,9 @@ function ParagraphOverlay({
   fontSize = 13,
 }: ParagraphOverlayProps) {
   const [copied, setCopied] = useState<number | null>(null);
+  const [copyBtnHoveredIdx, setCopyBtnHoveredIdx] = useState<number | null>(null);
   const lineHeight = fontSize * 1.6; // fontSize * lineHeight
+  const [containerHeight, setContainerHeight] = useState(0);
 
   const handleCopy = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
@@ -234,6 +266,24 @@ function ParagraphOverlay({
     textareaRef.current?.focus();
   };
 
+  // Track overlay container height via callback ref + ResizeObserver
+  const roRef = useRef<ResizeObserver | null>(null);
+  const overlayCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    if (roRef.current) {
+      roRef.current.disconnect();
+      roRef.current = null;
+    }
+    if (!node) return;
+    setContainerHeight(node.clientHeight);
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
+      }
+    });
+    ro.observe(node);
+    roRef.current = ro;
+  }, []);
+
   // Calculate scroll offset
   const [scrollTop, setScrollTop] = useState(0);
   useEffect(() => {
@@ -244,20 +294,48 @@ function ParagraphOverlay({
     return () => textarea.removeEventListener("scroll", onScroll);
   }, [textareaRef]);
 
+  // Pre-compute clamped positions outside of JSX render
+  const clampedTops = useMemo(() => {
+    const btnHeight = 22;
+    const minTop = 4;
+    const maxTop = containerHeight - btnHeight - 4;
+    return paragraphs.map((para) => {
+      const rawTop = paddingTop + para.startLine * lineHeight - scrollTop;
+      return containerHeight > 0 ? Math.max(minTop, Math.min(rawTop, maxTop)) : rawTop;
+    });
+  }, [paragraphs, paddingTop, lineHeight, scrollTop, containerHeight]);
+
   return (
     <div
+      ref={overlayCallbackRef}
       data-testid="paragraph-overlay"
       className="pointer-events-none absolute inset-0 overflow-hidden"
     >
+      {/* Highlight overlay when copy button is hovered */}
+      {copyBtnHoveredIdx !== null && paragraphs[copyBtnHoveredIdx] && (
+        <div
+          data-testid={`paragraph-highlight-${copyBtnHoveredIdx}`}
+          className="absolute left-0 right-0"
+          style={{
+            top: paddingTop + paragraphs[copyBtnHoveredIdx].startLine * lineHeight - scrollTop,
+            height:
+              (paragraphs[copyBtnHoveredIdx].endLine -
+                paragraphs[copyBtnHoveredIdx].startLine +
+                1) *
+              lineHeight,
+            background: "var(--accent-12)",
+            borderRadius: "var(--radius-sm, 4px)",
+            pointerEvents: "none",
+          }}
+        />
+      )}
       {paragraphs.map((para, i) => {
-        const top = paddingTop + para.startLine * lineHeight - scrollTop;
-
         return (
           <div
             key={i}
             data-testid={`paragraph-region-${i}`}
             className="absolute"
-            style={{ top, right: 0 }}
+            style={{ top: clampedTops[i], right: 0 }}
           >
             {hoveredIndex === i && (
               <button
@@ -273,6 +351,8 @@ function ParagraphOverlay({
                   opacity: 0.9,
                 }}
                 onMouseDown={(e) => handleCopy(e, i)}
+                onMouseEnter={() => setCopyBtnHoveredIdx(i)}
+                onMouseLeave={() => setCopyBtnHoveredIdx(null)}
                 title="단락 복사"
               >
                 {copied === i ? "Copied!" : "Copy"}
