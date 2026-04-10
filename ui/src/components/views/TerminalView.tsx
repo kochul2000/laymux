@@ -100,6 +100,7 @@ interface ShadowCursorState {
   cursorX: number;
   cursorAbsY: number;
   hasPromptBoundary: boolean;
+  isComposing: boolean;
   isInputPhase: boolean;
   isRepaintInProgress: boolean;
   isAltBufferActive: boolean;
@@ -202,6 +203,7 @@ export function TerminalView({
     cursorX: 0,
     cursorAbsY: 0,
     hasPromptBoundary: false,
+    isComposing: false,
     isInputPhase: false,
     isRepaintInProgress: false,
     isAltBufferActive: false,
@@ -334,7 +336,7 @@ export function TerminalView({
       }
 
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive) {
+      if (shadowCursor.isAltBufferActive || shadowCursor.isComposing) {
         overlay.style.opacity = "0";
         return;
       }
@@ -397,6 +399,7 @@ export function TerminalView({
         const shadowCursor = shadowCursorRef.current;
         if (
           !shadowCursor.isInputPhase ||
+          shadowCursor.isComposing ||
           shadowCursor.isRepaintInProgress ||
           shadowCursor.isAltBufferActive ||
           syncOutputActiveRef.current
@@ -547,12 +550,47 @@ export function TerminalView({
       }
       return false;
     });
+    const cursorMoveDisposable = terminal.onCursorMove(() => {
+      const shadowCursor = shadowCursorRef.current;
+      if (
+        !shadowCursor.hasPromptBoundary ||
+        !shadowCursor.isInputPhase ||
+        shadowCursor.isComposing ||
+        shadowCursor.isRepaintInProgress ||
+        shadowCursor.isAltBufferActive ||
+        syncOutputActiveRef.current
+      ) {
+        return;
+      }
+      syncShadowCursorToBuffer();
+      scheduleOverlayCaretUpdate();
+    });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
       scheduleOverlayCaretUpdate();
     });
+    let helperTextarea: HTMLTextAreaElement | null = null;
+    const handleCompositionStart = () => {
+      shadowCursorRef.current.isComposing = true;
+      scheduleOverlayCaretUpdate();
+    };
+    const handleCompositionEnd = () => {
+      shadowCursorRef.current.isComposing = false;
+      scheduleShadowCursorSync();
+    };
+    const bindHelperTextareaEvents = () => {
+      const nextHelperTextarea = terminal.element?.querySelector(
+        ".xterm-helper-textarea",
+      ) as HTMLTextAreaElement | null;
+      if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
+      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
+      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
+      helperTextarea = nextHelperTextarea;
+      helperTextarea.addEventListener("compositionstart", handleCompositionStart);
+      helperTextarea.addEventListener("compositionend", handleCompositionEnd);
+    };
 
     // Custom key event handler: IDE shortcuts + smart paste interception.
     // Returning false prevents xterm from consuming the event.
@@ -887,6 +925,7 @@ export function TerminalView({
         if (containerRef.current) {
           terminal.open(containerRef.current);
         }
+        bindHelperTextareaEvents();
         // WebGL renderer required for custom glyph drawing (box-drawing, block
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
         // Stagger creation to prevent simultaneous GPU context init crash.
@@ -981,6 +1020,7 @@ export function TerminalView({
         }
       } else if (sessionCreated && width > 0 && height > 0) {
         fitAddon.fit();
+        bindHelperTextareaEvents();
         scheduleOverlayCaretUpdate();
       }
     });
@@ -998,6 +1038,8 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
+      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
       stopSyncOutputMonitor();
@@ -1009,6 +1051,7 @@ export function TerminalView({
       syncOutputResetDisposable?.dispose();
       cursorSaveDisposable?.dispose();
       cursorRestoreDisposable?.dispose();
+      cursorMoveDisposable?.dispose();
       writeParsedDisposable?.dispose();
       renderDisposable?.dispose();
       setSyncOutputCursorVisibility(false);
