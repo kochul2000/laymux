@@ -322,6 +322,7 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
       return { label: "running", color: "var(--yellow)" };
     case "interactiveApp": {
       if (activity.name === "Claude") return { label: "Claude", color: "var(--claude)" };
+      if (activity.name === "Codex") return { label: "Codex", color: "var(--codex)" };
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }
   }

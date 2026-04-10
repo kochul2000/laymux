@@ -562,6 +562,12 @@ describe("formatActivity", () => {
     expect(result.label).toBe("Claude");
     expect(result.color).toBe("var(--claude)");
   });
+
+  it("returns Codex brand color for Codex app", () => {
+    const result = formatActivity({ type: "interactiveApp", name: "Codex" });
+    expect(result.label).toBe("Codex");
+    expect(result.color).toBe("var(--codex)");
+  });
 });
 
 describe("computeWorkspaceSummaryFromBackend", () => {
