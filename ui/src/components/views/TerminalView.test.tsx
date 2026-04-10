@@ -32,10 +32,14 @@ const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
 });
 const mockRefresh = vi.fn();
 const mockRegisterCsiHandler = vi.fn();
+const mockRegisterOscHandler = vi.fn();
+const mockRegisterEscHandler = vi.fn();
 const csiHandlers = new Map<
   string,
   (params: readonly (number | number[])[]) => boolean | Promise<boolean>
 >();
+const oscHandlers = new Map<string, (data: string) => boolean | Promise<boolean>>();
+const escHandlers = new Map<string, () => boolean | Promise<boolean>>();
 const mockRequestAnimationFrame = vi.fn((callback: FrameRequestCallback) =>
   window.setTimeout(() => callback(performance.now()), 0),
 );
@@ -73,6 +77,18 @@ vi.mock("@xterm/xterm", () => ({
     buffer = { active: { cursorX: 0, cursorY: 0 } };
     modes = mockModes;
     parser = {
+      registerOscHandler: mockRegisterOscHandler.mockImplementation(
+        (ident: number, callback: (data: string) => boolean | Promise<boolean>) => {
+          oscHandlers.set(String(ident), callback);
+          return { dispose: vi.fn() };
+        },
+      ),
+      registerEscHandler: mockRegisterEscHandler.mockImplementation(
+        (id: { final: string }, callback: () => boolean | Promise<boolean>) => {
+          escHandlers.set(id.final, callback);
+          return { dispose: vi.fn() };
+        },
+      ),
       registerCsiHandler: mockRegisterCsiHandler.mockImplementation(
         (
           id: { prefix?: string; final: string },
@@ -182,6 +198,8 @@ describe("TerminalView", () => {
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
     csiHandlers.clear();
+    oscHandlers.clear();
+    escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
     _resetWebglStagger();
     vi.clearAllMocks();
@@ -324,6 +342,86 @@ describe("TerminalView", () => {
 
     await vi.waitFor(() => {
       expect(container).toHaveStyle({ "--terminal-overlay-caret-color": "#4F525D" });
+    });
+  });
+
+  it("keeps the overlay caret pinned to the input cursor during repaint save/restore", async () => {
+    render(
+      <TerminalView instanceId="t-shadow-cursor" profile="PowerShell" syncGroup="" isFocused />,
+    );
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-shadow-cursor", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-shadow-cursor");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-shadow-cursor");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    terminal.element.appendChild(screenEl);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(20px, 80px)");
+      expect(overlay.style.opacity).toBe("1");
+    });
+
+    terminal.buffer.active.cursorX = 20;
+    terminal.buffer.active.cursorY = 10;
+
+    await act(async () => {
+      await csiHandlers.get(":s")?.([]);
+      const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+      renderHandler?.();
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(20px, 80px)");
+    });
+
+    await act(async () => {
+      await csiHandlers.get(":u")?.([]);
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(200px, 200px)");
     });
   });
 

@@ -94,6 +94,22 @@ function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boo
   );
 }
 
+interface ShadowCursorState {
+  commandStartLine: number;
+  commandStartX: number;
+  cursorX: number;
+  cursorAbsY: number;
+  hasPromptBoundary: boolean;
+  isInputPhase: boolean;
+  isRepaintInProgress: boolean;
+  isAltBufferActive: boolean;
+}
+
+function getBufferCursorAbsY(terminal: Terminal): number {
+  const activeBuffer = terminal.buffer.active as { baseY?: number; cursorY?: number };
+  return (activeBuffer.baseY ?? 0) + (activeBuffer.cursorY ?? 0);
+}
+
 interface TerminalViewProps {
   instanceId: string;
   paneId?: string;
@@ -149,6 +165,16 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
   const syncOutputActiveRef = useRef(false);
+  const shadowCursorRef = useRef<ShadowCursorState>({
+    commandStartLine: 0,
+    commandStartX: 0,
+    cursorX: 0,
+    cursorAbsY: 0,
+    hasPromptBoundary: false,
+    isInputPhase: false,
+    isRepaintInProgress: false,
+    isAltBufferActive: false,
+  });
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
@@ -233,6 +259,7 @@ export function TerminalView({
       if (host) {
         host.classList.toggle("terminal-sync-output-active", active);
       }
+      overlayCaretUpdaterRef.current?.();
     };
     let overlayCaretFrame: number | undefined;
     const updateOverlayCaret = () => {
@@ -245,7 +272,8 @@ export function TerminalView({
         !openedRef.current ||
         !isFocusedRef.current ||
         !stabilizeInteractiveCursorRef.current ||
-        !isOverlayCaretActivity(activityRef.current)
+        !isOverlayCaretActivity(activityRef.current) ||
+        syncOutputActiveRef.current
       ) {
         overlay.style.opacity = "0";
         return;
@@ -274,8 +302,25 @@ export function TerminalView({
         return;
       }
 
-      const cursorX = term.buffer.active.cursorX;
-      const cursorY = term.buffer.active.cursorY;
+      const shadowCursor = shadowCursorRef.current;
+      if (shadowCursor.isAltBufferActive) {
+        overlay.style.opacity = "0";
+        return;
+      }
+
+      const baseY = (term.buffer.active as { baseY?: number }).baseY ?? 0;
+      const useShadowCursor = shadowCursor.hasPromptBoundary && shadowCursor.isInputPhase;
+      const cursorX = useShadowCursor
+        ? shadowCursor.cursorX
+        : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
+      const cursorY = useShadowCursor
+        ? shadowCursor.cursorAbsY - baseY
+        : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
+      if (cursorY < 0 || cursorY >= term.rows) {
+        overlay.style.opacity = "0";
+        return;
+      }
+
       overlay.style.opacity = "1";
       overlay.style.width = `${Math.max(2, Math.round(cellWidth * 0.1))}px`;
       overlay.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
@@ -291,6 +336,63 @@ export function TerminalView({
       });
     };
     overlayCaretUpdaterRef.current = scheduleOverlayCaretUpdate;
+    let pendingShadowCursorSync = false;
+    const syncShadowCursorToBuffer = () => {
+      const shadowCursor = shadowCursorRef.current;
+      const activeBuffer = terminal.buffer.active as { cursorX?: number };
+      shadowCursor.cursorX = activeBuffer.cursorX ?? 0;
+      shadowCursor.cursorAbsY = getBufferCursorAbsY(terminal);
+    };
+    const setInputPhase = (active: boolean) => {
+      const shadowCursor = shadowCursorRef.current;
+      shadowCursor.isInputPhase = active;
+      if (!active) {
+        shadowCursor.isRepaintInProgress = false;
+      } else {
+        syncShadowCursorToBuffer();
+      }
+      scheduleOverlayCaretUpdate();
+    };
+    const scheduleShadowCursorSync = () => {
+      if (pendingShadowCursorSync) return;
+      pendingShadowCursorSync = true;
+      queueMicrotask(() => {
+        pendingShadowCursorSync = false;
+        const shadowCursor = shadowCursorRef.current;
+        if (
+          !shadowCursor.isInputPhase ||
+          shadowCursor.isRepaintInProgress ||
+          shadowCursor.isAltBufferActive ||
+          syncOutputActiveRef.current
+        ) {
+          return;
+        }
+        syncShadowCursorToBuffer();
+        scheduleOverlayCaretUpdate();
+      });
+    };
+    const handlePromptOsc = (data: string) => {
+      const shadowCursor = shadowCursorRef.current;
+      shadowCursor.hasPromptBoundary = true;
+      switch (data.split(";")[0]) {
+        case "A":
+          setInputPhase(false);
+          break;
+        case "B":
+          syncShadowCursorToBuffer();
+          shadowCursor.commandStartX = shadowCursor.cursorX;
+          shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
+          setInputPhase(true);
+          break;
+        case "C":
+        case "D":
+          setInputPhase(false);
+          break;
+        default:
+          break;
+      }
+      return false;
+    };
     let syncOutputMonitorFrame: number | undefined;
     const stopSyncOutputMonitor = () => {
       if (syncOutputMonitorFrame !== undefined) {
@@ -329,6 +431,14 @@ export function TerminalView({
     const parser = (
       terminal as Terminal & {
         parser?: {
+          registerOscHandler?: (
+            ident: number,
+            callback: (data: string) => boolean | Promise<boolean>,
+          ) => { dispose(): void };
+          registerEscHandler?: (
+            id: { final: string },
+            callback: () => boolean | Promise<boolean>,
+          ) => { dispose(): void };
           registerCsiHandler?: (
             id: { prefix?: string; final: string },
             callback: (params: readonly (number | number[])[]) => boolean | Promise<boolean>,
@@ -337,11 +447,35 @@ export function TerminalView({
       }
     ).parser;
 
+    const promptOsc133Disposable = parser?.registerOscHandler?.(133, handlePromptOsc);
+    const promptOsc633Disposable = parser?.registerOscHandler?.(633, handlePromptOsc);
+    const escSaveDisposable = parser?.registerEscHandler?.({ final: "7" }, () => {
+      if (shadowCursorRef.current.isInputPhase) {
+        shadowCursorRef.current.isRepaintInProgress = true;
+      }
+      return false;
+    });
+    const escRestoreDisposable = parser?.registerEscHandler?.({ final: "8" }, () => {
+      if (shadowCursorRef.current.isRepaintInProgress) {
+        shadowCursorRef.current.isRepaintInProgress = false;
+        scheduleShadowCursorSync();
+      }
+      return false;
+    });
+
     const syncOutputSetDisposable = parser?.registerCsiHandler?.(
       { prefix: "?", final: "h" },
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
+        }
+        if (
+          hasDecModeParam(params, 1049) ||
+          hasDecModeParam(params, 1047) ||
+          hasDecModeParam(params, 47)
+        ) {
+          shadowCursorRef.current.isAltBufferActive = true;
+          setInputPhase(false);
         }
         return false;
       },
@@ -351,15 +485,34 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
+          scheduleShadowCursorSync();
+        }
+        if (
+          hasDecModeParam(params, 1049) ||
+          hasDecModeParam(params, 1047) ||
+          hasDecModeParam(params, 47)
+        ) {
+          shadowCursorRef.current.isAltBufferActive = false;
+          scheduleOverlayCaretUpdate();
         }
         return false;
       },
     );
-    const cursorMoveDisposable = terminal.onCursorMove(() => {
-      scheduleOverlayCaretUpdate();
+    const cursorSaveDisposable = parser?.registerCsiHandler?.({ final: "s" }, () => {
+      if (shadowCursorRef.current.isInputPhase) {
+        shadowCursorRef.current.isRepaintInProgress = true;
+      }
+      return false;
+    });
+    const cursorRestoreDisposable = parser?.registerCsiHandler?.({ final: "u" }, () => {
+      if (shadowCursorRef.current.isRepaintInProgress) {
+        shadowCursorRef.current.isRepaintInProgress = false;
+        scheduleShadowCursorSync();
+      }
+      return false;
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
-      scheduleOverlayCaretUpdate();
+      scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
       scheduleOverlayCaretUpdate();
@@ -561,6 +714,28 @@ export function TerminalView({
         }
       }
 
+      if (text.includes("\x1b]133;A") || text.includes("\x1b]633;A")) {
+        shadowCursorRef.current.hasPromptBoundary = true;
+        setInputPhase(false);
+      }
+      if (text.includes("\x1b]133;B") || text.includes("\x1b]633;B")) {
+        const shadowCursor = shadowCursorRef.current;
+        shadowCursor.hasPromptBoundary = true;
+        syncShadowCursorToBuffer();
+        shadowCursor.commandStartX = shadowCursor.cursorX;
+        shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
+        setInputPhase(true);
+      }
+      if (
+        text.includes("\x1b]133;C") ||
+        text.includes("\x1b]133;D") ||
+        text.includes("\x1b]633;C") ||
+        text.includes("\x1b]633;D")
+      ) {
+        shadowCursorRef.current.hasPromptBoundary = true;
+        setInputPhase(false);
+      }
+
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
       const enterAlt =
         text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
@@ -568,6 +743,8 @@ export function TerminalView({
         text.includes("\x1b[?1049l") || text.includes("\x1b[?47l") || text.includes("\x1b[?1047l");
       if (enterAlt && !leaveAlt && !inAltScreen) {
         inAltScreen = true;
+        shadowCursorRef.current.isAltBufferActive = true;
+        setInputPhase(false);
         // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
         const cmdMatch = text.match(/\x1b\]133;E;([^\x07]*)\x07/);
         const cmdActivity = cmdMatch ? detectActivityFromCommand(cmdMatch[1]) : undefined;
@@ -592,6 +769,8 @@ export function TerminalView({
         }
       } else if (leaveAlt && !enterAlt && inAltScreen) {
         inAltScreen = false;
+        shadowCursorRef.current.isAltBufferActive = false;
+        scheduleOverlayCaretUpdate();
         // If leaving an interactive app (Claude, vim, etc.), clear stale command state
         // so WorkspaceSelectorView does not show leftover info after the app exits.
         const prevInst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
@@ -786,9 +965,14 @@ export function TerminalView({
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
       stopSyncOutputMonitor();
+      promptOsc133Disposable?.dispose();
+      promptOsc633Disposable?.dispose();
+      escSaveDisposable?.dispose();
+      escRestoreDisposable?.dispose();
       syncOutputSetDisposable?.dispose();
       syncOutputResetDisposable?.dispose();
-      cursorMoveDisposable?.dispose();
+      cursorSaveDisposable?.dispose();
+      cursorRestoreDisposable?.dispose();
       writeParsedDisposable?.dispose();
       renderDisposable?.dispose();
       setSyncOutputCursorVisibility(false);
