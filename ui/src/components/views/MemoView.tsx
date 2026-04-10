@@ -113,7 +113,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   const handleMouseUp = useCallback(() => {
     if (!memo.copyOnSelect) return;
-    const selectedText = window.getSelection()?.toString() ?? "";
+    const textarea = textareaRef.current;
+    // Read selection from textarea (covers drag select and programmatic setSelectionRange)
+    const selectedText = textarea
+      ? textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
+      : (window.getSelection()?.toString() ?? "");
     if (selectedText) {
       pendingCopyRef.current = selectedText;
     }
@@ -203,8 +207,12 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
       // Prevent default line selection and select paragraph instead
       e.preventDefault();
       textarea.setSelectionRange(startOffset, endOffset);
+
+      if (memo.copyOnSelect) {
+        pendingCopyRef.current = text.slice(startOffset, endOffset);
+      }
     },
-    [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
+    [showParagraphOverlay, memo.dblClickParagraphSelect, memo.copyOnSelect, text, paragraphs],
   );
 
   return (

@@ -284,156 +284,63 @@ describe("MemoView", () => {
   });
 
   describe("copyOnSelect feature (lazy)", () => {
-    it("does not copy immediately on mouseup, stores pending", async () => {
+    async function setupCopyOnSelect(memoKey: string, content = "hello world") {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
       });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos" />);
+      vi.mocked(loadMemo).mockResolvedValue(content);
+      render(<MemoView memoKey={memoKey} />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
       vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      // Select "hello" (first 5 chars)
+      textarea.setSelectionRange(0, 5);
       fireEvent.mouseUp(textarea);
+      return textarea;
+    }
 
-      // Should NOT copy immediately
+    it("does not copy immediately on mouseup, stores pending", async () => {
+      await setupCopyOnSelect("pane-cos");
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
     it("flushes pending copy on Ctrl+C", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-ctrlc" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
-      vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
-
+      const textarea = await setupCopyOnSelect("pane-cos-ctrlc");
       fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
     it("flushes pending copy on click outside textarea", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-blur" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
-      vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
-
-      // Click outside textarea (document-level mousedown)
+      await setupCopyOnSelect("pane-cos-outside");
       fireEvent.mouseDown(document.body);
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
     it("flushes pending copy on window blur (external app)", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-winblur" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
-      vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
-
-      // Window blur (switching to external app)
+      await setupCopyOnSelect("pane-cos-winblur");
       fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
     it("discards pending copy when user starts typing", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-type" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
-      vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
-
-      // Typing discards pending copy
+      const textarea = await setupCopyOnSelect("pane-cos-type");
       fireEvent.keyDown(textarea, { key: "a" });
-
-      // Click outside after typing should NOT copy (pending was discarded)
       fireEvent.mouseDown(document.body);
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
-    it("flushes pending copy on deselect (mousedown with no selection)", async () => {
+    it("flushes pending copy on deselect (mousedown inside with no selection)", async () => {
+      const textarea = await setupCopyOnSelect("pane-cos-desel");
+      // Simulate deselect: collapse selection then mousedown
+      textarea.setSelectionRange(0, 0);
+      fireEvent.mouseDown(textarea);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
+    it("stores pending copy from textarea selection (any selection method)", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -441,27 +348,25 @@ describe("MemoView", () => {
           copyOnSelect: true,
         },
       });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-desel" />);
+      vi.mocked(loadMemo).mockResolvedValue("first paragraph\n\nsecond paragraph");
+      render(<MemoView memoKey="pane-cos-sel" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
 
-      let selText = "hello";
-      vi.spyOn(window, "getSelection").mockReturnValue({
-        toString: () => selText,
-        removeAllRanges: vi.fn(),
-      } as unknown as Selection);
-
       vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+
+      // Simulate programmatic selection (as triple-click or drag would do)
+      textarea.setSelectionRange(0, 15); // "first paragraph"
       fireEvent.mouseUp(textarea);
+
+      // Should NOT copy immediately (lazy)
       expect(clipboardWriteText).not.toHaveBeenCalled();
 
-      // Simulate deselect: selection becomes empty on mousedown
-      selText = "";
-      fireEvent.mouseDown(textarea);
-      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+      // Flush on window blur
+      fireEvent(window, new Event("blur"));
+      expect(clipboardWriteText).toHaveBeenCalledWith("first paragraph");
     });
 
     it("does not copy on mouseup when copyOnSelect is disabled", async () => {
