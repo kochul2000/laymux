@@ -457,42 +457,42 @@ function WorkspaceItem({
                           </span>
                         </>
                       )}
-                      {wsDisplay.result && tCmdStatus?.icon ? (
-                        <span
-                          data-testid={`pane-cmd-badge-${ts.id}`}
-                          className="shrink-0"
-                          style={{
-                            color: tCmdStatus.color,
-                            border: ts.hasUnreadNotification
-                              ? "1.5px solid var(--accent)"
-                              : "1.5px solid transparent",
-                            borderRadius: "var(--radius-md)",
-                            width: 16,
-                            height: 16,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            boxSizing: "border-box",
-                            fontSize: 10,
-                            lineHeight: 1,
-                          }}
-                        >
-                          {tCmdStatus.icon}
-                        </span>
-                      ) : wsDisplay.result && ts.hasUnreadNotification ? (
-                        <span
-                          data-testid={`pane-notif-dot-${ts.id}`}
-                          className="shrink-0"
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            background: "var(--accent)",
-                            display: "inline-block",
-                          }}
-                        />
-                      ) : null}
                     </div>
+                    {wsDisplay.result && tCmdStatus?.icon ? (
+                      <span
+                        data-testid={`pane-cmd-badge-${ts.id}`}
+                        className="shrink-0 ml-auto"
+                        style={{
+                          color: tCmdStatus.color,
+                          border: ts.hasUnreadNotification
+                            ? "1.5px solid var(--accent)"
+                            : "1.5px solid transparent",
+                          borderRadius: "var(--radius-md)",
+                          width: 16,
+                          height: 16,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxSizing: "border-box",
+                          fontSize: 10,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {tCmdStatus.icon}
+                      </span>
+                    ) : wsDisplay.result && ts.hasUnreadNotification ? (
+                      <span
+                        data-testid={`pane-notif-dot-${ts.id}`}
+                        className="shrink-0 ml-auto"
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: "var(--accent)",
+                          display: "inline-block",
+                        }}
+                      />
+                    ) : null}
                   </div>
                 );
               }
