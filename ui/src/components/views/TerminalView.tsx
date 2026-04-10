@@ -1123,7 +1123,6 @@ export function TerminalView({
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
   const font = useSettingsStore((s) => s.resolveFont(profile));
-  const codexSettings = useSettingsStore((s) => s.codex);
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
   activityRef.current = activity;
   const cursorShape = useSettingsStore((s) => {
@@ -1149,12 +1148,7 @@ export function TerminalView({
     );
   });
   stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
-  const effectiveCursorBlink =
-    codexSettings.disableCursorBlink &&
-    activity?.type === "interactiveApp" &&
-    activity.name === "Codex"
-      ? false
-      : cursorBlink;
+  const effectiveCursorBlink = cursorBlink;
   const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
   useEffect(() => {

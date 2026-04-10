@@ -780,7 +780,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   codex: {
     statusMessageMode: "bullet-title" as const,
-    disableCursorBlink: true,
     statusMessageDelimiter: " · ",
   },
   memo: { ...DEFAULT_MEMO },
@@ -1024,7 +1023,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const codex = data.codex
       ? {
           statusMessageMode: "bullet-title" as const,
-          disableCursorBlink: true,
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),
         }
