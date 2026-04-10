@@ -7,7 +7,6 @@ import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
 
 const DEBOUNCE_MS = 300;
-const LAZY_COPY_DELAY_MS = 500;
 
 interface MemoViewProps {
   memoKey: string;
@@ -102,46 +101,51 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     setHoveredParagraph(null);
   }, []);
 
-  // Lazy copy on select: schedule clipboard write after delay, cancel if user acts
-  const lazyCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Lazy copy on select: remember selected text, copy on deselect / blur / Ctrl+C
+  const pendingCopyRef = useRef<string | null>(null);
 
-  const cancelLazyCopy = useCallback(() => {
-    if (lazyCopyTimerRef.current) {
-      clearTimeout(lazyCopyTimerRef.current);
-      lazyCopyTimerRef.current = null;
+  const flushPendingCopy = useCallback(() => {
+    if (pendingCopyRef.current) {
+      clipboardWriteText(pendingCopyRef.current).catch(() => {});
+      pendingCopyRef.current = null;
     }
   }, []);
 
   const handleMouseUp = useCallback(() => {
     if (!memo.copyOnSelect) return;
-    const selection = window.getSelection();
-    const selectedText = selection?.toString() ?? "";
-    if (!selectedText) return;
+    const selectedText = window.getSelection()?.toString() ?? "";
+    if (selectedText) {
+      pendingCopyRef.current = selectedText;
+    }
+  }, [memo.copyOnSelect]);
 
-    cancelLazyCopy();
-    lazyCopyTimerRef.current = setTimeout(() => {
-      // Re-check selection is still present at copy time
-      const currentSelection = window.getSelection()?.toString() ?? "";
-      if (currentSelection) {
-        clipboardWriteText(currentSelection).catch(() => {});
-      }
-      lazyCopyTimerRef.current = null;
-    }, LAZY_COPY_DELAY_MS);
-  }, [memo.copyOnSelect, cancelLazyCopy]);
-
-  // Cancel lazy copy on mousedown (new selection) or keydown (typing to replace)
   const handleMouseDown = useCallback(() => {
-    cancelLazyCopy();
-  }, [cancelLazyCopy]);
+    // Selection cleared by new click → flush pending copy
+    if (pendingCopyRef.current) {
+      const currentSelection = window.getSelection()?.toString() ?? "";
+      if (!currentSelection) {
+        flushPendingCopy();
+      }
+    }
+  }, [flushPendingCopy]);
 
-  const handleKeyDown = useCallback(() => {
-    cancelLazyCopy();
-  }, [cancelLazyCopy]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Ctrl+C / Cmd+C → flush pending copy immediately
+      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        flushPendingCopy();
+        return;
+      }
+      // Any other key (typing to replace) → discard pending copy
+      pendingCopyRef.current = null;
+    },
+    [flushPendingCopy],
+  );
 
-  // Cleanup lazy copy timer on unmount
-  useEffect(() => {
-    return () => cancelLazyCopy();
-  }, [cancelLazyCopy]);
+  // Flush pending copy when leaving the memo (blur)
+  const handleBlur = useCallback(() => {
+    flushPendingCopy();
+  }, [flushPendingCopy]);
 
   // Triple-click to select paragraph (changed from double-click)
   const handleClick = useCallback(
@@ -202,6 +206,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           onMouseUp={handleMouseUp}
           onMouseDown={handleMouseDown}
           onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
           className="h-full w-full resize-none border-none outline-none"
@@ -329,7 +334,7 @@ function ParagraphOverlay({
           }}
         />
       )}
-      {paragraphs.map((para, i) => {
+      {paragraphs.map((_para, i) => {
         return (
           <div
             key={i}

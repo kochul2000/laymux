@@ -284,7 +284,7 @@ describe("MemoView", () => {
   });
 
   describe("copyOnSelect feature (lazy)", () => {
-    it("does not copy immediately on mouseup, waits for delay", async () => {
+    it("does not copy immediately on mouseup, stores pending", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -310,16 +310,9 @@ describe("MemoView", () => {
 
       // Should NOT copy immediately
       expect(clipboardWriteText).not.toHaveBeenCalled();
-
-      // After the lazy delay (500ms), it should copy
-      await act(async () => {
-        vi.advanceTimersByTime(600);
-      });
-
-      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("cancels lazy copy when selection changes (new mousedown)", async () => {
+    it("flushes pending copy on Ctrl+C", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -328,7 +321,7 @@ describe("MemoView", () => {
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-cancel" />);
+      render(<MemoView memoKey="pane-cos-ctrlc" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
@@ -342,23 +335,42 @@ describe("MemoView", () => {
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
-
-      // Start new selection before delay expires (cancels pending copy)
-      await act(async () => {
-        vi.advanceTimersByTime(200);
-      });
-      fireEvent.mouseDown(textarea);
-
-      // Wait past the original delay
-      await act(async () => {
-        vi.advanceTimersByTime(500);
-      });
-
-      // Should NOT have copied because mousedown cancelled the pending copy
       expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("cancels lazy copy when user starts typing (keydown)", async () => {
+    it("flushes pending copy on blur", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-cos-blur" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const selection = {
+        toString: () => "hello",
+        removeAllRanges: vi.fn(),
+      };
+      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea");
+      fireEvent.mouseUp(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      fireEvent.blur(textarea);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
+    it("discards pending copy when user starts typing", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -382,19 +394,43 @@ describe("MemoView", () => {
       const textarea = screen.getByTestId("memo-textarea");
       fireEvent.mouseUp(textarea);
 
-      // User starts typing before delay expires
-      await act(async () => {
-        vi.advanceTimersByTime(200);
-      });
+      // Typing discards pending copy
       fireEvent.keyDown(textarea, { key: "a" });
 
-      // Wait past the original delay
+      // Blur after typing should NOT copy (pending was discarded)
+      fireEvent.blur(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("flushes pending copy on deselect (mousedown with no selection)", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-cos-desel" />);
       await act(async () => {
-        vi.advanceTimersByTime(500);
+        await vi.runAllTimersAsync();
       });
 
-      // Should NOT have copied because typing cancelled the pending copy
+      let selText = "hello";
+      vi.spyOn(window, "getSelection").mockReturnValue({
+        toString: () => selText,
+        removeAllRanges: vi.fn(),
+      } as unknown as Selection);
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea");
+      fireEvent.mouseUp(textarea);
       expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      // Simulate deselect: selection becomes empty on mousedown
+      selText = "";
+      fireEvent.mouseDown(textarea);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
     it("does not copy on mouseup when copyOnSelect is disabled", async () => {
