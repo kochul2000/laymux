@@ -89,9 +89,9 @@ export function shouldEnableTerminalWebgl(): boolean {
 }
 
 function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
-  return (
-    activity?.type === "interactiveApp" && (activity.name === "Codex" || activity.name === "Claude")
-  );
+  // Claude Code uses DEC 2026 (synchronized output) which positions the native
+  // cursor correctly at frame end — overlay is unnecessary and creates artifacts.
+  return activity?.type === "interactiveApp" && activity.name === "Codex";
 }
 
 interface ShadowCursorState {
@@ -100,6 +100,7 @@ interface ShadowCursorState {
   cursorX: number;
   cursorAbsY: number;
   hasPromptBoundary: boolean;
+  hasSyncFramePosition: boolean;
   isComposing: boolean;
   isInputPhase: boolean;
   isRepaintInProgress: boolean;
@@ -203,6 +204,7 @@ export function TerminalView({
     cursorX: 0,
     cursorAbsY: 0,
     hasPromptBoundary: false,
+    hasSyncFramePosition: false,
     isComposing: false,
     isInputPhase: false,
     isRepaintInProgress: false,
@@ -350,7 +352,9 @@ export function TerminalView({
 
       const baseY = (term.buffer.active as { baseY?: number }).baseY ?? 0;
       const useShadowCursor =
-        shadowCursor.hasPromptBoundary && (shadowCursor.isInputPhase || shadowCursor.isComposing);
+        (shadowCursor.hasPromptBoundary &&
+          (shadowCursor.isInputPhase || shadowCursor.isComposing)) ||
+        shadowCursor.hasSyncFramePosition;
       const cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
@@ -406,7 +410,7 @@ export function TerminalView({
         pendingShadowCursorSync = false;
         const shadowCursor = shadowCursorRef.current;
         if (
-          !shadowCursor.isInputPhase ||
+          !(shadowCursor.isInputPhase || shadowCursor.hasSyncFramePosition) ||
           shadowCursor.isComposing ||
           shadowCursor.isRepaintInProgress ||
           shadowCursor.isAltBufferActive ||
@@ -522,6 +526,7 @@ export function TerminalView({
           hasDecModeParam(params, 47)
         ) {
           shadowCursorRef.current.isAltBufferActive = true;
+          shadowCursorRef.current.hasSyncFramePosition = false;
           setInputPhase(false);
         }
         return false;
@@ -532,7 +537,18 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
-          scheduleShadowCursorSync();
+          if (
+            isOverlayCaretActivity(activityRef.current) &&
+            !shadowCursorRef.current.hasPromptBoundary
+          ) {
+            // TUI app (Claude/Codex) using only DEC 2026 without OSC 133:
+            // cursor position at frame end is the app's intended cursor position.
+            syncShadowCursorToBuffer();
+            shadowCursorRef.current.hasSyncFramePosition = true;
+            scheduleOverlayCaretUpdate();
+          } else {
+            scheduleShadowCursorSync();
+          }
         }
         if (
           hasDecModeParam(params, 1049) ||
@@ -560,15 +576,12 @@ export function TerminalView({
     });
     const cursorMoveDisposable = terminal.onCursorMove(() => {
       const shadowCursor = shadowCursorRef.current;
-      if (
-        !shadowCursor.hasPromptBoundary ||
-        !shadowCursor.isInputPhase ||
-        shadowCursor.isRepaintInProgress ||
-        shadowCursor.isAltBufferActive ||
-        syncOutputActiveRef.current
-      ) {
-        return;
-      }
+      if (shadowCursor.isAltBufferActive || syncOutputActiveRef.current) return;
+      const oscPath =
+        shadowCursor.hasPromptBoundary &&
+        shadowCursor.isInputPhase &&
+        !shadowCursor.isRepaintInProgress;
+      if (!oscPath && !shadowCursor.hasSyncFramePosition) return;
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
@@ -1168,11 +1181,15 @@ export function TerminalView({
       const resolvedTheme = scheme
         ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
         : defaultTheme;
+      // WebGL renderer strips alpha from cursor color (rgba >> 8 & 0xFFFFFF),
+      // so rgba(0,0,0,0) renders as opaque black. Hide the native cursor by
+      // matching it to the background color instead.
+      const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
       term.options.theme = nativeCursorHidden
         ? {
             ...resolvedTheme,
-            cursor: "rgba(0, 0, 0, 0)",
-            cursorAccent: "rgba(0, 0, 0, 0)",
+            cursor: hiddenCursorColor,
+            cursorAccent: hiddenCursorColor,
           }
         : resolvedTheme;
       term.options.fontSize = font.size;

@@ -116,7 +116,7 @@ terminal.onWriteParsed(() => {
 ```
 
 - **`onWriteParsed`**: 데이터 파싱 완료 직후, 프레임당 최대 1회. 버퍼가 완전히 업데이트된 상태 → **커서 추적에 올바른 이벤트**
-- **`onCursorMove`**: 리페인트 중간 위치도 잡힌다 → **사용 금지**
+- **`onCursorMove`**: 리페인트 중간 위치도 잡힌다 → **원칙적으로 사용 금지**. 단, 키 입력 즉각 반응성을 위해 최소한의 가드 조건부 사용은 허용한다(`hasPromptBoundary && isInputPhase && !isRepaintInProgress && !isAltBufferActive && !syncOutputActive`). 커서 관련 문제 발생 시 **가장 먼저 `onCursorMove` 핸들러 제거를 시도**하고, 그래도 재현되면 다른 원인을 조사한다.
 
 ---
 

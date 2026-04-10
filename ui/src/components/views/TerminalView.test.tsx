@@ -292,7 +292,7 @@ describe("TerminalView", () => {
     });
   });
 
-  it("uses overlay caret mode for Codex and Claude", async () => {
+  it("uses overlay caret mode for Codex but not Claude", async () => {
     const { rerender } = render(
       <TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />,
     );
@@ -313,6 +313,8 @@ describe("TerminalView", () => {
     expect(createdTerminals[0].options.cursorWidth).toBe(1);
     expect(createdTerminals[0].options.cursorBlink).toBe(false);
 
+    // Claude Code uses DEC 2026 synchronized output which keeps the native
+    // cursor at the correct position — overlay is not applied.
     rerender(<TerminalView instanceId="t-overlay-mode" profile="PowerShell" syncGroup="" />);
     act(() => {
       useTerminalStore.getState().updateInstanceInfo("t-overlay-mode", {
@@ -321,11 +323,8 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(container).toHaveClass("terminal-native-cursor-hidden");
+      expect(container).not.toHaveClass("terminal-native-cursor-hidden");
     });
-    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
-    expect(createdTerminals[0].options.cursorWidth).toBe(1);
-    expect(createdTerminals[0].options.cursorBlink).toBe(false);
   });
 
   it("uses the configured cursor color for the overlay caret", async () => {
