@@ -140,7 +140,9 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
         flushPendingCopy();
         return;
       }
-      // Any other key (typing to replace) → discard pending copy
+      // Ignore modifier shortcuts (Ctrl+V, Ctrl+A, etc.) — not typing
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Regular key (typing to replace) → discard pending copy
       pendingCopyRef.current = null;
     },
     [flushPendingCopy],

@@ -332,6 +332,14 @@ describe("MemoView", () => {
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
+    it("keeps pending copy on Ctrl+V (modifier shortcuts are not typing)", async () => {
+      const textarea = await setupCopyOnSelect("pane-cos-ctrlv");
+      fireEvent.keyDown(textarea, { key: "v", ctrlKey: true });
+      // Ctrl+V should NOT discard pending — it's a shortcut, not typing
+      fireEvent(window, new Event("blur"));
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
     it("flushes pending copy on deselect (mousedown inside with no selection)", async () => {
       const textarea = await setupCopyOnSelect("pane-cos-desel");
       // Simulate deselect: collapse selection then mousedown
