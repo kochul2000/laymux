@@ -211,12 +211,9 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
       // Prevent default line selection and select paragraph instead
       e.preventDefault();
       textarea.setSelectionRange(startOffset, endOffset);
-
-      if (memo.copyOnSelect) {
-        pendingCopyRef.current = text.slice(startOffset, endOffset);
-      }
+      // selectionchange handles pending — no direct setting needed
     },
-    [showParagraphOverlay, memo.dblClickParagraphSelect, memo.copyOnSelect, text, paragraphs],
+    [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
   );
 
   return (

@@ -359,66 +359,52 @@ describe("MemoView", () => {
       expect(clipboardWriteText).toHaveBeenCalledWith("first paragraph");
     });
 
-    it("does not copy on mouseup when copyOnSelect is disabled", async () => {
+    it("does not store pending when copyOnSelect is disabled", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: false,
-        },
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: false },
       });
       vi.mocked(loadMemo).mockResolvedValue("hello world");
       render(<MemoView memoKey="pane-cos-off" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-
-      const selection = {
-        toString: () => "hello",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
       vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
-
-      await act(async () => {
-        vi.advanceTimersByTime(600);
-      });
-
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      textarea.focus();
+      textarea.setSelectionRange(0, 5);
+      fireEvent(document, new Event("selectionchange"));
+      fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
-    it("does not copy when no text is selected", async () => {
+    it("clicking another MemoView flushes first memo's pending", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
       });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-cos-empty" />);
+      vi.mocked(loadMemo).mockResolvedValue("aaa bbb");
+      render(
+        <div>
+          <MemoView memoKey="pane-multi-a" />
+          <MemoView memoKey="pane-multi-b" />
+        </div>,
+      );
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-
-      const selection = {
-        toString: () => "",
-        removeAllRanges: vi.fn(),
-      };
-      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
-
       vi.mocked(clipboardWriteText).mockClear();
-      const textarea = screen.getByTestId("memo-textarea");
-      fireEvent.mouseUp(textarea);
 
-      await act(async () => {
-        vi.advanceTimersByTime(600);
-      });
-
+      const textareas = screen.getAllByTestId("memo-textarea") as HTMLTextAreaElement[];
+      // Select in first memo
+      textareas[0].focus();
+      textareas[0].setSelectionRange(0, 3); // "aaa"
+      fireEvent(document, new Event("selectionchange"));
       expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      // Click on second memo's textarea (outside first memo's textarea)
+      fireEvent.mouseDown(textareas[1], { bubbles: true });
+      expect(clipboardWriteText).toHaveBeenCalledWith("aaa");
     });
   });
 
