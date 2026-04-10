@@ -133,20 +133,10 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     }
   }, [flushPendingCopy]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      // Ctrl+C / Cmd+C → flush pending copy immediately
-      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-        flushPendingCopy();
-        return;
-      }
-      // Ignore modifier shortcuts (Ctrl+V, Ctrl+A, etc.) — not typing
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      // Regular key (typing to replace) → discard pending copy
-      pendingCopyRef.current = null;
-    },
-    [flushPendingCopy],
-  );
+  // Rule 3: paste event discards pending (user is replacing content with clipboard)
+  const handlePaste = useCallback(() => {
+    pendingCopyRef.current = null;
+  }, []);
 
   // Flush pending copy when focus leaves memo: window blur (external app)
   // or click outside textarea (dock/sidebar/other pane)
@@ -228,7 +218,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           onChange={handleChange}
           onMouseUp={handleMouseUp}
           onMouseDown={handleMouseDown}
-          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
           className="h-full w-full resize-none border-none outline-none"

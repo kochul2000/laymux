@@ -284,6 +284,11 @@ describe("MemoView", () => {
   });
 
   describe("copyOnSelect feature (lazy)", () => {
+    // Rule 1: selection → pending (not clipboard)
+    // Rule 2-1: leave memo (click outside / window blur) → flush to clipboard
+    // Rule 2-2: deselect → flush to clipboard
+    // Rule 3: paste event → discard pending
+
     async function setupCopyOnSelect(memoKey: string, content = "hello world") {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
@@ -296,83 +301,58 @@ describe("MemoView", () => {
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-      // Select "hello" (first 5 chars)
-      textarea.setSelectionRange(0, 5);
+      textarea.setSelectionRange(0, 5); // select "hello"
       fireEvent.mouseUp(textarea);
       return textarea;
     }
 
-    it("does not copy immediately on mouseup, stores pending", async () => {
-      await setupCopyOnSelect("pane-cos");
+    it("rule 1: selection stores pending, does not copy immediately", async () => {
+      await setupCopyOnSelect("pane-r1");
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
-    it("flushes pending copy on Ctrl+C", async () => {
-      const textarea = await setupCopyOnSelect("pane-cos-ctrlc");
-      fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
-      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
-    });
-
-    it("flushes pending copy on click outside textarea", async () => {
-      await setupCopyOnSelect("pane-cos-outside");
+    it("rule 2-1a: click outside textarea flushes to clipboard", async () => {
+      await setupCopyOnSelect("pane-r2-1a");
       fireEvent.mouseDown(document.body);
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("flushes pending copy on window blur (external app)", async () => {
-      await setupCopyOnSelect("pane-cos-winblur");
+    it("rule 2-1b: window blur (external app) flushes to clipboard", async () => {
+      await setupCopyOnSelect("pane-r2-1b");
       fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("discards pending copy when user starts typing", async () => {
-      const textarea = await setupCopyOnSelect("pane-cos-type");
-      fireEvent.keyDown(textarea, { key: "a" });
-      fireEvent.mouseDown(document.body);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
-    });
-
-    it("keeps pending copy on Ctrl+V (modifier shortcuts are not typing)", async () => {
-      const textarea = await setupCopyOnSelect("pane-cos-ctrlv");
-      fireEvent.keyDown(textarea, { key: "v", ctrlKey: true });
-      // Ctrl+V should NOT discard pending — it's a shortcut, not typing
-      fireEvent(window, new Event("blur"));
-      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
-    });
-
-    it("flushes pending copy on deselect (mousedown inside with no selection)", async () => {
-      const textarea = await setupCopyOnSelect("pane-cos-desel");
-      // Simulate deselect: collapse selection then mousedown
+    it("rule 2-2: deselect (mousedown with collapsed selection) flushes to clipboard", async () => {
+      const textarea = await setupCopyOnSelect("pane-r2-2");
       textarea.setSelectionRange(0, 0);
       fireEvent.mouseDown(textarea);
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("stores pending copy from textarea selection (any selection method)", async () => {
+    it("rule 3: paste event discards pending (no clipboard write)", async () => {
+      const textarea = await setupCopyOnSelect("pane-r3");
+      fireEvent.paste(textarea);
+      // After paste discards pending, leaving memo should NOT copy
+      fireEvent(window, new Event("blur"));
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("works with any selection method (programmatic/triple-click)", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          copyOnSelect: true,
-        },
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
       });
-      vi.mocked(loadMemo).mockResolvedValue("first paragraph\n\nsecond paragraph");
-      render(<MemoView memoKey="pane-cos-sel" />);
+      vi.mocked(loadMemo).mockResolvedValue("first paragraph\n\nsecond");
+      render(<MemoView memoKey="pane-any-sel" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-
-      // Simulate programmatic selection (as triple-click or drag would do)
-      textarea.setSelectionRange(0, 15); // "first paragraph"
+      textarea.setSelectionRange(0, 15);
       fireEvent.mouseUp(textarea);
-
-      // Should NOT copy immediately (lazy)
       expect(clipboardWriteText).not.toHaveBeenCalled();
-
-      // Flush on window blur
       fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).toHaveBeenCalledWith("first paragraph");
     });
