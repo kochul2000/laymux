@@ -557,10 +557,10 @@ describe("formatActivity", () => {
     expect(result.color).toBe("var(--accent)");
   });
 
-  it("returns accent color for Claude app", () => {
+  it("returns Claude brand color for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
     expect(result.label).toBe("Claude");
-    expect(result.color).toBe("var(--accent)");
+    expect(result.color).toBe("var(--claude)");
   });
 });
 
