@@ -1,7 +1,6 @@
 import { ShellActivityHandler } from "./shell-activity-handler";
-import type { RawTerminalState, StatusResult } from "./activity-handler";
+import type { RawTerminalState } from "./activity-handler";
 
-const CLAUDE_IDLE_PREFIX = "\u2733";
 const WORKING_STAR_SPINNERS = ["\u2736", "\u273B", "\u273D", "\u2722"];
 const DEFAULT_STATUS_MESSAGE_DELIMITER = " \u00b7 ";
 
@@ -23,18 +22,6 @@ function extractTitleMessage(title: string | undefined): string | undefined {
 export class ClaudeActivityHandler extends ShellActivityHandler {
   shouldPreserveActivityOnExitCode(): boolean {
     return true;
-  }
-
-  computeStatus(raw: RawTerminalState): StatusResult {
-    if (raw.outputActive || raw.exitCode !== undefined) {
-      return super.computeStatus(raw);
-    }
-
-    if (raw.title?.startsWith(CLAUDE_IDLE_PREFIX)) {
-      return { icon: "\u2733", color: "var(--claude)" };
-    }
-
-    return super.computeStatus(raw);
   }
 
   computeStatusMessage(raw: RawTerminalState): string | undefined {

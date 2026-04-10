@@ -557,10 +557,10 @@ describe("formatActivity", () => {
     expect(result.color).toBe("var(--accent)");
   });
 
-  it("returns Claude brand color for Claude app", () => {
+  it("returns accent color for Claude app", () => {
     const result = formatActivity({ type: "interactiveApp", name: "Claude" });
     expect(result.label).toBe("Claude");
-    expect(result.color).toBe("var(--claude)");
+    expect(result.color).toBe("var(--accent)");
   });
 });
 
@@ -718,10 +718,10 @@ describe("computeCommandStatus", () => {
       expect(s.icon).toBe("⏳");
     });
 
-    it("Claude interactiveApp without lastCommand: idle with ✳ → ✳", () => {
+    it("Claude interactiveApp without lastCommand: idle with ✳ → — (shell default)", () => {
       const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
-      expect(s.icon).toBe("✳");
-      expect(s.color).toBe("var(--claude)");
+      expect(s.icon).toBe("—");
+      expect(s.color).toBe("var(--text-secondary)");
     });
 
     it("Claude interactiveApp without lastCommand: exitCode=0 → ✓", () => {
@@ -760,11 +760,11 @@ describe("computeCommandStatus", () => {
       expect(s.text).toBe("Task completed successfully");
     });
 
-    it("Claude idle with ✳ title: no exitCode → ✳ Claude accent", () => {
+    it("Claude idle with ✳ title: no exitCode → — (shell default)", () => {
       // Claude entered but no task completed yet. Title shows ✳ (idle prefix).
       const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
-      expect(s.icon).toBe("✳");
-      expect(s.color).toBe("var(--claude)");
+      expect(s.icon).toBe("—");
+      expect(s.color).toBe("var(--text-secondary)");
     });
 
     it("Claude idle without title: no exitCode → — (fallback)", () => {

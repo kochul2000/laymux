@@ -54,10 +54,10 @@ describe("ClaudeActivityHandler", () => {
       });
     });
 
-    it("returns Claude idle status for idle title", () => {
+    it("returns shell idle status for idle title (no Claude-specific icon)", () => {
       expect(handler.computeStatus(raw({ title: "✳ Claude Code" }))).toEqual({
-        icon: "✳",
-        color: "var(--claude)",
+        icon: "—",
+        color: "var(--text-secondary)",
       });
     });
 
@@ -180,8 +180,8 @@ describe("ClaudeActivityHandler", () => {
   });
 
   describe("Claude lifecycle scenarios", () => {
-    it("shows idle status before a task starts", () => {
-      expect(handler.computeStatus(raw({ title: "✳ Claude Code" })).icon).toBe("✳");
+    it("shows shell idle status before a task starts", () => {
+      expect(handler.computeStatus(raw({ title: "✳ Claude Code" })).icon).toBe("—");
     });
 
     it("shows combined message while actively working", () => {
