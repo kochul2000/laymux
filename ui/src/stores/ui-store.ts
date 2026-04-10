@@ -32,6 +32,14 @@ interface UiState {
   barModes: Record<string, ControlBarMode>;
   /** Whether the app window is currently focused (not blurred to another app). */
   isAppFocused: boolean;
+  /** Whether pane hide mode is active in WorkspaceSelectorView. */
+  paneHideMode: boolean;
+  /** Whether workspace hide mode is active in WorkspaceSelectorView. */
+  workspaceHideMode: boolean;
+  /** Set of pane IDs hidden in WorkspaceSelectorView. */
+  hiddenPaneIds: Set<string>;
+  /** Set of workspace IDs hidden in WorkspaceSelectorView. */
+  hiddenWorkspaceIds: Set<string>;
 
   openSettingsModal: () => void;
   closeSettingsModal: () => void;
@@ -44,6 +52,10 @@ interface UiState {
   setBarMode: (paneId: string, mode: ControlBarMode) => void;
   getBarMode: (paneId: string) => ControlBarMode;
   setAppFocused: (focused: boolean) => void;
+  togglePaneHideMode: () => void;
+  toggleWorkspaceHideMode: () => void;
+  togglePaneHidden: (paneId: string) => void;
+  toggleWorkspaceHidden: (workspaceId: string) => void;
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
@@ -53,6 +65,10 @@ export const useUiStore = create<UiState>()((set, get) => ({
   settingsNavTarget: null,
   barModes: loadBarModes(),
   isAppFocused: true,
+  paneHideMode: false,
+  workspaceHideMode: false,
+  hiddenPaneIds: new Set<string>(),
+  hiddenWorkspaceIds: new Set<string>(),
 
   openSettingsModal: () => set({ settingsModalOpen: true, notificationPanelOpen: false }),
   closeSettingsModal: () => set({ settingsModalOpen: false }),
@@ -85,4 +101,22 @@ export const useUiStore = create<UiState>()((set, get) => ({
   getBarMode: (paneId) =>
     get().barModes[paneId] ?? useSettingsStore.getState().convenience.defaultControlBarMode,
   setAppFocused: (focused) => set({ isAppFocused: focused }),
+  togglePaneHideMode: () =>
+    set((state) => ({ paneHideMode: !state.paneHideMode, workspaceHideMode: false })),
+  toggleWorkspaceHideMode: () =>
+    set((state) => ({ workspaceHideMode: !state.workspaceHideMode, paneHideMode: false })),
+  togglePaneHidden: (paneId) =>
+    set((state) => {
+      const next = new Set(state.hiddenPaneIds);
+      if (next.has(paneId)) next.delete(paneId);
+      else next.add(paneId);
+      return { hiddenPaneIds: next };
+    }),
+  toggleWorkspaceHidden: (workspaceId) =>
+    set((state) => {
+      const next = new Set(state.hiddenWorkspaceIds);
+      if (next.has(workspaceId)) next.delete(workspaceId);
+      else next.add(workspaceId);
+      return { hiddenWorkspaceIds: next };
+    }),
 }));

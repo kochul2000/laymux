@@ -111,4 +111,86 @@ describe("ui-store", () => {
     useUiStore.getState().setBarMode("pane-1", "pinned");
     expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
   });
+
+  // -- pane hide mode --
+
+  it("starts with pane hide mode off", () => {
+    expect(useUiStore.getState().paneHideMode).toBe(false);
+  });
+
+  it("toggles pane hide mode", () => {
+    useUiStore.getState().togglePaneHideMode();
+    expect(useUiStore.getState().paneHideMode).toBe(true);
+    useUiStore.getState().togglePaneHideMode();
+    expect(useUiStore.getState().paneHideMode).toBe(false);
+  });
+
+  it("enabling pane hide mode disables workspace hide mode", () => {
+    useUiStore.getState().toggleWorkspaceHideMode();
+    expect(useUiStore.getState().workspaceHideMode).toBe(true);
+    useUiStore.getState().togglePaneHideMode();
+    expect(useUiStore.getState().paneHideMode).toBe(true);
+    expect(useUiStore.getState().workspaceHideMode).toBe(false);
+  });
+
+  // -- workspace hide mode --
+
+  it("starts with workspace hide mode off", () => {
+    expect(useUiStore.getState().workspaceHideMode).toBe(false);
+  });
+
+  it("toggles workspace hide mode", () => {
+    useUiStore.getState().toggleWorkspaceHideMode();
+    expect(useUiStore.getState().workspaceHideMode).toBe(true);
+    useUiStore.getState().toggleWorkspaceHideMode();
+    expect(useUiStore.getState().workspaceHideMode).toBe(false);
+  });
+
+  it("enabling workspace hide mode disables pane hide mode", () => {
+    useUiStore.getState().togglePaneHideMode();
+    expect(useUiStore.getState().paneHideMode).toBe(true);
+    useUiStore.getState().toggleWorkspaceHideMode();
+    expect(useUiStore.getState().workspaceHideMode).toBe(true);
+    expect(useUiStore.getState().paneHideMode).toBe(false);
+  });
+
+  // -- hidden pane ids --
+
+  it("starts with no hidden panes", () => {
+    expect(useUiStore.getState().hiddenPaneIds.size).toBe(0);
+  });
+
+  it("toggles pane hidden state", () => {
+    useUiStore.getState().togglePaneHidden("pane-1");
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-1")).toBe(true);
+    useUiStore.getState().togglePaneHidden("pane-1");
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-1")).toBe(false);
+  });
+
+  it("can hide multiple panes", () => {
+    useUiStore.getState().togglePaneHidden("pane-1");
+    useUiStore.getState().togglePaneHidden("pane-2");
+    expect(useUiStore.getState().hiddenPaneIds.size).toBe(2);
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-1")).toBe(true);
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-2")).toBe(true);
+  });
+
+  // -- hidden workspace ids --
+
+  it("starts with no hidden workspaces", () => {
+    expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(0);
+  });
+
+  it("toggles workspace hidden state", () => {
+    useUiStore.getState().toggleWorkspaceHidden("ws-1");
+    expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(true);
+    useUiStore.getState().toggleWorkspaceHidden("ws-1");
+    expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(false);
+  });
+
+  it("can hide multiple workspaces", () => {
+    useUiStore.getState().toggleWorkspaceHidden("ws-1");
+    useUiStore.getState().toggleWorkspaceHidden("ws-2");
+    expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(2);
+  });
 });
