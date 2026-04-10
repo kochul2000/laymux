@@ -323,10 +323,11 @@ describe("MemoView", () => {
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("rule 2-2: deselect (mousedown with collapsed selection) flushes to clipboard", async () => {
+    it("rule 2-2: deselect (click to collapse selection) flushes to clipboard", async () => {
       const textarea = await setupCopyOnSelect("pane-r2-2");
-      textarea.setSelectionRange(0, 0);
-      fireEvent.mouseDown(textarea);
+      // Simulate click that deselects: selection collapses, then mouseup
+      textarea.setSelectionRange(3, 3);
+      fireEvent.mouseUp(textarea);
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 

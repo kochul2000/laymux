@@ -114,24 +114,20 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   const handleMouseUp = useCallback(() => {
     if (!memo.copyOnSelect) return;
     const textarea = textareaRef.current;
-    // Read selection from textarea (covers drag select and programmatic setSelectionRange)
     const selectedText = textarea
       ? textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
       : (window.getSelection()?.toString() ?? "");
     if (selectedText) {
       pendingCopyRef.current = selectedText;
+    } else if (pendingCopyRef.current) {
+      // Selection was cleared (click to deselect) → flush pending
+      flushPendingCopy();
     }
-  }, [memo.copyOnSelect]);
+  }, [memo.copyOnSelect, flushPendingCopy]);
 
   const handleMouseDown = useCallback(() => {
-    // Selection cleared by new click → flush pending copy
-    if (pendingCopyRef.current) {
-      const currentSelection = window.getSelection()?.toString() ?? "";
-      if (!currentSelection) {
-        flushPendingCopy();
-      }
-    }
-  }, [flushPendingCopy]);
+    // no-op: deselect is detected in handleMouseUp where selection state is final
+  }, []);
 
   // Rule 3: paste event discards pending (user is replacing content with clipboard)
   const handlePaste = useCallback(() => {
