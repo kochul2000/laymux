@@ -28,3 +28,9 @@
   - **호버/인터랙션**: `onMouseEnter/Leave`에서 `style.background` 직접 조작 금지. CSS 호버 클래스(`.hover-bg` 등)를 사용.
   - **공유 컴포넌트**: 재사용 UI 요소는 `components/ui/`에 배치. 3곳 이상 동일 패턴 반복 시 공통화.
   - **스타일링**: Tailwind 유틸리티(레이아웃) + CSS 변수(테마 값) 하이브리드. 인라인 `style`은 동적/조건부 값에만 사용.
+* **Cursor work must follow the reference docs**: Any change to terminal cursor behavior, shadow cursor logic, overlay caret behavior, IME/composition handling, flicker mitigation, or DECSET 2026 synchronized output handling MUST be checked against ALL THREE documents before editing code:
+  - `docs/terminal/fix-flicker.md` — canonical entry point and workflow checklist.
+  - `docs/terminal/xterm-shadow-cursor-architecture.md` — 4-layer shadow cursor implementation guide (OSC 133, DECSC/RC, Mode 2026, onWriteParsed). Contains the complete `ShadowInputCursor` class.
+  - `docs/terminal/xterm-cursor-repaint-analysis.md` — deep analysis of WHY cursorX/Y drifts to footer during TUI repaints. Covers DECSET 2026 render/parse split, CSI s/u vs ESC 7/8 pitfalls, overlay sync timing (onRender vs onWriteParsed), buffer line inspection, and prompt marker design. Includes xterm.js issue/PR references.
+  Do not make cursor or overlay changes from memory or ad hoc experimentation alone. This is a complex, multi-layered problem where naive fixes cause regressions.
+* **Terminal cursor docs are research truth, not routine edit targets**: Treat `fix-flicker.md`, `xterm-shadow-cursor-architecture.md`, and `xterm-cursor-repaint-analysis.md` as authoritative reference material. Do not update these documents during normal implementation work unless the user explicitly asks to revise the research documents themselves.

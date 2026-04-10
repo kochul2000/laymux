@@ -1,4 +1,4 @@
-위 리포트 전체를 한국어로 다시 작성할게요.# xterm.js 리페인트 중 입력 커서 안정적 추적
+# xterm.js 섀도 커서 아키텍처 — 리페인트에서 입력 커서를 지키는 4-레이어 전략
 
 **xterm.js는 "입력 커서"와 "애플리케이션 커서"를 구분하지 않는다.** 버퍼당 커서는 하나뿐이다. Codex·Claude Code처럼 상태 footer를 자주 리페인트하는 CLI에서 `buffer.active.cursorX/Y`는 마지막 이스케이프 시퀀스가 도착한 위치 63 footer 끝 63 를 가리킨다. 해결책은 VS Code 터미널이 실제로 쓰는 **"섀도 커서(shadow cursor)" 아키텍처**다.
 

@@ -294,6 +294,13 @@ export function TerminalView({
       }
       overlayCaretUpdaterRef.current?.();
     };
+    const setImeCompositionState = (active: boolean) => {
+      shadowCursorRef.current.isComposing = active;
+      overlayCaretUpdaterRef.current?.();
+      if (!active) {
+        scheduleShadowCursorSync();
+      }
+    };
     let overlayCaretFrame: number | undefined;
     const updateOverlayCaret = () => {
       const overlay = overlayCaretRef.current;
@@ -336,13 +343,14 @@ export function TerminalView({
       }
 
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive || shadowCursor.isComposing) {
+      if (shadowCursor.isAltBufferActive) {
         overlay.style.opacity = "0";
         return;
       }
 
       const baseY = (term.buffer.active as { baseY?: number }).baseY ?? 0;
-      const useShadowCursor = shadowCursor.hasPromptBoundary && shadowCursor.isInputPhase;
+      const useShadowCursor =
+        shadowCursor.hasPromptBoundary && (shadowCursor.isInputPhase || shadowCursor.isComposing);
       const cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
@@ -555,15 +563,13 @@ export function TerminalView({
       if (
         !shadowCursor.hasPromptBoundary ||
         !shadowCursor.isInputPhase ||
-        shadowCursor.isComposing ||
         shadowCursor.isRepaintInProgress ||
         shadowCursor.isAltBufferActive ||
         syncOutputActiveRef.current
       ) {
         return;
       }
-      syncShadowCursorToBuffer();
-      scheduleOverlayCaretUpdate();
+      scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
       scheduleShadowCursorSync();
@@ -573,12 +579,10 @@ export function TerminalView({
     });
     let helperTextarea: HTMLTextAreaElement | null = null;
     const handleCompositionStart = () => {
-      shadowCursorRef.current.isComposing = true;
-      scheduleOverlayCaretUpdate();
+      setImeCompositionState(true);
     };
     const handleCompositionEnd = () => {
-      shadowCursorRef.current.isComposing = false;
-      scheduleShadowCursorSync();
+      setImeCompositionState(false);
     };
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
@@ -664,6 +668,7 @@ export function TerminalView({
 
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
+      scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
     });
 
