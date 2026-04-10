@@ -345,6 +345,78 @@ describe("TerminalView", () => {
     });
   });
 
+  it("renders the overlay caret using the configured cursor shape", async () => {
+    useSettingsStore.getState().updateProfile(0, { cursorShape: "underscore" });
+
+    render(
+      <TerminalView instanceId="t-overlay-shape" profile="PowerShell" syncGroup="" isFocused />,
+    );
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-overlay-shape", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-overlay-shape");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-overlay-shape");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    terminal.element.appendChild(screenEl);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.width).toBe("10px");
+      expect(overlay.style.height).toBe("2px");
+      expect(overlay.style.transform).toBe("translate(20px, 98px)");
+    });
+
+    act(() => {
+      useSettingsStore.getState().updateProfile(0, { cursorShape: "filledBox" });
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.width).toBe("10px");
+      expect(overlay.style.height).toBe("20px");
+      expect(overlay.style.transform).toBe("translate(20px, 80px)");
+    });
+  });
+
   it("keeps the overlay caret pinned to the input cursor during repaint save/restore", async () => {
     render(
       <TerminalView instanceId="t-shadow-cursor" profile="PowerShell" syncGroup="" isFocused />,

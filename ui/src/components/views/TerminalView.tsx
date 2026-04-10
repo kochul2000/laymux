@@ -7,7 +7,7 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
-import { toXtermCursorOptions } from "@/lib/cursor-settings";
+import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
   writeToTerminal,
@@ -110,6 +110,36 @@ function getBufferCursorAbsY(terminal: Terminal): number {
   return (activeBuffer.baseY ?? 0) + (activeBuffer.cursorY ?? 0);
 }
 
+function getOverlayCaretMetrics(
+  shape: "bar" | "underscore" | "filledBox",
+  cellWidth: number,
+  cellHeight: number,
+): { width: number; height: number; offsetY: number } {
+  switch (shape) {
+    case "underscore": {
+      const height = Math.max(2, Math.round(cellHeight * 0.12));
+      return {
+        width: Math.max(1, Math.round(cellWidth)),
+        height,
+        offsetY: Math.max(0, Math.round(cellHeight - height)),
+      };
+    }
+    case "filledBox":
+      return {
+        width: Math.max(1, Math.round(cellWidth)),
+        height: Math.max(1, Math.round(cellHeight)),
+        offsetY: 0,
+      };
+    case "bar":
+    default:
+      return {
+        width: Math.max(2, Math.round(cellWidth * 0.1)),
+        height: Math.max(1, Math.round(cellHeight)),
+        offsetY: 0,
+      };
+  }
+}
+
 interface TerminalViewProps {
   instanceId: string;
   paneId?: string;
@@ -153,6 +183,7 @@ export function TerminalView({
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
   const stabilizeInteractiveCursorRef = useRef(true);
+  const overlayCursorShapeRef = useRef<"bar" | "underscore" | "filledBox">("bar");
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
   onKeyboardActivityRef.current = onKeyboardActivity;
   isFocusedRef.current = isFocused;
@@ -321,11 +352,16 @@ export function TerminalView({
         return;
       }
 
+      const caretMetrics = getOverlayCaretMetrics(
+        overlayCursorShapeRef.current,
+        cellWidth,
+        cellHeight,
+      );
       overlay.style.opacity = "1";
-      overlay.style.width = `${Math.max(2, Math.round(cellWidth * 0.1))}px`;
-      overlay.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
+      overlay.style.width = `${caretMetrics.width}px`;
+      overlay.style.height = `${caretMetrics.height}px`;
       overlay.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + cursorX * cellWidth)}px, ${Math.round(
-        targetRect.top - hostRect.top + cursorY * cellHeight,
+        targetRect.top - hostRect.top + cursorY * cellHeight + caretMetrics.offsetY,
       )}px)`;
     };
     const scheduleOverlayCaretUpdate = () => {
@@ -1041,6 +1077,8 @@ export function TerminalView({
       prof?.cursorBlink ?? s.profileDefaults?.cursorBlink ?? defaultProfileDefaults.cursorBlink
     );
   });
+  const overlayCursorShape = toSupportedCursorShape(cursorShape);
+  overlayCursorShapeRef.current = overlayCursorShape;
   const stabilizeInteractiveCursor = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
     return (
