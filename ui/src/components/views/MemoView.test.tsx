@@ -301,8 +301,9 @@ describe("MemoView", () => {
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      textarea.focus();
       textarea.setSelectionRange(0, 5); // select "hello"
-      fireEvent.mouseUp(textarea);
+      fireEvent(document, new Event("selectionchange"));
       return textarea;
     }
 
@@ -323,11 +324,10 @@ describe("MemoView", () => {
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("rule 2-2: deselect (click to collapse selection) flushes to clipboard", async () => {
+    it("rule 2-2: deselect (selection collapses) flushes to clipboard", async () => {
       const textarea = await setupCopyOnSelect("pane-r2-2");
-      // Simulate click that deselects: selection collapses, then mouseup
       textarea.setSelectionRange(3, 3);
-      fireEvent.mouseUp(textarea);
+      fireEvent(document, new Event("selectionchange"));
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
@@ -351,8 +351,9 @@ describe("MemoView", () => {
       });
       vi.mocked(clipboardWriteText).mockClear();
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      textarea.focus();
       textarea.setSelectionRange(0, 15);
-      fireEvent.mouseUp(textarea);
+      fireEvent(document, new Event("selectionchange"));
       expect(clipboardWriteText).not.toHaveBeenCalled();
       fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).toHaveBeenCalledWith("first paragraph");

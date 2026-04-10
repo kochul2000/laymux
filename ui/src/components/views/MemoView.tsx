@@ -111,23 +111,23 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     }
   }, []);
 
-  const handleMouseUp = useCallback(() => {
+  // Track selection changes (covers drag, double-click, triple-click, keyboard select)
+  useEffect(() => {
     if (!memo.copyOnSelect) return;
-    const textarea = textareaRef.current;
-    const selectedText = textarea
-      ? textarea.value.slice(textarea.selectionStart, textarea.selectionEnd)
-      : (window.getSelection()?.toString() ?? "");
-    if (selectedText) {
-      pendingCopyRef.current = selectedText;
-    } else if (pendingCopyRef.current) {
-      // Selection was cleared (click to deselect) → flush pending
-      flushPendingCopy();
-    }
+    const onSelectionChange = () => {
+      const textarea = textareaRef.current;
+      if (!textarea || document.activeElement !== textarea) return;
+      const selectedText = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
+      if (selectedText) {
+        pendingCopyRef.current = selectedText;
+      } else if (pendingCopyRef.current) {
+        // Selection cleared → flush pending
+        flushPendingCopy();
+      }
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, [memo.copyOnSelect, flushPendingCopy]);
-
-  const handleMouseDown = useCallback(() => {
-    // no-op: deselect is detected in handleMouseUp where selection state is final
-  }, []);
 
   // Rule 3: paste event discards pending (user is replacing content with clipboard)
   const handlePaste = useCallback(() => {
@@ -212,8 +212,6 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           data-testid="memo-textarea"
           value={text}
           onChange={handleChange}
-          onMouseUp={handleMouseUp}
-          onMouseDown={handleMouseDown}
           onPaste={handlePaste}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
