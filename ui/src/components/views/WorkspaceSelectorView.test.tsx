@@ -1636,14 +1636,13 @@ describe("WorkspaceSelectorView", () => {
 
   // ======================= Pane Hide Mode =======================
 
-  describe("pane hide mode", () => {
+  describe("unified hide mode", () => {
     beforeEach(() => {
-      // Set up a workspace with 2 terminal panes
       useWorkspaceStore.setState({
         workspaces: [
           {
-            id: "ws-multi",
-            name: "Multi",
+            id: "ws-1",
+            name: "Project A",
             panes: [
               {
                 id: "pane-a",
@@ -1663,78 +1662,6 @@ describe("WorkspaceSelectorView", () => {
               },
             ],
           },
-        ],
-        activeWorkspaceId: "ws-multi",
-      });
-      useTerminalStore.setState({
-        instances: [
-          {
-            id: "terminal-pane-a",
-            profile: "WSL",
-            syncGroup: "ws-multi",
-            workspaceId: "ws-multi",
-            label: "WSL",
-            lastActivityAt: 0,
-            isFocused: true,
-          },
-          {
-            id: "terminal-pane-b",
-            profile: "PS",
-            syncGroup: "ws-multi",
-            workspaceId: "ws-multi",
-            label: "PS",
-            lastActivityAt: 0,
-            isFocused: false,
-          },
-        ],
-      });
-    });
-
-    it("shows pane hide toggle button on workspace hover", async () => {
-      const user = userEvent.setup();
-      render(<WorkspaceSelectorView />);
-      const wsItem = screen.getByTestId("workspace-item-ws-multi");
-      await user.hover(wsItem);
-      expect(screen.getByTestId("pane-hide-toggle-ws-multi")).toBeInTheDocument();
-    });
-
-    it("entering pane hide mode shows eye icons on each pane row", async () => {
-      render(<WorkspaceSelectorView />);
-      // Activate pane hide mode via store
-      useUiStore.getState().togglePaneHideMode();
-      // Re-render to pick up the state change
-      const { unmount } = render(<WorkspaceSelectorView />);
-      expect(screen.getAllByTestId(/^pane-eye-/).length).toBeGreaterThanOrEqual(2);
-      unmount();
-    });
-
-    it("clicking pane eye icon hides the pane from the list", () => {
-      // Enter pane hide mode and hide pane-a
-      useUiStore.getState().togglePaneHideMode();
-      useUiStore.getState().togglePaneHidden("pane-a");
-      expect(useUiStore.getState().hiddenPaneIds.has("pane-a")).toBe(true);
-
-      // Exit pane hide mode - hidden pane should not be visible
-      useUiStore.getState().togglePaneHideMode();
-      render(<WorkspaceSelectorView />);
-      // pane-a's terminal summary row should not be rendered
-      expect(screen.queryByTestId("pane-minimap-terminal-pane-a")).not.toBeInTheDocument();
-      // pane-b should still be visible
-      expect(screen.getByText("PS")).toBeInTheDocument();
-    });
-  });
-
-  // ======================= Workspace Hide Mode =======================
-
-  describe("workspace hide mode", () => {
-    beforeEach(() => {
-      useWorkspaceStore.setState({
-        workspaces: [
-          {
-            id: "ws-1",
-            name: "Project A",
-            panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
-          },
           {
             id: "ws-2",
             name: "Project B",
@@ -1748,44 +1675,73 @@ describe("WorkspaceSelectorView", () => {
         ],
         activeWorkspaceId: "ws-1",
       });
+      useTerminalStore.setState({
+        instances: [
+          {
+            id: "terminal-pane-a",
+            profile: "WSL",
+            syncGroup: "ws-1",
+            workspaceId: "ws-1",
+            label: "WSL",
+            lastActivityAt: 0,
+            isFocused: true,
+          },
+          {
+            id: "terminal-pane-b",
+            profile: "PS",
+            syncGroup: "ws-1",
+            workspaceId: "ws-1",
+            label: "PS",
+            lastActivityAt: 0,
+            isFocused: false,
+          },
+        ],
+      });
     });
 
-    it("shows workspace hide toggle button", () => {
+    it("shows hide mode toggle button", () => {
       render(<WorkspaceSelectorView />);
-      expect(screen.getByTestId("workspace-hide-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("hide-mode-toggle")).toBeInTheDocument();
     });
 
-    it("entering workspace hide mode shows eye icons for each workspace", () => {
-      useUiStore.getState().toggleWorkspaceHideMode();
+    it("entering hide mode shows eye icons on workspaces and panes", () => {
+      useUiStore.getState().toggleHideMode();
       render(<WorkspaceSelectorView />);
+      // Workspace eye icons
       expect(screen.getByTestId("workspace-eye-ws-1")).toBeInTheDocument();
       expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
       expect(screen.getByTestId("workspace-eye-ws-3")).toBeInTheDocument();
+      // Pane eye icons
+      expect(screen.getByTestId("pane-eye-pane-a")).toBeInTheDocument();
+      expect(screen.getByTestId("pane-eye-pane-b")).toBeInTheDocument();
+    });
+
+    it("hiding a pane removes it from the list in normal mode", () => {
+      useUiStore.getState().togglePaneHidden("pane-a");
+      render(<WorkspaceSelectorView />);
+      expect(screen.queryByTestId("pane-minimap-terminal-pane-a")).not.toBeInTheDocument();
+      expect(screen.getByText("PS")).toBeInTheDocument();
     });
 
     it("hiding a workspace removes it from the list in normal mode", () => {
-      // Hide ws-2
       useUiStore.getState().toggleWorkspaceHidden("ws-2");
       render(<WorkspaceSelectorView />);
-      // ws-2 should not be visible (it's not the active workspace)
       expect(screen.queryByTestId("workspace-item-ws-2")).not.toBeInTheDocument();
-      // ws-1 and ws-3 should still be visible
       expect(screen.getByTestId("workspace-item-ws-1")).toBeInTheDocument();
       expect(screen.getByTestId("workspace-item-ws-3")).toBeInTheDocument();
     });
 
     it("active workspace is never hidden even if in hiddenWorkspaceIds", () => {
-      useUiStore.getState().toggleWorkspaceHidden("ws-1"); // ws-1 is active
+      useUiStore.getState().toggleWorkspaceHidden("ws-1");
       render(<WorkspaceSelectorView />);
-      // Active workspace should still be visible
       expect(screen.getByTestId("workspace-item-ws-1")).toBeInTheDocument();
     });
 
-    it("workspace hide toggle shows hidden count badge", () => {
+    it("hide mode toggle shows total hidden count", () => {
       useUiStore.getState().toggleWorkspaceHidden("ws-2");
-      useUiStore.getState().toggleWorkspaceHidden("ws-3");
+      useUiStore.getState().togglePaneHidden("pane-a");
       render(<WorkspaceSelectorView />);
-      const toggle = screen.getByTestId("workspace-hide-toggle");
+      const toggle = screen.getByTestId("hide-mode-toggle");
       expect(toggle.textContent).toContain("2");
     });
   });

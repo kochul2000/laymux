@@ -112,46 +112,24 @@ describe("ui-store", () => {
     expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
   });
 
-  // -- pane hide mode --
+  // -- unified hide mode --
 
-  it("starts with pane hide mode off", () => {
-    expect(useUiStore.getState().paneHideMode).toBe(false);
+  it("starts with hide mode off", () => {
+    expect(useUiStore.getState().hideMode).toBe(false);
   });
 
-  it("toggles pane hide mode", () => {
-    useUiStore.getState().togglePaneHideMode();
-    expect(useUiStore.getState().paneHideMode).toBe(true);
-    useUiStore.getState().togglePaneHideMode();
-    expect(useUiStore.getState().paneHideMode).toBe(false);
+  it("toggles hide mode", () => {
+    useUiStore.getState().toggleHideMode();
+    expect(useUiStore.getState().hideMode).toBe(true);
+    useUiStore.getState().toggleHideMode();
+    expect(useUiStore.getState().hideMode).toBe(false);
   });
 
-  it("enabling pane hide mode disables workspace hide mode", () => {
-    useUiStore.getState().toggleWorkspaceHideMode();
-    expect(useUiStore.getState().workspaceHideMode).toBe(true);
-    useUiStore.getState().togglePaneHideMode();
-    expect(useUiStore.getState().paneHideMode).toBe(true);
-    expect(useUiStore.getState().workspaceHideMode).toBe(false);
-  });
-
-  // -- workspace hide mode --
-
-  it("starts with workspace hide mode off", () => {
-    expect(useUiStore.getState().workspaceHideMode).toBe(false);
-  });
-
-  it("toggles workspace hide mode", () => {
-    useUiStore.getState().toggleWorkspaceHideMode();
-    expect(useUiStore.getState().workspaceHideMode).toBe(true);
-    useUiStore.getState().toggleWorkspaceHideMode();
-    expect(useUiStore.getState().workspaceHideMode).toBe(false);
-  });
-
-  it("enabling workspace hide mode disables pane hide mode", () => {
-    useUiStore.getState().togglePaneHideMode();
-    expect(useUiStore.getState().paneHideMode).toBe(true);
-    useUiStore.getState().toggleWorkspaceHideMode();
-    expect(useUiStore.getState().workspaceHideMode).toBe(true);
-    expect(useUiStore.getState().paneHideMode).toBe(false);
+  it("exitHideMode turns off hide mode", () => {
+    useUiStore.getState().toggleHideMode();
+    expect(useUiStore.getState().hideMode).toBe(true);
+    useUiStore.getState().exitHideMode();
+    expect(useUiStore.getState().hideMode).toBe(false);
   });
 
   // -- hidden pane ids --

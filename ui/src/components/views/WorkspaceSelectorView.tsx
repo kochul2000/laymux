@@ -159,14 +159,15 @@ function WorkspaceItem({
   pathEllipsis,
   drag,
   dropIndicator,
-  paneHideMode,
+  hideMode,
+  isWsHidden,
   hiddenPaneIds,
   onSelect,
   onClose,
   onDuplicate,
   onRename,
-  onTogglePaneHideMode,
   onTogglePaneHidden,
+  onToggleWsHidden,
 }: {
   ws: { id: string; name: string };
   index: number;
@@ -177,14 +178,15 @@ function WorkspaceItem({
   pathEllipsis: "start" | "end";
   drag: DragContext;
   dropIndicator: DropIndicator | null;
-  paneHideMode: boolean;
+  hideMode: boolean;
+  isWsHidden: boolean;
   hiddenPaneIds: Set<string>;
   onSelect: () => void;
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
-  onTogglePaneHideMode: () => void;
   onTogglePaneHidden: (paneId: string) => void;
+  onToggleWsHidden: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
@@ -214,7 +216,7 @@ function WorkspaceItem({
       data-testid={`workspace-item-${ws.id}`}
       data-active={isActive ? "true" : "false"}
       draggable={drag.enabled}
-      onClick={onSelect}
+      onClick={hideMode ? undefined : onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onDragStart={(e) => drag.onDragStart(e, ws.id)}
@@ -235,11 +237,31 @@ function WorkspaceItem({
             : "none",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
+        opacity: hideMode && isWsHidden ? 0.35 : undefined,
       }}
     >
       {/* Row 1: Index + Workspace name + terminal count + badge + close */}
       <div data-testid={`ws-row-1-${ws.id}`} className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 truncate">
+          {hideMode && (
+            <button
+              data-testid={`workspace-eye-${ws.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleWsHidden();
+              }}
+              className="shrink-0 cursor-pointer"
+              style={{
+                color: isWsHidden ? "var(--text-secondary)" : "var(--accent)",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                lineHeight: 0,
+              }}
+            >
+              {isWsHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
+            </button>
+          )}
           {/* Keyboard shortcut index */}
           <span
             className="shrink-0 text-[10px] font-medium"
@@ -285,26 +307,6 @@ function WorkspaceItem({
           )}
           {hovered && (
             <>
-              <button
-                data-testid={`pane-hide-toggle-${ws.id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTogglePaneHideMode();
-                }}
-                className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100"
-                style={{
-                  color: paneHideMode
-                    ? "var(--accent)"
-                    : hiddenPaneIds.size > 0
-                      ? "var(--yellow)"
-                      : "var(--text-secondary)",
-                  background: "transparent",
-                  border: "none",
-                }}
-                title={paneHideMode ? "Exit pane hide mode" : "Toggle pane visibility"}
-              >
-                {hiddenPaneIds.size > 0 && !paneHideMode ? <EyeOffIcon /> : <EyeIcon />}
-              </button>
               <button
                 data-testid={`workspace-duplicate-${ws.id}`}
                 onClick={(e) => {
@@ -405,7 +407,7 @@ function WorkspaceItem({
               const isFocusedPane = isActive && gridFocused === paneIdx;
               const isPaneHidden = hiddenPaneIds.has(pane.id);
               // In normal mode, skip hidden panes
-              if (!paneHideMode && isPaneHidden) return null;
+              if (!hideMode && isPaneHidden) return null;
               if (pane.view.type === "TerminalView") {
                 const termId = `terminal-${pane.id}`;
                 const ts = summary.terminalSummaries.find((t) => t.id === termId);
@@ -431,9 +433,9 @@ function WorkspaceItem({
                 return (
                   <div
                     key={pane.id}
-                    className={`flex items-center gap-1.5 truncate text-[11px]${paneHideMode ? " cursor-pointer" : ""}`}
+                    className={`flex items-center gap-1.5 truncate text-[11px]${hideMode ? " cursor-pointer" : ""}`}
                     onClick={
-                      paneHideMode
+                      hideMode
                         ? (e) => {
                             e.stopPropagation();
                             onTogglePaneHidden(pane.id);
@@ -441,9 +443,9 @@ function WorkspaceItem({
                         : undefined
                     }
                     style={{
-                      paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
+                      paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
                       opacity: isPaneHidden ? 0.35 : undefined,
-                      ...(isFocusedPane && !paneHideMode
+                      ...(isFocusedPane && !hideMode
                         ? {
                             background: "var(--accent-12)",
                             borderRadius: "var(--radius-md)",
@@ -452,14 +454,24 @@ function WorkspaceItem({
                         : {}),
                     }}
                   >
-                    {paneHideMode && (
-                      <span
-                        className="shrink-0"
+                    {hideMode && (
+                      <button
+                        className="shrink-0 cursor-pointer"
                         data-testid={`pane-eye-${pane.id}`}
-                        style={{ color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTogglePaneHidden(pane.id);
+                        }}
+                        style={{
+                          color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)",
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          lineHeight: 0,
+                        }}
                       >
-                        {isPaneHidden ? <EyeOffIcon size={10} /> : <EyeIcon size={10} />}
-                      </span>
+                        {isPaneHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
+                      </button>
                     )}
                     {showMinimap && wsDisplay.minimap && (
                       <span
@@ -580,9 +592,9 @@ function WorkspaceItem({
               return (
                 <div
                   key={pane.id}
-                  className={`flex items-center gap-1.5 truncate text-[11px]${paneHideMode ? " cursor-pointer" : ""}`}
+                  className={`flex items-center gap-1.5 truncate text-[11px]${hideMode ? " cursor-pointer" : ""}`}
                   onClick={
-                    paneHideMode
+                    hideMode
                       ? (e) => {
                           e.stopPropagation();
                           onTogglePaneHidden(pane.id);
@@ -590,9 +602,9 @@ function WorkspaceItem({
                       : undefined
                   }
                   style={{
-                    paddingLeft: showMinimap && wsDisplay.minimap ? 2 : 18,
+                    paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
                     opacity: isPaneHidden ? 0.35 : undefined,
-                    ...(isFocusedPane && !paneHideMode
+                    ...(isFocusedPane && !hideMode
                       ? {
                           background: "var(--accent-08)",
                           borderRadius: "var(--radius-md)",
@@ -601,14 +613,24 @@ function WorkspaceItem({
                       : {}),
                   }}
                 >
-                  {paneHideMode && (
-                    <span
-                      className="shrink-0"
+                  {hideMode && (
+                    <button
+                      className="shrink-0 cursor-pointer"
                       data-testid={`pane-eye-${pane.id}`}
-                      style={{ color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePaneHidden(pane.id);
+                      }}
+                      style={{
+                        color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)",
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        lineHeight: 0,
+                      }}
                     >
-                      {isPaneHidden ? <EyeOffIcon size={10} /> : <EyeIcon size={10} />}
-                    </span>
+                      {isPaneHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
+                    </button>
                   )}
                   {showMinimap && wsDisplay.minimap && (
                     <span
@@ -950,6 +972,7 @@ function LayoutCard({
 export function WorkspaceSelectorView() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
+  const selectorRef = useRef<HTMLDivElement>(null);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -971,12 +994,11 @@ export function WorkspaceSelectorView() {
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
-  const paneHideMode = useUiStore((s) => s.paneHideMode);
-  const workspaceHideMode = useUiStore((s) => s.workspaceHideMode);
+  const hideMode = useUiStore((s) => s.hideMode);
   const hiddenPaneIds = useUiStore((s) => s.hiddenPaneIds);
   const hiddenWorkspaceIds = useUiStore((s) => s.hiddenWorkspaceIds);
-  const togglePaneHideMode = useUiStore((s) => s.togglePaneHideMode);
-  const toggleWorkspaceHideMode = useUiStore((s) => s.toggleWorkspaceHideMode);
+  const toggleHideMode = useUiStore((s) => s.toggleHideMode);
+  const exitHideMode = useUiStore((s) => s.exitHideMode);
   const togglePaneHidden = useUiStore((s) => s.togglePaneHidden);
   const toggleWorkspaceHidden = useUiStore((s) => s.toggleWorkspaceHidden);
 
@@ -992,6 +1014,19 @@ export function WorkspaceSelectorView() {
 
   // Build terminal ports map (empty for now — port detection doesn't map to terminals)
   const terminalPorts = useMemo(() => new Map<string, number[]>(), []);
+
+  // Exit hide mode only when focus truly leaves the workspace selector view
+  // (e.g. clicking a terminal pane, another dock view, etc.)
+  // Internal clicks within the selector do NOT exit — only the apply button does.
+  const handleSelectorBlur = useCallback(
+    (e: React.FocusEvent) => {
+      if (!hideMode) return;
+      // relatedTarget is the element receiving focus — if it's still inside the selector, ignore
+      if (selectorRef.current && selectorRef.current.contains(e.relatedTarget as Node)) return;
+      exitHideMode();
+    },
+    [hideMode, exitHideMode],
+  );
 
   // Sort workspaces based on current sort order (memoized to avoid re-sorting on every render)
   const sortedWorkspaces = useMemo(
@@ -1095,7 +1130,7 @@ export function WorkspaceSelectorView() {
   };
 
   return (
-    <div data-testid="workspace-selector" className="flex h-full flex-col">
+    <div ref={selectorRef} data-testid="workspace-selector" className="flex h-full flex-col" tabIndex={-1} onBlur={handleSelectorBlur}>
       <ViewHeader testId="workspace-selector-header" title="New Workspace" />
       {/* New Workspace: Layout picker */}
       <div className="shrink-0" data-testid="new-workspace-panel">
@@ -1131,28 +1166,32 @@ export function WorkspaceSelectorView() {
         <SectionLabel>Workspaces</SectionLabel>
         <span className="flex items-center gap-1">
           <button
-            data-testid="workspace-hide-toggle"
-            onClick={() => toggleWorkspaceHideMode()}
+            data-testid="hide-mode-toggle"
+            onClick={() => toggleHideMode()}
             className="flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px]"
             style={{
-              color: workspaceHideMode
+              color: hideMode
                 ? "var(--accent)"
-                : hiddenWorkspaceIds.size > 0
+                : hiddenWorkspaceIds.size + hiddenPaneIds.size > 0
                   ? "var(--yellow)"
                   : "var(--text-secondary)",
-              background: workspaceHideMode ? "var(--accent-12)" : "var(--active-bg)",
+              background: hideMode ? "var(--accent-12)" : "var(--active-bg)",
               border: "none",
-              opacity: workspaceHideMode ? 1 : 0.7,
+              opacity: hideMode ? 1 : 0.7,
             }}
-            title={workspaceHideMode ? "Exit workspace hide mode" : "Toggle workspace visibility"}
+            title={hideMode ? "Apply and exit hide mode" : "Enter hide mode"}
           >
-            {hiddenWorkspaceIds.size > 0 && !workspaceHideMode ? (
+            {hideMode ? (
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2 5.5L4 7.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : hiddenWorkspaceIds.size + hiddenPaneIds.size > 0 ? (
               <EyeOffIcon size={10} />
             ) : (
               <EyeIcon size={10} />
             )}
-            {hiddenWorkspaceIds.size > 0 && (
-              <span style={{ fontSize: 8, opacity: 0.8 }}>{hiddenWorkspaceIds.size}</span>
+            {!hideMode && hiddenWorkspaceIds.size + hiddenPaneIds.size > 0 && (
+              <span style={{ fontSize: 8, opacity: 0.8 }}>{hiddenWorkspaceIds.size + hiddenPaneIds.size}</span>
             )}
           </button>
           <button
@@ -1198,7 +1237,7 @@ export function WorkspaceSelectorView() {
         {sortedWorkspaces.map((ws, idx) => {
           const isWsHidden = hiddenWorkspaceIds.has(ws.id);
           // In normal mode, skip hidden workspaces (but never hide the active one)
-          if (!workspaceHideMode && isWsHidden && ws.id !== activeWorkspaceId) return null;
+          if (!hideMode && isWsHidden && ws.id !== activeWorkspaceId) return null;
           const isActive = ws.id === activeWorkspaceId;
           // Compute summary from frontend stores (event-driven, no polling).
           // Include lastCwd from settings as fallback for terminals that haven't
@@ -1237,36 +1276,6 @@ export function WorkspaceSelectorView() {
           if (isActive && portNumbers.length > 0) {
             summary.ports = portNumbers;
           }
-          // Workspace hide mode: show eye icon overlay and handle click to toggle
-          if (workspaceHideMode) {
-            return (
-              <div
-                key={ws.id}
-                data-testid={`workspace-hide-item-${ws.id}`}
-                className="relative flex cursor-pointer items-center gap-2 px-2 py-1.5"
-                onClick={() => toggleWorkspaceHidden(ws.id)}
-                style={{
-                  borderBottom: "1px solid var(--border)",
-                  opacity: isWsHidden ? 0.35 : 1,
-                  background: isWsHidden ? "transparent" : "var(--accent-08)",
-                }}
-              >
-                <span
-                  data-testid={`workspace-eye-${ws.id}`}
-                  style={{ color: isWsHidden ? "var(--text-secondary)" : "var(--accent)" }}
-                >
-                  {isWsHidden ? <EyeOffIcon /> : <EyeIcon />}
-                </span>
-                <span
-                  className="truncate text-sm"
-                  style={{ color: isWsHidden ? "var(--text-secondary)" : "var(--text-primary)" }}
-                >
-                  {ws.name}
-                </span>
-              </div>
-            );
-          }
-
           // Compute hidden pane IDs for this workspace
           const wsHiddenPaneIds = new Set(
             [...hiddenPaneIds].filter((id) => ws.panes.some((p) => p.id === id)),
@@ -1284,7 +1293,8 @@ export function WorkspaceSelectorView() {
               pathEllipsis={pathEllipsis}
               drag={dragContext}
               dropIndicator={dropIndicator}
-              paneHideMode={paneHideMode}
+              hideMode={hideMode}
+              isWsHidden={isWsHidden}
               hiddenPaneIds={wsHiddenPaneIds}
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
@@ -1298,8 +1308,8 @@ export function WorkspaceSelectorView() {
                 const newName = window.prompt("Rename workspace:", ws.name);
                 if (newName?.trim()) renameWorkspace(ws.id, newName.trim());
               }}
-              onTogglePaneHideMode={togglePaneHideMode}
               onTogglePaneHidden={togglePaneHidden}
+              onToggleWsHidden={() => toggleWorkspaceHidden(ws.id)}
             />
           );
         })}
