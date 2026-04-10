@@ -103,47 +103,42 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   // Lazy copy on select: remember selected text, copy on deselect / blur / Ctrl+C
   const pendingCopyRef = useRef<string | null>(null);
-  const flushedGuardRef = useRef(false);
-
+  const prevSelRef = useRef<string | null>(null);
   const flushPendingCopy = useCallback(() => {
     if (pendingCopyRef.current) {
       clipboardWriteText(pendingCopyRef.current).catch(() => {});
       pendingCopyRef.current = null;
-      // Prevent selectionchange from re-storing the same text right after flush
-      flushedGuardRef.current = true;
-      requestAnimationFrame(() => {
-        flushedGuardRef.current = false;
-      });
     }
   }, []);
 
   const discardPendingCopy = useCallback(() => {
     pendingCopyRef.current = null;
-    flushedGuardRef.current = true;
-    requestAnimationFrame(() => {
-      flushedGuardRef.current = false;
-    });
   }, []);
 
   // Track selection changes (covers drag, double-click, triple-click, keyboard select)
   useEffect(() => {
     if (!memo.copyOnSelect) return;
     const onSelectionChange = () => {
-      if (flushedGuardRef.current) return;
       const textarea = textareaRef.current;
       if (!textarea) return;
       const isFocused = document.activeElement === textarea;
       if (!isFocused) {
-        // Focus left textarea → flush whatever was pending
         if (pendingCopyRef.current) flushPendingCopy();
         return;
       }
       const selectedText = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
       if (selectedText) {
-        pendingCopyRef.current = selectedText;
-      } else if (pendingCopyRef.current) {
-        // Selection cleared within textarea → flush
-        flushPendingCopy();
+        // After flush/discard, pending is null. If selectionchange fires
+        // with the same text (stale event), don't re-store it.
+        if (pendingCopyRef.current !== null || selectedText !== prevSelRef.current) {
+          pendingCopyRef.current = selectedText;
+        }
+        prevSelRef.current = selectedText;
+      } else {
+        prevSelRef.current = null;
+        if (pendingCopyRef.current) {
+          flushPendingCopy();
+        }
       }
     };
     document.addEventListener("selectionchange", onSelectionChange);
