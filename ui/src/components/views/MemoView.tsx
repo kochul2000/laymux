@@ -142,9 +142,22 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     [flushPendingCopy],
   );
 
-  // Flush pending copy when leaving the memo (blur)
-  const handleBlur = useCallback(() => {
-    flushPendingCopy();
+  // Flush pending copy when focus leaves memo: window blur (external app)
+  // or click outside textarea (dock/sidebar/other pane)
+  useEffect(() => {
+    const onWindowBlur = () => flushPendingCopy();
+    const onDocumentMouseDown = (e: MouseEvent) => {
+      if (!pendingCopyRef.current) return;
+      if (textareaRef.current && !textareaRef.current.contains(e.target as Node)) {
+        flushPendingCopy();
+      }
+    };
+    window.addEventListener("blur", onWindowBlur);
+    document.addEventListener("mousedown", onDocumentMouseDown, true);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      document.removeEventListener("mousedown", onDocumentMouseDown, true);
+    };
   }, [flushPendingCopy]);
 
   // Triple-click to select paragraph (changed from double-click)
@@ -206,7 +219,6 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           onMouseUp={handleMouseUp}
           onMouseDown={handleMouseDown}
           onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
           className="h-full w-full resize-none border-none outline-none"

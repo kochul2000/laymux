@@ -341,7 +341,7 @@ describe("MemoView", () => {
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("flushes pending copy on blur", async () => {
+    it("flushes pending copy on click outside textarea", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -366,7 +366,38 @@ describe("MemoView", () => {
       fireEvent.mouseUp(textarea);
       expect(clipboardWriteText).not.toHaveBeenCalled();
 
-      fireEvent.blur(textarea);
+      // Click outside textarea (document-level mousedown)
+      fireEvent.mouseDown(document.body);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
+    it("flushes pending copy on window blur (external app)", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          copyOnSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-cos-winblur" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const selection = {
+        toString: () => "hello",
+        removeAllRanges: vi.fn(),
+      };
+      vi.spyOn(window, "getSelection").mockReturnValue(selection as unknown as Selection);
+
+      vi.mocked(clipboardWriteText).mockClear();
+      const textarea = screen.getByTestId("memo-textarea");
+      fireEvent.mouseUp(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      // Window blur (switching to external app)
+      fireEvent(window, new Event("blur"));
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
@@ -397,8 +428,8 @@ describe("MemoView", () => {
       // Typing discards pending copy
       fireEvent.keyDown(textarea, { key: "a" });
 
-      // Blur after typing should NOT copy (pending was discarded)
-      fireEvent.blur(textarea);
+      // Click outside after typing should NOT copy (pending was discarded)
+      fireEvent.mouseDown(document.body);
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
 
