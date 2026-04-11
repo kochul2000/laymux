@@ -218,6 +218,10 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/settings/profiles/{index}",
                 "description": "Update a specific terminal profile by index.",
                 "body": "object — profile fields to update"
+            },
+            {
+                "method": "POST", "path": "/mcp",
+                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint. Accepts JSON-RPC 2.0 requests. Methods: initialize, tools/list, tools/call, ping, notifications/initialized. 15 tools available for terminal, workspace, grid, and utility operations."
             }
         ],
         "tips": [

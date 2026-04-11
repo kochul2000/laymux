@@ -170,6 +170,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/v1/settings/profile-defaults"),
     ("PUT", "/api/v1/settings/profiles/{index}"),
     ("POST", "/api/v1/ui/notifications"),
+    ("POST", "/mcp"),
 ];
 
 #[cfg(test)]
