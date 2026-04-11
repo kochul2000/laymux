@@ -11,7 +11,7 @@ use rmcp::{schemars, tool, tool_router, ErrorData, ServerHandler};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::constants::{MCP_PROTOCOL_VERSION, MCP_SERVER_NAME};
+use crate::constants::MCP_SERVER_NAME;
 use crate::lock_ext::MutexExt;
 
 use super::helpers::bridge_request;
@@ -163,14 +163,56 @@ impl McpHandler {
 }
 
 /// Create the MCP service for mounting in the axum router.
+///
+/// Allowed hosts include loopback addresses plus common WSL2 gateway patterns.
+/// The axum server binds to 0.0.0.0 for WSL2 access, so we extend the default
+/// loopback-only list rather than disabling host validation entirely.
 pub fn create_service(
     state: ServerState,
 ) -> StreamableHttpService<McpHandler, LocalSessionManager> {
     StreamableHttpService::new(
         move || Ok(McpHandler::new(state.clone())),
         Arc::new(LocalSessionManager::default()),
-        StreamableHttpServerConfig::default().disable_allowed_hosts(),
+        StreamableHttpServerConfig::default().with_allowed_hosts(mcp_allowed_hosts()),
     )
+}
+
+/// Build the allowed hosts list for MCP host header validation.
+/// Includes loopback addresses and the WSL2 gateway IP (dynamic).
+fn mcp_allowed_hosts() -> Vec<String> {
+    let mut hosts = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+
+    // WSL2 gateway IP — the Windows host IP that WSL2 clients connect through.
+    // On Windows native this is a no-op (returns None).
+    if let Some(gateway) = detect_wsl2_gateway() {
+        hosts.push(gateway);
+    }
+
+    hosts
+}
+
+/// Detect WSL2 gateway IP from the default route.
+/// Returns None on native Windows or if detection fails.
+#[cfg(not(target_os = "windows"))]
+fn detect_wsl2_gateway() -> Option<String> {
+    use std::process::Command;
+    let output = Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // "default via 172.x.x.x dev eth0" → extract the IP
+    stdout.split_whitespace().nth(2).map(|s| s.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn detect_wsl2_gateway() -> Option<String> {
+    // On native Windows, MCP clients connect via loopback — no gateway needed.
+    None
 }
 
 // ── Tool implementations ──────────────────────────────────────────
@@ -415,11 +457,11 @@ impl ServerHandler for McpHandler {
                 MCP_SERVER_NAME,
                 env!("CARGO_PKG_VERSION"),
             ))
-            .with_instructions(format!(
-                "Laymux IDE automation via MCP (protocol {}). \
-                 Control terminals, workspaces, grid layout, and capture screenshots.",
-                MCP_PROTOCOL_VERSION,
-            ))
+            .with_instructions(
+                "Laymux IDE automation via MCP. \
+                 Control terminals, workspaces, grid layout, and capture screenshots."
+                    .to_string(),
+            )
     }
 }
 
@@ -508,5 +550,13 @@ mod tests {
         // is_error is None or Some(false) for success
         assert_ne!(result.is_error, Some(true));
         assert_eq!(result.content.len(), 1);
+    }
+
+    #[test]
+    fn mcp_allowed_hosts_includes_loopback() {
+        let hosts = mcp_allowed_hosts();
+        assert!(hosts.contains(&"localhost".to_string()));
+        assert!(hosts.contains(&"127.0.0.1".to_string()));
+        assert!(hosts.contains(&"::1".to_string()));
     }
 }

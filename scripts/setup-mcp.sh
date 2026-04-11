@@ -4,12 +4,14 @@ set -euo pipefail
 # laymux 내장 MCP 서버 설정 스크립트 (Streamable HTTP)
 #
 # laymux가 실행 중이면 discovery 파일에서 port/key를 읽어
-# .mcp.json을 자동 생성한다. 별도 빌드 불필요.
+# Claude Code MCP 설정을 자동 등록한다. 별도 빌드 불필요.
+# 기본: 전역 등록 (~/.claude.json), --project: 프로젝트별 (.mcp.json)
 #
 # 사용법:
 #   ./setup-mcp.sh                    # 전역 (~/.claude.json)
 #   ./setup-mcp.sh --project /path    # 프로젝트 (.mcp.json)
 #   ./setup-mcp.sh --dev              # dev 인스턴스 (포트 19281)
+#   ./setup-mcp.sh --force            # health check 실패해도 계속 진행
 
 # --- 색상 ---
 RED='\033[0;31m'
@@ -25,6 +27,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 SCOPE="global"
 PROJECT_DIR=""
 USE_DEV=false
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,8 +41,12 @@ while [[ $# -gt 0 ]]; do
             USE_DEV=true
             shift
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
         *)
-            error "알 수 없는 옵션: $1\n사용법: $0 [--project /path] [--dev]"
+            error "알 수 없는 옵션: $1\n사용법: $0 [--project /path] [--dev] [--force]"
             ;;
     esac
 done
@@ -57,17 +64,27 @@ fi
 
 # Try WSL path first (Windows %APPDATA% via /mnt/c)
 DISCOVERY=""
-APPDATA_WSL=""
 
 if [ -d "/mnt/c" ]; then
-    # WSL: find Windows APPDATA
-    for user_dir in /mnt/c/Users/*/AppData/Roaming; do
-        candidate="$user_dir/$APP_DIR/automation.json"
+    # WSL: resolve current Windows user via cmd.exe, not glob
+    WIN_USER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r\n' || echo "")
+    if [ -n "$WIN_USER" ]; then
+        candidate="/mnt/c/Users/$WIN_USER/AppData/Roaming/$APP_DIR/automation.json"
         if [ -f "$candidate" ]; then
             DISCOVERY="$candidate"
-            break
         fi
-    done
+    fi
+
+    # Fallback: glob (single-user machines)
+    if [ -z "$DISCOVERY" ]; then
+        for user_dir in /mnt/c/Users/*/AppData/Roaming; do
+            candidate="$user_dir/$APP_DIR/automation.json"
+            if [ -f "$candidate" ]; then
+                DISCOVERY="$candidate"
+                break
+            fi
+        done
+    fi
 fi
 
 # Fallback: Linux native
@@ -108,12 +125,20 @@ info "Gateway: $GATEWAY"
 MCP_URL="http://$GATEWAY:$PORT/mcp"
 HEALTH_URL="http://$GATEWAY:$PORT/api/v1/health"
 
+HEALTH_OK=false
 if command -v curl >/dev/null 2>&1; then
-    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    if curl -sf --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
         info "Health check 통과"
+        HEALTH_OK=true
     else
-        warn "Health check 실패. laymux가 실행 중인지 확인하세요."
+        if [ "$FORCE" = true ]; then
+            warn "Health check 실패 (--force로 계속 진행)"
+        else
+            error "Health check 실패. laymux가 실행 중인지 확인하세요.\n       stale automation.json일 수 있습니다. --force로 무시할 수 있습니다."
+        fi
     fi
+else
+    warn "curl이 없어 health check를 건너뜁니다."
 fi
 
 # --- 5. .mcp.json 생성 ---

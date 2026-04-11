@@ -54,7 +54,6 @@ pub const DEC_SYNC_OUTPUT_SET: &[u8] = b"\x1b[?2026h";
 
 // ── MCP (Model Context Protocol) ──────────────────────────────────
 
-pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 pub const MCP_SERVER_NAME: &str = "laymux";
 
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
