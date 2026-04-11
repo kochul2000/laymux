@@ -220,8 +220,8 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": "object — profile fields to update"
             },
             {
-                "method": "POST", "path": "/mcp",
-                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint. Accepts JSON-RPC 2.0 requests. Methods: initialize, tools/list, tools/call, ping, notifications/initialized. 15 tools available for terminal, workspace, grid, and utility operations."
+                "method": "*", "path": "/mcp",
+                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint (stateful, session-based). POST: send JSON-RPC 2.0 requests (initialize, tools/list, tools/call, ping). After initialize, include the Mcp-Session-Id header from the response in all subsequent requests. GET: open SSE stream for server-initiated notifications. DELETE: terminate session. 15 tools available for terminal, workspace, grid, and utility operations."
             }
         ],
         "tips": [

@@ -191,19 +191,17 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let ptys = self
-            .state
-            .app_state
-            .pty_handles
-            .lock_or_err()
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        match ptys.get(&p.terminal_id) {
-            Some(handle) => {
-                handle
-                    .write(p.data.as_bytes())
-                    .map_err(|e| ErrorData::internal_error(e, None))?;
-                Ok(CallToolResult::success(vec![Content::text("written")]))
+        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
+            Ok(guard) => guard,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
             }
+        };
+        match ptys.get(&p.terminal_id) {
+            Some(handle) => match handle.write(p.data.as_bytes()) {
+                Ok(_) => Ok(CallToolResult::success(vec![Content::text("written")])),
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            },
             None => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 p.terminal_id
@@ -218,12 +216,12 @@ impl McpHandler {
         Parameters(p): Parameters<ReadOutputParam>,
     ) -> Result<CallToolResult, ErrorData> {
         let lines = p.lines.unwrap_or(100) as usize;
-        let buffers = self
-            .state
-            .app_state
-            .output_buffers
-            .lock_or_err()
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+            Ok(guard) => guard,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+            }
+        };
         match buffers.get(&p.terminal_id) {
             Some(buf) => {
                 let output = buf.recent_lines(lines);
