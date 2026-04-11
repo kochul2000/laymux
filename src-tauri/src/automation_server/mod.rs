@@ -237,7 +237,7 @@ pub fn build_router(state: ServerState, key: &str) -> Router {
         .route("/api/v1/terminals/states", get(terminals_states))
         .route("/api/v1/layouts", get(layouts_list))
         .route("/api/v1/screenshot", post(screenshot_capture))
-        .route("/mcp", post(mcp::handle_mcp))
+        .nest_service("/mcp", mcp::create_service(state.clone()))
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
