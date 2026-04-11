@@ -178,41 +178,51 @@ pub fn create_service(
 }
 
 /// Build the allowed hosts list for MCP host header validation.
-/// Includes loopback addresses and the WSL2 gateway IP (dynamic).
+///
+/// Includes loopback addresses plus all local interface IPs.
+/// On Windows, this captures the vEthernet (WSL) adapter IP so that
+/// WSL2 clients connecting via the gateway IP are not blocked.
 fn mcp_allowed_hosts() -> Vec<String> {
     let mut hosts = vec![
         "localhost".to_string(),
         "127.0.0.1".to_string(),
         "::1".to_string(),
     ];
-
-    // WSL2 gateway IP — the Windows host IP that WSL2 clients connect through.
-    // On Windows native this is a no-op (returns None).
-    if let Some(gateway) = detect_wsl2_gateway() {
-        hosts.push(gateway);
-    }
-
+    hosts.extend(local_interface_ips());
     hosts
 }
 
-/// Detect WSL2 gateway IP from the default route.
-/// Returns None on native Windows or if detection fails.
-#[cfg(not(target_os = "windows"))]
-fn detect_wsl2_gateway() -> Option<String> {
-    use std::process::Command;
-    let output = Command::new("ip")
-        .args(["route", "show", "default"])
+/// Enumerate local IPv4 addresses so MCP host validation accepts them.
+///
+/// On Windows, parses `ipconfig` output (locale-independent: matches any
+/// line ending in `: <valid_ipv4>`). This captures the vEthernet (WSL)
+/// adapter IP that WSL2 clients use as their gateway.
+#[cfg(target_os = "windows")]
+fn local_interface_ips() -> Vec<String> {
+    let output = match crate::process::headless_command("ipconfig")
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // "default via 172.x.x.x dev eth0" → extract the IP
-    stdout.split_whitespace().nth(2).map(|s| s.to_string())
+    let mut ips = Vec::new();
+    for line in stdout.lines() {
+        // ipconfig format (any locale): "   Label . . . : 172.25.160.1"
+        if let Some(after_colon) = line.rsplit(':').next() {
+            let trimmed = after_colon.trim();
+            if trimmed.parse::<std::net::Ipv4Addr>().is_ok() && trimmed != "127.0.0.1" {
+                ips.push(trimmed.to_string());
+            }
+        }
+    }
+    ips
 }
 
-#[cfg(target_os = "windows")]
-fn detect_wsl2_gateway() -> Option<String> {
-    // On native Windows, MCP clients connect via loopback — no gateway needed.
-    None
+/// On Linux, MCP clients connect via loopback (already in the base list).
+#[cfg(not(target_os = "windows"))]
+fn local_interface_ips() -> Vec<String> {
+    vec![]
 }
 
 // ── Tool implementations ──────────────────────────────────────────
@@ -558,5 +568,36 @@ mod tests {
         assert!(hosts.contains(&"localhost".to_string()));
         assert!(hosts.contains(&"127.0.0.1".to_string()));
         assert!(hosts.contains(&"::1".to_string()));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn mcp_allowed_hosts_includes_local_ips() {
+        let hosts = mcp_allowed_hosts();
+        // On Windows with WSL2, there should be at least one non-loopback IP
+        // (e.g. vEthernet adapter, LAN adapter)
+        let non_loopback = hosts
+            .iter()
+            .filter(|h| *h != "localhost" && *h != "127.0.0.1" && *h != "::1")
+            .count();
+        assert!(
+            non_loopback > 0,
+            "Expected local interface IPs but got only loopback: {:?}",
+            hosts
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn local_interface_ips_returns_valid_ipv4() {
+        let ips = local_interface_ips();
+        for ip in &ips {
+            assert!(
+                ip.parse::<std::net::Ipv4Addr>().is_ok(),
+                "Not a valid IPv4: {}",
+                ip
+            );
+            assert_ne!(ip, "127.0.0.1", "Should exclude loopback");
+        }
     }
 }
