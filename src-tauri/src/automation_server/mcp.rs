@@ -62,11 +62,47 @@ struct PaneIndexParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+impl std::fmt::Display for SplitDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SplitDirection::Horizontal => write!(f, "horizontal"),
+            SplitDirection::Vertical => write!(f, "vertical"),
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SplitPaneParam {
     /// Pane index to split
     pane_index: u64,
-    /// Split direction: "horizontal" or "vertical"
-    direction: String,
+    /// Split direction
+    direction: SplitDirection,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum NotificationLevel {
+    Info,
+    Error,
+    Warning,
+    Success,
+}
+
+impl std::fmt::Display for NotificationLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotificationLevel::Info => write!(f, "info"),
+            NotificationLevel::Error => write!(f, "error"),
+            NotificationLevel::Warning => write!(f, "warning"),
+            NotificationLevel::Success => write!(f, "success"),
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -77,8 +113,8 @@ struct SendNotificationParam {
     workspace_id: String,
     /// Notification message
     message: String,
-    /// Notification level: info, error, warning, success (default: info)
-    level: Option<String>,
+    /// Notification level (default: info)
+    level: Option<NotificationLevel>,
 }
 
 // ── MCP Handler ───────────────────────────────────────────────────
@@ -104,6 +140,8 @@ impl McpHandler {
     }
 
     /// Bridge request to frontend via Tauri event.
+    /// Returns tool-level errors (CallToolResult::error) instead of JSON-RPC errors
+    /// so MCP clients can see the error message in the tool response.
     async fn bridge(
         &self,
         category: &str,
@@ -111,16 +149,16 @@ impl McpHandler {
         method: &str,
         params: Value,
     ) -> Result<CallToolResult, ErrorData> {
-        let data = bridge_request(&self.state, category, target, method, params)
-            .await
-            .map_err(|(_status, axum::Json(body))| {
+        match bridge_request(&self.state, category, target, method, params).await {
+            Ok(data) => Ok(json_result(&data)),
+            Err((_status, axum::Json(body))) => {
                 let msg = body
                     .get("error")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Bridge request failed");
-                ErrorData::internal_error(msg.to_string(), None)
-            })?;
-        Ok(json_result(&data))
+                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            }
+        }
     }
 }
 
@@ -142,13 +180,13 @@ impl McpHandler {
     // ── Terminal (5) ──
 
     /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, branch.
-    #[tool(description = "List all terminal instances with id, profile, syncGroup, workspaceId, cwd, branch.")]
+    #[tool]
     async fn list_terminals(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "terminals", "list", json!({})).await
     }
 
-    /// Send input to a terminal (like typing). Use \r\n for Enter.
-    #[tool(description = "Send input to a terminal (like typing). Use \\r\\n for Enter.")]
+    /// Send input to a terminal (like typing). Use \\r\\n for Enter.
+    #[tool]
     async fn write_to_terminal(
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
@@ -174,7 +212,7 @@ impl McpHandler {
     }
 
     /// Read recent terminal output from ring buffer. Contains raw ANSI escapes.
-    #[tool(description = "Read recent terminal output from ring buffer. Contains raw ANSI escapes.")]
+    #[tool]
     async fn read_terminal_output(
         &self,
         Parameters(p): Parameters<ReadOutputParam>,
@@ -203,7 +241,7 @@ impl McpHandler {
     }
 
     /// Set focus to a terminal pane.
-    #[tool(description = "Set focus to a terminal pane.")]
+    #[tool]
     async fn focus_terminal(
         &self,
         Parameters(p): Parameters<TerminalIdParam>,
@@ -218,7 +256,7 @@ impl McpHandler {
     }
 
     /// Get activity state (shell/running/interactiveApp) for all terminals.
-    #[tool(description = "Get activity state (shell/running/interactiveApp) for all terminals.")]
+    #[tool]
     async fn get_terminal_states(&self) -> Result<CallToolResult, ErrorData> {
         let states = crate::activity::detect_all_terminal_states(&self.state.app_state);
         Ok(json_result(&json!({ "states": states })))
@@ -227,20 +265,20 @@ impl McpHandler {
     // ── Workspace (4) ──
 
     /// List all workspaces with pane layouts and active workspace ID.
-    #[tool(description = "List all workspaces with pane layouts and active workspace ID.")]
+    #[tool]
     async fn list_workspaces(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "workspaces", "list", json!({})).await
     }
 
     /// Get the currently active workspace with full pane details.
-    #[tool(description = "Get the currently active workspace with full pane details.")]
+    #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "workspaces", "getActive", json!({}))
             .await
     }
 
     /// Switch to a different workspace by ID.
-    #[tool(description = "Switch to a different workspace by ID.")]
+    #[tool]
     async fn switch_workspace(
         &self,
         Parameters(p): Parameters<WorkspaceIdParam>,
@@ -255,7 +293,7 @@ impl McpHandler {
     }
 
     /// Create a new workspace, optionally from a layout template.
-    #[tool(description = "Create a new workspace, optionally from a layout template.")]
+    #[tool]
     async fn create_workspace(
         &self,
         Parameters(p): Parameters<CreateWorkspaceParam>,
@@ -270,13 +308,13 @@ impl McpHandler {
     // ── Grid/Pane (3) ──
 
     /// Get grid state: editMode, focusedPaneIndex.
-    #[tool(description = "Get grid state: editMode, focusedPaneIndex.")]
+    #[tool]
     async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "grid", "getState", json!({})).await
     }
 
     /// Focus a specific pane by index.
-    #[tool(description = "Focus a specific pane by index.")]
+    #[tool]
     async fn focus_pane(
         &self,
         Parameters(p): Parameters<PaneIndexParam>,
@@ -291,7 +329,7 @@ impl McpHandler {
     }
 
     /// Split a pane horizontally or vertically.
-    #[tool(description = "Split a pane horizontally or vertically.")]
+    #[tool]
     async fn split_pane(
         &self,
         Parameters(p): Parameters<SplitPaneParam>,
@@ -300,7 +338,7 @@ impl McpHandler {
             "action",
             "panes",
             "split",
-            json!({ "paneIndex": p.pane_index, "direction": p.direction }),
+            json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() }),
         )
         .await
     }
@@ -308,9 +346,9 @@ impl McpHandler {
     // ── Utility (3) ──
 
     /// Capture a screenshot of the current IDE UI. Returns image content.
-    #[tool(description = "Capture a screenshot of the current IDE UI. Returns image content.")]
+    #[tool]
     async fn take_screenshot(&self) -> Result<CallToolResult, ErrorData> {
-        let data = bridge_request(
+        let data = match bridge_request(
             &self.state,
             "action",
             "screenshot",
@@ -318,20 +356,22 @@ impl McpHandler {
             json!({}),
         )
         .await
-        .map_err(|(_status, axum::Json(body))| {
-            let msg = body
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Screenshot failed");
-            ErrorData::internal_error(msg.to_string(), None)
-        })?;
+        {
+            Ok(data) => data,
+            Err((_status, axum::Json(body))) => {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Screenshot failed");
+                return Ok(CallToolResult::error(vec![Content::text(msg)]));
+            }
+        };
 
-        let data_url = data
-            .get("dataUrl")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ErrorData::internal_error("No dataUrl in screenshot response", None)
-            })?;
+        let Some(data_url) = data.get("dataUrl").and_then(|v| v.as_str()) else {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "No dataUrl in screenshot response",
+            )]));
+        };
 
         let base64_data = data_url
             .strip_prefix("data:image/png;base64,")
@@ -344,14 +384,14 @@ impl McpHandler {
     }
 
     /// List all notifications across workspaces.
-    #[tool(description = "List all notifications across workspaces.")]
+    #[tool]
     async fn list_notifications(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "notifications", "list", json!({}))
             .await
     }
 
     /// Create a notification in the IDE.
-    #[tool(description = "Create a notification in the IDE.")]
+    #[tool]
     async fn send_notification(
         &self,
         Parameters(p): Parameters<SendNotificationParam>,
@@ -362,7 +402,7 @@ impl McpHandler {
             "message": p.message,
         });
         if let Some(level) = p.level {
-            params["level"] = json!(level);
+            params["level"] = json!(level.to_string());
         }
         self.bridge("action", "notifications", "add", params).await
     }
@@ -388,7 +428,8 @@ impl ServerHandler for McpHandler {
 // ── Helpers ───────────────────────────────────────────────────────
 
 fn json_result(data: &Value) -> CallToolResult {
-    let text = serde_json::to_string_pretty(data).unwrap_or_default();
+    let text = serde_json::to_string_pretty(data)
+        .unwrap_or_else(|e| format!("{{\"error\": \"serialize failed: {e}\"}}"));
     CallToolResult::success(vec![Content::text(text)])
 }
 
@@ -427,6 +468,39 @@ mod tests {
         let p: SendNotificationParam = serde_json::from_str(json).unwrap();
         assert_eq!(p.message, "hello");
         assert!(p.level.is_none());
+    }
+
+    #[test]
+    fn send_notification_param_with_level() {
+        let json = r#"{"terminal_id":"t1","workspace_id":"ws1","message":"fail","level":"error"}"#;
+        let p: SendNotificationParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(p.level, Some(NotificationLevel::Error)));
+    }
+
+    #[test]
+    fn split_direction_enum_deserialize() {
+        let json = r#"{"pane_index":0,"direction":"horizontal"}"#;
+        let p: SplitPaneParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(p.direction, SplitDirection::Horizontal));
+        assert_eq!(p.direction.to_string(), "horizontal");
+
+        let json = r#"{"pane_index":1,"direction":"vertical"}"#;
+        let p: SplitPaneParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(p.direction, SplitDirection::Vertical));
+    }
+
+    #[test]
+    fn split_direction_rejects_invalid() {
+        let json = r#"{"pane_index":0,"direction":"diagonal"}"#;
+        let result: Result<SplitPaneParam, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn notification_level_rejects_invalid() {
+        let json = r#"{"terminal_id":"t1","workspace_id":"ws1","message":"x","level":"critical"}"#;
+        let result: Result<SendNotificationParam, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 
     #[test]
