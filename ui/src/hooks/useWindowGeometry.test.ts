@@ -182,10 +182,11 @@ describe("useWindowGeometry", () => {
   });
 
   describe("captureWindowGeometry", () => {
-    it("captures current window state and saves", async () => {
+    it("captures inner size (not outer size) to match setSize restore", async () => {
       mockSaveWindowGeometry.mockResolvedValue(undefined);
       const mockWindow = {
         outerPosition: vi.fn().mockResolvedValue({ x: 50, y: 100 }),
+        innerSize: vi.fn().mockResolvedValue({ width: 1200, height: 770 }),
         outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
         isMaximized: vi.fn().mockResolvedValue(false),
         isMinimized: vi.fn().mockResolvedValue(false),
@@ -194,11 +195,14 @@ describe("useWindowGeometry", () => {
 
       await captureWindowGeometry();
 
+      // Must use innerSize, not outerSize, because restoreWindowGeometry
+      // calls setSize() which sets inner (content) size.
+      expect(mockWindow.innerSize).toHaveBeenCalled();
       expect(mockSaveWindowGeometry).toHaveBeenCalledWith({
         x: 50,
         y: 100,
         width: 1200,
-        height: 800,
+        height: 770,
         maximized: false,
       });
     });
@@ -207,6 +211,7 @@ describe("useWindowGeometry", () => {
       mockSaveWindowGeometry.mockResolvedValue(undefined);
       const mockWindow = {
         outerPosition: vi.fn().mockResolvedValue({ x: 200, y: 300 }),
+        innerSize: vi.fn().mockResolvedValue({ width: 1400, height: 870 }),
         outerSize: vi.fn().mockResolvedValue({ width: 1400, height: 900 }),
         isMaximized: vi.fn().mockResolvedValue(false),
         isMinimized: vi.fn().mockResolvedValue(false),
@@ -219,7 +224,7 @@ describe("useWindowGeometry", () => {
         x: 200,
         y: 300,
         width: 1400,
-        height: 900,
+        height: 870,
         maximized: false,
       });
     });
@@ -229,6 +234,7 @@ describe("useWindowGeometry", () => {
       mockSaveWindowGeometry.mockResolvedValue(undefined);
       const normalWindow = {
         outerPosition: vi.fn().mockResolvedValue({ x: 100, y: 200 }),
+        innerSize: vi.fn().mockResolvedValue({ width: 1200, height: 770 }),
         outerSize: vi.fn().mockResolvedValue({ width: 1200, height: 800 }),
         isMaximized: vi.fn().mockResolvedValue(false),
         isMinimized: vi.fn().mockResolvedValue(false),
@@ -252,7 +258,7 @@ describe("useWindowGeometry", () => {
         x: 100,
         y: 200,
         width: 1200,
-        height: 800,
+        height: 770,
         maximized: false,
       });
     });
@@ -260,6 +266,7 @@ describe("useWindowGeometry", () => {
     it("skips saving when minimized and no cached geometry", async () => {
       const mockWindow = {
         outerPosition: vi.fn().mockResolvedValue({ x: -32000, y: -32000 }),
+        innerSize: vi.fn().mockResolvedValue({ width: 160, height: 28 }),
         outerSize: vi.fn().mockResolvedValue({ width: 160, height: 28 }),
         isMaximized: vi.fn().mockResolvedValue(false),
         isMinimized: vi.fn().mockResolvedValue(true),
