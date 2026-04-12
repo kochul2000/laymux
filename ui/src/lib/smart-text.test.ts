@@ -416,3 +416,89 @@ describe("prepareSelectionForCopy", () => {
     expect(result).toBe("hello\r\nworld");
   });
 });
+
+// ============================================================
+// smartRemoveIndent와 MemoView Tab indent 상호작용 검증
+// PR #185(smartRemoveIndent)와 PR #186(MemoView Tab/Shift+Tab)은
+// 서로 다른 인덴트 제거 알고리즘을 사용한다:
+//   - smartRemoveIndent: 전역 최소 인덴트를 계산하여 모든 줄에서 동일량 제거
+//   - MemoView Shift+Tab: 각 줄에서 독립적으로 최대 indentSize만큼 제거
+// 두 알고리즘의 결과가 일치/불일치하는 케이스를 명시적으로 문서화한다.
+// ============================================================
+describe("smartRemoveIndent vs MemoView Shift+Tab dedent 비교", () => {
+  /** MemoView의 Shift+Tab dedent 로직을 시뮬레이션 (PR #186 MemoView.tsx 기반) */
+  function memoShiftTabDedent(text: string, indentSize: number): string {
+    const regex = new RegExp(`^ {1,${indentSize}}`);
+    return text
+      .split("\n")
+      .map((line) => {
+        const spaces = line.match(regex);
+        return spaces ? line.slice(spaces[0].length) : line;
+      })
+      .join("\n");
+  }
+
+  it("균일 인덴트: 두 알고리즘 결과가 동일하다", () => {
+    const input = "  line1\n  line2\n  line3";
+    const expected = "line1\nline2\nline3";
+    expect(smartRemoveIndent(input)).toBe(expected);
+    expect(memoShiftTabDedent(input, 2)).toBe(expected);
+  });
+
+  it("계층 인덴트(2sp+4sp): 둘 다 최소 단위(2sp)만 제거, 상대 구조 보존", () => {
+    const input = "  if (true) {\n    return 1;\n  }";
+    const expected = "if (true) {\n  return 1;\n}";
+    expect(smartRemoveIndent(input)).toBe(expected);
+    expect(memoShiftTabDedent(input, 2)).toBe(expected);
+  });
+
+  it("인덴트 없는 줄 포함: smartRemoveIndent는 제거 안 함, Shift+Tab은 개별 제거", () => {
+    // 첫 줄에 인덴트 없음 → min indent = 0
+    const input = "line1\n  line2\n  line3";
+    // smartRemoveIndent: min=0 → 변경 없음 (공통 인덴트가 0)
+    expect(smartRemoveIndent(input)).toBe("line1\n  line2\n  line3");
+    // Shift+Tab: 각 줄 독립 처리 → line2, line3의 인덴트 제거
+    expect(memoShiftTabDedent(input, 2)).toBe("line1\nline2\nline3");
+  });
+
+  it("indentSize 미만 인덴트: smartRemoveIndent는 최소만, Shift+Tab은 개별 최대", () => {
+    // 1sp + 3sp 혼합
+    const input = " line1\n   line2";
+    // smartRemoveIndent: min=1 → 모든 줄에서 1sp 제거, 상대 구조 보존
+    expect(smartRemoveIndent(input)).toBe("line1\n  line2");
+    // Shift+Tab(2): line1에서 1sp, line2에서 2sp 독립 제거
+    expect(memoShiftTabDedent(input, 2)).toBe("line1\n line2");
+  });
+
+  it("round-trip: Tab indent → smartRemoveIndent → 원본 복원", () => {
+    const original = "function foo() {\n  return bar;\n}";
+    // MemoView Tab(2sp) 시뮬레이션: 모든 줄에 2sp 추가
+    const tabIndented = original
+      .split("\n")
+      .map((l) => "  " + l)
+      .join("\n");
+    expect(tabIndented).toBe("  function foo() {\n    return bar;\n  }");
+    // smartRemoveIndent: 공통 2sp 제거 → 원본 복원
+    expect(smartRemoveIndent(tabIndented)).toBe(original);
+  });
+
+  it("round-trip: Tab 2회 indent → smartRemoveIndent → 원본 복원", () => {
+    const original = "a\n  b\nc";
+    const doubleIndented = original
+      .split("\n")
+      .map((l) => "    " + l)
+      .join("\n");
+    // smartRemoveIndent: 공통 4sp 제거 → 원본 복원
+    expect(smartRemoveIndent(doubleIndented)).toBe(original);
+  });
+
+  it("공백만 있는 줄: smartRemoveIndent는 보존, Shift+Tab은 제거", () => {
+    // MemoView에서 빈 줄 포함 텍스트를 Tab 인덴트한 경우
+    // "  " (2sp)는 trim하면 빈 줄 → smartRemoveIndent가 건드리지 않음
+    const input = "  line1\n  \n  line3";
+    // smartRemoveIndent: 공백 줄은 그대로 유지 (min 계산에서 제외, slice도 안 함)
+    expect(smartRemoveIndent(input)).toBe("line1\n  \nline3");
+    // Shift+Tab: 공백 줄의 2sp도 독립적으로 제거
+    expect(memoShiftTabDedent(input, 2)).toBe("line1\n\nline3");
+  });
+});
