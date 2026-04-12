@@ -364,6 +364,7 @@ const DEFAULT_MEMO: MemoSettings = {
   paragraphCopy: { enabled: true, minBlankLines: 2 },
   copyOnSelect: false,
   dblClickParagraphSelect: true,
+  indentSize: 2,
   fontFamily: "",
   fontSize: 13,
   fontWeight: "",

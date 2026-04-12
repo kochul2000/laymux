@@ -19,6 +19,16 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestTextRef = useRef(text);
   const flushedRef = useRef(true);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Apply pending selection after React re-render
+  useEffect(() => {
+    if (pendingSelectionRef.current && textareaRef.current) {
+      const { start, end } = pendingSelectionRef.current;
+      textareaRef.current.setSelectionRange(start, end);
+      pendingSelectionRef.current = null;
+    }
+  }, [text]);
 
   // Load content from memo.json on mount
   useEffect(() => {
@@ -216,6 +226,152 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
   );
 
+  const indent = " ".repeat(memo.indentSize || 2);
+
+  const applyTextChange = useCallback(
+    (newText: string) => {
+      setText(newText);
+      latestTextRef.current = newText;
+      flushedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        saveMemo(memoKey, newText).catch(() => {});
+        flushedRef.current = true;
+      }, DEBOUNCE_MS);
+    },
+    [memoKey],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== "Tab") return;
+      e.preventDefault();
+
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const { selectionStart, selectionEnd, value } = textarea;
+      const hasSelection = selectionStart !== selectionEnd;
+      const indentSize = indent.length;
+      const dedentRegex = new RegExp(`^ {1,${indentSize}}`);
+
+      if (e.shiftKey) {
+        // Shift+Tab: 인덴트 제거
+        if (hasSelection) {
+          // 선택된 줄들의 인덴트 제거
+          const lines = value.split("\n");
+          let charCount = 0;
+          let startLine = 0;
+          let endLine = 0;
+          for (let i = 0; i < lines.length; i++) {
+            if (charCount + lines[i].length >= selectionStart && startLine === 0 && charCount <= selectionStart) {
+              startLine = i;
+            }
+            if (charCount + lines[i].length >= selectionEnd - 1 || i === lines.length - 1) {
+              endLine = i;
+              break;
+            }
+            charCount += lines[i].length + 1;
+          }
+
+          const newLines = lines.map((line, i) => {
+            if (i < startLine || i > endLine) return line;
+            const spaces = line.match(dedentRegex);
+            if (spaces) {
+              return line.slice(spaces[0].length);
+            }
+            return line;
+          });
+
+          const newText = newLines.join("\n");
+          applyTextChange(newText);
+
+          // 선택 범위 계산: 첫 줄 시작 ~ 마지막 줄 끝
+          let newStartOffset = 0;
+          for (let i = 0; i < startLine; i++) {
+            newStartOffset += newLines[i].length + 1;
+          }
+          let newEndOffset = newStartOffset;
+          for (let i = startLine; i <= endLine; i++) {
+            newEndOffset += newLines[i].length + (i < endLine ? 1 : 0);
+          }
+
+          pendingSelectionRef.current = { start: newStartOffset, end: newEndOffset };
+        } else {
+          // 커서만 있는 경우: 현재 줄의 인덴트 제거
+          const lines = value.split("\n");
+          let charCount = 0;
+          let cursorLine = 0;
+          for (let i = 0; i < lines.length; i++) {
+            if (charCount + lines[i].length >= selectionStart) {
+              cursorLine = i;
+              break;
+            }
+            charCount += lines[i].length + 1;
+          }
+
+          const line = lines[cursorLine];
+          const spaces = line.match(dedentRegex);
+          if (!spaces) return;
+          const removed = spaces[0].length;
+          lines[cursorLine] = line.slice(removed);
+          const newText = lines.join("\n");
+          applyTextChange(newText);
+
+          const newPos = Math.max(selectionStart - removed, charCount);
+          pendingSelectionRef.current = { start: newPos, end: newPos };
+        }
+      } else {
+        // Tab: 인덴트 추가
+        if (hasSelection) {
+          // 선택된 줄들에 인덴트 추가
+          const lines = value.split("\n");
+          let charCount = 0;
+          let startLine = 0;
+          let endLine = 0;
+          for (let i = 0; i < lines.length; i++) {
+            if (charCount + lines[i].length >= selectionStart && startLine === 0 && charCount <= selectionStart) {
+              startLine = i;
+            }
+            if (charCount + lines[i].length >= selectionEnd - 1 || i === lines.length - 1) {
+              endLine = i;
+              break;
+            }
+            charCount += lines[i].length + 1;
+          }
+
+          const newLines = lines.map((line, i) => {
+            if (i >= startLine && i <= endLine) return indent + line;
+            return line;
+          });
+
+          const newText = newLines.join("\n");
+          applyTextChange(newText);
+
+          // 선택 범위: 첫 줄 시작 ~ 마지막 줄 끝
+          let newStartOffset = 0;
+          for (let i = 0; i < startLine; i++) {
+            newStartOffset += newLines[i].length + 1;
+          }
+          let newEndOffset = newStartOffset;
+          for (let i = startLine; i <= endLine; i++) {
+            newEndOffset += newLines[i].length + (i < endLine ? 1 : 0);
+          }
+
+          pendingSelectionRef.current = { start: newStartOffset, end: newEndOffset };
+        } else {
+          // 커서만 있는 경우: 커서 위치에 스페이스 삽입
+          const newText = value.slice(0, selectionStart) + indent + value.slice(selectionStart);
+          applyTextChange(newText);
+
+          const newPos = selectionStart + indent.length;
+          pendingSelectionRef.current = { start: newPos, end: newPos };
+        }
+      }
+    },
+    [applyTextChange, indent],
+  );
+
   return (
     <ViewShell testId="memo-view">
       <ViewHeader testId="memo-header" title="Memo" />
@@ -226,6 +382,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           value={text}
           onChange={handleChange}
           onPaste={handlePaste}
+          onKeyDown={handleKeyDown}
           onMouseMove={handleMouseMove}
           onClick={handleClick}
           className="h-full w-full resize-none border-none outline-none"

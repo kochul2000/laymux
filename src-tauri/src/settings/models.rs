@@ -664,6 +664,9 @@ pub struct MemoSettings {
     /// Double-click to select entire paragraph (requires paragraph_copy enabled).
     #[serde(default = "default_true")]
     pub dbl_click_paragraph_select: bool,
+    /// Tab indent size (number of spaces). Default: 2.
+    #[serde(default = "default_indent_size")]
+    pub indent_size: u32,
     /// Font family override. Empty string = inherit from app_font.
     #[serde(default)]
     pub font_family: String,
@@ -673,6 +676,10 @@ pub struct MemoSettings {
     /// Font weight override. Empty string = inherit from app_font.
     #[serde(default)]
     pub font_weight: String,
+}
+
+fn default_indent_size() -> u32 {
+    2
 }
 
 impl Default for MemoSettings {
@@ -685,6 +692,7 @@ impl Default for MemoSettings {
             paragraph_copy: MemoParagraphCopySettings::default(),
             copy_on_select: false,
             dbl_click_paragraph_select: true,
+            indent_size: 2,
             font_family: String::new(),
             font_size: 13,
             font_weight: String::new(),
