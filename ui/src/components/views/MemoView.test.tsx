@@ -432,6 +432,94 @@ describe("MemoView", () => {
     });
   });
 
+  describe("Tab/Shift+Tab indent", () => {
+    async function setupMemo(content: string) {
+      vi.mocked(loadMemo).mockResolvedValue(content);
+      render(<MemoView memoKey="pane-tab" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      vi.mocked(saveMemo).mockClear();
+      return screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+    }
+
+    it("Tab 키로 선택 없이 커서 위치에 2 스페이스를 삽입한다", async () => {
+      const textarea = await setupMemo("hello");
+      textarea.setSelectionRange(2, 2); // "he|llo"
+      fireEvent.keyDown(textarea, { key: "Tab" });
+
+      expect(textarea.value).toBe("he  llo");
+      expect(textarea.selectionStart).toBe(4);
+      expect(textarea.selectionEnd).toBe(4);
+    });
+
+    it("Tab 키로 선택된 여러 줄에 인덴트를 추가한다", async () => {
+      const textarea = await setupMemo("line1\nline2\nline3");
+      // "line1\n" = 0~5, "line2\n" = 6~11, "line3" = 12~16
+      textarea.setSelectionRange(2, 14); // line1~line3 일부 선택
+      fireEvent.keyDown(textarea, { key: "Tab" });
+
+      expect(textarea.value).toBe("  line1\n  line2\n  line3");
+      // 선택이 인덴트된 범위를 포함해야 함
+      expect(textarea.selectionStart).toBe(0); // 첫 번째 줄 시작
+      expect(textarea.selectionEnd).toBe(23); // 마지막까지
+    });
+
+    it("Shift+Tab 키로 선택된 여러 줄에서 인덴트를 제거한다", async () => {
+      const textarea = await setupMemo("  line1\n  line2\n  line3");
+      textarea.setSelectionRange(4, 20); // 여러 줄 선택
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+
+      expect(textarea.value).toBe("line1\nline2\nline3");
+    });
+
+    it("Shift+Tab 키로 선택 없이 현재 줄의 인덴트를 제거한다", async () => {
+      const textarea = await setupMemo("  hello");
+      textarea.setSelectionRange(4, 4); // "  he|llo"
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+
+      expect(textarea.value).toBe("hello");
+      expect(textarea.selectionStart).toBe(2); // 커서가 2칸 왼쪽으로
+      expect(textarea.selectionEnd).toBe(2);
+    });
+
+    it("Shift+Tab은 인덴트가 없는 줄은 건너뛴다", async () => {
+      const textarea = await setupMemo("  line1\nline2\n  line3");
+      textarea.setSelectionRange(0, 21); // 전체 선택
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+
+      expect(textarea.value).toBe("line1\nline2\nline3");
+    });
+
+    it("Tab 인덴트 후 debounce save가 트리거된다", async () => {
+      const textarea = await setupMemo("hello");
+      textarea.setSelectionRange(0, 0);
+      fireEvent.keyDown(textarea, { key: "Tab" });
+
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(saveMemo).toHaveBeenCalledWith("pane-tab", "  hello");
+    });
+
+    it("단일 줄 선택 시에도 인덴트가 적용된다", async () => {
+      const textarea = await setupMemo("hello\nworld");
+      textarea.setSelectionRange(0, 3); // "hel" 선택 (한 줄 내)
+      fireEvent.keyDown(textarea, { key: "Tab" });
+
+      expect(textarea.value).toBe("  hello\nworld");
+    });
+
+    it("Shift+Tab은 1 스페이스만 있는 줄에서 1 스페이스만 제거한다", async () => {
+      const textarea = await setupMemo(" hello");
+      textarea.setSelectionRange(3, 3);
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+
+      expect(textarea.value).toBe("hello");
+    });
+  });
+
   describe("font settings", () => {
     it("applies custom fontFamily from settings", async () => {
       useSettingsStore.setState({
