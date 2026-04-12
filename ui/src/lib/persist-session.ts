@@ -39,6 +39,14 @@ export function truncateFromEnd(data: string, maxChars: number): string {
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
 
+/** When true, persistSession/saveBeforeClose skip writing settings.json (e.g. parse_error recovery). */
+let persistBlocked = false;
+
+/** Block settings persistence (e.g. when settings.json had a parse error and we don't want to overwrite it). */
+export function setBlockPersist(blocked: boolean): void {
+  persistBlocked = blocked;
+}
+
 /** Reset closingDown flag (for tests only). */
 export function _resetClosingDown(): void {
   closingDown = false;
@@ -203,7 +211,7 @@ async function persistSessionCore(): Promise<void> {
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
 export async function persistSession(): Promise<void> {
-  if (closingDown) return;
+  if (closingDown || persistBlocked) return;
   await persistSessionCore();
 }
 
@@ -214,6 +222,11 @@ export async function persistSession(): Promise<void> {
  */
 export async function saveBeforeClose(): Promise<void> {
   closingDown = true;
+
+  // When settings had a parse error, don't overwrite the user's original file with defaults.
+  // Terminal output caching is still safe — only settings.json persistence is blocked.
+  if (persistBlocked) return;
+
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
 

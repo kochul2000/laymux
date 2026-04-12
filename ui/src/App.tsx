@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSyncEvents } from "@/hooks/useSyncEvents";
@@ -8,14 +8,17 @@ import { saveBeforeClose } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 import { useAppFocus } from "@/hooks/useAppFocus";
+import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
 
 export function App() {
   useKeyboardShortcuts();
   useSyncEvents();
-  const { loaded } = useSessionPersistence();
+  const { loaded, loadStatus } = useSessionPersistence();
   useAutomationBridge();
   useWindowGeometry();
   useAppFocus();
+
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false);
 
   // Save terminal state before window close (Alt+F4, OS close, etc.)
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -75,9 +78,27 @@ export function App() {
     );
   }
 
+  // Show recovery modal when settings had issues
+  const showRecovery =
+    !recoveryDismissed &&
+    loaded &&
+    loadStatus.result != null &&
+    (loadStatus.result.status === "parse_error" || loadStatus.result.status === "repaired");
+
   return (
     <div className="h-screen" data-testid="app-root">
       <AppLayout />
+      {showRecovery && loadStatus.result && (
+        <SettingsRecoveryModal
+          loadResult={loadStatus.result}
+          onDismiss={() => setRecoveryDismissed(true)}
+          onReset={() => {
+            setRecoveryDismissed(true);
+            // Reload to apply fresh defaults
+            window.location.reload();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -70,6 +70,29 @@ export async function loadSettings(): Promise<Settings> {
   return invoke("load_settings");
 }
 
+export interface ValidationWarning {
+  path: string;
+  message: string;
+  repaired: boolean;
+}
+
+export type SettingsLoadResult =
+  | { status: "ok"; settings: Settings; warnings: ValidationWarning[] }
+  | { status: "repaired"; settings: Settings; warnings: ValidationWarning[] }
+  | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
+
+export async function loadSettingsValidated(): Promise<SettingsLoadResult> {
+  return invoke("load_settings_validated");
+}
+
+export async function resetSettings(): Promise<Settings> {
+  return invoke("reset_settings");
+}
+
+export async function getSettingsPath(): Promise<string> {
+  return invoke("get_settings_path");
+}
+
 export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }

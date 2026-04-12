@@ -1,9 +1,10 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
+use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FileExplorerSettings,
     FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
-    OutputActivityBurstSettings, Profile, ProfileDefaults, Settings, TerminalSettings, Workspace,
-    WorkspacePane, WorkspacePaneView,
+    OutputActivityBurstSettings, Profile, ProfileDefaults, Settings, SettingsLoadResult,
+    TerminalSettings, ValidationWarning, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -2041,4 +2042,135 @@ fn burst_settings_deserialize_with_invalid_values() {
     assert!(safe.window_ms >= 100);
     assert!(safe.threshold >= 2);
     assert!(safe.throttle_ms >= 100);
+}
+
+// ============================================================================
+// Settings Validation E2E Tests (#152)
+// ============================================================================
+
+#[test]
+fn validate_settings_with_missing_profile_in_pane() {
+    // Simulate API-created settings where pane references a non-existent profile
+    let json = r#"{
+        "profiles": [
+            {"name": "PowerShell", "commandLine": "powershell.exe"}
+        ],
+        "workspaces": [{
+            "id": "ws-1",
+            "name": "Test",
+            "panes": [{
+                "id": "pane-1",
+                "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "view": {"type": "TerminalView", "profile": "NonExistent"}
+            }]
+        }]
+    }"#;
+    let mut settings: Settings = serde_json::from_str(json).unwrap();
+    let warnings = validate_and_repair(&mut settings);
+    // Should warn about non-existent profile (not repaired, just warned)
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.path.contains("profile") && !w.repaired),
+        "Should warn about missing profile reference"
+    );
+}
+
+#[test]
+fn validate_settings_with_corrupted_pane_coordinates() {
+    let json = r#"{
+        "profiles": [{"name": "PowerShell", "commandLine": "powershell.exe"}],
+        "workspaces": [{
+            "id": "ws-1",
+            "name": "Test",
+            "panes": [
+                {"id": "pane-ok", "x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0,
+                 "view": {"type": "TerminalView", "profile": "PowerShell"}},
+                {"id": "pane-bad", "x": 2.5, "y": -1.0, "w": 0.5, "h": 0.0,
+                 "view": {"type": "TerminalView", "profile": "PowerShell"}}
+            ]
+        }]
+    }"#;
+    let mut settings: Settings = serde_json::from_str(json).unwrap();
+    let warnings = validate_and_repair(&mut settings);
+    // bad pane coordinates should be clamped
+    assert!(!warnings.is_empty());
+    let bad_pane = &settings.workspaces[0].panes[1];
+    assert!(bad_pane.x <= 1.0 && bad_pane.x >= 0.0);
+    assert!(bad_pane.y <= 1.0 && bad_pane.y >= 0.0);
+    assert!(bad_pane.h > 0.0);
+}
+
+#[test]
+fn validate_settings_completely_empty_workspaces_gets_default() {
+    let json = r#"{"workspaces": [], "profiles": []}"#;
+    let mut settings: Settings = serde_json::from_str(json).unwrap();
+    let warnings = validate_and_repair(&mut settings);
+    // Should have added default workspace and profiles
+    assert!(!settings.workspaces.is_empty());
+    assert!(!settings.profiles.is_empty());
+    assert!(warnings
+        .iter()
+        .any(|w| w.path == "workspaces" && w.repaired));
+    assert!(warnings.iter().any(|w| w.path == "profiles" && w.repaired));
+}
+
+#[test]
+fn validate_settings_pane_without_view_type() {
+    let json = r#"{
+        "profiles": [{"name": "PowerShell", "commandLine": "powershell.exe"}],
+        "workspaces": [{
+            "id": "ws-1",
+            "name": "Test",
+            "panes": [{
+                "id": "pane-1",
+                "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0,
+                "view": {"type": ""}
+            }]
+        }]
+    }"#;
+    let mut settings: Settings = serde_json::from_str(json).unwrap();
+    let warnings = validate_and_repair(&mut settings);
+    assert_eq!(settings.workspaces[0].panes[0].view.view_type, "EmptyView");
+    assert!(warnings
+        .iter()
+        .any(|w| w.path.contains("view.type") && w.repaired));
+}
+
+#[test]
+fn settings_load_result_round_trip_ok() {
+    let result = SettingsLoadResult::Ok {
+        settings: Settings::default(),
+        warnings: vec![],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(result, parsed);
+}
+
+#[test]
+fn settings_load_result_round_trip_repaired() {
+    let result = SettingsLoadResult::Repaired {
+        settings: Settings::default(),
+        warnings: vec![ValidationWarning {
+            path: "workspaces[0].panes[0].x".into(),
+            message: "x 좌표가 범위를 벗어남".into(),
+            repaired: true,
+        }],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(result, parsed);
+}
+
+#[test]
+fn settings_load_result_round_trip_parse_error() {
+    let result = SettingsLoadResult::ParseError {
+        settings: Settings::default(),
+        error: "expected value at line 1 column 1".into(),
+        settings_path: "C:\\Users\\test\\settings.json".into(),
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(result, parsed);
 }

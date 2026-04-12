@@ -142,6 +142,9 @@ pub fn run() {
             commands::read_file_for_viewer,
             commands::list_directory,
             commands::get_automation_info,
+            commands::load_settings_validated,
+            commands::reset_settings,
+            commands::get_settings_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

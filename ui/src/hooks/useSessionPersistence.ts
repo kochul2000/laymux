@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { loadSettings, cleanTerminalOutputCache } from "@/lib/tauri-api";
-import { persistSession } from "@/lib/persist-session";
+import {
+  loadSettingsValidated,
+  cleanTerminalOutputCache,
+  type SettingsLoadResult,
+  type ValidationWarning,
+} from "@/lib/tauri-api";
+import { persistSession, setBlockPersist } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   useSettingsStore,
@@ -11,16 +16,45 @@ import {
 import { useDockStore } from "@/stores/dock-store";
 import type { ViewType, Layout, Workspace, DockPosition } from "@/stores/types";
 
+/** Settings load status exposed to App for recovery UI. */
+export interface SettingsLoadStatus {
+  /** Whether settings loaded with issues. */
+  result: SettingsLoadResult | null;
+  /** Warnings from validation (repaired items). */
+  warnings: ValidationWarning[];
+}
+
 /**
  * Hook that loads settings from disk on mount and provides a save function.
  * Bridges the gap between the Tauri backend settings.json and the frontend stores.
  */
 export function useSessionPersistence() {
   const [loaded, setLoaded] = useState(false);
+  const [loadStatus, setLoadStatus] = useState<SettingsLoadStatus>({
+    result: null,
+    warnings: [],
+  });
 
   useEffect(() => {
-    loadSettings()
-      .then((rawSettings) => {
+    loadSettingsValidated()
+      .then((loadResult) => {
+        setLoadStatus({
+          result: loadResult,
+          warnings:
+            loadResult.status === "repaired" || loadResult.status === "ok"
+              ? loadResult.warnings
+              : [],
+        });
+
+        // When settings.json couldn't be parsed, don't hydrate stores with defaults —
+        // this prevents saveBeforeClose from overwriting the user's original file.
+        if (loadResult.status === "parse_error") {
+          setBlockPersist(true);
+          setLoaded(true);
+          return;
+        }
+
+        const rawSettings = loadResult.settings;
         const sFont = rawSettings.font;
         const sProfiles = rawSettings.profiles;
         const sColorSchemes = rawSettings.colorSchemes;
@@ -243,5 +277,5 @@ export function useSessionPersistence() {
     await persistSession();
   }, []);
 
-  return { loaded, save };
+  return { loaded, save, loadStatus };
 }
