@@ -29,8 +29,14 @@ struct TerminalIdParam {
 struct WriteTerminalParam {
     /// Terminal ID
     terminal_id: String,
-    /// Text to send. Use \r\n for Enter.
+    /// Text to send.
     data: String,
+    /// When true, C-style escape sequences in `data` are converted to real
+    /// control characters before writing (e.g. `\r\n` → CR+LF, `\u0003` → Ctrl+C).
+    /// Default is false — data is sent as-is, preserving literal backslashes
+    /// (important for Windows paths like `C:\new\tmp`).
+    #[serde(default)]
+    escape: bool,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -235,12 +241,20 @@ impl McpHandler {
         self.bridge("query", "terminals", "list", json!({})).await
     }
 
-    /// Send input to a terminal (like typing). Use \\r\\n for Enter.
+    /// Send input to a terminal (like typing). For control characters set
+    /// `escape` to true and use C-style sequences: `\\r\\n` for Enter,
+    /// `\\u0003` for Ctrl+C. Leave `escape` false for literal text (preserves
+    /// backslashes in Windows paths).
     #[tool]
     async fn write_to_terminal(
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        let data = if p.escape {
+            super::helpers::unescape_terminal_input(&p.data)
+        } else {
+            p.data.clone()
+        };
         let ptys = match self.state.app_state.pty_handles.lock_or_err() {
             Ok(guard) => guard,
             Err(e) => {
@@ -248,7 +262,7 @@ impl McpHandler {
             }
         };
         match ptys.get(&p.terminal_id) {
-            Some(handle) => match handle.write(p.data.as_bytes()) {
+            Some(handle) => match handle.write(data.as_bytes()) {
                 Ok(_) => Ok(CallToolResult::success(vec![Content::text("written")])),
                 Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
             },
@@ -591,5 +605,42 @@ mod tests {
             );
             assert_ne!(ip, "127.0.0.1", "Should exclude loopback");
         }
+    }
+
+    #[test]
+    fn write_terminal_escape_true_converts_sequences() {
+        // With escape=true, literal \r\n is converted to CR+LF
+        let json = r#"{"terminal_id":"t1","data":"ls\\r\\n","escape":true}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(p.escape);
+        assert_eq!(p.data, r"ls\r\n");
+        let unescaped = super::super::helpers::unescape_terminal_input(&p.data);
+        assert_eq!(unescaped, "ls\r\n");
+    }
+
+    #[test]
+    fn write_terminal_escape_true_ctrl_c() {
+        let json = r#"{"terminal_id":"t1","data":"\\u0003","escape":true}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(p.escape);
+        let unescaped = super::super::helpers::unescape_terminal_input(&p.data);
+        assert_eq!(unescaped, "\u{0003}");
+    }
+
+    #[test]
+    fn write_terminal_escape_false_preserves_backslashes() {
+        // Default (escape=false): backslashes in Windows paths are preserved
+        let json = r#"{"terminal_id":"t1","data":"cd C:\\new\\tmp"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(!p.escape);
+        // Without unescape, \n and \t remain literal backslash sequences
+        assert_eq!(p.data, r"cd C:\new\tmp");
+    }
+
+    #[test]
+    fn write_terminal_escape_defaults_to_false() {
+        let json = r#"{"terminal_id":"t1","data":"hello"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(!p.escape);
     }
 }
