@@ -65,7 +65,7 @@ async function snapshotGeometry(): Promise<void> {
   if (minimized) return;
 
   const pos = await appWindow.outerPosition();
-  const size = await appWindow.outerSize();
+  const size = await appWindow.innerSize();
   const maximized = await appWindow.isMaximized();
 
   cachedGeometry = {
@@ -80,6 +80,10 @@ async function snapshotGeometry(): Promise<void> {
 /**
  * Save window geometry to persistent cache.
  * If minimized, saves the last known good geometry instead of bogus values.
+ *
+ * NOTE: We save innerSize (content area), not outerSize (includes OS decorations),
+ * because restoreWindowGeometry uses setSize() which sets the inner size.
+ * Using outerSize would cause the window to grow by the decoration height on each restart.
  */
 export async function captureWindowGeometry(): Promise<void> {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -95,7 +99,7 @@ export async function captureWindowGeometry(): Promise<void> {
   }
 
   const pos = await appWindow.outerPosition();
-  const size = await appWindow.outerSize();
+  const size = await appWindow.innerSize();
   const maximized = await appWindow.isMaximized();
 
   const geo: WindowGeometry = {
