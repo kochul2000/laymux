@@ -104,9 +104,13 @@ function findTerminalContext(terminalId: string) {
   return { terminal, workspace, pane, paneIndex, activeWorkspaceId };
 }
 
-/** Enrich a pane with its index and terminal ID. */
+/** Enrich a pane with its index and terminal ID (null for non-terminal panes). */
 function enrichPane(p: WorkspacePane, index: number) {
-  return { ...p, paneIndex: index, terminalId: `terminal-${p.id}` };
+  return {
+    ...p,
+    paneIndex: index,
+    terminalId: p.view.type === "TerminalView" ? `terminal-${p.id}` : null,
+  };
 }
 
 const handlers: HandlerMap = {
@@ -195,7 +199,7 @@ const handlers: HandlerMap = {
         newPane: newPane
           ? {
               id: newPane.id,
-              terminalId: `terminal-${newPane.id}`,
+              terminalId: newPane.view.type === "TerminalView" ? `terminal-${newPane.id}` : null,
               paneIndex: newPaneIndex,
               x: newPane.x,
               y: newPane.y,
@@ -348,7 +352,7 @@ const handlers: HandlerMap = {
               y: pane.y,
               w: pane.w,
               h: pane.h,
-              isFocusedPane: focusedPaneIndex === paneIndex,
+              isFocusedPane: workspace.id === activeWorkspaceId && focusedPaneIndex === paneIndex,
             }
           : null,
         neighbors: pane ? computeNeighbors(workspace.panes, paneIndex) : null,

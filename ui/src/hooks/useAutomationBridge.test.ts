@@ -550,7 +550,8 @@ describe("identify_caller and enriched responses", () => {
     expect(instances[0].panePosition).toHaveProperty("x");
   });
 
-  it("get_active_workspace includes paneIndex and terminalId per pane", () => {
+  it("get_active_workspace: EmptyView pane has terminalId null", () => {
+    // Default workspace pane is EmptyView — no terminal registered
     const result = handleAutomationRequest({
       requestId: "gaw1",
       category: "query",
@@ -563,8 +564,26 @@ describe("identify_caller and enriched responses", () => {
     const ws = data.workspace as Record<string, unknown>;
     const panes = ws.panes as Array<Record<string, unknown>>;
     expect(panes[0]).toHaveProperty("paneIndex", 0);
-    expect(panes[0]).toHaveProperty("terminalId");
-    expect((panes[0].terminalId as string).startsWith("terminal-")).toBe(true);
+    expect(panes[0].terminalId).toBeNull();
+  });
+
+  it("get_active_workspace: TerminalView pane has terminalId set", () => {
+    // Set the pane to TerminalView
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+
+    const result = handleAutomationRequest({
+      requestId: "gaw2",
+      category: "query",
+      target: "workspaces",
+      method: "getActive",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const wsData = data.workspace as Record<string, unknown>;
+    const panes = wsData.panes as Array<Record<string, unknown>>;
+    expect(panes[0].terminalId).toBe(`terminal-${ws.panes[0].id}`);
   });
 
   it("get_grid_state includes activeWorkspaceId", () => {
@@ -596,7 +615,8 @@ describe("identify_caller and enriched responses", () => {
     const newPane = data.newPane as Record<string, unknown>;
     expect(newPane).not.toBeNull();
     expect(newPane.paneIndex).toBe(1);
-    expect(newPane).toHaveProperty("terminalId");
+    // New split pane is EmptyView — terminalId should be null
+    expect(newPane.terminalId).toBeNull();
     expect(newPane).toHaveProperty("x");
   });
 
@@ -616,6 +636,53 @@ describe("identify_caller and enriched responses", () => {
     expect(ws.name).toBe("TestWS");
     expect(typeof ws.id).toBe("string");
     expect(ws.paneCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("identify_caller: isFocusedPane is false for inactive workspace", () => {
+    // Create a second workspace and register a terminal in it
+    const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();
+    addWorkspace("WS2", layouts[0].id);
+    const ws2 = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "WS2")!;
+
+    // Set pane to TerminalView so we can register a terminal
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }); // active ws pane 0
+    // For WS2 we need to switch, set view, then switch back
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    // Switch back to original workspace
+    const originalWsId = workspaces[0].id;
+    useWorkspaceStore.getState().setActiveWorkspace(originalWsId);
+
+    // Register terminal in the inactive WS2's pane 0
+    const ws2Updated = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === ws2.id)!;
+    const ws2Pane = ws2Updated.panes[0];
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${ws2Pane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws2.id,
+    });
+
+    // focusedPaneIndex defaults to 0, and WS2 also has pane index 0
+    // But WS2 is inactive, so isFocusedPane should be false
+    useGridStore.setState({ focusedPaneIndex: 0 });
+
+    const result = handleAutomationRequest({
+      requestId: "ifp1",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${ws2Pane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const workspace = data.workspace as Record<string, unknown>;
+    expect(workspace.isActive).toBe(false);
+    const pane = data.pane as Record<string, unknown>;
+    expect(pane.index).toBe(0);
+    // Key assertion: even though focusedPaneIndex === 0 === paneIndex,
+    // isFocusedPane must be false because this is an inactive workspace
+    expect(pane.isFocusedPane).toBe(false);
   });
 
   it("reorders workspaces via automation API", () => {
