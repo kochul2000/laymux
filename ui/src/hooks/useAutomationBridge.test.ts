@@ -693,6 +693,24 @@ describe("identify_caller and enriched responses", () => {
     expect(result.error).toContain("layout");
   });
 
+  it("create_workspace uses default layout when layoutId is omitted", () => {
+    const before = useWorkspaceStore.getState().workspaces.length;
+    const result = handleAutomationRequest({
+      requestId: "cwdl1",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "NoLayoutWS" },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.created).toBe(true);
+    const ws = data.workspace as Record<string, unknown>;
+    expect(ws).not.toBeNull();
+    expect(ws.name).toBe("NoLayoutWS");
+    expect(useWorkspaceStore.getState().workspaces.length).toBe(before + 1);
+  });
+
   it("identify_caller: isFocusedPane is false for inactive workspace", () => {
     // Create a second workspace and register a terminal in it
     const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();

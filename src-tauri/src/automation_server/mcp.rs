@@ -525,7 +525,8 @@ impl ServerHandler for McpHandler {
                  Control terminals, workspaces, grid layout, and capture screenshots.\n\n\
                  ## Self-identification\n\
                  Your terminal has the env var LX_TERMINAL_ID (e.g. \"terminal-pane-a1b2c3d4\"). \
-                 Read it with `echo $LX_TERMINAL_ID` then call `identify_caller` with that value to learn:\n\
+                 Read it with `echo $LX_TERMINAL_ID` (bash/zsh) or `echo $env:LX_TERMINAL_ID` (PowerShell), \
+                 then call `identify_caller` with that value to learn:\n\
                  - Which workspace you are in (id, name, whether it is active)\n\
                  - Your pane position in the grid (x, y, w, h as 0-1 normalized coordinates, pane index)\n\
                  - Neighboring panes (left, right, above, below) and their terminal IDs\n\
@@ -534,7 +535,7 @@ impl ServerHandler for McpHandler {
                  - LX_AUTOMATION_PORT: The port this MCP server runs on\n\
                  - LX_GROUP_ID: Your sync group (terminals in the same group share CWD)\n\n\
                  ## Common workflows\n\
-                 - Find yourself: echo $LX_TERMINAL_ID → identify_caller\n\
+                 - Find yourself: echo $LX_TERMINAL_ID (or $env:LX_TERMINAL_ID in PowerShell) → identify_caller\n\
                  - Send command to adjacent pane: identify_caller → use neighbors.right.terminalId → write_to_terminal\n\
                  - Read another pane's output: list_terminals → read_terminal_output with target terminal_id"
                     .to_string(),

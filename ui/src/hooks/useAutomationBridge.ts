@@ -136,11 +136,14 @@ const handlers: HandlerMap = {
       return ok({ switched: p.id });
     },
     add: (p) => {
+      const { layouts } = useWorkspaceStore.getState();
+      const layoutId = (p.layoutId as string | undefined) ?? layouts[0]?.id;
+      if (!layoutId) return err("No layouts available");
       const before = useWorkspaceStore.getState().workspaces;
-      useWorkspaceStore.getState().addWorkspace(p.name as string, p.layoutId as string);
+      useWorkspaceStore.getState().addWorkspace(p.name as string, layoutId);
       const after = useWorkspaceStore.getState().workspaces;
       const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
-      if (!newWs) return err(`Failed to create workspace: layout '${p.layoutId}' not found`);
+      if (!newWs) return err(`Failed to create workspace: layout '${layoutId}' not found`);
       return ok({
         created: true,
         workspace: { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length },
