@@ -303,6 +303,86 @@ fn validate_docks(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>
                 repaired: true,
             });
         }
+
+        // Validate dock pane coordinates
+        let mut to_remove = Vec::new();
+        for (i, pane) in dock.panes.iter_mut().enumerate() {
+            let pane_path = format!("{dock_path}.panes[{i}]");
+
+            if pane.x.is_nan()
+                || pane.y.is_nan()
+                || pane.w.is_nan()
+                || pane.h.is_nan()
+                || pane.x.is_infinite()
+                || pane.y.is_infinite()
+                || pane.w.is_infinite()
+                || pane.h.is_infinite()
+            {
+                to_remove.push(i);
+                warnings.push(ValidationWarning {
+                    path: pane_path,
+                    message: "독 Pane 좌표에 NaN/Infinity 값이 있어 제거했습니다.".into(),
+                    repaired: true,
+                });
+                continue;
+            }
+
+            if !is_valid_ratio(pane.x) {
+                let old = pane.x;
+                pane.x = clamp_ratio(pane.x);
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}.x"),
+                    message: format!(
+                        "독 Pane x 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
+                        pane.x
+                    ),
+                    repaired: true,
+                });
+            }
+
+            if !is_valid_ratio(pane.y) {
+                let old = pane.y;
+                pane.y = clamp_ratio(pane.y);
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}.y"),
+                    message: format!(
+                        "독 Pane y 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
+                        pane.y
+                    ),
+                    repaired: true,
+                });
+            }
+
+            if !is_valid_dimension(pane.w) {
+                let old = pane.w;
+                pane.w = clamp_dimension(pane.w);
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}.w"),
+                    message: format!(
+                        "독 Pane w 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
+                        pane.w
+                    ),
+                    repaired: true,
+                });
+            }
+
+            if !is_valid_dimension(pane.h) {
+                let old = pane.h;
+                pane.h = clamp_dimension(pane.h);
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}.h"),
+                    message: format!(
+                        "독 Pane h 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
+                        pane.h
+                    ),
+                    repaired: true,
+                });
+            }
+        }
+
+        for i in to_remove.into_iter().rev() {
+            dock.panes.remove(i);
+        }
     }
 }
 
@@ -579,6 +659,69 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|w| w.path.contains("size") && w.repaired));
+    }
+
+    #[test]
+    fn dock_pane_nan_coordinates_removed() {
+        let mut settings = Settings::default();
+        settings.docks[0].panes = vec![DockPaneSetting {
+            id: "dp-bad".into(),
+            view: serde_json::json!({"type": "TerminalView"}),
+            x: f64::NAN,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+        }];
+        let warnings = validate_and_repair(&mut settings);
+        assert!(settings.docks[0].panes.is_empty());
+        assert!(warnings.iter().any(|w| w.message.contains("NaN/Infinity")));
+    }
+
+    #[test]
+    fn dock_pane_out_of_range_is_clamped() {
+        let mut settings = Settings::default();
+        settings.docks[0].panes = vec![DockPaneSetting {
+            id: "dp-test".into(),
+            view: serde_json::json!({"type": "TerminalView"}),
+            x: 1.5,
+            y: -0.5,
+            w: 0.0,
+            h: 2.0,
+        }];
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.docks[0].panes[0];
+        assert_eq!(pane.x, 1.0);
+        assert_eq!(pane.y, 0.0);
+        assert!(pane.w > 0.0);
+        assert_eq!(pane.h, 1.0);
+        assert!(warnings.len() >= 4);
+    }
+
+    #[test]
+    fn dock_pane_infinity_removed() {
+        let mut settings = Settings::default();
+        settings.docks[0].panes = vec![
+            DockPaneSetting {
+                id: "dp-good".into(),
+                view: serde_json::json!({"type": "TerminalView"}),
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+            DockPaneSetting {
+                id: "dp-inf".into(),
+                view: serde_json::json!({"type": "TerminalView"}),
+                x: 0.0,
+                y: 0.0,
+                w: f64::INFINITY,
+                h: 1.0,
+            },
+        ];
+        let warnings = validate_and_repair(&mut settings);
+        assert_eq!(settings.docks[0].panes.len(), 1);
+        assert_eq!(settings.docks[0].panes[0].id, "dp-good");
+        assert!(warnings.iter().any(|w| w.message.contains("NaN/Infinity")));
     }
 
     // ── 레이아웃 검증 ──

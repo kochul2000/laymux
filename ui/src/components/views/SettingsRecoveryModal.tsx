@@ -5,6 +5,7 @@ import {
   type SettingsLoadResult,
   type ValidationWarning,
 } from "@/lib/tauri-api";
+import { setBlockPersist } from "@/lib/persist-session";
 
 interface SettingsRecoveryModalProps {
   loadResult: SettingsLoadResult;
@@ -40,11 +41,14 @@ export function SettingsRecoveryModal({
 
   const handleReset = async () => {
     setResetting(true);
+    // Block persistence so any in-flight persistSession() doesn't overwrite the fresh defaults
+    setBlockPersist(true);
     try {
       await resetSettings();
       onReset();
     } catch (err) {
       console.error("[SettingsRecoveryModal] Reset failed:", err);
+      setBlockPersist(false);
       setResetting(false);
     }
   };

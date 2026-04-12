@@ -91,11 +91,11 @@ import { useSessionPersistence } from "./useSessionPersistence";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import { loadSettingsValidated } from "@/lib/tauri-api";
+import { loadSettingsValidated, type SettingsLoadResult } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 
 /** Wrap raw settings into a SettingsLoadResult with status "ok" for test mocks. */
-function wrapOk(settings: any) {
+function wrapOk(settings: any): SettingsLoadResult {
   return { status: "ok", settings, warnings: [] };
 }
 
