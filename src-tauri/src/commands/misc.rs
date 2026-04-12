@@ -99,6 +99,23 @@ pub fn load_settings() -> Result<crate::settings::Settings, String> {
 }
 
 #[tauri::command]
+pub fn load_settings_validated() -> Result<crate::settings::SettingsLoadResult, String> {
+    Ok(crate::settings::load_settings_validated())
+}
+
+#[tauri::command]
+pub fn reset_settings() -> Result<crate::settings::Settings, String> {
+    let default_settings = crate::settings::Settings::default();
+    crate::settings::save_settings(&default_settings)?;
+    Ok(default_settings)
+}
+
+#[tauri::command]
+pub fn get_settings_path() -> Result<String, String> {
+    Ok(crate::settings::settings_path().display().to_string())
+}
+
+#[tauri::command]
 pub fn save_settings(settings: crate::settings::Settings) -> Result<(), String> {
     crate::settings::save_settings(&settings)
 }

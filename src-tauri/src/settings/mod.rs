@@ -1,5 +1,7 @@
 pub mod models;
+pub mod validation;
 pub use models::*;
+pub use validation::{SettingsLoadResult, ValidationWarning};
 
 use std::fs;
 use std::path::PathBuf;
@@ -35,13 +37,66 @@ pub(crate) fn dirs_config_path() -> Option<PathBuf> {
 
 /// Load settings from disk. Returns default settings if file doesn't exist.
 pub fn load_settings() -> Settings {
+    let result = load_settings_validated();
+    match result {
+        SettingsLoadResult::Ok { settings, .. } => settings,
+        SettingsLoadResult::Repaired { settings, .. } => settings,
+        SettingsLoadResult::ParseError { settings, .. } => settings,
+    }
+}
+
+/// Load settings from disk with full validation result.
+/// Returns a `SettingsLoadResult` that the frontend can use to show recovery UI.
+pub fn load_settings_validated() -> SettingsLoadResult {
     let path = settings_path();
-    let mut settings = match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => Settings::default(),
+    let path_str = path.display().to_string();
+
+    let raw_content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => {
+            // File doesn't exist — return default (no error, no warnings)
+            return SettingsLoadResult::Ok {
+                settings: Settings::default(),
+                warnings: vec![],
+            };
+        }
     };
+
+    // Try to parse JSON
+    let mut settings: Settings = match serde_json::from_str(&raw_content) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path_str, "Settings JSON 파싱 실패, 기본 설정 사용");
+            return SettingsLoadResult::ParseError {
+                settings: Settings::default(),
+                error: e.to_string(),
+                settings_path: path_str,
+            };
+        }
+    };
+
+    // Apply migrations
     migrate_settings(&mut settings);
-    settings
+
+    // Validate and repair
+    let warnings = validation::validate_and_repair(&mut settings);
+
+    if warnings.is_empty() {
+        SettingsLoadResult::Ok {
+            settings,
+            warnings: vec![],
+        }
+    } else {
+        let has_repairs = warnings.iter().any(|w| w.repaired);
+        if has_repairs {
+            tracing::info!(
+                warning_count = warnings.len(),
+                "Settings 검증 완료: {}개 항목 자동 수정",
+                warnings.iter().filter(|w| w.repaired).count()
+            );
+        }
+        SettingsLoadResult::Repaired { settings, warnings }
+    }
 }
 
 /// Apply settings migrations.
