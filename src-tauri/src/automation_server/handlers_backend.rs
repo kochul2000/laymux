@@ -218,6 +218,10 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "PUT", "path": "/api/v1/settings/profiles/{index}",
                 "description": "Update a specific terminal profile by index.",
                 "body": "object — profile fields to update"
+            },
+            {
+                "method": "*", "path": "/mcp",
+                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint (stateful, session-based). POST: send JSON-RPC 2.0 requests (initialize, tools/list, tools/call, ping). After initialize, include the Mcp-Session-Id header from the response in all subsequent requests. GET: open SSE stream for server-initiated notifications. DELETE: terminate session. 15 tools available for terminal, workspace, grid, and utility operations."
             }
         ],
         "tips": [

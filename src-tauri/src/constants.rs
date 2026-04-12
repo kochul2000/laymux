@@ -52,6 +52,10 @@ pub const STATUS_MESSAGE_SCAN_BYTES: usize = 500;
 /// Shell commands never use it, making it a high-confidence activity signal.
 pub const DEC_SYNC_OUTPUT_SET: &[u8] = b"\x1b[?2026h";
 
+// ── MCP (Model Context Protocol) ──────────────────────────────────
+
+pub const MCP_SERVER_NAME: &str = "laymux";
+
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
 /// notifications are enabled even without observing a user command.

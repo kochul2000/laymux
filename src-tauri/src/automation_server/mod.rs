@@ -1,6 +1,7 @@
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
+pub mod mcp;
 pub mod types;
 
 // Re-export key types used by other modules
@@ -236,6 +237,7 @@ pub fn build_router(state: ServerState, key: &str) -> Router {
         .route("/api/v1/terminals/states", get(terminals_states))
         .route("/api/v1/layouts", get(layouts_list))
         .route("/api/v1/screenshot", post(screenshot_capture))
+        .nest_service("/mcp", mcp::create_service(state.clone()))
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
@@ -340,6 +342,48 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Verify auth middleware applies to nest_service routes (covers /mcp).
+    #[tokio::test]
+    async fn auth_nest_service_requires_token() {
+        use axum::routing::get;
+        use tower::service_fn;
+
+        let nested_svc = service_fn(|_req: axum::http::Request<axum::body::Body>| async {
+            Ok::<_, std::convert::Infallible>(
+                axum::http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+        });
+
+        let app = Router::new()
+            .nest_service("/mcp", nested_svc)
+            .layer(middleware::from_fn_with_state(
+                "secret-key".to_string(),
+                auth_middleware,
+            ));
+
+        // Without token → 401
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // With valid token → 200
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header("Authorization", "Bearer secret-key")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[test]
