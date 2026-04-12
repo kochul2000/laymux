@@ -614,30 +614,6 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (isLxShortcut(e)) return false;
 
-      // Smart copy: intercept Ctrl+C/Ctrl+Shift+C when selection exists
-      // to apply smartRemoveIndent before writing to clipboard.
-      // Without this, browser default copy would preserve terminal indentation.
-      if (
-        e.type === "keydown" &&
-        (e.key === "c" || e.key === "C") &&
-        e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        terminal.hasSelection()
-      ) {
-        const { convenience: conv } = useSettingsStore.getState();
-        if (conv.smartRemoveIndent) {
-          e.preventDefault();
-          clipboardWriteText(
-            prepareSelectionForCopy(terminal.getSelection(), {
-              smartRemoveIndent: conv.smartRemoveIndent,
-            }),
-          ).catch(() => {});
-          terminal.clearSelection();
-          return false;
-        }
-      }
-
       // Smart paste: intercept Ctrl+V / Ctrl+Shift+V on keydown
       if (
         e.type === "keydown" &&
@@ -692,6 +668,22 @@ export function TerminalView({
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
+
+    // Smart copy: intercept DOM copy event to apply smartRemoveIndent.
+    // xterm.js handles Ctrl+C natively (copy if selection, SIGINT if not).
+    // We hook into the resulting copy event to transform clipboard content
+    // without breaking bare Ctrl+C → SIGINT flow.
+    const handleCopy = (e: ClipboardEvent) => {
+      const { convenience: conv } = useSettingsStore.getState();
+      if (conv.smartRemoveIndent && terminal.hasSelection()) {
+        e.preventDefault();
+        const transformed = prepareSelectionForCopy(terminal.getSelection(), {
+          smartRemoveIndent: true,
+        });
+        e.clipboardData?.setData("text/plain", transformed);
+      }
+    };
+    containerRef.current?.addEventListener("copy", handleCopy);
 
     // Copy-on-select: auto-copy to clipboard when text is selected
     terminal.onSelectionChange(() => {
@@ -1085,6 +1077,7 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      containerRef.current?.removeEventListener("copy", handleCopy);
       helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
       helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
