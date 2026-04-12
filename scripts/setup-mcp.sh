@@ -86,7 +86,7 @@ info "Gateway: $GATEWAY"
 # --- 3. JSON 읽기 & WSL이면 URL 치환 ---
 MCP_JSON=$(cat "$JSON_FILE")
 if [ "$GATEWAY" != "127.0.0.1" ]; then
-    MCP_JSON=$(echo "$MCP_JSON" | sed "s/127\\.0\\.0\\.1/$GATEWAY/g")
+    MCP_JSON=$(printf '%s' "$MCP_JSON" | sed "s/127\\.0\\.0\\.1/$GATEWAY/g")
     info "WSL 감지 — URL을 $GATEWAY 로 치환"
 fi
 
