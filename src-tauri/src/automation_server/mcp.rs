@@ -247,8 +247,9 @@ impl McpHandler {
                 return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
             }
         };
+        let data = super::helpers::unescape_terminal_input(&p.data);
         match ptys.get(&p.terminal_id) {
-            Some(handle) => match handle.write(p.data.as_bytes()) {
+            Some(handle) => match handle.write(data.as_bytes()) {
                 Ok(_) => Ok(CallToolResult::success(vec![Content::text("written")])),
                 Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
             },
@@ -591,5 +592,26 @@ mod tests {
             );
             assert_ne!(ip, "127.0.0.1", "Should exclude loopback");
         }
+    }
+
+    #[test]
+    fn write_terminal_data_unescaped_before_pty() {
+        // Simulate what MCP clients send: literal \r\n text (JSON: "ls\\r\\n")
+        let json = r#"{"terminal_id":"t1","data":"ls\\r\\n"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        // serde gives us the literal string "ls\r\n" (backslash-r-backslash-n)
+        assert_eq!(p.data, r"ls\r\n");
+        // After unescape, it becomes actual CR+LF
+        let unescaped = super::super::helpers::unescape_terminal_input(&p.data);
+        assert_eq!(unescaped, "ls\r\n");
+    }
+
+    #[test]
+    fn write_terminal_ctrl_c_unescaped() {
+        let json = r#"{"terminal_id":"t1","data":"\\u0003"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.data, r"\u0003");
+        let unescaped = super::super::helpers::unescape_terminal_input(&p.data);
+        assert_eq!(unescaped, "\u{0003}");
     }
 }

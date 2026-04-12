@@ -137,6 +137,53 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// Process C-style escape sequences in a string into actual control characters.
+///
+/// MCP clients pass tool parameters as literal text, so `\r\n` arrives as the
+/// four characters `\`, `r`, `\`, `n` rather than CR+LF.  This function converts
+/// common escape sequences to their real byte values before writing to the PTY.
+///
+/// Supported sequences: `\\`, `\r`, `\n`, `\t`, `\0`, `\uXXXX` (4-digit hex).
+pub fn unescape_terminal_input(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('r') => out.push('\r'),
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('0') => out.push('\0'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if hex.len() == 4 {
+                        if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                            if let Some(ch) = char::from_u32(code) {
+                                out.push(ch);
+                                continue;
+                            }
+                        }
+                    }
+                    // Invalid sequence — emit as-is
+                    out.push('\\');
+                    out.push('u');
+                    out.push_str(&hex);
+                }
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +214,61 @@ mod tests {
         let encoded = "SGk"; // "Hi"
         let decoded = base64_decode(encoded).unwrap();
         assert_eq!(decoded, b"Hi");
+    }
+
+    #[test]
+    fn unescape_cr_lf() {
+        assert_eq!(unescape_terminal_input(r"ls\r\n"), "ls\r\n");
+    }
+
+    #[test]
+    fn unescape_tab_and_null() {
+        assert_eq!(unescape_terminal_input(r"a\tb\0c"), "a\tb\0c");
+    }
+
+    #[test]
+    fn unescape_backslash() {
+        assert_eq!(unescape_terminal_input(r"path\\file"), "path\\file");
+    }
+
+    #[test]
+    fn unescape_unicode() {
+        // \u0003 = ETX (Ctrl+C)
+        assert_eq!(unescape_terminal_input(r"\u0003"), "\u{0003}");
+    }
+
+    #[test]
+    fn unescape_unicode_korean() {
+        assert_eq!(unescape_terminal_input(r"\uD55C"), "한");
+    }
+
+    #[test]
+    fn unescape_no_escapes() {
+        assert_eq!(unescape_terminal_input("hello world"), "hello world");
+    }
+
+    #[test]
+    fn unescape_trailing_backslash() {
+        assert_eq!(unescape_terminal_input(r"end\"), "end\\");
+    }
+
+    #[test]
+    fn unescape_unknown_sequence_preserved() {
+        assert_eq!(unescape_terminal_input(r"\x41"), "\\x41");
+    }
+
+    #[test]
+    fn unescape_mixed() {
+        assert_eq!(
+            unescape_terminal_input(r"echo hello\r\n"),
+            "echo hello\r\n"
+        );
+    }
+
+    #[test]
+    fn unescape_real_control_chars_pass_through() {
+        // If the string already contains real CR+LF (from JSON deserialization),
+        // they should pass through unchanged.
+        assert_eq!(unescape_terminal_input("ls\r\n"), "ls\r\n");
     }
 }

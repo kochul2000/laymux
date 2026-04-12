@@ -286,6 +286,7 @@ fn parse_dib_to_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::path_utils::windows_to_wsl_path;
 
     #[test]
     fn test_is_image_file() {
