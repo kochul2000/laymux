@@ -5,6 +5,7 @@ import {
   applySmartTextTransforms,
   transformPasteContent,
   trimSelectionTrailingWhitespace,
+  prepareSelectionForCopy,
 } from "./smart-text";
 import { RAW_XTERM_SELECTION, WRONG_RESULT, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
 
@@ -351,5 +352,67 @@ describe("right-pane fixture: terminal-padded multi-line URL", () => {
     const pasted = applySmartTextTransforms(copied, pasteOpts);
     // trim이 trailing space를 제거하므로 URL joining 성공
     expect(pasted).toBe(CLEAN_URL);
+  });
+});
+
+// ============================================================
+// prepareSelectionForCopy — 복사 시 trailing whitespace + indent 제거
+// ============================================================
+describe("prepareSelectionForCopy", () => {
+  it("smartRemoveIndent 활성 시 복사 시점에 공통 인덴트가 제거된다", () => {
+    // 이슈 #183: 터미널에서 인덴트된 텍스트를 복사해서 외부 앱에 붙여넣기하면
+    // 인덴트가 그대로 남는 문제
+    const raw =
+      "  cat > ~/.asoundrc << 'EOF'   \n" +
+      "  pcm.default pulse            \n" +
+      "  ctl.default pulse            \n" +
+      "                               \n" +
+      "  pcm.pulse {                  \n" +
+      "      type pulse               \n" +
+      "  }                            \n" +
+      "                               \n" +
+      "  ctl.pulse {                  \n" +
+      "      type pulse               \n" +
+      "  }                            \n" +
+      "  EOF                          \n" +
+      "                               \n";
+    const result = prepareSelectionForCopy(raw, { smartRemoveIndent: true });
+    // 공통 2-space 인덴트가 제거되어야 한다
+    expect(result).toBe(
+      "cat > ~/.asoundrc << 'EOF'\n" +
+        "pcm.default pulse\n" +
+        "ctl.default pulse\n" +
+        "\n" +
+        "pcm.pulse {\n" +
+        "    type pulse\n" +
+        "}\n" +
+        "\n" +
+        "ctl.pulse {\n" +
+        "    type pulse\n" +
+        "}\n" +
+        "EOF",
+    );
+  });
+
+  it("smartRemoveIndent 비활성 시 인덴트가 유지된다", () => {
+    const raw = "  hello   \n  world   \n";
+    const result = prepareSelectionForCopy(raw, { smartRemoveIndent: false });
+    expect(result).toBe("  hello\n  world");
+  });
+
+  it("인덴트 없는 텍스트는 변경 없이 trailing whitespace만 제거된다", () => {
+    const raw = "hello   \nworld   \n";
+    const result = prepareSelectionForCopy(raw, { smartRemoveIndent: true });
+    expect(result).toBe("hello\nworld");
+  });
+
+  it("빈 문자열은 그대로 반환된다", () => {
+    expect(prepareSelectionForCopy("", { smartRemoveIndent: true })).toBe("");
+  });
+
+  it("CRLF 입력도 올바르게 처리된다", () => {
+    const raw = "  hello   \r\n  world   \r\n";
+    const result = prepareSelectionForCopy(raw, { smartRemoveIndent: true });
+    expect(result).toBe("hello\r\nworld");
   });
 });

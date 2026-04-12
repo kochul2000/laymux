@@ -23,7 +23,7 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
+import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
@@ -614,6 +614,30 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (isLxShortcut(e)) return false;
 
+      // Smart copy: intercept Ctrl+C/Ctrl+Shift+C when selection exists
+      // to apply smartRemoveIndent before writing to clipboard.
+      // Without this, browser default copy would preserve terminal indentation.
+      if (
+        e.type === "keydown" &&
+        (e.key === "c" || e.key === "C") &&
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        terminal.hasSelection()
+      ) {
+        const { convenience: conv } = useSettingsStore.getState();
+        if (conv.smartRemoveIndent) {
+          e.preventDefault();
+          clipboardWriteText(
+            prepareSelectionForCopy(terminal.getSelection(), {
+              smartRemoveIndent: conv.smartRemoveIndent,
+            }),
+          ).catch(() => {});
+          terminal.clearSelection();
+          return false;
+        }
+      }
+
       // Smart paste: intercept Ctrl+V / Ctrl+Shift+V on keydown
       if (
         e.type === "keydown" &&
@@ -673,9 +697,11 @@ export function TerminalView({
     terminal.onSelectionChange(() => {
       const { convenience: conv } = useSettingsStore.getState();
       if (conv.copyOnSelect && terminal.hasSelection()) {
-        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
-          () => {},
-        );
+        clipboardWriteText(
+          prepareSelectionForCopy(terminal.getSelection(), {
+            smartRemoveIndent: conv.smartRemoveIndent,
+          }),
+        ).catch(() => {});
       }
     });
 
@@ -887,9 +913,12 @@ export function TerminalView({
       e.preventDefault();
       if (terminal.hasSelection()) {
         // Selection exists → copy to clipboard via Tauri, then clear
-        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
-          () => {},
-        );
+        const { convenience: conv } = useSettingsStore.getState();
+        clipboardWriteText(
+          prepareSelectionForCopy(terminal.getSelection(), {
+            smartRemoveIndent: conv.smartRemoveIndent,
+          }),
+        ).catch(() => {});
         terminal.clearSelection();
       } else {
         // No selection → paste via terminal.paste() (same as Ctrl+V for bracketed paste support)
