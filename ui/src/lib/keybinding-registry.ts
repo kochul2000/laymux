@@ -93,26 +93,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "UI",
   },
   { id: "settings.open", label: "설정 열기", defaultKeys: "Ctrl+,", group: "UI" },
-  // -- File Explorer --
-  {
-    id: "fileExplorer.copy",
-    label: "선택 파일 경로 복사",
-    defaultKeys: "Ctrl+C",
-    group: "File Explorer",
-  },
   // -- Issue Reporter --
   {
     id: "issueReporter.submit",
     label: "이슈 제출",
     defaultKeys: "Ctrl+Enter",
     group: "Issue Reporter",
-  },
-  // -- Terminal --
-  {
-    id: "terminal.paste",
-    label: "스마트 붙여넣기",
-    defaultKeys: "Ctrl+V",
-    group: "Terminal",
   },
 ];
 

@@ -25,7 +25,6 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
-import { matchesKeybinding } from "@/lib/keybinding-registry";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -610,39 +609,10 @@ export function TerminalView({
       helperTextarea.addEventListener("compositionend", handleCompositionEnd);
     };
 
-    // Custom key event handler: IDE shortcuts + smart paste interception.
+    // Custom key event handler: let IDE shortcuts pass through xterm.
     // Returning false prevents xterm from consuming the event.
     terminal.attachCustomKeyEventHandler((e) => {
       if (isLxShortcut(e)) return false;
-
-      // Smart paste: intercept paste shortcut on keydown
-      if (e.type === "keydown" && matchesKeybinding(e, "terminal.paste")) {
-        const { convenience } = useSettingsStore.getState();
-        if (convenience.smartPaste) {
-          e.preventDefault();
-
-          // Rust reads clipboard (files, images, or text) and returns result.
-          // Use terminal.paste() to support bracketed paste mode — without it,
-          // multi-line paste executes each line as a separate command.
-          smartPaste(convenience.pasteImageDir, profile)
-            .then((result) => {
-              if (result.pasteType !== "none" && result.content) {
-                const content = transformPasteContent(result.content, result.pasteType, {
-                  removeIndent: convenience.smartRemoveIndent,
-                  removeLineBreak: convenience.smartRemoveLineBreak,
-                });
-                if (shouldBlockLargePaste(content, convenience.largePasteWarning)) {
-                  return;
-                }
-                terminal.paste(content);
-              }
-            })
-            .catch(() => {}); // clipboard read failed — silently ignore
-
-          return false; // Block xterm from processing Ctrl+V
-        }
-      }
-
       return true;
     });
 
@@ -907,6 +877,33 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
+    // Smart paste: intercept the system paste event (Ctrl+V, Cmd+V, context menu paste, etc.)
+    // By listening to the 'paste' event instead of a specific key combo, this works
+    // regardless of OS or how the user triggers paste.
+    const handlePaste = (e: ClipboardEvent) => {
+      const { convenience } = useSettingsStore.getState();
+      if (!convenience.smartPaste) return; // Let xterm handle normally
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      smartPaste(convenience.pasteImageDir, profile)
+        .then((result) => {
+          if (result.pasteType !== "none" && result.content) {
+            const content = transformPasteContent(result.content, result.pasteType, {
+              removeIndent: convenience.smartRemoveIndent,
+              removeLineBreak: convenience.smartRemoveLineBreak,
+            });
+            if (shouldBlockLargePaste(content, convenience.largePasteWarning)) {
+              return;
+            }
+            terminal.paste(content);
+          }
+        })
+        .catch(() => {}); // clipboard read failed — silently ignore
+    };
+    outerContainer?.addEventListener("paste", handlePaste, { capture: true });
+
     // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
@@ -1048,6 +1045,9 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
+      outerContainer?.removeEventListener("paste", handlePaste, {
+        capture: true,
+      } as EventListenerOptions);
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);

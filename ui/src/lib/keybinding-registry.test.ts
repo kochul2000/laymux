@@ -31,8 +31,9 @@ describe("keybinding-registry", () => {
       expect(new Set(ids).size).toBe(ids.length);
     });
 
-    it("should include fileExplorer.copy", () => {
-      expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "fileExplorer.copy")).toBeDefined();
+    it("should not include clipboard operations (copy/paste are system events)", () => {
+      expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "fileExplorer.copy")).toBeUndefined();
+      expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste")).toBeUndefined();
     });
 
     it("should include issueReporter.submit", () => {
@@ -42,14 +43,14 @@ describe("keybinding-registry", () => {
 
   describe("resolveKeybinding", () => {
     it("should return default keys when no override", () => {
-      expect(resolveKeybinding("fileExplorer.copy")).toBe("Ctrl+C");
+      expect(resolveKeybinding("issueReporter.submit")).toBe("Ctrl+Enter");
     });
 
     it("should return user override when present", () => {
       mockGetState.mockReturnValue({
-        keybindings: [{ command: "fileExplorer.copy", keys: "Ctrl+Shift+C" }],
+        keybindings: [{ command: "issueReporter.submit", keys: "Ctrl+Shift+Enter" }],
       });
-      expect(resolveKeybinding("fileExplorer.copy")).toBe("Ctrl+Shift+C");
+      expect(resolveKeybinding("issueReporter.submit")).toBe("Ctrl+Shift+Enter");
     });
 
     it("should return undefined for unknown action", () => {
@@ -58,16 +59,6 @@ describe("keybinding-registry", () => {
   });
 
   describe("matchesKeybinding", () => {
-    it("should match Ctrl+C to fileExplorer.copy", () => {
-      const e = makeKeyEvent("c", { ctrl: true });
-      expect(matchesKeybinding(e, "fileExplorer.copy")).toBe(true);
-    });
-
-    it("should not match Ctrl+C when shift is also held", () => {
-      const e = makeKeyEvent("c", { ctrl: true, shift: true });
-      expect(matchesKeybinding(e, "fileExplorer.copy")).toBe(false);
-    });
-
     it("should match Ctrl+Enter to issueReporter.submit", () => {
       const e = makeKeyEvent("Enter", { ctrl: true });
       expect(matchesKeybinding(e, "issueReporter.submit")).toBe(true);
@@ -85,14 +76,14 @@ describe("keybinding-registry", () => {
 
     it("should respect user override", () => {
       mockGetState.mockReturnValue({
-        keybindings: [{ command: "fileExplorer.copy", keys: "Ctrl+Shift+C" }],
+        keybindings: [{ command: "issueReporter.submit", keys: "Ctrl+Shift+Enter" }],
       });
       // Old combo should NOT match
-      const oldEvent = makeKeyEvent("c", { ctrl: true });
-      expect(matchesKeybinding(oldEvent, "fileExplorer.copy")).toBe(false);
+      const oldEvent = makeKeyEvent("Enter", { ctrl: true });
+      expect(matchesKeybinding(oldEvent, "issueReporter.submit")).toBe(false);
       // New combo should match
-      const newEvent = makeKeyEvent("c", { ctrl: true, shift: true });
-      expect(matchesKeybinding(newEvent, "fileExplorer.copy")).toBe(true);
+      const newEvent = makeKeyEvent("Enter", { ctrl: true, shift: true });
+      expect(matchesKeybinding(newEvent, "issueReporter.submit")).toBe(true);
     });
 
     it("should match arrow keys with normalized names", () => {
@@ -108,16 +99,6 @@ describe("keybinding-registry", () => {
     it("should match Ctrl+, to settings.open", () => {
       const e = makeKeyEvent(",", { ctrl: true });
       expect(matchesKeybinding(e, "settings.open")).toBe(true);
-    });
-
-    it("should match Ctrl+V to terminal.paste", () => {
-      const e = makeKeyEvent("v", { ctrl: true });
-      expect(matchesKeybinding(e, "terminal.paste")).toBe(true);
-    });
-
-    it("should not match Ctrl+Shift+V to terminal.paste (shift not in default)", () => {
-      const e = makeKeyEvent("V", { ctrl: true, shift: true });
-      expect(matchesKeybinding(e, "terminal.paste")).toBe(false);
     });
   });
 });
