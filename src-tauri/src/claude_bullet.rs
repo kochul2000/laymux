@@ -5,6 +5,7 @@
 //!
 //!   - Legacy: bright-white `●` (U+25CF) with SGR 38;5;231
 //!   - Current: salmon `·` (U+00B7) with SGR 38;5;174 (Claude brand color)
+//!
 //! Also provides general-purpose ANSI escape stripping.
 
 use crate::constants::STATUS_MESSAGE_SCAN_BYTES;
