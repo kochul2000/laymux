@@ -202,6 +202,47 @@ fn validate_workspace_panes(
             });
         }
 
+        // Normalize bounds: ensure x+w <= 1 and y+h <= 1
+        if pane.x + pane.w > 1.0 {
+            let old_x = pane.x;
+            let old_w = pane.w;
+            // Shrink w first; if w would become too small, pull x back instead
+            let available = 1.0 - pane.x;
+            if available >= 0.01 {
+                pane.w = available;
+            } else {
+                pane.x = 1.0 - pane.w.min(1.0);
+                pane.w = pane.w.min(1.0);
+            }
+            warnings.push(ValidationWarning {
+                path: format!("{pane_path}"),
+                message: format!(
+                    "x({old_x:.2})+w({old_w:.2}) 합이 1.0 범위를 초과하여 x={:.2}, w={:.2}로 수정했습니다.",
+                    pane.x, pane.w
+                ),
+                repaired: true,
+            });
+        }
+        if pane.y + pane.h > 1.0 {
+            let old_y = pane.y;
+            let old_h = pane.h;
+            let available = 1.0 - pane.y;
+            if available >= 0.01 {
+                pane.h = available;
+            } else {
+                pane.y = 1.0 - pane.h.min(1.0);
+                pane.h = pane.h.min(1.0);
+            }
+            warnings.push(ValidationWarning {
+                path: format!("{pane_path}"),
+                message: format!(
+                    "y({old_y:.2})+h({old_h:.2}) 합이 1.0 범위를 초과하여 y={:.2}, h={:.2}로 수정했습니다.",
+                    pane.y, pane.h
+                ),
+                repaired: true,
+            });
+        }
+
         // View type must not be empty
         if pane.view.view_type.is_empty() {
             pane.view.view_type = "EmptyView".into();
@@ -263,6 +304,45 @@ fn validate_layouts(settings: &mut Settings, warnings: &mut Vec<ValidationWarnin
                 warnings.push(ValidationWarning {
                     path: format!("{pane_path}.h"),
                     message: "레이아웃 Pane h 크기를 유효 범위로 수정했습니다.".into(),
+                    repaired: true,
+                });
+            }
+            // Normalize bounds: ensure x+w <= 1 and y+h <= 1
+            if pane.x + pane.w > 1.0 {
+                let old_x = pane.x;
+                let old_w = pane.w;
+                let available = 1.0 - pane.x;
+                if available >= 0.01 {
+                    pane.w = available;
+                } else {
+                    pane.x = 1.0 - pane.w.min(1.0);
+                    pane.w = pane.w.min(1.0);
+                }
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}"),
+                    message: format!(
+                        "x({old_x:.2})+w({old_w:.2}) 합이 1.0 범위를 초과하여 x={:.2}, w={:.2}로 수정했습니다.",
+                        pane.x, pane.w
+                    ),
+                    repaired: true,
+                });
+            }
+            if pane.y + pane.h > 1.0 {
+                let old_y = pane.y;
+                let old_h = pane.h;
+                let available = 1.0 - pane.y;
+                if available >= 0.01 {
+                    pane.h = available;
+                } else {
+                    pane.y = 1.0 - pane.h.min(1.0);
+                    pane.h = pane.h.min(1.0);
+                }
+                warnings.push(ValidationWarning {
+                    path: format!("{pane_path}"),
+                    message: format!(
+                        "y({old_y:.2})+h({old_h:.2}) 합이 1.0 범위를 초과하여 y={:.2}, h={:.2}로 수정했습니다.",
+                        pane.y, pane.h
+                    ),
                     repaired: true,
                 });
             }
@@ -501,7 +581,8 @@ mod tests {
         let mut settings = Settings::default();
         settings.workspaces[0].panes[0].x = 1.5;
         let warnings = validate_and_repair(&mut settings);
-        assert_eq!(settings.workspaces[0].panes[0].x, 1.0);
+        // x is clamped, and then bounds normalization ensures x+w <= 1
+        assert!(settings.workspaces[0].panes[0].x <= 1.0);
         assert!(warnings.iter().any(|w| w.path.contains(".x") && w.repaired));
     }
 
@@ -530,6 +611,74 @@ mod tests {
         let warnings = validate_and_repair(&mut settings);
         assert!(settings.workspaces[0].panes[0].h > 0.0);
         assert!(warnings.iter().any(|w| w.path.contains(".h") && w.repaired));
+    }
+
+    // ── Pane bounds 정규화 (x+w <= 1, y+h <= 1) ──
+
+    #[test]
+    fn pane_x_plus_w_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        // x=1.5 clamps to 1.0, w=0.5 is valid → x+w=1.5 > 1 → must shrink w
+        settings.workspaces[0].panes[0].x = 1.5;
+        settings.workspaces[0].panes[0].w = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert!(
+            pane.x + pane.w <= 1.0,
+            "x({}) + w({}) = {} > 1.0",
+            pane.x,
+            pane.w,
+            pane.x + pane.w
+        );
+    }
+
+    #[test]
+    fn pane_y_plus_h_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].y = 0.8;
+        settings.workspaces[0].panes[0].h = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert!(
+            pane.y + pane.h <= 1.0,
+            "y({}) + h({}) = {} > 1.0",
+            pane.y,
+            pane.h,
+            pane.y + pane.h
+        );
+    }
+
+    #[test]
+    fn pane_within_bounds_is_not_modified() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].x = 0.5;
+        settings.workspaces[0].panes[0].w = 0.5;
+        settings.workspaces[0].panes[0].y = 0.3;
+        settings.workspaces[0].panes[0].h = 0.7;
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.x, 0.5);
+        assert_eq!(pane.w, 0.5);
+        assert_eq!(pane.y, 0.3);
+        assert_eq!(pane.h, 0.7);
+        // No bounds-related warnings
+        assert!(!warnings.iter().any(|w| w.message.contains("범위를 초과")));
+    }
+
+    #[test]
+    fn layout_pane_x_plus_w_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        settings.layouts[0].panes[0].x = 0.7;
+        settings.layouts[0].panes[0].w = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.layouts[0].panes[0];
+        assert!(
+            pane.x + pane.w <= 1.0,
+            "layout: x({}) + w({}) = {} > 1.0",
+            pane.x,
+            pane.w,
+            pane.x + pane.w
+        );
     }
 
     // ── View 타입 검증 ──
@@ -741,8 +890,11 @@ mod tests {
         settings.layouts[0].panes[0].x = 2.0;
         settings.layouts[0].panes[0].w = -0.5;
         let warnings = validate_and_repair(&mut settings);
-        assert_eq!(settings.layouts[0].panes[0].x, 1.0);
-        assert!(settings.layouts[0].panes[0].w > 0.0);
+        let pane = &settings.layouts[0].panes[0];
+        // x clamped from 2.0, w clamped from -0.5, then bounds normalized
+        assert!(pane.x >= 0.0 && pane.x <= 1.0);
+        assert!(pane.w > 0.0 && pane.w <= 1.0);
+        assert!(pane.x + pane.w <= 1.0);
         assert!(warnings.len() >= 2);
     }
 
