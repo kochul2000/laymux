@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sortWorkspaces } from "./workspace-sort";
+import { sortWorkspaces, filterVisibleWorkspaces } from "./workspace-sort";
 import type { Workspace } from "@/stores/types";
 
 function ws(id: string): Workspace {
@@ -54,5 +54,31 @@ describe("sortWorkspaces", () => {
       const result = sortWorkspaces(workspaces, "notification", ["c", "a", "b"], []);
       expect(result.map((w) => w.id)).toEqual(["a", "b", "c"]);
     });
+  });
+});
+
+describe("filterVisibleWorkspaces", () => {
+  const workspaces = [ws("a"), ws("b"), ws("c")];
+
+  it("returns all workspaces when hiddenIds is empty", () => {
+    const result = filterVisibleWorkspaces(workspaces, new Set());
+    expect(result).toHaveLength(3);
+    expect(result.map((w) => w.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("excludes hidden workspace", () => {
+    const result = filterVisibleWorkspaces(workspaces, new Set(["b"]));
+    expect(result.map((w) => w.id)).toEqual(["a", "c"]);
+  });
+
+  it("excludes multiple hidden workspaces", () => {
+    const result = filterVisibleWorkspaces(workspaces, new Set(["a", "c"]));
+    expect(result.map((w) => w.id)).toEqual(["b"]);
+  });
+
+  it("preserves sort order from input", () => {
+    const sorted = [ws("c"), ws("a"), ws("b")];
+    const result = filterVisibleWorkspaces(sorted, new Set(["a"]));
+    expect(result.map((w) => w.id)).toEqual(["c", "b"]);
   });
 });

@@ -1214,4 +1214,138 @@ describe("useKeyboardShortcuts", () => {
 
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
   });
+
+  // --- Hidden workspace navigation ---
+  describe("hidden workspace navigation", () => {
+    it("Ctrl+Alt+ArrowDown skips hidden workspaces", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      // Hide WS2 (the middle one)
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]);
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // From Default (index 0), ArrowDown should skip WS2 and go to WS3
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+
+    it("Ctrl+Alt+ArrowUp skips hidden workspaces", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      // Hide WS2 (the middle one)
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]);
+
+      // Set active to WS3
+      useWorkspaceStore.getState().setActiveWorkspace(ids[2]);
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // From WS3, ArrowUp should skip WS2 and go to Default
+      fireKey("ArrowUp", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+    });
+
+    it("Ctrl+Alt+number skips hidden workspaces in index", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      // Hide Default (first workspace)
+      useUiStore.getState().toggleWorkspaceHidden(ids[0]);
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // Ctrl+Alt+1 should go to WS2 (first visible), not Default
+      fireKey("1", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[1]);
+
+      // Ctrl+Alt+2 should go to WS3 (second visible)
+      fireKey("2", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+
+    it("Ctrl+Alt+9 goes to last visible workspace", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      // Hide WS3 (last workspace)
+      useUiStore.getState().toggleWorkspaceHidden(ids[2]);
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // Ctrl+Alt+9 should go to WS2 (last visible), not WS3
+      fireKey("9", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[1]);
+    });
+
+    it("ArrowDown from hidden active workspace goes to next visible in sorted order", () => {
+      // [Default, WS2, WS3] — hide WS2, make WS2 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]); // hide WS2
+      useWorkspaceStore.getState().setActiveWorkspace(ids[1]); // active = WS2 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowDown from hidden WS2 should go to WS3 (next visible after WS2 in sorted order)
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+
+    it("ArrowUp from hidden active workspace goes to previous visible in sorted order", () => {
+      // [Default, WS2, WS3] — hide WS2, make WS2 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]); // hide WS2
+      useWorkspaceStore.getState().setActiveWorkspace(ids[1]); // active = WS2 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowUp from hidden WS2 should go to Default (previous visible before WS2)
+      fireKey("ArrowUp", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+    });
+
+    it("ArrowDown from hidden active at end wraps to first visible", () => {
+      // [Default, WS2, WS3] — hide WS3, make WS3 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[2]); // hide WS3
+      useWorkspaceStore.getState().setActiveWorkspace(ids[2]); // active = WS3 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowDown from hidden WS3 (end) should wrap to Default (first visible)
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+    });
+
+    it("ArrowUp from hidden active at start wraps to last visible", () => {
+      // [Default, WS2, WS3] — hide Default, make Default active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[0]); // hide Default
+      useWorkspaceStore.getState().setActiveWorkspace(ids[0]); // active = Default (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowUp from hidden Default (start) should wrap to WS3 (last visible)
+      fireKey("ArrowUp", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+  });
 });
