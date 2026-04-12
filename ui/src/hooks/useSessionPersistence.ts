@@ -5,7 +5,7 @@ import {
   type SettingsLoadResult,
   type ValidationWarning,
 } from "@/lib/tauri-api";
-import { persistSession } from "@/lib/persist-session";
+import { persistSession, setBlockPersist } from "@/lib/persist-session";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   useSettingsStore,
@@ -45,6 +45,14 @@ export function useSessionPersistence() {
               ? loadResult.warnings
               : [],
         });
+
+        // When settings.json couldn't be parsed, don't hydrate stores with defaults —
+        // this prevents saveBeforeClose from overwriting the user's original file.
+        if (loadResult.status === "parse_error") {
+          setBlockPersist(true);
+          setLoaded(true);
+          return;
+        }
 
         const rawSettings = loadResult.settings;
         const sFont = rawSettings.font;

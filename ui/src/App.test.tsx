@@ -43,6 +43,12 @@ vi.mock("@tauri-apps/api/window", () => {
   };
 });
 
+vi.mock("@/lib/persist-session", () => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+  saveBeforeClose: vi.fn().mockResolvedValue(undefined),
+  setBlockPersist: vi.fn(),
+}));
+
 // Mock tauri-api to prevent unhandled errors in test environment
 vi.mock("@/lib/tauri-api", () => {
   const unlisten = vi.fn();
@@ -65,6 +71,19 @@ vi.mock("@/lib/tauri-api", () => {
       layouts: [],
       workspaces: [],
       docks: [],
+    }),
+    loadSettingsValidated: vi.fn().mockResolvedValue({
+      status: "ok",
+      settings: {
+        defaultProfile: "PowerShell",
+        profiles: [],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [],
+      },
+      warnings: [],
     }),
     saveSettings: vi.fn().mockResolvedValue(undefined),
     getListeningPorts: vi.fn().mockResolvedValue([]),

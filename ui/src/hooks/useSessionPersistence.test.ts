@@ -3,10 +3,11 @@ import { renderHook, act } from "@testing-library/react";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
+  setBlockPersist: vi.fn(),
 }));
 
-vi.mock("@/lib/tauri-api", () => ({
-  loadSettings: vi.fn().mockResolvedValue({
+vi.mock("@/lib/tauri-api", () => {
+  const mockSettings = {
     font: { face: "Fira Code", size: 16 },
     defaultProfile: "WSL",
     profiles: [
@@ -34,7 +35,6 @@ vi.mock("@/lib/tauri-api", () => ({
       {
         id: "ws-1",
         name: "Saved WS",
-
         panes: [
           {
             x: 0,
@@ -62,30 +62,42 @@ vi.mock("@/lib/tauri-api", () => ({
       },
       { position: "right", activeView: null, views: [], visible: true },
     ],
-  }),
-  saveSettings: vi.fn().mockResolvedValue(undefined),
-  createTerminalSession: vi.fn().mockResolvedValue({}),
-  writeToTerminal: vi.fn().mockResolvedValue(undefined),
-  resizeTerminal: vi.fn().mockResolvedValue(undefined),
-  closeTerminalSession: vi.fn().mockResolvedValue(undefined),
-  getSyncGroupTerminals: vi.fn().mockResolvedValue([]),
-  handleLxMessage: vi.fn().mockResolvedValue({}),
-  onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
-  onSyncCwd: vi.fn().mockResolvedValue(() => {}),
-  onSyncBranch: vi.fn().mockResolvedValue(() => {}),
-  onLxNotify: vi.fn().mockResolvedValue(() => {}),
-  onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
-  getListeningPorts: vi.fn().mockResolvedValue([]),
-  getGitBranch: vi.fn().mockResolvedValue(null),
-  sendOsNotification: vi.fn().mockResolvedValue(undefined),
-}));
+  };
+  return {
+    loadSettings: vi.fn().mockResolvedValue(mockSettings),
+    loadSettingsValidated: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", settings: mockSettings, warnings: [] }),
+    cleanTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
+    saveSettings: vi.fn().mockResolvedValue(undefined),
+    createTerminalSession: vi.fn().mockResolvedValue({}),
+    writeToTerminal: vi.fn().mockResolvedValue(undefined),
+    resizeTerminal: vi.fn().mockResolvedValue(undefined),
+    closeTerminalSession: vi.fn().mockResolvedValue(undefined),
+    getSyncGroupTerminals: vi.fn().mockResolvedValue([]),
+    handleLxMessage: vi.fn().mockResolvedValue({}),
+    onTerminalOutput: vi.fn().mockResolvedValue(() => {}),
+    onSyncCwd: vi.fn().mockResolvedValue(() => {}),
+    onSyncBranch: vi.fn().mockResolvedValue(() => {}),
+    onLxNotify: vi.fn().mockResolvedValue(() => {}),
+    onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
+    getListeningPorts: vi.fn().mockResolvedValue([]),
+    getGitBranch: vi.fn().mockResolvedValue(null),
+    sendOsNotification: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 import { useSessionPersistence } from "./useSessionPersistence";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import { loadSettings } from "@/lib/tauri-api";
+import { loadSettingsValidated } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
+
+/** Wrap raw settings into a SettingsLoadResult with status "ok" for test mocks. */
+function wrapOk(settings: any) {
+  return { status: "ok", settings, warnings: [] };
+}
 
 describe("useSessionPersistence", () => {
   beforeEach(() => {
@@ -102,7 +114,7 @@ describe("useSessionPersistence", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(loadSettings).toHaveBeenCalledTimes(1);
+    expect(loadSettingsValidated).toHaveBeenCalledTimes(1);
     expect(result.current.loaded).toBe(true);
   });
 
@@ -162,51 +174,53 @@ describe("useSessionPersistence", () => {
 
   it("leaves cwdReceive/cwdSend undefined when not set in dock panes (resolved at render time via syncCwdDefaults)", async () => {
     // Override loadSettings to return dock panes without cwdReceive/cwdSend
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [
+          {
+            position: "bottom",
+            activeView: "TerminalView",
+            views: ["TerminalView"],
+            visible: true,
+            size: 200,
+            panes: [
+              {
+                id: "dp-test1",
+                view: { type: "TerminalView", profile: "WSL" }, // no cwdReceive/cwdSend
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+              },
+            ],
+          },
+        ],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [],
-      workspaces: [],
-      docks: [
-        {
-          position: "bottom",
-          activeView: "TerminalView",
-          views: ["TerminalView"],
-          visible: true,
-          size: 200,
-          panes: [
-            {
-              id: "dp-test1",
-              view: { type: "TerminalView", profile: "WSL" }, // no cwdReceive/cwdSend
-              x: 0,
-              y: 0,
-              w: 1,
-              h: 1,
-            },
-          ],
-        },
-      ],
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace",
-        copyOnSelect: true,
-        pathEllipsis: "start",
-        scrollbarStyle: "overlay",
-      },
-      claude: { syncCwd: "skip" },
-    } as any);
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {
@@ -222,51 +236,53 @@ describe("useSessionPersistence", () => {
   });
 
   it("preserves explicit cwdReceive=false from saved dock panes", async () => {
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [
+          {
+            position: "bottom",
+            activeView: "TerminalView",
+            views: ["TerminalView"],
+            visible: true,
+            size: 200,
+            panes: [
+              {
+                id: "dp-test1",
+                view: { type: "TerminalView", profile: "WSL", cwdReceive: false, cwdSend: false },
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+              },
+            ],
+          },
+        ],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [],
-      workspaces: [],
-      docks: [
-        {
-          position: "bottom",
-          activeView: "TerminalView",
-          views: ["TerminalView"],
-          visible: true,
-          size: 200,
-          panes: [
-            {
-              id: "dp-test1",
-              view: { type: "TerminalView", profile: "WSL", cwdReceive: false, cwdSend: false },
-              x: 0,
-              y: 0,
-              w: 1,
-              h: 1,
-            },
-          ],
-        },
-      ],
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace",
-        copyOnSelect: true,
-        pathEllipsis: "start",
-        scrollbarStyle: "overlay",
-      },
-      claude: { syncCwd: "skip" },
-    } as any);
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {
@@ -280,34 +296,36 @@ describe("useSessionPersistence", () => {
   });
 
   it("loads per-profile font override from backend settings", async () => {
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
-          font: { face: "JetBrains Mono", size: 16, weight: "bold" },
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+            font: { face: "JetBrains Mono", size: 16, weight: "bold" },
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [],
-      workspaces: [],
-      docks: [],
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace",
-        copyOnSelect: true,
-        pathEllipsis: "start",
-        scrollbarStyle: "overlay",
-      },
-      claude: { syncCwd: "skip" },
-    } as any);
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {
@@ -332,33 +350,35 @@ describe("useSessionPersistence", () => {
   });
 
   it("loads convenience settings from backend", async () => {
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [],
+        convenience: {
+          smartPaste: false,
+          pasteImageDir: "/images",
+          hoverIdleSeconds: 5,
+          notificationDismiss: "manual",
+          copyOnSelect: false,
+          pathEllipsis: "end",
+          scrollbarStyle: "separate",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [],
-      workspaces: [],
-      docks: [],
-      convenience: {
-        smartPaste: false,
-        pasteImageDir: "/images",
-        hoverIdleSeconds: 5,
-        notificationDismiss: "manual",
-        copyOnSelect: false,
-        pathEllipsis: "end",
-        scrollbarStyle: "separate",
-      },
-      claude: { syncCwd: "skip" },
-    } as any);
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {
@@ -376,62 +396,64 @@ describe("useSessionPersistence", () => {
   });
 
   it("restores layout viewConfig (overwritten layouts persist across restart)", async () => {
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [
+          {
+            id: "layout-custom",
+            name: "Custom Layout",
+            panes: [
+              {
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                viewType: "TerminalView",
+                viewConfig: { type: "TerminalView", profile: "WSL" },
+              },
+              {
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                viewType: "MemoView",
+                viewConfig: { type: "MemoView" },
+              },
+            ],
+          },
+        ],
+        workspaces: [
+          {
+            id: "ws-1",
+            name: "WS",
+            panes: [{ x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          },
+        ],
+        docks: [],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [
-        {
-          id: "layout-custom",
-          name: "Custom Layout",
-          panes: [
-            {
-              x: 0,
-              y: 0,
-              w: 0.5,
-              h: 1,
-              viewType: "TerminalView",
-              viewConfig: { type: "TerminalView", profile: "WSL" },
-            },
-            {
-              x: 0.5,
-              y: 0,
-              w: 0.5,
-              h: 1,
-              viewType: "MemoView",
-              viewConfig: { type: "MemoView" },
-            },
-          ],
-        },
-      ],
-      workspaces: [
-        {
-          id: "ws-1",
-          name: "WS",
-          panes: [{ x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
-        },
-      ],
-      docks: [],
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace",
-        copyOnSelect: true,
-        pathEllipsis: "start",
-        scrollbarStyle: "overlay",
-      },
-      claude: { syncCwd: "skip" },
-    } as any);
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {
@@ -450,33 +472,35 @@ describe("useSessionPersistence", () => {
   });
 
   it("loads claude settings from backend", async () => {
-    vi.mocked(loadSettings).mockResolvedValueOnce({
-      defaultProfile: "WSL",
-      profiles: [
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          colorScheme: "",
-          startingDirectory: "",
-          hidden: false,
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [],
+        workspaces: [],
+        docks: [],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
         },
-      ],
-      colorSchemes: [],
-      keybindings: [],
-      layouts: [],
-      workspaces: [],
-      docks: [],
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace",
-        copyOnSelect: true,
-        pathEllipsis: "start",
-        scrollbarStyle: "overlay",
-      },
-      claude: { syncCwd: "command" },
-    } as any);
+        claude: { syncCwd: "command" },
+      }) as any,
+    );
 
     renderHook(() => useSessionPersistence());
     await act(async () => {

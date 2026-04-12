@@ -44,23 +44,7 @@ pub enum SettingsLoadResult {
 pub fn validate_and_repair(settings: &mut Settings) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
 
-    validate_workspaces(settings, &mut warnings);
-    validate_layouts(settings, &mut warnings);
-    validate_docks(settings, &mut warnings);
-    validate_profile_references(settings, &mut warnings);
-
-    // Ensure at least one workspace exists
-    if settings.workspaces.is_empty() {
-        let default = Settings::default();
-        settings.workspaces = default.workspaces;
-        warnings.push(ValidationWarning {
-            path: "workspaces".into(),
-            message: "워크스페이스가 비어 있어 기본 워크스페이스를 생성했습니다.".into(),
-            repaired: true,
-        });
-    }
-
-    // Ensure at least one profile exists
+    // Ensure at least one profile exists FIRST — workspace repair needs a valid profile name.
     if settings.profiles.is_empty() {
         let default = Settings::default();
         settings.profiles = default.profiles;
@@ -71,10 +55,33 @@ pub fn validate_and_repair(settings: &mut Settings) -> Vec<ValidationWarning> {
         });
     }
 
+    validate_workspaces(settings, &mut warnings);
+    validate_layouts(settings, &mut warnings);
+    validate_docks(settings, &mut warnings);
+    validate_profile_references(settings, &mut warnings);
+
+    // Ensure at least one workspace exists
+    if settings.workspaces.is_empty() {
+        let fallback_profile = resolve_fallback_profile(settings);
+        settings.workspaces = vec![super::models::Workspace {
+            id: format!("ws-{}", &uuid::Uuid::new_v4().to_string()[..8]),
+            name: "Workspace 1".into(),
+            layout_id: None,
+            panes: vec![default_workspace_pane(&fallback_profile)],
+        }];
+        warnings.push(ValidationWarning {
+            path: "workspaces".into(),
+            message: "워크스페이스가 비어 있어 기본 워크스페이스를 생성했습니다.".into(),
+            repaired: true,
+        });
+    }
+
     warnings
 }
 
 fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>) {
+    let fallback_profile = resolve_fallback_profile(settings);
+
     for (ws_idx, ws) in settings.workspaces.iter_mut().enumerate() {
         let ws_path = format!("workspaces[{ws_idx}]");
 
@@ -103,7 +110,7 @@ fn validate_workspaces(settings: &mut Settings, warnings: &mut Vec<ValidationWar
 
         // If all panes were removed, add a default pane
         if ws.panes.is_empty() {
-            ws.panes.push(default_workspace_pane());
+            ws.panes.push(default_workspace_pane(&fallback_profile));
             warnings.push(ValidationWarning {
                 path: format!("{ws_path}.panes"),
                 message: "유효한 Pane이 없어 기본 Pane을 추가했습니다.".into(),
@@ -359,7 +366,27 @@ fn clamp_dimension(v: f64) -> f64 {
     v.clamp(0.01, 1.0)
 }
 
-fn default_workspace_pane() -> WorkspacePane {
+/// Pick the best profile name for fallback panes:
+/// 1. settings.default_profile if non-empty and present in profiles
+/// 2. First profile in the list
+/// 3. "PowerShell" as absolute last resort
+fn resolve_fallback_profile(settings: &Settings) -> String {
+    let profile_names: Vec<&str> = settings.profiles.iter().map(|p| p.name.as_str()).collect();
+
+    if !settings.default_profile.is_empty()
+        && profile_names.contains(&settings.default_profile.as_str())
+    {
+        return settings.default_profile.clone();
+    }
+
+    if let Some(first) = settings.profiles.first() {
+        return first.name.clone();
+    }
+
+    "PowerShell".into()
+}
+
+fn default_workspace_pane(profile_name: &str) -> WorkspacePane {
     WorkspacePane {
         id: format!("pane-{}", &uuid::Uuid::new_v4().to_string()[..8]),
         x: 0.0,
@@ -368,7 +395,7 @@ fn default_workspace_pane() -> WorkspacePane {
         h: 1.0,
         view: super::models::WorkspacePaneView {
             view_type: "TerminalView".into(),
-            extra: serde_json::json!({"profile": "PowerShell"}),
+            extra: serde_json::json!({"profile": profile_name}),
         },
     }
 }
@@ -634,6 +661,64 @@ mod tests {
         let json = r#"{"unknownField": true, "profiles": []}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.profiles.is_empty());
+    }
+
+    // ── 폴백 프로파일 선택 ──
+
+    #[test]
+    fn default_pane_uses_default_profile_when_valid() {
+        let mut settings = Settings::default();
+        settings.default_profile = "WSL".into();
+        // Remove all panes to trigger default_workspace_pane
+        settings.workspaces[0].panes.clear();
+        let _warnings = validate_and_repair(&mut settings);
+        let profile = settings.workspaces[0].panes[0]
+            .view
+            .extra
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(profile, "WSL");
+    }
+
+    #[test]
+    fn default_pane_uses_first_profile_when_default_invalid() {
+        let mut settings = Settings::default();
+        settings.default_profile = "NonExistent".into();
+        settings.profiles = vec![Profile {
+            name: "GitBash".into(),
+            command_line: "bash.exe".into(),
+            ..Profile::default()
+        }];
+        settings.workspaces[0].panes.clear();
+        let _warnings = validate_and_repair(&mut settings);
+        let profile = settings.workspaces[0].panes[0]
+            .view
+            .extra
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(profile, "GitBash");
+    }
+
+    #[test]
+    fn default_pane_uses_first_profile_when_no_default_set() {
+        let mut settings = Settings::default();
+        settings.default_profile = "".into();
+        settings.profiles = vec![Profile {
+            name: "WSL".into(),
+            command_line: "wsl.exe".into(),
+            ..Profile::default()
+        }];
+        settings.workspaces[0].panes.clear();
+        let _warnings = validate_and_repair(&mut settings);
+        let profile = settings.workspaces[0].panes[0]
+            .view
+            .extra
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(profile, "WSL");
     }
 
     // ── Multiple panes: valid + invalid mix ──
