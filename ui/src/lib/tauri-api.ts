@@ -169,6 +169,8 @@ export interface MemoSettings {
   copyOnSelect: boolean;
   /** Double-click to select entire paragraph (requires paragraphCopy enabled). */
   dblClickParagraphSelect: boolean;
+  /** Tab indent size (number of spaces). */
+  indentSize: number;
   fontFamily: string;
   fontSize: number;
   fontWeight: string;

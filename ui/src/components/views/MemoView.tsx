@@ -226,7 +226,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
   );
 
-  const INDENT = "  "; // 2 spaces
+  const indent = " ".repeat(memo.indentSize || 2);
 
   const applyTextChange = useCallback(
     (newText: string) => {
@@ -252,6 +252,8 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
       const { selectionStart, selectionEnd, value } = textarea;
       const hasSelection = selectionStart !== selectionEnd;
+      const indentSize = indent.length;
+      const dedentRegex = new RegExp(`^ {1,${indentSize}}`);
 
       if (e.shiftKey) {
         // Shift+Tab: 인덴트 제거
@@ -276,7 +278,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           let removedBeforeStart = 0;
           const newLines = lines.map((line, i) => {
             if (i < startLine || i > endLine) return line;
-            const spaces = line.match(/^ {1,2}/);
+            const spaces = line.match(dedentRegex);
             if (spaces) {
               const removed = spaces[0].length;
               totalRemoved += removed;
@@ -315,7 +317,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           }
 
           const line = lines[cursorLine];
-          const spaces = line.match(/^ {1,2}/);
+          const spaces = line.match(dedentRegex);
           if (!spaces) return;
           const removed = spaces[0].length;
           lines[cursorLine] = line.slice(removed);
@@ -345,7 +347,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           }
 
           const newLines = lines.map((line, i) => {
-            if (i >= startLine && i <= endLine) return INDENT + line;
+            if (i >= startLine && i <= endLine) return indent + line;
             return line;
           });
 
@@ -365,15 +367,15 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           pendingSelectionRef.current = { start: newStartOffset, end: newEndOffset };
         } else {
           // 커서만 있는 경우: 커서 위치에 스페이스 삽입
-          const newText = value.slice(0, selectionStart) + INDENT + value.slice(selectionStart);
+          const newText = value.slice(0, selectionStart) + indent + value.slice(selectionStart);
           applyTextChange(newText);
 
-          const newPos = selectionStart + INDENT.length;
+          const newPos = selectionStart + indent.length;
           pendingSelectionRef.current = { start: newPos, end: newPos };
         }
       }
     },
-    [applyTextChange],
+    [applyTextChange, indent],
   );
 
   return (

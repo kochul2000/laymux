@@ -518,6 +518,29 @@ describe("MemoView", () => {
 
       expect(textarea.value).toBe("hello");
     });
+
+    it("설정된 indentSize에 따라 인덴트 크기가 변경된다", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, indentSize: 4 },
+      });
+      const textarea = await setupMemo("hello");
+      textarea.setSelectionRange(0, 0);
+      fireEvent.keyDown(textarea, { key: "Tab" });
+
+      expect(textarea.value).toBe("    hello"); // 4 spaces
+      expect(textarea.selectionStart).toBe(4);
+    });
+
+    it("Shift+Tab은 indentSize만큼의 스페이스를 제거한다", async () => {
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, indentSize: 4 },
+      });
+      const textarea = await setupMemo("    hello");
+      textarea.setSelectionRange(6, 6);
+      fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
+
+      expect(textarea.value).toBe("hello");
+    });
   });
 
   describe("font settings", () => {
