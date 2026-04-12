@@ -6,7 +6,7 @@ Laymux IDE의 dev 인스턴스에서 스크린샷을 캡처하여 확인한다.
 
 - **Dev 인스턴스**: 고정 포트 `19281`
 - **Release 인스턴스 (19280)**: 절대 건드리지 않는다
-- **인증 불필요**: IP allowlist로 로컬 접근만 허용 (loopback, RFC 1918 사설 대역)
+- **인증 불필요**: IP allowlist로 로컬 접근만 허용 (loopback, WSL2/Hyper-V, link-local)
 
 ## 절차
 

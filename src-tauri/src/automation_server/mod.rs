@@ -120,19 +120,22 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     Ok(port)
 }
 
-/// Check if an IP address is a local/private address.
-/// Allows: loopback (127.x, ::1), RFC 1918 private (10.x, 172.16-31.x, 192.168.x),
-/// and link-local (169.254.x, fe80::).
+/// Check if an IP address is allowed to access the automation API.
+/// Allows only loopback, link-local, and Hyper-V/WSL2 bridge (172.16.0.0/12).
+/// Broader RFC 1918 ranges (10.0.0.0/8, 192.168.0.0/16) are excluded to prevent
+/// LAN/VPN peers from accessing the API without authentication.
 fn is_local_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             v4.is_loopback()            // 127.0.0.0/8
-                || v4.octets()[0] == 10  // 10.0.0.0/8
-                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1])) // 172.16.0.0/12
-                || (v4.octets()[0] == 192 && v4.octets()[1] == 168) // 192.168.0.0/16
+                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1])) // 172.16.0.0/12 (WSL2/Hyper-V)
                 || (v4.octets()[0] == 169 && v4.octets()[1] == 254) // 169.254.0.0/16 link-local
         }
         IpAddr::V6(v6) => {
+            // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x) — OS may use these when bound to 0.0.0.0
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_local_ip(&IpAddr::V4(mapped));
+            }
             v6.is_loopback()  // ::1
                 || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
         }
@@ -265,17 +268,22 @@ mod tests {
     }
 
     #[test]
-    fn is_local_ip_allows_private_ranges() {
-        // 10.0.0.0/8
-        assert!(is_local_ip(&"10.0.0.1".parse().unwrap()));
-        assert!(is_local_ip(&"10.255.255.255".parse().unwrap()));
-        // 172.16.0.0/12
+    fn is_local_ip_allows_wsl2_and_link_local() {
+        // 172.16.0.0/12 (WSL2/Hyper-V bridge)
         assert!(is_local_ip(&"172.16.0.1".parse().unwrap()));
         assert!(is_local_ip(&"172.31.255.255".parse().unwrap()));
-        // 192.168.0.0/16
-        assert!(is_local_ip(&"192.168.1.1".parse().unwrap()));
         // link-local
         assert!(is_local_ip(&"169.254.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_local_ip_rejects_lan_and_vpn_ranges() {
+        // 10.0.0.0/8 (corporate VPN)
+        assert!(!is_local_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(!is_local_ip(&"10.255.255.255".parse().unwrap()));
+        // 192.168.0.0/16 (home LAN)
+        assert!(!is_local_ip(&"192.168.1.1".parse().unwrap()));
+        assert!(!is_local_ip(&"192.168.0.1".parse().unwrap()));
     }
 
     #[test]
@@ -284,6 +292,18 @@ mod tests {
         assert!(!is_local_ip(&"172.32.0.1".parse().unwrap()));
         assert!(!is_local_ip(&"172.15.255.255".parse().unwrap()));
         assert!(!is_local_ip(&"192.169.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_local_ip_handles_ipv4_mapped_ipv6() {
+        // ::ffff:127.0.0.1 → loopback
+        assert!(is_local_ip(&"::ffff:127.0.0.1".parse().unwrap()));
+        // ::ffff:172.20.0.1 → WSL2 range
+        assert!(is_local_ip(&"::ffff:172.20.0.1".parse().unwrap()));
+        // ::ffff:192.168.1.1 → rejected (LAN)
+        assert!(!is_local_ip(&"::ffff:192.168.1.1".parse().unwrap()));
+        // ::ffff:8.8.8.8 → rejected (public)
+        assert!(!is_local_ip(&"::ffff:8.8.8.8".parse().unwrap()));
     }
 
     #[test]

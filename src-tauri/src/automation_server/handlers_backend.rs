@@ -15,9 +15,9 @@ pub async fn api_docs() -> impl IntoResponse {
     Json(serde_json::json!({
         "name": "Laymux IDE Automation API",
         "version": "v1",
-        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). Access restricted to local/private networks (loopback, RFC 1918).",
+        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). Access restricted to loopback, WSL2/Hyper-V bridge (172.16.0.0/12), and link-local.",
         "base_url": format!("http://127.0.0.1:{}/api/v1", super::automation_port()),
-        "auth": "No authentication required. Access is restricted by IP allowlist (localhost, RFC 1918 private networks, link-local).",
+        "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), link-local (169.254.x, fe80::).",
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
             {
