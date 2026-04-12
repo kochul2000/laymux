@@ -71,11 +71,31 @@ info "서버: $MCP_NAME"
 info "Port: $PORT"
 info "Scope: $SCOPE"
 
-# --- 2. Gateway IP 결정 (WSL이면 Windows 호스트 IP 사용) ---
+# --- 2. Gateway IP 결정 (WSL이면 Windows 호스트 IP 탐색) ---
 if [ -d "/mnt/c" ]; then
-    GATEWAY=$(ip route show default 2>/dev/null | awk '{print $3}' || echo "")
+    # WSL 감지 — 여러 후보를 시도하여 실제 연결 가능한 IP를 찾는다.
+    # WSL2 미러링 네트워킹: 127.0.0.1로 Windows에 직접 접근 가능
+    # WSL2 NAT 모드: Hyper-V 게이트웨이 IP (보통 172.x.x.x) 필요
+    WSL_GATEWAY=$(ip route show default 2>/dev/null | awk '{print $3}' || echo "")
+    WSL_NAMESERVER=$(grep -m1 nameserver /etc/resolv.conf 2>/dev/null | awk '{print $2}' || echo "")
+
+    GATEWAY=""
+    for candidate in "127.0.0.1" "$WSL_GATEWAY" "$WSL_NAMESERVER"; do
+        [ -z "$candidate" ] && continue
+        if command -v curl >/dev/null 2>&1; then
+            if curl -sf --max-time 2 "http://$candidate:$PORT/api/v1/health" >/dev/null 2>&1; then
+                GATEWAY="$candidate"
+                break
+            fi
+        fi
+    done
+
+    # 모두 실패하면 게이트웨이 IP를 기본값으로 사용 (--force 시 나중에 연결)
     if [ -z "$GATEWAY" ]; then
-        GATEWAY=$(grep -m1 nameserver /etc/resolv.conf | awk '{print $2}' || echo "127.0.0.1")
+        GATEWAY="${WSL_GATEWAY:-127.0.0.1}"
+        warn "WSL에서 laymux에 연결할 수 없었습니다. 기본값 사용: $GATEWAY"
+    else
+        info "WSL 감지 — 연결 확인된 IP: $GATEWAY"
     fi
 else
     GATEWAY="127.0.0.1"
@@ -83,19 +103,21 @@ fi
 
 info "Gateway: $GATEWAY"
 
-# --- 3. JSON 읽기 & WSL이면 URL 치환 ---
+# --- 3. JSON 읽기 & 필요 시 URL 치환 ---
 MCP_JSON=$(cat "$JSON_FILE")
 if [ "$GATEWAY" != "127.0.0.1" ]; then
     MCP_JSON=$(printf '%s' "$MCP_JSON" | sed "s/127\\.0\\.0\\.1/$GATEWAY/g")
-    info "WSL 감지 — URL을 $GATEWAY 로 치환"
+    info "URL을 $GATEWAY 로 치환"
 fi
 
-# --- 4. Health check ---
+# --- 4. Health check (WSL 게이트웨이 탐색에서 이미 통과했으면 스킵) ---
 HEALTH_URL="http://$GATEWAY:$PORT/api/v1/health"
+HEALTH_PASSED=false
 
 if command -v curl >/dev/null 2>&1; then
     if curl -sf --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
         info "Health check 통과"
+        HEALTH_PASSED=true
     else
         if [ "$FORCE" = true ]; then
             warn "Health check 실패 (--force로 계속 진행)"
