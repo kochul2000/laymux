@@ -9,7 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import type { DockPosition, ViewType } from "@/stores/types";
+import type { DockPosition, ViewType, WorkspacePane } from "@/stores/types";
 
 interface HandlerResult {
   success: boolean;
@@ -28,6 +28,87 @@ function err(message: string): HandlerResult {
   return { success: false, error: message };
 }
 
+/** Check if two 1D ranges overlap (with tolerance for floating point). */
+function rangesOverlap(a: number, aLen: number, b: number, bLen: number): boolean {
+  const eps = 0.01;
+  return a < b + bLen - eps && b < a + aLen - eps;
+}
+
+/** Compute directional neighbors for a pane in the grid. */
+function computeNeighbors(
+  panes: WorkspacePane[],
+  targetIndex: number,
+): Record<string, { paneIndex: number; terminalId: string } | null> {
+  const target = panes[targetIndex];
+  if (!target) return { left: null, right: null, above: null, below: null };
+
+  const result: Record<string, { paneIndex: number; terminalId: string } | null> = {
+    left: null,
+    right: null,
+    above: null,
+    below: null,
+  };
+
+  for (let i = 0; i < panes.length; i++) {
+    if (i === targetIndex) continue;
+    const other = panes[i];
+    const entry = { paneIndex: i, terminalId: `terminal-${other.id}` };
+
+    // Right: other starts where target ends on x-axis, y ranges overlap
+    if (
+      Math.abs(other.x - (target.x + target.w)) < 0.01 &&
+      rangesOverlap(target.y, target.h, other.y, other.h)
+    ) {
+      if (!result.right || other.y < panes[result.right.paneIndex].y) result.right = entry;
+    }
+    // Left: other ends where target starts on x-axis
+    if (
+      Math.abs(other.x + other.w - target.x) < 0.01 &&
+      rangesOverlap(target.y, target.h, other.y, other.h)
+    ) {
+      if (!result.left || other.y < panes[result.left.paneIndex].y) result.left = entry;
+    }
+    // Below: other starts where target ends on y-axis
+    if (
+      Math.abs(other.y - (target.y + target.h)) < 0.01 &&
+      rangesOverlap(target.x, target.w, other.x, other.w)
+    ) {
+      if (!result.below || other.x < panes[result.below.paneIndex].x) result.below = entry;
+    }
+    // Above: other ends where target starts on y-axis
+    if (
+      Math.abs(other.y + other.h - target.y) < 0.01 &&
+      rangesOverlap(target.x, target.w, other.x, other.w)
+    ) {
+      if (!result.above || other.x < panes[result.above.paneIndex].x) result.above = entry;
+    }
+  }
+
+  return result;
+}
+
+/** Find the workspace and pane for a given terminal ID. */
+function findTerminalContext(terminalId: string) {
+  const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
+  const { instances } = useTerminalStore.getState();
+  const terminal = instances.find((i) => i.id === terminalId);
+  if (!terminal) return null;
+
+  const workspace = workspaces.find((ws) => ws.id === terminal.workspaceId);
+  if (!workspace) return null;
+
+  const paneId = terminalId.replace(/^terminal-/, "");
+  const paneIndex = workspace.panes.findIndex((p) => p.id === paneId);
+  const pane = paneIndex >= 0 ? workspace.panes[paneIndex] : null;
+
+  return { terminal, workspace, pane, paneIndex, activeWorkspaceId };
+}
+
+/** Enrich a pane with its index and terminal ID. */
+function enrichPane(p: WorkspacePane, index: number) {
+  return { ...p, paneIndex: index, terminalId: `terminal-${p.id}` };
+}
+
 const handlers: HandlerMap = {
   workspaces: {
     list: () => {
@@ -36,15 +117,26 @@ const handlers: HandlerMap = {
     },
     getActive: () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      return ok({ workspace: ws ?? null });
+      if (!ws) return ok({ workspace: null });
+      const enriched = {
+        ...ws,
+        panes: ws.panes.map(enrichPane),
+      };
+      return ok({ workspace: enriched });
     },
     switchActive: (p) => {
       useWorkspaceStore.getState().setActiveWorkspace(p.id as string);
       return ok({ switched: p.id });
     },
     add: (p) => {
+      const before = useWorkspaceStore.getState().workspaces;
       useWorkspaceStore.getState().addWorkspace(p.name as string, p.layoutId as string);
-      return ok({ created: true });
+      const after = useWorkspaceStore.getState().workspaces;
+      const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
+      return ok({
+        created: true,
+        workspace: newWs ? { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length } : null,
+      });
     },
     remove: (p) => {
       useWorkspaceStore.getState().removeWorkspace(p.id as string);
@@ -72,7 +164,8 @@ const handlers: HandlerMap = {
   grid: {
     getState: () => {
       const { editMode, focusedPaneIndex } = useGridStore.getState();
-      return ok({ editMode, focusedPaneIndex });
+      const { activeWorkspaceId } = useWorkspaceStore.getState();
+      return ok({ editMode, focusedPaneIndex, activeWorkspaceId });
     },
     setEditMode: (p) => {
       useGridStore.getState().setEditMode(p.enabled as boolean);
@@ -94,7 +187,24 @@ const handlers: HandlerMap = {
       useWorkspaceStore
         .getState()
         .splitPane(p.paneIndex as number, p.direction as "horizontal" | "vertical");
-      return ok({ split: true });
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      const newPaneIndex = (p.paneIndex as number) + 1;
+      const newPane = ws?.panes[newPaneIndex];
+      return ok({
+        split: true,
+        newPane: newPane
+          ? {
+              id: newPane.id,
+              terminalId: `terminal-${newPane.id}`,
+              paneIndex: newPaneIndex,
+              x: newPane.x,
+              y: newPane.y,
+              w: newPane.w,
+              h: newPane.h,
+            }
+          : null,
+        totalPanes: ws?.panes.length ?? 0,
+      });
     },
     remove: (p) => {
       useWorkspaceStore.getState().removePane(p.paneIndex as number);
@@ -181,7 +291,68 @@ const handlers: HandlerMap = {
   terminals: {
     list: () => {
       const { instances } = useTerminalStore.getState();
-      return ok({ instances });
+      const { workspaces } = useWorkspaceStore.getState();
+      const enriched = instances.map((inst) => {
+        const ws = workspaces.find((w) => w.id === inst.workspaceId);
+        const paneId = inst.id.replace(/^terminal-/, "");
+        const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
+        const pane = paneIndex >= 0 ? ws!.panes[paneIndex] : null;
+        return {
+          ...inst,
+          paneIndex: paneIndex >= 0 ? paneIndex : null,
+          panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
+        };
+      });
+      return ok({ instances: enriched });
+    },
+    get: (p) => {
+      const ctx = findTerminalContext(p.id as string);
+      if (!ctx) return err(`Terminal '${p.id}' not found`);
+      const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
+      return ok({
+        terminal: {
+          ...terminal,
+          paneIndex: paneIndex >= 0 ? paneIndex : null,
+          panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
+        },
+        workspace: { id: workspace.id, name: workspace.name, isActive: workspace.id === activeWorkspaceId },
+      });
+    },
+    identify: (p) => {
+      const ctx = findTerminalContext(p.id as string);
+      if (!ctx) return err(`Terminal '${p.id}' not found`);
+      const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
+      const { focusedPaneIndex } = useGridStore.getState();
+
+      return ok({
+        terminal: {
+          id: terminal.id,
+          profile: terminal.profile,
+          syncGroup: terminal.syncGroup,
+          cwd: terminal.cwd,
+          branch: terminal.branch,
+          activity: terminal.activity,
+          isFocused: terminal.isFocused,
+        },
+        workspace: {
+          id: workspace.id,
+          name: workspace.name,
+          isActive: workspace.id === activeWorkspaceId,
+          totalPanes: workspace.panes.length,
+        },
+        pane: pane
+          ? {
+              id: pane.id,
+              index: paneIndex,
+              x: pane.x,
+              y: pane.y,
+              w: pane.w,
+              h: pane.h,
+              isFocusedPane: focusedPaneIndex === paneIndex,
+            }
+          : null,
+        neighbors: pane ? computeNeighbors(workspace.panes, paneIndex) : null,
+      });
     },
     setFocus: (p) => {
       useTerminalStore.getState().setTerminalFocus(p.id as string);
