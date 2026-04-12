@@ -22,7 +22,6 @@ pub const ENV_LX_SOCKET: &str = "LX_SOCKET";
 pub const ENV_LX_TERMINAL_ID: &str = "LX_TERMINAL_ID";
 pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
-pub const ENV_LX_AUTOMATION_KEY: &str = "LX_AUTOMATION_KEY";
 pub const ENV_LX_PROPAGATED: &str = "LX_PROPAGATED";
 
 // ── Timeouts & limits ──────────────────────────────────────────────
@@ -118,7 +117,6 @@ mod tests {
             ENV_LX_TERMINAL_ID,
             ENV_LX_GROUP_ID,
             ENV_LX_AUTOMATION_PORT,
-            ENV_LX_AUTOMATION_KEY,
             ENV_LX_PROPAGATED,
         ];
         for name in envs {
