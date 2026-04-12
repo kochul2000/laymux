@@ -183,8 +183,14 @@ const handlers: HandlerMap = {
       return ok({ editMode: p.enabled });
     },
     focusPane: (p) => {
-      useGridStore.getState().setFocusedPane(p.index as number);
-      return ok({ focusedPaneIndex: p.index });
+      const index = p.index as number;
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      const paneCount = ws?.panes.length ?? 0;
+      if (index < 0 || index >= paneCount) {
+        return err(`Pane index ${index} out of range (0-${paneCount - 1})`);
+      }
+      useGridStore.getState().setFocusedPane(index);
+      return ok({ focusedPaneIndex: index });
     },
     simulateHover: (p) => {
       const idx = p.index != null ? (p.index as number) : null;
@@ -198,8 +204,14 @@ const handlers: HandlerMap = {
       useWorkspaceStore
         .getState()
         .splitPane(p.paneIndex as number, p.direction as "horizontal" | "vertical");
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPaneIndex = (p.paneIndex as number) + 1;
+      // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
+      const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
+      const newPaneBefore = wsBeforeConvert?.panes[newPaneIndex];
+      if (newPaneBefore && newPaneBefore.view.type !== "TerminalView") {
+        useWorkspaceStore.getState().setPaneView(newPaneIndex, { type: "TerminalView" });
+      }
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];
       return ok({
         split: true,
@@ -366,8 +378,19 @@ const handlers: HandlerMap = {
       });
     },
     setFocus: (p) => {
-      useTerminalStore.getState().setTerminalFocus(p.id as string);
-      return ok({ focused: p.id });
+      const terminalId = p.id as string;
+      const { instances } = useTerminalStore.getState();
+      const terminal = instances.find((i) => i.id === terminalId);
+      if (!terminal) return err(`Terminal '${terminalId}' not found`);
+
+      // Auto-switch workspace if terminal is in a different workspace
+      const { activeWorkspaceId } = useWorkspaceStore.getState();
+      if (terminal.workspaceId !== activeWorkspaceId) {
+        useWorkspaceStore.getState().setActiveWorkspace(terminal.workspaceId);
+      }
+
+      useTerminalStore.getState().setTerminalFocus(terminalId);
+      return ok({ focused: terminalId, switchedWorkspace: terminal.workspaceId !== activeWorkspaceId ? terminal.workspaceId : undefined });
     },
   },
 
@@ -377,9 +400,21 @@ const handlers: HandlerMap = {
       return ok({ notifications });
     },
     add: (p) => {
+      const workspaceId = p.workspaceId as string;
+      const terminalId = p.terminalId as string;
+      // Validate workspace exists
+      const { workspaces } = useWorkspaceStore.getState();
+      if (!workspaces.some((ws) => ws.id === workspaceId)) {
+        return err(`Workspace '${workspaceId}' not found`);
+      }
+      // Validate terminal exists
+      const { instances } = useTerminalStore.getState();
+      if (!instances.some((i) => i.id === terminalId)) {
+        return err(`Terminal '${terminalId}' not found`);
+      }
       useNotificationStore.getState().addNotification({
-        terminalId: p.terminalId as string,
-        workspaceId: p.workspaceId as string,
+        terminalId,
+        workspaceId,
         message: p.message as string,
         level: (p.level as NotificationLevel) ?? undefined,
       });

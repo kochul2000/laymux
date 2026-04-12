@@ -235,10 +235,41 @@ fn local_interface_ips() -> Vec<String> {
 impl McpHandler {
     // ── Terminal (7) ──
 
-    /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, branch, paneIndex, and panePosition (x,y,w,h).
+    /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition (x,y,w,h).
+    /// The activity field reflects real-time backend detection (shell or interactiveApp).
     #[tool]
     async fn list_terminals(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "terminals", "list", json!({})).await
+        let bridge_result =
+            bridge_request(&self.state, "query", "terminals", "list", json!({})).await;
+        match bridge_result {
+            Ok(mut data) => {
+                // Enrich with backend activity states to resolve frontend/backend inconsistency
+                let backend_states =
+                    crate::activity::detect_all_terminal_states(&self.state.app_state);
+                if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
+                    for inst in instances.iter_mut() {
+                        if let Some(id) = inst.get("id").and_then(|v| v.as_str()) {
+                            if let Some(state_info) = backend_states.get(id) {
+                                inst.as_object_mut().map(|obj| {
+                                    obj.insert(
+                                        "activity".to_string(),
+                                        serde_json::to_value(state_info).unwrap_or(json!(null)),
+                                    )
+                                });
+                            }
+                        }
+                    }
+                }
+                Ok(json_result(&data))
+            }
+            Err((_status, axum::Json(body))) => {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Bridge request failed");
+                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            }
+        }
     }
 
     /// Identify a terminal's full context: workspace, pane position (x,y,w,h), and neighboring panes.
