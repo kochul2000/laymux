@@ -2,6 +2,7 @@
 //!
 //! Scans raw PTY output for user-facing status messages emitted by Claude Code.
 //! Two marker variants are supported:
+//!
 //!   - Legacy: bright-white `●` (U+25CF) with SGR 38;5;231
 //!   - Current: salmon `·` (U+00B7) with SGR 38;5;174 (Claude brand color)
 //! Also provides general-purpose ANSI escape stripping.
@@ -13,14 +14,16 @@ use crate::constants::STATUS_MESSAGE_SCAN_BYTES;
 /// that the TUI may insert between color and marker.
 const SGR_LOOKBACK_BYTES: usize = 50;
 
+/// (UTF-8 bytes of the marker char, expected color as RGB).
+type MarkerDef = (&'static [u8], (u8, u8, u8));
+
 /// Marker variants emitted by Claude Code for status messages.
-/// Each entry: (UTF-8 bytes of the marker char, expected color as RGB).
 ///
 /// Color matching supports both 256-color (`38;5;N`) and true-color (`38;2;R;G;B`)
 /// SGR sequences. ConPTY on Windows converts 256-color to RGB, so we parse the
 /// SGR and compare colors with a tolerance (±40 per channel) instead of exact
 /// byte matching.
-const MARKERS: &[(&[u8], (u8, u8, u8))] = &[
+const MARKERS: &[MarkerDef] = &[
     // Current (2025+): · (U+00B7 MIDDLE DOT) with salmon/terracotta color (256-color 174 = #d78787)
     (&[0xc2, 0xb7], (215, 135, 135)),
     // Legacy: ● (U+25CF BLACK CIRCLE) with bright-white color (256-color 231 = #ffffff)
@@ -103,7 +106,7 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
                     // Keep the last occurrence by position in the byte stream
                     if best
                         .as_ref()
-                        .map_or(true, |(prev_pos, _)| marker_pos > *prev_pos)
+                        .is_none_or(|(prev_pos, _)| marker_pos > *prev_pos)
                     {
                         best = Some((marker_pos, stripped));
                     }
