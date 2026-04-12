@@ -11,6 +11,7 @@ import {
 } from "@/lib/tauri-api";
 // convertFileSrc no longer needed — images are returned as data URLs
 import { shellEscape, joinPath, parentPath } from "@/lib/file-explorer-parse";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { TerminalView } from "./TerminalView";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
@@ -432,8 +433,8 @@ export function FileExplorerView({
           setSelectedIndices(new Set());
           break;
         }
-        case "c": {
-          if (e.ctrlKey) {
+        default: {
+          if (matchesKeybinding(e.nativeEvent, "fileExplorer.copy")) {
             e.preventDefault();
             copySelectedPaths();
           }
