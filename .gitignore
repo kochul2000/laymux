@@ -38,5 +38,8 @@ test-results/
 .claude/worktrees/
 .claude/*.local.*
 
+# Codex
+.codex
+
 # Temp files
 *~

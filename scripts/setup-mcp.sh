@@ -141,11 +141,18 @@ else
     warn "curl이 없어 health check를 건너뜁니다."
 fi
 
-# --- 5. .mcp.json 생성 ---
+# --- 5. MCP 서버 이름 결정 (dev/release 키 분리) ---
+if [ "$USE_DEV" = true ]; then
+    MCP_NAME="laymux-dev"
+else
+    MCP_NAME="laymux"
+fi
+
+# --- 6. .mcp.json 생성 ---
 MCP_CONFIG=$(cat <<EOF
 {
   "mcpServers": {
-    "laymux": {
+    "$MCP_NAME": {
       "type": "http",
       "url": "$MCP_URL",
       "headers": {
@@ -163,33 +170,33 @@ if [ "$SCOPE" = "global" ]; then
     if [ -f "$TARGET" ]; then
         # Merge into existing file
         EXISTING=$(cat "$TARGET")
-        echo "$EXISTING" | jq --arg url "$MCP_URL" --arg key "Bearer $KEY" \
-            '.mcpServers.laymux = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
+        echo "$EXISTING" | jq --arg name "$MCP_NAME" --arg url "$MCP_URL" --arg key "Bearer $KEY" \
+            '.mcpServers[$name] = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
             > "$TARGET.tmp"
         mv "$TARGET.tmp" "$TARGET"
     else
         echo "$MCP_CONFIG" > "$TARGET"
     fi
-    info "전역 등록 완료: $TARGET"
+    info "전역 등록 완료: $TARGET ($MCP_NAME)"
 else
     PROJECT_DIR="$(realpath "$PROJECT_DIR")"
     [ -d "$PROJECT_DIR" ] || error "디렉토리가 존재하지 않습니다: $PROJECT_DIR"
     TARGET="$PROJECT_DIR/.mcp.json"
 
     if [ -f "$TARGET" ]; then
-        jq --arg url "$MCP_URL" --arg key "Bearer $KEY" \
-            '.mcpServers.laymux = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
+        jq --arg name "$MCP_NAME" --arg url "$MCP_URL" --arg key "Bearer $KEY" \
+            '.mcpServers[$name] = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
             "$TARGET" > "$TARGET.tmp"
         mv "$TARGET.tmp" "$TARGET"
     else
         echo "$MCP_CONFIG" > "$TARGET"
     fi
-    info "프로젝트 등록 완료: $TARGET"
+    info "프로젝트 등록 완료: $TARGET ($MCP_NAME)"
 fi
 
-# --- 6. 권한 설정 ---
+# --- 7. 권한 설정 ---
 SETTINGS="$HOME/.claude/settings.json"
-PERMISSION_RULE="mcp__laymux__*"
+PERMISSION_RULE="mcp__${MCP_NAME}__*"
 
 if [ -f "$SETTINGS" ]; then
     if jq -e --arg rule "$PERMISSION_RULE" '.permissions.allow | index($rule)' "$SETTINGS" >/dev/null 2>&1; then
