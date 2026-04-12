@@ -1122,7 +1122,33 @@ pub fn get_terminal_summaries_inner(
 - Props에 `data-testid`를 전달할 수 있도록 `testId` prop을 지원한다.
 - 스타일 상수(높이, 반경 등)는 컴포넌트 파일 상단에 `const`로 선언하되, CSS 변수로 정의된 토큰이 있으면 그것을 사용한다.
 
-### 15.5 앱 전용 편의 코드 격리
+### 15.5 키보드 단축키 설계 원칙
+
+**기능 구현에 키 조합을 하드코딩하지 않는다.** 단축키는 사용자가 언제든 재바인딩할 수 있으므로, 기능 코드에서 특정 키 조합(예: `e.ctrlKey && e.key === 'c'`)을 직접 검사하면 커스터마이징이 불가능해진다.
+
+| 규칙 | 설명 |
+|------|------|
+| 이벤트/액션 기반 설계 | 기능은 **액션(이벤트)에 반응**하도록 구현한다. 키 입력 → 액션 변환은 중앙 키바인딩 시스템(`useKeyboardShortcuts`, `lx-shortcuts`)이 담당한다. |
+| 컴포넌트 내 `e.key` 직접 검사 금지 | `onKeyDown`에서 `e.ctrlKey && e.key === 'x'` 같은 수정자+키 조합을 직접 검사하지 않는다. 네비게이션 키(`ArrowUp/Down`, `Enter`, `Escape`, `Tab`)만 컴포넌트 내에서 허용한다. |
+| 새 단축키 추가 시 | `settings.json`의 `keybindings` 배열에 기본값을 등록하고, 키바인딩 시스템에서 액션을 디스패치한다. 컴포넌트는 그 액션만 구독한다. |
+| 모든 단축키는 오버라이드 가능 | 모든 단축키는 `settings.json`의 `keybindings`에서 사용자가 재바인딩할 수 있어야 한다. 새 단축키 추가 시 **SettingsView의 Keybindings UI에도 반드시 반영**한다 (`defaultKeybindings` 배열 + 표시 라벨). Settings UI에 나타나지 않는 단축키는 존재하지 않는 것과 같다. |
+
+```typescript
+// ❌ 금지 — 기능 코드에 키 조합 하드코딩
+function handleKeyDown(e: KeyboardEvent) {
+  if (e.ctrlKey && e.key === "c") { copySelectedPaths(); }
+}
+
+// ✅ 사용 — 키바인딩 시스템에서 액션 디스패치, 컴포넌트는 액션만 처리
+// useKeyboardShortcuts 또는 keybindings 설정에서:
+//   { "keys": "ctrl+c", "command": "fileExplorer.copy", "when": "fileExplorerFocused" }
+// 컴포넌트에서:
+useAction("fileExplorer.copy", () => copySelectedPaths());
+```
+
+**예외**: xterm.js 터미널 입력 처리(smart paste 등 PTY 전달 전 인터셉트)는 터미널 에뮬레이터 고유 동작이므로 키바인딩 시스템을 거치지 않아도 된다.
+
+### 15.6 앱 전용 편의 코드 격리
 
 각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
 
