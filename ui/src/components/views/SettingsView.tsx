@@ -18,6 +18,7 @@ import {
 } from "@/stores/settings-store";
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
+import { DEFAULT_KEYBINDINGS } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
@@ -2440,86 +2441,7 @@ function MemoSection() {
 
 // -- Section: Keybindings --
 
-interface KeybindingDef {
-  id: string;
-  label: string;
-  defaultKeys: string;
-  group: string;
-}
-
-const defaultKeybindings: KeybindingDef[] = [
-  // Workspace switch
-  { id: "workspace.1", label: "워크스페이스 1", defaultKeys: "Ctrl+Alt+1", group: "Workspace" },
-  { id: "workspace.2", label: "워크스페이스 2", defaultKeys: "Ctrl+Alt+2", group: "Workspace" },
-  { id: "workspace.3", label: "워크스페이스 3", defaultKeys: "Ctrl+Alt+3", group: "Workspace" },
-  { id: "workspace.4", label: "워크스페이스 4", defaultKeys: "Ctrl+Alt+4", group: "Workspace" },
-  { id: "workspace.5", label: "워크스페이스 5", defaultKeys: "Ctrl+Alt+5", group: "Workspace" },
-  { id: "workspace.6", label: "워크스페이스 6", defaultKeys: "Ctrl+Alt+6", group: "Workspace" },
-  { id: "workspace.7", label: "워크스페이스 7", defaultKeys: "Ctrl+Alt+7", group: "Workspace" },
-  { id: "workspace.8", label: "워크스페이스 8", defaultKeys: "Ctrl+Alt+8", group: "Workspace" },
-  {
-    id: "workspace.last",
-    label: "마지막 워크스페이스",
-    defaultKeys: "Ctrl+Alt+9",
-    group: "Workspace",
-  },
-  {
-    id: "workspace.next",
-    label: "다음 워크스페이스",
-    defaultKeys: "Ctrl+Alt+Down",
-    group: "Workspace",
-  },
-  {
-    id: "workspace.prev",
-    label: "이전 워크스페이스",
-    defaultKeys: "Ctrl+Alt+Up",
-    group: "Workspace",
-  },
-  { id: "workspace.new", label: "새 워크스페이스", defaultKeys: "Ctrl+Alt+N", group: "Workspace" },
-  {
-    id: "workspace.duplicate",
-    label: "워크스페이스 복제",
-    defaultKeys: "Ctrl+Alt+D",
-    group: "Workspace",
-  },
-  {
-    id: "workspace.close",
-    label: "워크스페이스 닫기",
-    defaultKeys: "Ctrl+Alt+W",
-    group: "Workspace",
-  },
-  {
-    id: "workspace.rename",
-    label: "워크스페이스 이름 변경",
-    defaultKeys: "Ctrl+Alt+R",
-    group: "Workspace",
-  },
-  // Pane
-  { id: "pane.focus", label: "Pane 포커스 이동", defaultKeys: "Alt+Arrow", group: "Pane" },
-  { id: "pane.delete", label: "Pane 제거 (편집 모드)", defaultKeys: "Delete", group: "Pane" },
-  // UI
-  { id: "sidebar.toggle", label: "사이드바 토글", defaultKeys: "Ctrl+Shift+B", group: "UI" },
-  { id: "notifications.toggle", label: "알림 패널 토글", defaultKeys: "Ctrl+Shift+I", group: "UI" },
-  {
-    id: "notifications.unread",
-    label: "읽지 않은 알림으로 이동",
-    defaultKeys: "Ctrl+Shift+U",
-    group: "UI",
-  },
-  {
-    id: "notifications.recent",
-    label: "최근 알림 Pane으로 이동",
-    defaultKeys: "Ctrl+Alt+Left",
-    group: "UI",
-  },
-  {
-    id: "notifications.oldest",
-    label: "오래된 알림 Pane으로 이동",
-    defaultKeys: "Ctrl+Alt+Right",
-    group: "UI",
-  },
-  { id: "settings.open", label: "설정 열기", defaultKeys: "Ctrl+,", group: "UI" },
-];
+const defaultKeybindings = DEFAULT_KEYBINDINGS;
 
 const kbdStyle: React.CSSProperties = {
   background: "var(--bg-surface)",

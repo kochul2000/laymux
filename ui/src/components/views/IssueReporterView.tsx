@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
+import { matchesKeybinding, resolveKeybinding } from "@/lib/keybinding-registry";
 import { inputStyle } from "@/components/ui/FormControls";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
@@ -81,7 +82,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && e.key === "Enter") {
+    if (matchesKeybinding(e.nativeEvent, "issueReporter.submit")) {
       e.preventDefault();
       handleSubmit();
     }
@@ -247,7 +248,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               opacity: !title.trim() || state === "submitting" ? 0.4 : 1,
               transition: "opacity 0.15s",
             }}
-            title="Ctrl+Enter"
+            title={resolveKeybinding("issueReporter.submit") ?? "Ctrl+Enter"}
           >
             {state === "submitting" ? "Saving..." : "Save"}
           </button>

@@ -432,13 +432,6 @@ export function FileExplorerView({
           setSelectedIndices(new Set());
           break;
         }
-        case "c": {
-          if (e.ctrlKey) {
-            e.preventDefault();
-            copySelectedPaths();
-          }
-          break;
-        }
         case "Backspace": {
           e.preventDefault();
           navigateToDir("..");
@@ -454,11 +447,23 @@ export function FileExplorerView({
       selectRange,
       activateEntry,
       closeViewer,
-      copySelectedPaths,
       scrollToIndex,
       navigateToDir,
     ],
   );
+
+  // --- Copy event handler: responds to system copy (Ctrl+C, Cmd+C, context menu) ---
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handleCopy = (e: ClipboardEvent) => {
+      if (selectedIndices.size === 0) return;
+      e.preventDefault();
+      copySelectedPaths();
+    };
+    el.addEventListener("copy", handleCopy);
+    return () => el.removeEventListener("copy", handleCopy);
+  }, [selectedIndices, copySelectedPaths]);
 
   // --- Item click handler ---
   const handleItemClick = useCallback(
