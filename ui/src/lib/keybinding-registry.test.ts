@@ -109,5 +109,15 @@ describe("keybinding-registry", () => {
       const e = makeKeyEvent(",", { ctrl: true });
       expect(matchesKeybinding(e, "settings.open")).toBe(true);
     });
+
+    it("should match Ctrl+V to terminal.paste", () => {
+      const e = makeKeyEvent("v", { ctrl: true });
+      expect(matchesKeybinding(e, "terminal.paste")).toBe(true);
+    });
+
+    it("should not match Ctrl+Shift+V to terminal.paste (shift not in default)", () => {
+      const e = makeKeyEvent("V", { ctrl: true, shift: true });
+      expect(matchesKeybinding(e, "terminal.paste")).toBe(false);
+    });
   });
 });

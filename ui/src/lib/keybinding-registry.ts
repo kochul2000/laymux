@@ -107,6 +107,13 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     defaultKeys: "Ctrl+Enter",
     group: "Issue Reporter",
   },
+  // -- Terminal --
+  {
+    id: "terminal.paste",
+    label: "스마트 붙여넣기",
+    defaultKeys: "Ctrl+V",
+    group: "Terminal",
+  },
 ];
 
 /** Normalized key names: KeyboardEvent.key → shortcut string token. */

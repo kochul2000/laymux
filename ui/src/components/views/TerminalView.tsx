@@ -25,6 +25,7 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -614,14 +615,8 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (isLxShortcut(e)) return false;
 
-      // Smart paste: intercept Ctrl+V / Ctrl+Shift+V on keydown
-      if (
-        e.type === "keydown" &&
-        (e.key === "v" || e.key === "V") &&
-        e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey
-      ) {
+      // Smart paste: intercept paste shortcut on keydown
+      if (e.type === "keydown" && matchesKeybinding(e, "terminal.paste")) {
         const { convenience } = useSettingsStore.getState();
         if (convenience.smartPaste) {
           e.preventDefault();

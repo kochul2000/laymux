@@ -1146,8 +1146,6 @@ function handleKeyDown(e: KeyboardEvent) {
 useAction("fileExplorer.copy", () => copySelectedPaths());
 ```
 
-**예외**: xterm.js 터미널 입력 처리(smart paste 등 PTY 전달 전 인터셉트)는 터미널 에뮬레이터 고유 동작이므로 키바인딩 시스템을 거치지 않아도 된다.
-
 ### 15.6 앱 전용 편의 코드 격리
 
 각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
