@@ -492,13 +492,25 @@ const handlers: HandlerMap = {
   },
 };
 
-/** Capture a screenshot of the current UI as a base64 PNG data URL.
+/** Capture a screenshot of the current UI (or a specific pane) as a base64 PNG data URL.
  *  html2canvas cannot read WebGL canvases, so after the initial capture we
  *  composite each WebGL canvas (xterm.js terminals) onto the result manually. */
-export async function captureScreenshot(): Promise<string> {
-  const root = document.documentElement;
+export async function captureScreenshot(paneIndex?: number): Promise<string> {
+  let target: HTMLElement = document.documentElement;
+
+  // If paneIndex specified, find the specific pane element
+  if (paneIndex != null) {
+    const paneElements = document.querySelectorAll<HTMLElement>("[data-pane-index]");
+    const paneEl = Array.from(paneElements).find(
+      (el) => el.getAttribute("data-pane-index") === String(paneIndex),
+    );
+    if (paneEl) {
+      target = paneEl;
+    }
+  }
+
   const scale = window.devicePixelRatio || 1;
-  const result = await html2canvas(root, {
+  const result = await html2canvas(target, {
     backgroundColor: null,
     scale,
     logging: false,
@@ -507,14 +519,15 @@ export async function captureScreenshot(): Promise<string> {
   // Composite WebGL canvases that html2canvas missed
   const ctx = result.getContext("2d");
   if (ctx) {
-    document.querySelectorAll("canvas").forEach((c) => {
+    const targetRect = target.getBoundingClientRect();
+    target.querySelectorAll("canvas").forEach((c) => {
       if (c.width === 0 || c.height === 0) return;
       const rect = c.getBoundingClientRect();
       try {
         ctx.drawImage(
           c,
-          rect.left * scale,
-          rect.top * scale,
+          (rect.left - targetRect.left) * scale,
+          (rect.top - targetRect.top) * scale,
           rect.width * scale,
           rect.height * scale,
         );
@@ -552,7 +565,8 @@ export async function handleAsyncAutomationRequest(
 ): Promise<HandlerResult> {
   if (request.target === "screenshot" && request.method === "capture") {
     try {
-      const dataUrl = await captureScreenshot();
+      const paneIndex = typeof request.params.paneIndex === "number" ? request.params.paneIndex : undefined;
+      const dataUrl = await captureScreenshot(paneIndex);
       return ok({ dataUrl });
     } catch (e) {
       return err(`Screenshot error: ${e instanceof Error ? e.message : String(e)}`);

@@ -20,6 +20,12 @@ use super::ServerState;
 // ── Parameter types ───────────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListTerminalsParam {
+    /// Filter by workspace ID (optional — omit to list all terminals)
+    workspace_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct TerminalIdParam {
     /// Terminal ID (e.g. "terminal-pane-abc12345")
     terminal_id: String,
@@ -53,6 +59,65 @@ struct ReadOutputParam {
 struct WorkspaceIdParam {
     /// Workspace ID
     workspace_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SwitchWorkspaceParam {
+    /// Workspace ID (e.g. "ws-abc12345")
+    workspace_id: Option<String>,
+    /// Workspace name (alternative to workspace_id)
+    name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListWorkspacesParam {
+    /// When true, returns only id, name, pane_count, and active status (no pane details)
+    #[serde(default)]
+    summary: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RenameWorkspaceParam {
+    /// Workspace ID
+    workspace_id: String,
+    /// New name for the workspace
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListNotificationsParam {
+    /// Filter by workspace ID (optional)
+    workspace_id: Option<String>,
+    /// Filter by terminal ID (optional)
+    terminal_id: Option<String>,
+    /// Only return unread notifications
+    #[serde(default)]
+    unread_only: Option<bool>,
+    /// Maximum number of notifications to return
+    limit: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SearchOutputParam {
+    /// Terminal ID
+    terminal_id: String,
+    /// Search pattern (plain text or regex)
+    pattern: String,
+    /// Number of context lines before and after each match (default: 2)
+    context_lines: Option<usize>,
+    /// Maximum number of matches to return (default: 10)
+    max_results: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct BroadcastWriteParam {
+    /// Terminal IDs to send to
+    terminal_ids: Vec<String>,
+    /// Text to send
+    data: String,
+    /// When true, process C-style escape sequences
+    #[serde(default)]
+    escape: bool,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -93,6 +158,8 @@ struct SplitPaneParam {
     pane_index: u64,
     /// Split direction
     direction: SplitDirection,
+    /// Terminal profile name for the new pane (e.g. "PowerShell", "WSL"). Use list_profiles to see available profiles.
+    profile: Option<String>,
     /// Initial working directory for the new terminal (optional)
     cwd: Option<String>,
 }
@@ -139,11 +206,17 @@ struct SwapPanesParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ScreenshotParam {
+    /// Capture a specific pane by index (optional — omit to capture the full IDE)
+    pane_index: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SendNotificationParam {
-    /// Terminal ID
-    terminal_id: String,
-    /// Workspace ID
-    workspace_id: String,
+    /// Terminal ID (optional — omit for workspace-level notification)
+    terminal_id: Option<String>,
+    /// Workspace ID (optional — defaults to active workspace)
+    workspace_id: Option<String>,
     /// Notification message
     message: String,
     /// Notification level (default: info)
@@ -274,10 +347,14 @@ fn local_interface_ips() -> Vec<String> {
 impl McpHandler {
     // ── Terminal (7) ──
 
-    /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition (x,y,w,h).
+    /// List terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition.
+    /// Pass workspace_id to filter terminals by workspace (omit for all terminals).
     /// The activity field reflects real-time backend detection (shell or interactiveApp).
     #[tool]
-    async fn list_terminals(&self) -> Result<CallToolResult, ErrorData> {
+    async fn list_terminals(
+        &self,
+        Parameters(p): Parameters<ListTerminalsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
         let bridge_result =
             bridge_request(&self.state, "query", "terminals", "list", json!({})).await;
         match bridge_result {
@@ -297,6 +374,15 @@ impl McpHandler {
                                 });
                             }
                         }
+                    }
+                    // Filter by workspace_id if provided
+                    if let Some(ref ws_id) = p.workspace_id {
+                        instances.retain(|inst| {
+                            inst.get("workspaceId")
+                                .and_then(|v| v.as_str())
+                                .map(|id| id == ws_id)
+                                .unwrap_or(false)
+                        });
                     }
                 }
                 Ok(json_result(&data))
@@ -575,32 +661,140 @@ impl McpHandler {
 
     // ── Workspace (4) ──
 
-    /// List all workspaces with pane layouts and active workspace ID.
+    /// List workspaces. Pass summary=true for compact output (id, name, pane_count only).
     #[tool]
-    async fn list_workspaces(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "workspaces", "list", json!({})).await
+    async fn list_workspaces(
+        &self,
+        Parameters(p): Parameters<ListWorkspacesParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let bridge_result =
+            bridge_request(&self.state, "query", "workspaces", "list", json!({})).await;
+        match bridge_result {
+            Ok(data) => {
+                if p.summary.unwrap_or(false) {
+                    if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
+                        let summary: Vec<Value> = workspaces
+                            .iter()
+                            .map(|ws| {
+                                json!({
+                                    "id": ws.get("id"),
+                                    "name": ws.get("name"),
+                                    "paneCount": ws.get("panes").and_then(|p| p.as_array()).map(|a| a.len()),
+                                })
+                            })
+                            .collect();
+                        return Ok(json_result(&json!({
+                            "workspaces": summary,
+                            "activeWorkspaceId": data.get("activeWorkspaceId"),
+                        })));
+                    }
+                }
+                Ok(json_result(&data))
+            }
+            Err((_status, axum::Json(body))) => {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Bridge request failed");
+                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            }
+        }
     }
 
-    /// Get the currently active workspace with full pane details including paneIndex and terminalId for each pane.
+    /// Get the currently active workspace with full pane details, terminal activity states,
+    /// and focusedPaneIndex — a single call for complete workspace context.
     #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "workspaces", "getActive", json!({}))
-            .await
+        let bridge_result =
+            bridge_request(&self.state, "query", "workspaces", "getActive", json!({})).await;
+        match bridge_result {
+            Ok(mut data) => {
+                // Enrich panes with backend activity states
+                let backend_states =
+                    crate::activity::detect_all_terminal_states(&self.state.app_state);
+                if let Some(ws) = data.get_mut("workspace") {
+                    if let Some(panes) = ws.get_mut("panes").and_then(|v| v.as_array_mut()) {
+                        for pane in panes.iter_mut() {
+                            if let Some(tid) = pane.get("terminalId").and_then(|v| v.as_str()) {
+                                if let Some(state_info) = backend_states.get(tid) {
+                                    pane.as_object_mut().map(|obj| {
+                                        obj.insert(
+                                            "terminalActivity".to_string(),
+                                            serde_json::to_value(state_info)
+                                                .unwrap_or(json!(null)),
+                                        )
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Add focusedPaneIndex from grid state bridge
+                    if let Ok(grid) = bridge_request(
+                        &self.state,
+                        "query",
+                        "grid",
+                        "getState",
+                        json!({}),
+                    )
+                    .await
+                    {
+                        if let Some(fpi) = grid.get("focusedPaneIndex") {
+                            ws.as_object_mut()
+                                .map(|obj| obj.insert("focusedPaneIndex".to_string(), fpi.clone()));
+                        }
+                    }
+                }
+                Ok(json_result(&data))
+            }
+            Err((_status, axum::Json(body))) => {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Bridge request failed");
+                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            }
+        }
     }
 
-    /// Switch to a different workspace by ID.
+    /// Switch to a different workspace by ID or name.
     #[tool]
     async fn switch_workspace(
         &self,
-        Parameters(p): Parameters<WorkspaceIdParam>,
+        Parameters(p): Parameters<SwitchWorkspaceParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.bridge(
-            "action",
-            "workspaces",
-            "switchActive",
-            json!({ "id": p.workspace_id }),
-        )
-        .await
+        let ws_id = if let Some(id) = p.workspace_id {
+            id
+        } else if let Some(name) = p.name {
+            // Resolve name to ID via list
+            let list = bridge_request(&self.state, "query", "workspaces", "list", json!({})).await;
+            match list {
+                Ok(data) => {
+                    let found = data.get("workspaces")
+                        .and_then(|v| v.as_array())
+                        .and_then(|arr| arr.iter().find(|ws| {
+                            ws.get("name").and_then(|n| n.as_str()) == Some(&name)
+                        }))
+                        .and_then(|ws| ws.get("id").and_then(|v| v.as_str()))
+                        .map(|s| s.to_string());
+                    match found {
+                        Some(id) => id,
+                        None => return Ok(CallToolResult::error(vec![Content::text(
+                            format!("Workspace '{}' not found", name)
+                        )])),
+                    }
+                }
+                Err((_status, axum::Json(body))) => {
+                    let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to list workspaces");
+                    return Ok(CallToolResult::error(vec![Content::text(msg)]));
+                }
+            }
+        } else {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Either workspace_id or name is required"
+            )]));
+        };
+
+        self.bridge("action", "workspaces", "switchActive", json!({ "id": ws_id })).await
     }
 
     /// Create a new workspace, optionally from a layout template. Returns the new workspace's id, name, and pane count.
@@ -619,7 +813,43 @@ impl McpHandler {
         self.bridge("action", "workspaces", "add", params).await
     }
 
-    // ── Grid/Pane (4) ──
+    /// Delete a workspace by ID. Cannot delete the last workspace.
+    #[tool]
+    async fn delete_workspace(
+        &self,
+        Parameters(p): Parameters<WorkspaceIdParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "workspaces",
+            "remove",
+            json!({ "id": p.workspace_id }),
+        )
+        .await
+    }
+
+    /// Rename a workspace.
+    #[tool]
+    async fn rename_workspace(
+        &self,
+        Parameters(p): Parameters<RenameWorkspaceParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "workspaces",
+            "rename",
+            json!({ "id": p.workspace_id, "name": p.name }),
+        )
+        .await
+    }
+
+    /// List available layout templates for create_workspace.
+    #[tool]
+    async fn list_layouts(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("query", "layouts", "list", json!({})).await
+    }
+
+    // ── Grid/Pane ──
 
     /// Get grid state: editMode, focusedPaneIndex, and activeWorkspaceId.
     #[tool]
@@ -649,6 +879,9 @@ impl McpHandler {
         Parameters(p): Parameters<SplitPaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut params = json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() });
+        if let Some(profile) = p.profile {
+            params["profile"] = json!(profile);
+        }
         if let Some(cwd) = p.cwd {
             params["cwd"] = json!(cwd);
         }
@@ -710,11 +943,18 @@ impl McpHandler {
 
     // ── Utility (3) ──
 
-    /// Capture a screenshot of the current IDE UI. Returns image content.
+    /// Capture a screenshot. Pass pane_index to capture a single pane, or omit for the full IDE.
     #[tool]
-    async fn take_screenshot(&self) -> Result<CallToolResult, ErrorData> {
+    async fn take_screenshot(
+        &self,
+        Parameters(p): Parameters<ScreenshotParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let params = match p.pane_index {
+            Some(idx) => json!({ "paneIndex": idx }),
+            None => json!({}),
+        };
         let data =
-            match bridge_request(&self.state, "action", "screenshot", "capture", json!({})).await {
+            match bridge_request(&self.state, "action", "screenshot", "capture", params).await {
                 Ok(data) => data,
                 Err((_status, axum::Json(body))) => {
                     let msg = body
@@ -741,28 +981,208 @@ impl McpHandler {
         )]))
     }
 
-    /// List all notifications across workspaces.
+    /// List notifications. Supports filtering by workspace, terminal, read status, and limit.
     #[tool]
-    async fn list_notifications(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "notifications", "list", json!({}))
-            .await
+    async fn list_notifications(
+        &self,
+        Parameters(p): Parameters<ListNotificationsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let bridge_result =
+            bridge_request(&self.state, "query", "notifications", "list", json!({})).await;
+        match bridge_result {
+            Ok(mut data) => {
+                if let Some(notifications) =
+                    data.get_mut("notifications").and_then(|v| v.as_array_mut())
+                {
+                    if let Some(ref ws_id) = p.workspace_id {
+                        notifications.retain(|n| {
+                            n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
+                        });
+                    }
+                    if let Some(ref t_id) = p.terminal_id {
+                        notifications.retain(|n| {
+                            n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
+                        });
+                    }
+                    if p.unread_only.unwrap_or(false) {
+                        notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
+                    }
+                    if let Some(limit) = p.limit {
+                        let len = notifications.len();
+                        if len > limit as usize {
+                            *notifications = notifications.split_off(len - limit as usize);
+                        }
+                    }
+                }
+                Ok(json_result(&data))
+            }
+            Err((_status, axum::Json(body))) => {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Bridge request failed");
+                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            }
+        }
     }
 
-    /// Create a notification in the IDE.
+    /// Create a notification in the IDE. terminal_id and workspace_id are optional —
+    /// omit both for a global notification on the active workspace.
     #[tool]
     async fn send_notification(
         &self,
         Parameters(p): Parameters<SendNotificationParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        // Resolve workspace_id: use provided, or fall back to active workspace
+        let workspace_id = match p.workspace_id {
+            Some(id) => id,
+            None => {
+                // Get active workspace ID from grid state
+                match bridge_request(&self.state, "query", "grid", "getState", json!({})).await {
+                    Ok(data) => data
+                        .get("activeWorkspaceId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    Err(_) => "unknown".to_string(),
+                }
+            }
+        };
+        let terminal_id = p.terminal_id.unwrap_or_default();
+
         let mut params = json!({
-            "terminalId": p.terminal_id,
-            "workspaceId": p.workspace_id,
+            "terminalId": terminal_id,
+            "workspaceId": workspace_id,
             "message": p.message,
         });
         if let Some(level) = p.level {
             params["level"] = json!(level.to_string());
         }
         self.bridge("action", "notifications", "add", params).await
+    }
+
+    /// Search terminal output for a pattern. Returns matching lines with context.
+    #[tool]
+    async fn search_terminal_output(
+        &self,
+        Parameters(p): Parameters<SearchOutputParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let context_lines = p.context_lines.unwrap_or(2);
+        let max_results = p.max_results.unwrap_or(10);
+
+        let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+            Ok(g) => g,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+
+        let buf = match buffers.get(&p.terminal_id) {
+            Some(b) => b,
+            None => {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found",
+                    p.terminal_id
+                ))]));
+            }
+        };
+
+        let raw = buf.recent_lines(1000); // search in last 1000 lines
+        let text = super::helpers::strip_ansi(&raw);
+        let lines: Vec<&str> = text.lines().collect();
+
+        let mut matches: Vec<Value> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if line.contains(&p.pattern) {
+                let start = i.saturating_sub(context_lines);
+                let end = (i + context_lines + 1).min(lines.len());
+                let context: Vec<&str> = lines[start..end].to_vec();
+                matches.push(json!({
+                    "line": i + 1,
+                    "match": line,
+                    "context": context,
+                }));
+                if matches.len() >= max_results {
+                    break;
+                }
+            }
+        }
+
+        Ok(json_result(&json!({
+            "matches": matches,
+            "totalMatches": matches.len(),
+            "pattern": p.pattern,
+        })))
+    }
+
+    /// Send the same input to multiple terminals at once.
+    #[tool]
+    async fn broadcast_write(
+        &self,
+        Parameters(p): Parameters<BroadcastWriteParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let data = if p.escape {
+            super::helpers::unescape_terminal_input(&p.data)
+        } else {
+            p.data.clone()
+        };
+
+        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
+            Ok(g) => g,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+
+        let mut written = Vec::new();
+        let mut failed = Vec::new();
+
+        for id in &p.terminal_ids {
+            match ptys.get(id) {
+                Some(handle) => match handle.write(data.as_bytes()) {
+                    Ok(_) => written.push(id.clone()),
+                    Err(e) => failed.push(json!({ "id": id, "error": e })),
+                },
+                None => failed.push(json!({ "id": id, "error": "not found" })),
+            }
+        }
+
+        Ok(json_result(&json!({
+            "written": written,
+            "failed": failed,
+        })))
+    }
+
+    /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).
+    #[tool]
+    async fn list_profiles(&self) -> Result<CallToolResult, ErrorData> {
+        // Profiles are stored in frontend settings — use bridge
+        let settings_result =
+            bridge_request(&self.state, "query", "layouts", "list", json!({})).await;
+        // Also get profiles from terminal instances as a fallback
+        let terminals = self.state.app_state.terminals.lock_or_err().ok();
+        let mut profiles: Vec<Value> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        if let Some(terms) = terminals {
+            for (_, session) in terms.iter() {
+                let profile = &session.config.profile;
+                if seen.insert(profile.clone()) {
+                    profiles.push(json!({
+                        "name": profile,
+                        "shell_type": session.wsl_distro.as_ref().map(|_| "bash").unwrap_or("unknown"),
+                    }));
+                }
+            }
+        }
+
+        // Also fetch from settings bridge
+        if let Ok(data) = settings_result {
+            if let Some(layouts) = data.get("layouts").and_then(|v| v.as_array()) {
+                return Ok(json_result(&json!({
+                    "profiles": profiles,
+                    "layouts": layouts,
+                })));
+            }
+        }
+
+        Ok(json_result(&json!({ "profiles": profiles })))
     }
 }
 
