@@ -416,6 +416,347 @@ describe("useAutomationBridge hook", () => {
       expect.anything(),
     );
   });
+});
+
+describe("identify_caller and enriched responses", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("identifies caller terminal with workspace, pane, and neighbors", () => {
+    // Split to get 2 panes (left/right via vertical split)
+    handleAutomationRequest({
+      requestId: "s1",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+
+    // Set both panes to TerminalView (split creates EmptyView by default)
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useWorkspaceStore.getState().setPaneView(1, { type: "TerminalView" });
+
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const leftPane = ws.panes[0];
+    const rightPane = ws.panes[1];
+
+    // Register terminals for both panes
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${leftPane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${rightPane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+
+    // Identify the left pane terminal
+    const result = handleAutomationRequest({
+      requestId: "id1",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${leftPane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+
+    // Should have terminal info
+    const terminal = data.terminal as Record<string, unknown>;
+    expect(terminal.id).toBe(`terminal-${leftPane.id}`);
+
+    // Should have workspace info
+    const workspace = data.workspace as Record<string, unknown>;
+    expect(workspace.id).toBe(ws.id);
+    expect(workspace.isActive).toBe(true);
+    expect(workspace.totalPanes).toBe(2);
+
+    // Should have pane info
+    const pane = data.pane as Record<string, unknown>;
+    expect(pane.index).toBe(0);
+    expect(typeof pane.x).toBe("number");
+
+    // Should have right neighbor (the second pane)
+    const neighbors = data.neighbors as Record<string, unknown>;
+    const right = neighbors.right as Record<string, unknown>;
+    expect(right).not.toBeNull();
+    expect(right.terminalId).toBe(`terminal-${rightPane.id}`);
+    expect(right.paneIndex).toBe(1);
+  });
+
+  it("returns error for identify with unknown terminal", () => {
+    const result = handleAutomationRequest({
+      requestId: "id2",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: "terminal-nonexistent" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+  });
+
+  it("gets single terminal with pane position", () => {
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const pane = ws.panes[0];
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${pane.id}`,
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "gt1",
+      category: "query",
+      target: "terminals",
+      method: "get",
+      params: { id: `terminal-${pane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const terminal = data.terminal as Record<string, unknown>;
+    expect(terminal.paneIndex).toBe(0);
+    expect(terminal.panePosition).toHaveProperty("x");
+    const workspace = data.workspace as Record<string, unknown>;
+    expect(workspace.id).toBe(ws.id);
+  });
+
+  it("list_terminals includes paneIndex and panePosition", () => {
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const pane = ws.panes[0];
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${pane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "lt1",
+      category: "query",
+      target: "terminals",
+      method: "list",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const instances = data.instances as Array<Record<string, unknown>>;
+    expect(instances[0].paneIndex).toBe(0);
+    expect(instances[0].panePosition).toHaveProperty("x");
+  });
+
+  it("get_active_workspace: EmptyView pane has terminalId null", () => {
+    // Default workspace pane is EmptyView — no terminal registered
+    const result = handleAutomationRequest({
+      requestId: "gaw1",
+      category: "query",
+      target: "workspaces",
+      method: "getActive",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const ws = data.workspace as Record<string, unknown>;
+    const panes = ws.panes as Array<Record<string, unknown>>;
+    expect(panes[0]).toHaveProperty("paneIndex", 0);
+    expect(panes[0].terminalId).toBeNull();
+  });
+
+  it("get_active_workspace: TerminalView pane has terminalId set", () => {
+    // Set the pane to TerminalView
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+
+    const result = handleAutomationRequest({
+      requestId: "gaw2",
+      category: "query",
+      target: "workspaces",
+      method: "getActive",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const wsData = data.workspace as Record<string, unknown>;
+    const panes = wsData.panes as Array<Record<string, unknown>>;
+    expect(panes[0].terminalId).toBe(`terminal-${ws.panes[0].id}`);
+  });
+
+  it("get_grid_state includes activeWorkspaceId", () => {
+    const result = handleAutomationRequest({
+      requestId: "gs1",
+      category: "query",
+      target: "grid",
+      method: "getState",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data).toHaveProperty("activeWorkspaceId");
+    expect(data.activeWorkspaceId).toBe(useWorkspaceStore.getState().activeWorkspaceId);
+  });
+
+  it("split_pane returns new pane info", () => {
+    const result = handleAutomationRequest({
+      requestId: "sp1",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.split).toBe(true);
+    expect(data.totalPanes).toBe(2);
+    const newPane = data.newPane as Record<string, unknown>;
+    expect(newPane).not.toBeNull();
+    expect(newPane.paneIndex).toBe(1);
+    // New split pane is EmptyView — terminalId should be null
+    expect(newPane.terminalId).toBeNull();
+    expect(newPane).toHaveProperty("x");
+  });
+
+  it("create_workspace returns new workspace info", () => {
+    const result = handleAutomationRequest({
+      requestId: "cw1",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "TestWS", layoutId: "default-layout" },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.created).toBe(true);
+    const ws = data.workspace as Record<string, unknown>;
+    expect(ws).not.toBeNull();
+    expect(ws.name).toBe("TestWS");
+    expect(typeof ws.id).toBe("string");
+    expect(ws.paneCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("identify_caller: neighbor terminalId is null when neighbor is EmptyView", () => {
+    // Split to get 2 panes — only register terminal for the LEFT pane
+    handleAutomationRequest({
+      requestId: "sn1",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const leftPane = ws.panes[0];
+    // Set left pane to TerminalView, right pane stays EmptyView
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${leftPane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "nid1",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${leftPane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const neighbors = data.neighbors as Record<string, unknown>;
+    const right = neighbors.right as Record<string, unknown>;
+    expect(right).not.toBeNull();
+    expect(right.paneIndex).toBe(1);
+    // Right pane is EmptyView — terminalId should be null
+    expect(right.terminalId).toBeNull();
+  });
+
+  it("create_workspace returns error for invalid layoutId", () => {
+    const result = handleAutomationRequest({
+      requestId: "cwf1",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "FailWS", layoutId: "nonexistent-layout" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("layout");
+  });
+
+  it("create_workspace uses default layout when layoutId is omitted", () => {
+    const before = useWorkspaceStore.getState().workspaces.length;
+    const result = handleAutomationRequest({
+      requestId: "cwdl1",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "NoLayoutWS" },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.created).toBe(true);
+    const ws = data.workspace as Record<string, unknown>;
+    expect(ws).not.toBeNull();
+    expect(ws.name).toBe("NoLayoutWS");
+    expect(useWorkspaceStore.getState().workspaces.length).toBe(before + 1);
+  });
+
+  it("identify_caller: isFocusedPane is false for inactive workspace", () => {
+    // Create a second workspace and register a terminal in it
+    const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();
+    addWorkspace("WS2", layouts[0].id);
+    const ws2 = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "WS2")!;
+
+    // Set pane to TerminalView so we can register a terminal
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }); // active ws pane 0
+    // For WS2 we need to switch, set view, then switch back
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    // Switch back to original workspace
+    const originalWsId = workspaces[0].id;
+    useWorkspaceStore.getState().setActiveWorkspace(originalWsId);
+
+    // Register terminal in the inactive WS2's pane 0
+    const ws2Updated = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === ws2.id)!;
+    const ws2Pane = ws2Updated.panes[0];
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${ws2Pane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws2.id,
+    });
+
+    // focusedPaneIndex defaults to 0, and WS2 also has pane index 0
+    // But WS2 is inactive, so isFocusedPane should be false
+    useGridStore.setState({ focusedPaneIndex: 0 });
+
+    const result = handleAutomationRequest({
+      requestId: "ifp1",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${ws2Pane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const workspace = data.workspace as Record<string, unknown>;
+    expect(workspace.isActive).toBe(false);
+    const pane = data.pane as Record<string, unknown>;
+    expect(pane.index).toBe(0);
+    // Key assertion: even though focusedPaneIndex === 0 === paneIndex,
+    // isFocusedPane must be false because this is an inactive workspace
+    expect(pane.isFocusedPane).toBe(false);
+  });
 
   it("reorders workspaces via automation API", () => {
     // Create additional workspaces

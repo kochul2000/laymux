@@ -233,12 +233,44 @@ fn local_interface_ips() -> Vec<String> {
 
 #[tool_router]
 impl McpHandler {
-    // ── Terminal (5) ──
+    // ── Terminal (7) ──
 
-    /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, branch.
+    /// List all terminal instances with id, profile, syncGroup, workspaceId, cwd, branch, paneIndex, and panePosition (x,y,w,h).
     #[tool]
     async fn list_terminals(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "terminals", "list", json!({})).await
+    }
+
+    /// Identify a terminal's full context: workspace, pane position (x,y,w,h), and neighboring panes.
+    /// Pass the value of the LX_TERMINAL_ID environment variable from your shell.
+    /// Use this as the first step to understand your position in the IDE grid.
+    #[tool]
+    async fn identify_caller(
+        &self,
+        Parameters(p): Parameters<TerminalIdParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "query",
+            "terminals",
+            "identify",
+            json!({ "id": p.terminal_id }),
+        )
+        .await
+    }
+
+    /// Get details for a single terminal by ID, including pane position and workspace info.
+    #[tool]
+    async fn get_terminal(
+        &self,
+        Parameters(p): Parameters<TerminalIdParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "query",
+            "terminals",
+            "get",
+            json!({ "id": p.terminal_id }),
+        )
+        .await
     }
 
     /// Send input to a terminal (like typing). For control characters set
@@ -332,7 +364,7 @@ impl McpHandler {
         self.bridge("query", "workspaces", "list", json!({})).await
     }
 
-    /// Get the currently active workspace with full pane details.
+    /// Get the currently active workspace with full pane details including paneIndex and terminalId for each pane.
     #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "workspaces", "getActive", json!({}))
@@ -354,7 +386,7 @@ impl McpHandler {
         .await
     }
 
-    /// Create a new workspace, optionally from a layout template.
+    /// Create a new workspace, optionally from a layout template. Returns the new workspace's id, name, and pane count.
     #[tool]
     async fn create_workspace(
         &self,
@@ -367,9 +399,9 @@ impl McpHandler {
         self.bridge("action", "workspaces", "add", params).await
     }
 
-    // ── Grid/Pane (3) ──
+    // ── Grid/Pane (4) ──
 
-    /// Get grid state: editMode, focusedPaneIndex.
+    /// Get grid state: editMode, focusedPaneIndex, and activeWorkspaceId.
     #[tool]
     async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "grid", "getState", json!({})).await
@@ -390,7 +422,7 @@ impl McpHandler {
         .await
     }
 
-    /// Split a pane horizontally or vertically.
+    /// Split a pane horizontally or vertically. Returns info about the new pane created.
     #[tool]
     async fn split_pane(
         &self,
@@ -401,6 +433,21 @@ impl McpHandler {
             "panes",
             "split",
             json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() }),
+        )
+        .await
+    }
+
+    /// Remove a pane from the active workspace grid. Remaining panes redistribute space.
+    #[tool]
+    async fn remove_pane(
+        &self,
+        Parameters(p): Parameters<PaneIndexParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "panes",
+            "remove",
+            json!({ "paneIndex": p.pane_index }),
         )
         .await
     }
@@ -475,7 +522,22 @@ impl ServerHandler for McpHandler {
             ))
             .with_instructions(
                 "Laymux IDE automation via MCP. \
-                 Control terminals, workspaces, grid layout, and capture screenshots."
+                 Control terminals, workspaces, grid layout, and capture screenshots.\n\n\
+                 ## Self-identification\n\
+                 Your terminal has the env var LX_TERMINAL_ID (e.g. \"terminal-pane-a1b2c3d4\"). \
+                 Read it with `echo $LX_TERMINAL_ID` (bash/zsh) or `echo $env:LX_TERMINAL_ID` (PowerShell), \
+                 then call `identify_caller` with that value to learn:\n\
+                 - Which workspace you are in (id, name, whether it is active)\n\
+                 - Your pane position in the grid (x, y, w, h as 0-1 normalized coordinates, pane index)\n\
+                 - Neighboring panes (left, right, above, below) and their terminal IDs\n\
+                 - Your terminal metadata (cwd, branch, activity state)\n\n\
+                 ## Other env vars\n\
+                 - LX_AUTOMATION_PORT: The port this MCP server runs on\n\
+                 - LX_GROUP_ID: Your sync group (terminals in the same group share CWD)\n\n\
+                 ## Common workflows\n\
+                 - Find yourself: echo $LX_TERMINAL_ID (or $env:LX_TERMINAL_ID in PowerShell) → identify_caller\n\
+                 - Send command to adjacent pane: identify_caller → use neighbors.right.terminalId → write_to_terminal\n\
+                 - Read another pane's output: list_terminals → read_terminal_output with target terminal_id"
                     .to_string(),
             )
     }
