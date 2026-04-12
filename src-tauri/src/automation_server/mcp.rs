@@ -241,13 +241,13 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        let data = super::helpers::unescape_terminal_input(&p.data);
         let ptys = match self.state.app_state.pty_handles.lock_or_err() {
             Ok(guard) => guard,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
             }
         };
-        let data = super::helpers::unescape_terminal_input(&p.data);
         match ptys.get(&p.terminal_id) {
             Some(handle) => match handle.write(data.as_bytes()) {
                 Ok(_) => Ok(CallToolResult::success(vec![Content::text("written")])),
