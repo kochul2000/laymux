@@ -436,6 +436,10 @@ describe("identify_caller and enriched responses", () => {
       params: { paneIndex: 0, direction: "vertical" },
     });
 
+    // Set both panes to TerminalView (split creates EmptyView by default)
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useWorkspaceStore.getState().setPaneView(1, { type: "TerminalView" });
+
     const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
     const leftPane = ws.panes[0];
     const rightPane = ws.panes[1];
@@ -636,6 +640,57 @@ describe("identify_caller and enriched responses", () => {
     expect(ws.name).toBe("TestWS");
     expect(typeof ws.id).toBe("string");
     expect(ws.paneCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("identify_caller: neighbor terminalId is null when neighbor is EmptyView", () => {
+    // Split to get 2 panes — only register terminal for the LEFT pane
+    handleAutomationRequest({
+      requestId: "sn1",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const leftPane = ws.panes[0];
+    // Set left pane to TerminalView, right pane stays EmptyView
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${leftPane.id}`,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws.id,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "nid1",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${leftPane.id}` },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const neighbors = data.neighbors as Record<string, unknown>;
+    const right = neighbors.right as Record<string, unknown>;
+    expect(right).not.toBeNull();
+    expect(right.paneIndex).toBe(1);
+    // Right pane is EmptyView — terminalId should be null
+    expect(right.terminalId).toBeNull();
+  });
+
+  it("create_workspace returns error for invalid layoutId", () => {
+    const result = handleAutomationRequest({
+      requestId: "cwf1",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "FailWS", layoutId: "nonexistent-layout" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("layout");
   });
 
   it("identify_caller: isFocusedPane is false for inactive workspace", () => {

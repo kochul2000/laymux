@@ -38,11 +38,11 @@ function rangesOverlap(a: number, aLen: number, b: number, bLen: number): boolea
 function computeNeighbors(
   panes: WorkspacePane[],
   targetIndex: number,
-): Record<string, { paneIndex: number; terminalId: string } | null> {
+): Record<string, { paneIndex: number; terminalId: string | null } | null> {
   const target = panes[targetIndex];
   if (!target) return { left: null, right: null, above: null, below: null };
 
-  const result: Record<string, { paneIndex: number; terminalId: string } | null> = {
+  const result: Record<string, { paneIndex: number; terminalId: string | null } | null> = {
     left: null,
     right: null,
     above: null,
@@ -52,7 +52,10 @@ function computeNeighbors(
   for (let i = 0; i < panes.length; i++) {
     if (i === targetIndex) continue;
     const other = panes[i];
-    const entry = { paneIndex: i, terminalId: `terminal-${other.id}` };
+    const entry = {
+      paneIndex: i,
+      terminalId: other.view.type === "TerminalView" ? `terminal-${other.id}` : null,
+    };
 
     // Right: other starts where target ends on x-axis, y ranges overlap
     if (
@@ -137,9 +140,10 @@ const handlers: HandlerMap = {
       useWorkspaceStore.getState().addWorkspace(p.name as string, p.layoutId as string);
       const after = useWorkspaceStore.getState().workspaces;
       const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
+      if (!newWs) return err(`Failed to create workspace: layout '${p.layoutId}' not found`);
       return ok({
         created: true,
-        workspace: newWs ? { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length } : null,
+        workspace: { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length },
       });
     },
     remove: (p) => {
