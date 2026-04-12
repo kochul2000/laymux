@@ -23,7 +23,7 @@ import {
   markClaudeTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { transformPasteContent, trimSelectionTrailingWhitespace } from "@/lib/smart-text";
+import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 
 import {
@@ -669,13 +669,31 @@ export function TerminalView({
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
 
+    // Smart copy: intercept DOM copy event to apply smartRemoveIndent.
+    // xterm.js handles Ctrl+C natively (copy if selection, SIGINT if not).
+    // We hook into the resulting copy event to transform clipboard content
+    // without breaking bare Ctrl+C → SIGINT flow.
+    const handleCopy = (e: ClipboardEvent) => {
+      const { convenience: conv } = useSettingsStore.getState();
+      if (conv.smartRemoveIndent && terminal.hasSelection()) {
+        e.preventDefault();
+        const transformed = prepareSelectionForCopy(terminal.getSelection(), {
+          smartRemoveIndent: true,
+        });
+        e.clipboardData?.setData("text/plain", transformed);
+      }
+    };
+    containerRef.current?.addEventListener("copy", handleCopy);
+
     // Copy-on-select: auto-copy to clipboard when text is selected
     terminal.onSelectionChange(() => {
       const { convenience: conv } = useSettingsStore.getState();
       if (conv.copyOnSelect && terminal.hasSelection()) {
-        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
-          () => {},
-        );
+        clipboardWriteText(
+          prepareSelectionForCopy(terminal.getSelection(), {
+            smartRemoveIndent: conv.smartRemoveIndent,
+          }),
+        ).catch(() => {});
       }
     });
 
@@ -887,9 +905,12 @@ export function TerminalView({
       e.preventDefault();
       if (terminal.hasSelection()) {
         // Selection exists → copy to clipboard via Tauri, then clear
-        clipboardWriteText(trimSelectionTrailingWhitespace(terminal.getSelection())).catch(
-          () => {},
-        );
+        const { convenience: conv } = useSettingsStore.getState();
+        clipboardWriteText(
+          prepareSelectionForCopy(terminal.getSelection(), {
+            smartRemoveIndent: conv.smartRemoveIndent,
+          }),
+        ).catch(() => {});
         terminal.clearSelection();
       } else {
         // No selection → paste via terminal.paste() (same as Ctrl+V for bracketed paste support)
@@ -1056,6 +1077,7 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      containerRef.current?.removeEventListener("copy", handleCopy);
       helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
       helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);

@@ -199,9 +199,7 @@ fn mcp_allowed_hosts() -> Vec<String> {
 /// adapter IP that WSL2 clients use as their gateway.
 #[cfg(target_os = "windows")]
 fn local_interface_ips() -> Vec<String> {
-    let output = match crate::process::headless_command("ipconfig")
-        .output()
-    {
+    let output = match crate::process::headless_command("ipconfig").output() {
         Ok(o) => o,
         Err(_) => return vec![],
     };
@@ -398,24 +396,17 @@ impl McpHandler {
     /// Capture a screenshot of the current IDE UI. Returns image content.
     #[tool]
     async fn take_screenshot(&self) -> Result<CallToolResult, ErrorData> {
-        let data = match bridge_request(
-            &self.state,
-            "action",
-            "screenshot",
-            "capture",
-            json!({}),
-        )
-        .await
-        {
-            Ok(data) => data,
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Screenshot failed");
-                return Ok(CallToolResult::error(vec![Content::text(msg)]));
-            }
-        };
+        let data =
+            match bridge_request(&self.state, "action", "screenshot", "capture", json!({})).await {
+                Ok(data) => data,
+                Err((_status, axum::Json(body))) => {
+                    let msg = body
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Screenshot failed");
+                    return Ok(CallToolResult::error(vec![Content::text(msg)]));
+                }
+            };
 
         let Some(data_url) = data.get("dataUrl").and_then(|v| v.as_str()) else {
             return Ok(CallToolResult::error(vec![Content::text(

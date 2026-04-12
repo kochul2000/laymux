@@ -133,13 +133,12 @@ pub fn create_terminal_session(
             && data
                 .windows(DEC_SYNC_OUTPUT_SET.len())
                 .any(|w| w == DEC_SYNC_OUTPUT_SET)
+            && pty_cb_state.burst_detector.record_hit()
         {
-            if pty_cb_state.burst_detector.record_hit() {
-                let _ = app_clone.emit(
-                    EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                    serde_json::json!({ "terminalId": terminal_id }),
-                );
-            }
+            let _ = app_clone.emit(
+                EVENT_TERMINAL_OUTPUT_ACTIVITY,
+                serde_json::json!({ "terminalId": terminal_id }),
+            );
         }
 
         // ── Unified OSC processing loop ──

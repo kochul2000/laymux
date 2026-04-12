@@ -1130,7 +1130,13 @@ export function WorkspaceSelectorView() {
   };
 
   return (
-    <div ref={selectorRef} data-testid="workspace-selector" className="flex h-full flex-col" tabIndex={-1} onBlur={handleSelectorBlur}>
+    <div
+      ref={selectorRef}
+      data-testid="workspace-selector"
+      className="flex h-full flex-col"
+      tabIndex={-1}
+      onBlur={handleSelectorBlur}
+    >
       <ViewHeader testId="workspace-selector-header" title="New Workspace" />
       {/* New Workspace: Layout picker */}
       <div className="shrink-0" data-testid="new-workspace-panel">
@@ -1183,7 +1189,13 @@ export function WorkspaceSelectorView() {
           >
             {hideMode ? (
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                <path d="M2 5.5L4 7.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M2 5.5L4 7.5L8 3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             ) : hiddenWorkspaceIds.size + hiddenPaneIds.size > 0 ? (
               <EyeOffIcon size={10} />
@@ -1191,7 +1203,9 @@ export function WorkspaceSelectorView() {
               <EyeIcon size={10} />
             )}
             {!hideMode && hiddenWorkspaceIds.size + hiddenPaneIds.size > 0 && (
-              <span style={{ fontSize: 8, opacity: 0.8 }}>{hiddenWorkspaceIds.size + hiddenPaneIds.size}</span>
+              <span style={{ fontSize: 8, opacity: 0.8 }}>
+                {hiddenWorkspaceIds.size + hiddenPaneIds.size}
+              </span>
             )}
           </button>
           <button

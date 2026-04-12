@@ -3,6 +3,7 @@
  *
  * Copy transforms:
  * - trimSelectionTrailingWhitespace — strip trailing whitespace from xterm.js selection
+ * - prepareSelectionForCopy — trim + optional smartRemoveIndent (복사 시점에 인덴트 제거)
  *
  * Paste transforms:
  * 1. smartRemoveIndent — strip common leading whitespace from all lines
@@ -36,6 +37,25 @@ export function trimSelectionTrailingWhitespace(text: string): string {
   }
 
   return trimmed.join(lineEnding);
+}
+
+export interface CopyOptions {
+  smartRemoveIndent: boolean;
+}
+
+/**
+ * Prepare xterm.js selection text for clipboard copy.
+ *
+ * Always applies trimSelectionTrailingWhitespace (remove trailing spaces/blank lines).
+ * When smartRemoveIndent is enabled, also removes common leading whitespace so that
+ * text copied from terminal doesn't carry unwanted indentation into external apps.
+ */
+export function prepareSelectionForCopy(text: string, options: CopyOptions): string {
+  let result = trimSelectionTrailingWhitespace(text);
+  if (options.smartRemoveIndent) {
+    result = smartRemoveIndent(result);
+  }
+  return result;
 }
 
 /**

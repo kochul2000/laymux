@@ -47,8 +47,7 @@ pub fn is_claude_idle_title(title: &str) -> bool {
 pub fn strip_claude_spinner_prefix(title: &str) -> &str {
     let mut chars = title.chars();
     if let Some(first) = chars.next() {
-        if CLAUDE_SPINNER_PREFIXES.contains(&first) || ('\u{2800}'..='\u{28FF}').contains(&first)
-        {
+        if CLAUDE_SPINNER_PREFIXES.contains(&first) || ('\u{2800}'..='\u{28FF}').contains(&first) {
             return chars.as_str().trim();
         }
     }
@@ -115,13 +114,12 @@ pub fn process_claude_title(
         // Task completion: working → idle transition
         if was_working && result.now_idle {
             let description = title.trim_start_matches(IDLE_PREFIX).trim();
-            result.task_completed = Some(
-                if description.is_empty() || description == "Claude Code" {
+            result.task_completed =
+                Some(if description.is_empty() || description == "Claude Code" {
                     "Claude Code task completed".to_string()
                 } else {
                     description.to_string()
-                },
-            );
+                });
         }
     }
 
@@ -153,7 +151,9 @@ mod tests {
     #[test]
     fn claude_title_braille_spinners() {
         assert!(is_claude_title("\u{2802} Claude Code"));
-        assert!(is_claude_title("\u{2810} General coding assistance session"));
+        assert!(is_claude_title(
+            "\u{2810} General coding assistance session"
+        ));
         assert!(is_claude_title("\u{280B} Working on task"));
         assert!(is_claude_title("\u{2819} Analyzing"));
         assert!(is_claude_title("\u{2839} Building"));

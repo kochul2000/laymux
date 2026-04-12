@@ -359,12 +359,13 @@ mod tests {
             )
         });
 
-        let app = Router::new()
-            .nest_service("/mcp", nested_svc)
-            .layer(middleware::from_fn_with_state(
-                "secret-key".to_string(),
-                auth_middleware,
-            ));
+        let app =
+            Router::new()
+                .nest_service("/mcp", nested_svc)
+                .layer(middleware::from_fn_with_state(
+                    "secret-key".to_string(),
+                    auth_middleware,
+                ));
 
         // Without token → 401
         let req = axum::http::Request::builder()
