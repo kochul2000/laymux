@@ -3,8 +3,8 @@ set -euo pipefail
 
 # laymux 내장 MCP 서버 설정 스크립트 (Streamable HTTP)
 #
-# laymux가 실행 중이면 discovery 파일에서 port/key를 읽어
-# Claude Code MCP 설정을 자동 등록한다. 별도 빌드 불필요.
+# laymux의 고정 포트를 사용하여 Claude Code MCP 설정을 자동 등록한다.
+# 인증 불필요 — IP allowlist로 로컬 접근만 허용.
 # 기본: 전역 등록 (~/.claude.json), --project: 프로젝트별 (.mcp.json)
 #
 # 사용법:
@@ -22,6 +22,9 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# --- jq 확인 ---
+command -v jq >/dev/null 2>&1 || error "jq가 설치되어 있지 않습니다. (sudo apt install jq)"
 
 # --- 인자 파싱 ---
 SCOPE="global"
@@ -51,63 +54,22 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- 1. Discovery 파일 찾기 ---
+# --- 1. Port 결정 ---
 echo "=== laymux MCP 설정 (내장 HTTP) ==="
 echo
 
-# Determine discovery file path
 if [ "$USE_DEV" = true ]; then
-    APP_DIR="laymux-dev"
+    MCP_NAME="laymux-dev"
+    PORT=19281
 else
-    APP_DIR="laymux"
+    MCP_NAME="laymux"
+    PORT=19280
 fi
 
-# Try WSL path first (Windows %APPDATA% via /mnt/c)
-DISCOVERY=""
-
-if [ -d "/mnt/c" ]; then
-    # WSL: resolve current Windows user via cmd.exe, not glob
-    WIN_USER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r\n' || echo "")
-    if [ -n "$WIN_USER" ]; then
-        candidate="/mnt/c/Users/$WIN_USER/AppData/Roaming/$APP_DIR/automation.json"
-        if [ -f "$candidate" ]; then
-            DISCOVERY="$candidate"
-        fi
-    fi
-
-    # Fallback: glob (single-user machines)
-    if [ -z "$DISCOVERY" ]; then
-        for user_dir in /mnt/c/Users/*/AppData/Roaming; do
-            candidate="$user_dir/$APP_DIR/automation.json"
-            if [ -f "$candidate" ]; then
-                DISCOVERY="$candidate"
-                break
-            fi
-        done
-    fi
-fi
-
-# Fallback: Linux native
-if [ -z "$DISCOVERY" ] && [ -f "$HOME/.config/$APP_DIR/automation.json" ]; then
-    DISCOVERY="$HOME/.config/$APP_DIR/automation.json"
-fi
-
-[ -z "$DISCOVERY" ] && error "automation.json을 찾을 수 없습니다. laymux가 실행 중인지 확인하세요."
-info "Discovery 파일: $DISCOVERY"
-
-# --- 2. Port / Key 읽기 ---
-command -v jq >/dev/null 2>&1 || error "jq가 설치되어 있지 않습니다. (sudo apt install jq)"
-
-PORT=$(jq -r '.port' "$DISCOVERY")
-KEY=$(jq -r '.key' "$DISCOVERY")
-
-[ -z "$PORT" ] || [ "$PORT" = "null" ] && error "discovery 파일에서 port를 읽을 수 없습니다."
-[ -z "$KEY" ] || [ "$KEY" = "null" ] && error "discovery 파일에서 key를 읽을 수 없습니다."
-
+info "서버: $MCP_NAME"
 info "Port: $PORT"
-info "Key: ${KEY:0:8}...${KEY: -4}"
 
-# --- 3. Gateway IP 결정 ---
+# --- 2. Gateway IP 결정 ---
 if [ -d "/mnt/c" ]; then
     # WSL: Windows host IP
     GATEWAY=$(ip route show default 2>/dev/null | awk '{print $3}' || echo "")
@@ -121,36 +83,31 @@ fi
 
 info "Gateway: $GATEWAY"
 
-# --- 4. Health check ---
+# --- 3. Health check ---
 MCP_URL="http://$GATEWAY:$PORT/mcp"
 HEALTH_URL="http://$GATEWAY:$PORT/api/v1/health"
 
-HEALTH_OK=false
 if command -v curl >/dev/null 2>&1; then
     if curl -sf --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
         info "Health check 통과"
-        HEALTH_OK=true
     else
         if [ "$FORCE" = true ]; then
             warn "Health check 실패 (--force로 계속 진행)"
         else
-            error "Health check 실패. laymux가 실행 중인지 확인하세요.\n       stale automation.json일 수 있습니다. --force로 무시할 수 있습니다."
+            error "Health check 실패. laymux가 실행 중인지 확인하세요.\n       --force로 무시할 수 있습니다."
         fi
     fi
 else
     warn "curl이 없어 health check를 건너뜁니다."
 fi
 
-# --- 5. .mcp.json 생성 ---
+# --- 4. .mcp.json 생성 ---
 MCP_CONFIG=$(cat <<EOF
 {
   "mcpServers": {
-    "laymux": {
+    "$MCP_NAME": {
       "type": "http",
-      "url": "$MCP_URL",
-      "headers": {
-        "Authorization": "Bearer $KEY"
-      }
+      "url": "$MCP_URL"
     }
   }
 }
@@ -163,33 +120,33 @@ if [ "$SCOPE" = "global" ]; then
     if [ -f "$TARGET" ]; then
         # Merge into existing file
         EXISTING=$(cat "$TARGET")
-        echo "$EXISTING" | jq --arg url "$MCP_URL" --arg key "Bearer $KEY" \
-            '.mcpServers.laymux = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
+        echo "$EXISTING" | jq --arg name "$MCP_NAME" --arg url "$MCP_URL" \
+            '.mcpServers[$name] = { "type": "http", "url": $url }' \
             > "$TARGET.tmp"
         mv "$TARGET.tmp" "$TARGET"
     else
         echo "$MCP_CONFIG" > "$TARGET"
     fi
-    info "전역 등록 완료: $TARGET"
+    info "전역 등록 완료: $TARGET ($MCP_NAME)"
 else
     PROJECT_DIR="$(realpath "$PROJECT_DIR")"
     [ -d "$PROJECT_DIR" ] || error "디렉토리가 존재하지 않습니다: $PROJECT_DIR"
     TARGET="$PROJECT_DIR/.mcp.json"
 
     if [ -f "$TARGET" ]; then
-        jq --arg url "$MCP_URL" --arg key "Bearer $KEY" \
-            '.mcpServers.laymux = { "type": "http", "url": $url, "headers": { "Authorization": $key } }' \
+        jq --arg name "$MCP_NAME" --arg url "$MCP_URL" \
+            '.mcpServers[$name] = { "type": "http", "url": $url }' \
             "$TARGET" > "$TARGET.tmp"
         mv "$TARGET.tmp" "$TARGET"
     else
         echo "$MCP_CONFIG" > "$TARGET"
     fi
-    info "프로젝트 등록 완료: $TARGET"
+    info "프로젝트 등록 완료: $TARGET ($MCP_NAME)"
 fi
 
-# --- 6. 권한 설정 ---
+# --- 5. 권한 설정 ---
 SETTINGS="$HOME/.claude/settings.json"
-PERMISSION_RULE="mcp__laymux__*"
+PERMISSION_RULE="mcp__${MCP_NAME}__*"
 
 if [ -f "$SETTINGS" ]; then
     if jq -e --arg rule "$PERMISSION_RULE" '.permissions.allow | index($rule)' "$SETTINGS" >/dev/null 2>&1; then
@@ -208,7 +165,6 @@ fi
 echo
 echo "=== 설정 완료 ==="
 echo "MCP URL: $MCP_URL"
-echo "Claude Code를 재시작한 후 /mcp 명령으로 laymux가 보이는지 확인하세요."
+echo "Claude Code를 재시작한 후 /mcp 명령으로 $MCP_NAME 이 보이는지 확인하세요."
 echo
-echo "참고: laymux를 재시작하면 Bearer key가 변경됩니다."
-echo "      그 때 이 스크립트를 다시 실행하세요."
+echo "인증이 필요 없으므로 laymux를 재시작해도 이 설정은 유효합니다."

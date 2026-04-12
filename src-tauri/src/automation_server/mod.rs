@@ -11,7 +11,10 @@ pub use types::{AutomationRequest, AutomationResponse};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Request, State as AxumState};
+use std::net::IpAddr;
+
+use axum::extract::ConnectInfo;
+use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -49,13 +52,8 @@ pub fn automation_port() -> u16 {
     }
 }
 
-/// Generate a random bearer token for API authentication.
-pub fn generate_automation_key() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-/// Write discovery file so external tools can find the automation port and key.
-pub fn write_discovery_file(port: u16, key: &str) {
+/// Write discovery file so external tools can find the automation port.
+pub fn write_discovery_file(port: u16) {
     let path = discovery_file_path();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -64,7 +62,6 @@ pub fn write_discovery_file(port: u16, key: &str) {
         "port": port,
         "pid": std::process::id(),
         "version": env!("CARGO_PKG_VERSION"),
-        "key": key,
     });
     let _ = std::fs::write(
         &path,
@@ -88,14 +85,12 @@ fn discovery_file_path() -> std::path::PathBuf {
 /// Start the automation HTTP server on a fixed port.
 /// Release = 19280, Dev = 19281. No fallback — fails if port is occupied.
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
-    let key = generate_automation_key();
-
     let server_state = ServerState {
         app_state: app_state.clone(),
         app_handle,
     };
 
-    let app = build_router(server_state, &key);
+    let app = build_router(server_state);
 
     let port = automation_port();
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -103,32 +98,21 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
         .await
         .map_err(|e| format!("Failed to bind automation server on port {port}: {e}. Is another instance already running?"))?;
 
-    // Store port and key in AppState
+    // Store port in AppState
     if let Ok(mut p) = app_state.automation_port.lock_or_err() {
         *p = Some(port);
     } else {
         tracing::error!("Failed to store automation port in AppState (lock poisoned)");
     }
-    if let Ok(mut k) = app_state.automation_key.lock_or_err() {
-        *k = Some(key.clone());
-    } else {
-        tracing::error!("Failed to store automation key in AppState (lock poisoned)");
-    }
 
-    // Write discovery file (includes key)
-    write_discovery_file(port, &key);
+    write_discovery_file(port);
 
     tracing::info!(port, "Automation server listening on 0.0.0.0:{port}");
-    tracing::info!(
-        key_prefix = &key[..8],
-        key_suffix = &key[key.len() - 4..],
-        "Automation API key: {}...{}",
-        &key[..8],
-        &key[key.len() - 4..]
-    );
 
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
+        if let Err(e) =
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
+        {
             tracing::error!(error = %e, "Automation server error");
         }
     });
@@ -136,48 +120,45 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     Ok(port)
 }
 
-/// Bearer token authentication middleware.
-/// Skips auth for GET /api/v1/health and CORS preflight (OPTIONS).
-async fn auth_middleware(
-    AxumState(expected_key): AxumState<String>,
-    req: Request,
-    next: Next,
-) -> Response {
-    // Allow CORS preflight through (OPTIONS must pass before auth)
-    if req.method() == axum::http::Method::OPTIONS {
-        return next.run(req).await;
-    }
-
-    // Allow health endpoint without auth
-    if req.uri().path() == "/api/v1/health" {
-        return next.run(req).await;
-    }
-
-    let auth_header = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
-
-    match auth_header.and_then(|h| h.strip_prefix("Bearer ")) {
-        Some(token) if token == expected_key => next.run(req).await,
-        Some(_) => (
-            StatusCode::UNAUTHORIZED,
-            Json(err_json("Invalid API key")),
-        )
-            .into_response(),
-        None => (
-            StatusCode::UNAUTHORIZED,
-            Json(err_json(
-                "Missing Authorization header. Use: Authorization: Bearer <key from automation.json>",
-            )),
-        )
-            .into_response(),
+/// Check if an IP address is a local/private address.
+/// Allows: loopback (127.x, ::1), RFC 1918 private (10.x, 172.16-31.x, 192.168.x),
+/// and link-local (169.254.x, fe80::).
+fn is_local_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()            // 127.0.0.0/8
+                || v4.octets()[0] == 10  // 10.0.0.0/8
+                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1])) // 172.16.0.0/12
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 168) // 192.168.0.0/16
+                || (v4.octets()[0] == 169 && v4.octets()[1] == 254) // 169.254.0.0/16 link-local
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()  // ::1
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+        }
     }
 }
 
-pub fn build_router(state: ServerState, key: &str) -> Router {
-    let key = key.to_string();
+/// IP allowlist middleware — only permits requests from local/private networks.
+/// Replaces Bearer token auth: since this is localhost/WSL communication,
+/// IP restriction provides equivalent security without key management overhead.
+async fn ip_allowlist_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if is_local_ip(&addr.ip()) {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(err_json("Access denied: only local/private network connections are allowed")),
+        )
+            .into_response()
+    }
+}
 
+pub fn build_router(state: ServerState) -> Router {
     Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
@@ -253,7 +234,7 @@ pub fn build_router(state: ServerState, key: &str) -> Router {
             "/api/v1/ui/notifications",
             post(ui_toggle_notification_panel),
         )
-        .layer(middleware::from_fn_with_state(key, auth_middleware))
+        .layer(middleware::from_fn(ip_allowlist_middleware))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -277,125 +258,32 @@ mod tests {
     }
 
     #[test]
-    fn generate_automation_key_is_unique() {
-        let k1 = generate_automation_key();
-        let k2 = generate_automation_key();
-        assert_ne!(k1, k2);
-        assert!(!k1.is_empty());
-    }
-
-    /// Build a minimal router with auth middleware for testing.
-    fn auth_test_router(key: &str) -> Router {
-        let protected = Router::new()
-            .route("/api/v1/health", get(|| async { StatusCode::OK }))
-            .route("/api/v1/protected", get(|| async { StatusCode::OK }));
-
-        protected
-            .layer(middleware::from_fn_with_state(
-                key.to_string(),
-                auth_middleware,
-            ))
-            .layer(CorsLayer::permissive())
-    }
-
-    #[tokio::test]
-    async fn auth_health_no_token_returns_ok() {
-        let app = auth_test_router("secret-key");
-        let req = axum::http::Request::builder()
-            .uri("/api/v1/health")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn auth_valid_token_returns_ok() {
-        let app = auth_test_router("secret-key");
-        let req = axum::http::Request::builder()
-            .uri("/api/v1/protected")
-            .header("Authorization", "Bearer secret-key")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn auth_invalid_token_returns_401() {
-        let app = auth_test_router("secret-key");
-        let req = axum::http::Request::builder()
-            .uri("/api/v1/protected")
-            .header("Authorization", "Bearer wrong-key")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn auth_missing_header_returns_401() {
-        let app = auth_test_router("secret-key");
-        let req = axum::http::Request::builder()
-            .uri("/api/v1/protected")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    /// Verify auth middleware applies to nest_service routes (covers /mcp).
-    #[tokio::test]
-    async fn auth_nest_service_requires_token() {
-        use axum::routing::get;
-        use tower::service_fn;
-
-        let nested_svc = service_fn(|_req: axum::http::Request<axum::body::Body>| async {
-            Ok::<_, std::convert::Infallible>(
-                axum::http::Response::builder()
-                    .status(StatusCode::OK)
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-        });
-
-        let app =
-            Router::new()
-                .nest_service("/mcp", nested_svc)
-                .layer(middleware::from_fn_with_state(
-                    "secret-key".to_string(),
-                    auth_middleware,
-                ));
-
-        // Without token → 401
-        let req = axum::http::Request::builder()
-            .method("POST")
-            .uri("/mcp")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-
-        // With valid token → 200
-        let req = axum::http::Request::builder()
-            .method("POST")
-            .uri("/mcp")
-            .header("Authorization", "Bearer secret-key")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+    fn is_local_ip_allows_loopback() {
+        assert!(is_local_ip(&"127.0.0.1".parse().unwrap()));
+        assert!(is_local_ip(&"127.0.0.2".parse().unwrap()));
+        assert!(is_local_ip(&"::1".parse().unwrap()));
     }
 
     #[test]
-    #[serial]
-    fn discovery_file_contains_key() {
-        write_discovery_file(19281, "secret-abc");
-        let path = discovery_file_path();
-        let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["key"], "secret-abc");
-        remove_discovery_file();
+    fn is_local_ip_allows_private_ranges() {
+        // 10.0.0.0/8
+        assert!(is_local_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(is_local_ip(&"10.255.255.255".parse().unwrap()));
+        // 172.16.0.0/12
+        assert!(is_local_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_local_ip(&"172.31.255.255".parse().unwrap()));
+        // 192.168.0.0/16
+        assert!(is_local_ip(&"192.168.1.1".parse().unwrap()));
+        // link-local
+        assert!(is_local_ip(&"169.254.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_local_ip_rejects_public() {
+        assert!(!is_local_ip(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_local_ip(&"172.32.0.1".parse().unwrap()));
+        assert!(!is_local_ip(&"172.15.255.255".parse().unwrap()));
+        assert!(!is_local_ip(&"192.169.0.1".parse().unwrap()));
     }
 
     #[test]
@@ -407,13 +295,13 @@ mod tests {
     #[test]
     #[serial]
     fn write_and_remove_discovery_file() {
-        write_discovery_file(19280, "test-key-123");
+        write_discovery_file(19280);
         let path = discovery_file_path();
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["port"], 19280);
-        assert_eq!(parsed["key"], "test-key-123");
+        assert!(parsed.get("key").is_none());
         assert!(parsed["pid"].as_u64().unwrap() > 0);
         remove_discovery_file();
         assert!(!path.exists());

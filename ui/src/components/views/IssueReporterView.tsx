@@ -42,10 +42,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setState("capturing");
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const info = await invoke<{ port: number; key: string }>("get_automation_info");
+      const info = await invoke<{ port: number }>("get_automation_info");
       const res = await fetch(`http://127.0.0.1:${info.port}/api/v1/screenshot`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${info.key}` },
       });
       const data = await res.json();
       if (data.path) setScreenshotPath(data.path);

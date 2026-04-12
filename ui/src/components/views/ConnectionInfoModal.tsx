@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 
 interface AutomationInfo {
   port: number;
-  key: string;
 }
 
 export function ConnectionInfoModal() {
@@ -26,7 +25,6 @@ export function ConnectionInfoModal() {
   const lines = [
     `LX_AUTOMATION_HOST=127.0.0.1`,
     `LX_AUTOMATION_PORT=${info.port}`,
-    `LX_AUTOMATION_KEY=${info.key}`,
   ].join("\n");
 
   return (
