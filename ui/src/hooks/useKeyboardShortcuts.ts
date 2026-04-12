@@ -5,7 +5,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { sortWorkspaces } from "@/lib/workspace-sort";
+import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
@@ -173,6 +173,8 @@ export function useKeyboardShortcuts() {
         workspaceDisplayOrder,
         notifications,
       );
+      const { hiddenWorkspaceIds } = useUiStore.getState();
+      const visibleWorkspaces = filterVisibleWorkspaces(workspaces, hiddenWorkspaceIds);
 
       // Ctrl+Shift shortcuts (non-workspace: sidebar, notifications)
       if (e.shiftKey && !e.altKey) {
@@ -258,20 +260,20 @@ export function useKeyboardShortcuts() {
           return;
         }
 
-        // Ctrl+Alt+1~8: switch workspace by index
+        // Ctrl+Alt+1~8: switch workspace by index (visible only)
         if (e.key >= "1" && e.key <= "8") {
           e.preventDefault();
           const idx = parseInt(e.key) - 1;
-          if (idx < workspaces.length) {
-            switchWorkspace(workspaces[idx].id);
+          if (idx < visibleWorkspaces.length) {
+            switchWorkspace(visibleWorkspaces[idx].id);
           }
           return;
         }
 
-        // Ctrl+Alt+9: last workspace
+        // Ctrl+Alt+9: last visible workspace
         if (e.key === "9") {
           e.preventDefault();
-          const last = workspaces.at(-1);
+          const last = visibleWorkspaces.at(-1);
           if (last) switchWorkspace(last.id);
           return;
         }
@@ -290,21 +292,23 @@ export function useKeyboardShortcuts() {
           return;
         }
 
-        // Ctrl+Alt+ArrowDown: next workspace
+        // Ctrl+Alt+ArrowDown: next visible workspace
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
-          const nextIdx = (currentIdx + 1) % workspaces.length;
-          switchWorkspace(workspaces[nextIdx].id);
+          if (visibleWorkspaces.length === 0) return;
+          const currentIdx = visibleWorkspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+          const nextIdx = (currentIdx + 1) % visibleWorkspaces.length;
+          switchWorkspace(visibleWorkspaces[nextIdx].id);
           return;
         }
 
-        // Ctrl+Alt+ArrowUp: previous workspace
+        // Ctrl+Alt+ArrowUp: previous visible workspace
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          const currentIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
-          const prevIdx = (currentIdx - 1 + workspaces.length) % workspaces.length;
-          switchWorkspace(workspaces[prevIdx].id);
+          if (visibleWorkspaces.length === 0) return;
+          const currentIdx = visibleWorkspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+          const prevIdx = (currentIdx - 1 + visibleWorkspaces.length) % visibleWorkspaces.length;
+          switchWorkspace(visibleWorkspaces[prevIdx].id);
           return;
         }
 

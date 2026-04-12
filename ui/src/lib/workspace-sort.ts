@@ -9,6 +9,18 @@ interface NotificationLike {
 }
 
 /**
+ * Filter out hidden workspaces from a (pre-sorted) list.
+ * Preserves the input order — apply after sortWorkspaces().
+ */
+export function filterVisibleWorkspaces(
+  workspaces: Workspace[],
+  hiddenIds: Set<string>,
+): Workspace[] {
+  if (hiddenIds.size === 0) return workspaces;
+  return workspaces.filter((ws) => !hiddenIds.has(ws.id));
+}
+
+/**
  * Sort workspaces to match the visual display order.
  * - "manual": follows workspaceDisplayOrder (DnD), falls back to natural array order.
  * - "notification": unread-notification recency first, then original array order.
