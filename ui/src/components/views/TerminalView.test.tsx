@@ -513,6 +513,77 @@ describe("TerminalView", () => {
     expect(container).not.toHaveClass("terminal-sync-output-active");
   });
 
+  it("keeps DEC 2026 fallback cursor sync available after PowerShell-style OSC 133 D", async () => {
+    render(
+      <TerminalView
+        instanceId="t-powershell-dec-fallback"
+        profile="PowerShell"
+        syncGroup=""
+        isFocused
+      />,
+    );
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-powershell-dec-fallback", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-powershell-dec-fallback");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-powershell-dec-fallback");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    terminal.element.appendChild(screenEl);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+
+    await act(async () => {
+      await oscHandlers.get("133")?.("D;0");
+    });
+
+    terminal.buffer.active.cursorX = 20;
+    terminal.buffer.active.cursorY = 10;
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(200px, 200px)");
+      expect(overlay.style.opacity).toBe("1");
+    });
+  });
+
   it("tracks xterm synchronizedOutputMode after terminal.write", async () => {
     render(<TerminalView instanceId="t-sync-write" profile="PowerShell" syncGroup="" />);
 

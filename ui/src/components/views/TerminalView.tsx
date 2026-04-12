@@ -84,6 +84,10 @@ function hasDecModeParam(params: readonly (number | number[])[], mode: number): 
   return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
 }
 
+function isPromptBoundaryOscParam(param: string): boolean {
+  return param === "A" || param === "B" || param === "C";
+}
+
 export function shouldEnableTerminalWebgl(): boolean {
   return true;
 }
@@ -424,8 +428,11 @@ export function TerminalView({
     };
     const handlePromptOsc = (data: string) => {
       const shadowCursor = shadowCursorRef.current;
-      shadowCursor.hasPromptBoundary = true;
-      switch (data.split(";")[0]) {
+      const param = data.split(";")[0] ?? "";
+      if (isPromptBoundaryOscParam(param)) {
+        shadowCursor.hasPromptBoundary = true;
+      }
+      switch (param) {
         case "A":
           setInputPhase(false);
           break;
@@ -820,11 +827,12 @@ export function TerminalView({
       }
       if (
         text.includes("\x1b]133;C") ||
-        text.includes("\x1b]133;D") ||
-        text.includes("\x1b]633;C") ||
-        text.includes("\x1b]633;D")
+        text.includes("\x1b]633;C")
       ) {
         shadowCursorRef.current.hasPromptBoundary = true;
+        setInputPhase(false);
+      }
+      if (text.includes("\x1b]133;D") || text.includes("\x1b]633;D")) {
         setInputPhase(false);
       }
 
