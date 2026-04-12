@@ -274,17 +274,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
             charCount += lines[i].length + 1;
           }
 
-          let totalRemoved = 0;
-          let removedBeforeStart = 0;
           const newLines = lines.map((line, i) => {
             if (i < startLine || i > endLine) return line;
             const spaces = line.match(dedentRegex);
             if (spaces) {
-              const removed = spaces[0].length;
-              totalRemoved += removed;
-              if (i < startLine) removedBeforeStart += removed;
-              if (i === startLine) removedBeforeStart += removed;
-              return line.slice(removed);
+              return line.slice(spaces[0].length);
             }
             return line;
           });
