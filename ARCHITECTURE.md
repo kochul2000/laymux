@@ -1131,6 +1131,7 @@ pub fn get_terminal_summaries_inner(
 | 이벤트/액션 기반 설계 | 기능은 **액션(이벤트)에 반응**하도록 구현한다. 키 입력 → 액션 변환은 중앙 키바인딩 시스템(`useKeyboardShortcuts`, `lx-shortcuts`)이 담당한다. |
 | 컴포넌트 내 `e.key` 직접 검사 금지 | `onKeyDown`에서 `e.ctrlKey && e.key === 'x'` 같은 수정자+키 조합을 직접 검사하지 않는다. 네비게이션 키(`ArrowUp/Down`, `Enter`, `Escape`, `Tab`)만 컴포넌트 내에서 허용한다. |
 | 새 단축키 추가 시 | `settings.json`의 `keybindings` 배열에 기본값을 등록하고, 키바인딩 시스템에서 액션을 디스패치한다. 컴포넌트는 그 액션만 구독한다. |
+| 모든 단축키는 오버라이드 가능 | 모든 단축키는 `settings.json`의 `keybindings`에서 사용자가 재바인딩할 수 있어야 한다. 새 단축키 추가 시 **SettingsView의 Keybindings UI에도 반드시 반영**한다 (`defaultKeybindings` 배열 + 표시 라벨). Settings UI에 나타나지 않는 단축키는 존재하지 않는 것과 같다. |
 
 ```typescript
 // ❌ 금지 — 기능 코드에 키 조합 하드코딩
