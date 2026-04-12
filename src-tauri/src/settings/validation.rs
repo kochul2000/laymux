@@ -149,58 +149,15 @@ fn validate_workspace_panes(
             continue;
         }
 
-        // Clamp coordinates to 0.0~1.0
-        if !is_valid_ratio(pane.x) {
-            let old = pane.x;
-            pane.x = clamp_ratio(pane.x);
-            warnings.push(ValidationWarning {
-                path: format!("{pane_path}.x"),
-                message: format!(
-                    "x 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
-                    pane.x
-                ),
-                repaired: true,
-            });
-        }
-
-        if !is_valid_ratio(pane.y) {
-            let old = pane.y;
-            pane.y = clamp_ratio(pane.y);
-            warnings.push(ValidationWarning {
-                path: format!("{pane_path}.y"),
-                message: format!(
-                    "y 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
-                    pane.y
-                ),
-                repaired: true,
-            });
-        }
-
-        if !is_valid_dimension(pane.w) {
-            let old = pane.w;
-            pane.w = clamp_dimension(pane.w);
-            warnings.push(ValidationWarning {
-                path: format!("{pane_path}.w"),
-                message: format!(
-                    "w 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
-                    pane.w
-                ),
-                repaired: true,
-            });
-        }
-
-        if !is_valid_dimension(pane.h) {
-            let old = pane.h;
-            pane.h = clamp_dimension(pane.h);
-            warnings.push(ValidationWarning {
-                path: format!("{pane_path}.h"),
-                message: format!(
-                    "h 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
-                    pane.h
-                ),
-                repaired: true,
-            });
-        }
+        // Clamp coordinates and normalize bounds
+        normalize_pane_bounds(
+            &mut pane.x,
+            &mut pane.y,
+            &mut pane.w,
+            &mut pane.h,
+            &pane_path,
+            warnings,
+        );
 
         // View type must not be empty
         if pane.view.view_type.is_empty() {
@@ -234,38 +191,14 @@ fn validate_layouts(settings: &mut Settings, warnings: &mut Vec<ValidationWarnin
 
         for (i, pane) in layout.panes.iter_mut().enumerate() {
             let pane_path = format!("{layout_path}.panes[{i}]");
-            if !is_valid_ratio(pane.x) {
-                pane.x = clamp_ratio(pane.x);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.x"),
-                    message: "레이아웃 Pane x 좌표를 유효 범위로 수정했습니다.".into(),
-                    repaired: true,
-                });
-            }
-            if !is_valid_ratio(pane.y) {
-                pane.y = clamp_ratio(pane.y);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.y"),
-                    message: "레이아웃 Pane y 좌표를 유효 범위로 수정했습니다.".into(),
-                    repaired: true,
-                });
-            }
-            if !is_valid_dimension(pane.w) {
-                pane.w = clamp_dimension(pane.w);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.w"),
-                    message: "레이아웃 Pane w 크기를 유효 범위로 수정했습니다.".into(),
-                    repaired: true,
-                });
-            }
-            if !is_valid_dimension(pane.h) {
-                pane.h = clamp_dimension(pane.h);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.h"),
-                    message: "레이아웃 Pane h 크기를 유효 범위로 수정했습니다.".into(),
-                    repaired: true,
-                });
-            }
+            normalize_pane_bounds(
+                &mut pane.x,
+                &mut pane.y,
+                &mut pane.w,
+                &mut pane.h,
+                &pane_path,
+                warnings,
+            );
             if pane.view_type.is_empty() {
                 pane.view_type = "TerminalView".into();
                 warnings.push(ValidationWarning {
@@ -327,57 +260,14 @@ fn validate_docks(settings: &mut Settings, warnings: &mut Vec<ValidationWarning>
                 continue;
             }
 
-            if !is_valid_ratio(pane.x) {
-                let old = pane.x;
-                pane.x = clamp_ratio(pane.x);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.x"),
-                    message: format!(
-                        "독 Pane x 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
-                        pane.x
-                    ),
-                    repaired: true,
-                });
-            }
-
-            if !is_valid_ratio(pane.y) {
-                let old = pane.y;
-                pane.y = clamp_ratio(pane.y);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.y"),
-                    message: format!(
-                        "독 Pane y 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
-                        pane.y
-                    ),
-                    repaired: true,
-                });
-            }
-
-            if !is_valid_dimension(pane.w) {
-                let old = pane.w;
-                pane.w = clamp_dimension(pane.w);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.w"),
-                    message: format!(
-                        "독 Pane w 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
-                        pane.w
-                    ),
-                    repaired: true,
-                });
-            }
-
-            if !is_valid_dimension(pane.h) {
-                let old = pane.h;
-                pane.h = clamp_dimension(pane.h);
-                warnings.push(ValidationWarning {
-                    path: format!("{pane_path}.h"),
-                    message: format!(
-                        "독 Pane h 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
-                        pane.h
-                    ),
-                    repaired: true,
-                });
-            }
+            normalize_pane_bounds(
+                &mut pane.x,
+                &mut pane.y,
+                &mut pane.w,
+                &mut pane.h,
+                &pane_path,
+                warnings,
+            );
         }
 
         for i in to_remove.into_iter().rev() {
@@ -424,6 +314,12 @@ fn validate_profile_references(settings: &mut Settings, warnings: &mut Vec<Valid
     }
 }
 
+/// Minimum pane dimension (width or height) — below this a pane is effectively invisible.
+const MIN_PANE_DIM: f64 = 0.01;
+
+/// Tolerance for floating-point comparison to avoid false positives (e.g. 0.3+0.7 = 1.0000000000000002).
+const BOUNDS_EPSILON: f64 = 1e-9;
+
 fn is_valid_ratio(v: f64) -> bool {
     v.is_finite() && (0.0..=1.0).contains(&v)
 }
@@ -443,7 +339,106 @@ fn clamp_dimension(v: f64) -> f64 {
     if !v.is_finite() || v <= 0.0 {
         return 0.1;
     }
-    v.clamp(0.01, 1.0)
+    v.clamp(MIN_PANE_DIM, 1.0)
+}
+
+/// Normalize bounds so that `origin + size <= 1.0` on a single axis.
+/// Shrinks size first; if remaining space is too small, pulls origin back instead.
+fn normalize_axis(origin: &mut f64, size: &mut f64) -> bool {
+    if *origin + *size > 1.0 + BOUNDS_EPSILON {
+        let available = 1.0 - *origin;
+        if available >= MIN_PANE_DIM {
+            *size = available;
+        } else {
+            *origin = 1.0 - *size;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// Normalize pane bounds: clamp individual fields, then ensure x+w<=1 and y+h<=1.
+fn normalize_pane_bounds(
+    x: &mut f64,
+    y: &mut f64,
+    w: &mut f64,
+    h: &mut f64,
+    pane_path: &str,
+    warnings: &mut Vec<ValidationWarning>,
+) {
+    if !is_valid_ratio(*x) {
+        let old = *x;
+        *x = clamp_ratio(*x);
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.x"),
+            message: format!(
+                "x 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
+                *x
+            ),
+            repaired: true,
+        });
+    }
+    if !is_valid_ratio(*y) {
+        let old = *y;
+        *y = clamp_ratio(*y);
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.y"),
+            message: format!(
+                "y 좌표 {old}이(가) 유효 범위(0.0~1.0)를 벗어나 {:.2}로 수정했습니다.",
+                *y
+            ),
+            repaired: true,
+        });
+    }
+    if !is_valid_dimension(*w) {
+        let old = *w;
+        *w = clamp_dimension(*w);
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.w"),
+            message: format!(
+                "w 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
+                *w
+            ),
+            repaired: true,
+        });
+    }
+    if !is_valid_dimension(*h) {
+        let old = *h;
+        *h = clamp_dimension(*h);
+        warnings.push(ValidationWarning {
+            path: format!("{pane_path}.h"),
+            message: format!(
+                "h 크기 {old}이(가) 유효 범위(0.0~1.0, >0)를 벗어나 {:.2}로 수정했습니다.",
+                *h
+            ),
+            repaired: true,
+        });
+    }
+
+    // Ensure x+w <= 1 and y+h <= 1
+    let (old_x, old_w) = (*x, *w);
+    if normalize_axis(x, w) {
+        warnings.push(ValidationWarning {
+            path: pane_path.into(),
+            message: format!(
+                "x({old_x:.2})+w({old_w:.2}) 합이 1.0 범위를 초과하여 x={:.2}, w={:.2}로 수정했습니다.",
+                *x, *w
+            ),
+            repaired: true,
+        });
+    }
+    let (old_y, old_h) = (*y, *h);
+    if normalize_axis(y, h) {
+        warnings.push(ValidationWarning {
+            path: pane_path.into(),
+            message: format!(
+                "y({old_y:.2})+h({old_h:.2}) 합이 1.0 범위를 초과하여 y={:.2}, h={:.2}로 수정했습니다.",
+                *y, *h
+            ),
+            repaired: true,
+        });
+    }
 }
 
 /// Pick the best profile name for fallback panes:
@@ -499,9 +494,12 @@ mod tests {
     #[test]
     fn pane_x_out_of_range_is_clamped() {
         let mut settings = Settings::default();
+        // default w=1.0; x=1.5 → clamp x=1.0 → x+w=2.0 > 1 → pull x back to 0.0
         settings.workspaces[0].panes[0].x = 1.5;
         let warnings = validate_and_repair(&mut settings);
-        assert_eq!(settings.workspaces[0].panes[0].x, 1.0);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.x, 0.0);
+        assert_eq!(pane.w, 1.0);
         assert!(warnings.iter().any(|w| w.path.contains(".x") && w.repaired));
     }
 
@@ -530,6 +528,87 @@ mod tests {
         let warnings = validate_and_repair(&mut settings);
         assert!(settings.workspaces[0].panes[0].h > 0.0);
         assert!(warnings.iter().any(|w| w.path.contains(".h") && w.repaired));
+    }
+
+    // ── Pane bounds 정규화 (x+w <= 1, y+h <= 1) ──
+
+    #[test]
+    fn pane_x_plus_w_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        // x=1.5 clamps to 1.0, w=0.5 is valid → x+w=1.5 > 1 → must shrink w
+        settings.workspaces[0].panes[0].x = 1.5;
+        settings.workspaces[0].panes[0].w = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert!(
+            pane.x + pane.w <= 1.0,
+            "x({}) + w({}) = {} > 1.0",
+            pane.x,
+            pane.w,
+            pane.x + pane.w
+        );
+    }
+
+    #[test]
+    fn pane_y_plus_h_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].y = 0.8;
+        settings.workspaces[0].panes[0].h = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert!(
+            pane.y + pane.h <= 1.0,
+            "y({}) + h({}) = {} > 1.0",
+            pane.y,
+            pane.h,
+            pane.y + pane.h
+        );
+    }
+
+    #[test]
+    fn pane_within_bounds_is_not_modified() {
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].x = 0.5;
+        settings.workspaces[0].panes[0].w = 0.5;
+        settings.workspaces[0].panes[0].y = 0.3;
+        settings.workspaces[0].panes[0].h = 0.7;
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.x, 0.5);
+        assert_eq!(pane.w, 0.5);
+        assert_eq!(pane.y, 0.3);
+        assert_eq!(pane.h, 0.7);
+        // No bounds-related warnings
+        assert!(!warnings.iter().any(|w| w.message.contains("범위를 초과")));
+    }
+
+    #[test]
+    fn pane_fp_rounding_does_not_trigger_false_positive() {
+        // 0.1 + 0.2 + 0.7 can produce 1.0000000000000002 in f64
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].x = 0.1 + 0.2; // 0.30000000000000004
+        settings.workspaces[0].panes[0].w = 0.7;
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        // Should NOT be modified — epsilon tolerance absorbs fp noise
+        assert_eq!(pane.w, 0.7);
+        assert!(!warnings.iter().any(|w| w.message.contains("범위를 초과")));
+    }
+
+    #[test]
+    fn layout_pane_x_plus_w_exceeding_1_is_normalized() {
+        let mut settings = Settings::default();
+        settings.layouts[0].panes[0].x = 0.7;
+        settings.layouts[0].panes[0].w = 0.5;
+        let _warnings = validate_and_repair(&mut settings);
+        let pane = &settings.layouts[0].panes[0];
+        assert!(
+            pane.x + pane.w <= 1.0,
+            "layout: x({}) + w({}) = {} > 1.0",
+            pane.x,
+            pane.w,
+            pane.x + pane.w
+        );
     }
 
     // ── View 타입 검증 ──
@@ -690,10 +769,12 @@ mod tests {
         }];
         let warnings = validate_and_repair(&mut settings);
         let pane = &settings.docks[0].panes[0];
-        assert_eq!(pane.x, 1.0);
+        // x=1.5→1.0, w=0.0→0.1, x+w=1.1→pull x back: x=0.9, w=0.1
+        assert_eq!(pane.x, 0.9);
         assert_eq!(pane.y, 0.0);
-        assert!(pane.w > 0.0);
+        assert_eq!(pane.w, 0.1);
         assert_eq!(pane.h, 1.0);
+        assert!(pane.x + pane.w <= 1.0);
         assert!(warnings.len() >= 4);
     }
 
@@ -738,11 +819,14 @@ mod tests {
     #[test]
     fn layout_pane_out_of_range_is_clamped() {
         let mut settings = Settings::default();
+        // x=2.0 → clamp 1.0, w=-0.5 → clamp 0.1, x+w=1.1 → pull x back to 0.9
         settings.layouts[0].panes[0].x = 2.0;
         settings.layouts[0].panes[0].w = -0.5;
         let warnings = validate_and_repair(&mut settings);
-        assert_eq!(settings.layouts[0].panes[0].x, 1.0);
-        assert!(settings.layouts[0].panes[0].w > 0.0);
+        let pane = &settings.layouts[0].panes[0];
+        assert_eq!(pane.x, 0.9);
+        assert_eq!(pane.w, 0.1);
+        assert!(pane.x + pane.w <= 1.0);
         assert!(warnings.len() >= 2);
     }
 
