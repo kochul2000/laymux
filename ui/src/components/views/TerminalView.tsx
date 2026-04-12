@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -88,10 +88,24 @@ export function shouldEnableTerminalWebgl(): boolean {
   return true;
 }
 
-function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
-  // Claude Code uses DEC 2026 (synchronized output) which positions the native
-  // cursor correctly at frame end — overlay is unnecessary and creates artifacts.
-  return activity?.type === "interactiveApp" && activity.name === "Codex";
+/**
+ * Determine whether the native xterm cursor should be used instead of the
+ * overlay caret.  Interactive TUI apps (Claude Code, vim, htop, etc.) manage
+ * their own cursor via DEC 2026 or the alternate screen buffer, so the overlay
+ * caret is unnecessary and may cause artifacts.  The exception is Codex, which
+ * benefits from the overlay caret for cursor stability.
+ *
+ * When this returns `false`, the overlay caret is used (if
+ * `stabilizeInteractiveCursor` is enabled) and the native cursor is hidden.
+ */
+export function shouldUseNativeCursor(activity: TerminalActivityInfo | undefined): boolean {
+  if (!activity) return false;
+  // Codex specifically benefits from overlay caret — do NOT use native cursor.
+  if (activity.type === "interactiveApp" && activity.name === "Codex") return false;
+  // Other interactive apps (Claude Code, vim, etc.) manage their own cursor.
+  if (activity.type === "interactiveApp") return true;
+  // Shell / running / unknown — overlay caret provides stable cursor.
+  return false;
 }
 
 interface ShadowCursorState {
@@ -198,6 +212,7 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
   const syncOutputActiveRef = useRef(false);
+  const [hasPromptBoundary, setHasPromptBoundary] = useState(false);
   const shadowCursorRef = useRef<ShadowCursorState>({
     commandStartLine: 0,
     commandStartX: 0,
@@ -314,7 +329,7 @@ export function TerminalView({
         !openedRef.current ||
         !isFocusedRef.current ||
         !stabilizeInteractiveCursorRef.current ||
-        !isOverlayCaretActivity(activityRef.current) ||
+        shouldUseNativeCursor(activityRef.current) ||
         syncOutputActiveRef.current
       ) {
         overlay.style.opacity = "0";
@@ -345,6 +360,15 @@ export function TerminalView({
       }
 
       const shadowCursor = shadowCursorRef.current;
+      // For non-Codex terminals (shell sessions), only show overlay after
+      // prompt boundaries are established (OSC 133). Before that, the native
+      // cursor is still visible and the overlay is not needed.
+      const isCodex =
+        activityRef.current?.type === "interactiveApp" && activityRef.current.name === "Codex";
+      if (!isCodex && !shadowCursor.hasPromptBoundary && !shadowCursor.hasSyncFramePosition) {
+        overlay.style.opacity = "0";
+        return;
+      }
       if (shadowCursor.isAltBufferActive) {
         overlay.style.opacity = "0";
         return;
@@ -424,7 +448,10 @@ export function TerminalView({
     };
     const handlePromptOsc = (data: string) => {
       const shadowCursor = shadowCursorRef.current;
-      shadowCursor.hasPromptBoundary = true;
+      if (!shadowCursor.hasPromptBoundary) {
+        shadowCursor.hasPromptBoundary = true;
+        setHasPromptBoundary(true);
+      }
       switch (data.split(";")[0]) {
         case "A":
           setInputPhase(false);
@@ -538,7 +565,7 @@ export function TerminalView({
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
           if (
-            isOverlayCaretActivity(activityRef.current) &&
+            !shouldUseNativeCursor(activityRef.current) &&
             !shadowCursorRef.current.hasPromptBoundary
           ) {
             // TUI app (Claude/Codex) using only DEC 2026 without OSC 133:
@@ -825,12 +852,18 @@ export function TerminalView({
       }
 
       if (text.includes("\x1b]133;A") || text.includes("\x1b]633;A")) {
-        shadowCursorRef.current.hasPromptBoundary = true;
+        if (!shadowCursorRef.current.hasPromptBoundary) {
+          shadowCursorRef.current.hasPromptBoundary = true;
+          setHasPromptBoundary(true);
+        }
         setInputPhase(false);
       }
       if (text.includes("\x1b]133;B") || text.includes("\x1b]633;B")) {
         const shadowCursor = shadowCursorRef.current;
-        shadowCursor.hasPromptBoundary = true;
+        if (!shadowCursor.hasPromptBoundary) {
+          shadowCursor.hasPromptBoundary = true;
+          setHasPromptBoundary(true);
+        }
         syncShadowCursorToBuffer();
         shadowCursor.commandStartX = shadowCursor.cursorX;
         shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
@@ -842,7 +875,10 @@ export function TerminalView({
         text.includes("\x1b]633;C") ||
         text.includes("\x1b]633;D")
       ) {
-        shadowCursorRef.current.hasPromptBoundary = true;
+        if (!shadowCursorRef.current.hasPromptBoundary) {
+          shadowCursorRef.current.hasPromptBoundary = true;
+          setHasPromptBoundary(true);
+        }
         setInputPhase(false);
       }
 
@@ -1171,11 +1207,25 @@ export function TerminalView({
   });
   stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
   const effectiveCursorBlink = cursorBlink;
-  const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
+  // Hide the native cursor and show overlay caret when:
+  // 1. stabilizeInteractiveCursor is enabled
+  // 2. The activity is not an interactive TUI app (Claude Code, vim, etc.)
+  //    that manages its own cursor
+  // 3. Either prompt boundaries have been detected (OSC 133), or
+  //    the activity is specifically Codex (which uses DEC 2026 sync frames)
+  //
+  // For shell sessions, this activates after the first OSC 133 prompt marker
+  // arrives (PowerShell PSReadLine, bash with prompt integration, etc.).
+  // Before that, the native cursor is used normally.
+  const isCodexActivity = activity?.type === "interactiveApp" && activity.name === "Codex";
+  const nativeCursorHidden =
+    stabilizeInteractiveCursor &&
+    !shouldUseNativeCursor(activity) &&
+    (hasPromptBoundary || isCodexActivity);
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
-  }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
+  }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor, hasPromptBoundary]);
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;

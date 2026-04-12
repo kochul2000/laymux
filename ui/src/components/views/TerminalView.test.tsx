@@ -1,6 +1,11 @@
 import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TerminalView, _resetWebglStagger, shouldEnableTerminalWebgl } from "./TerminalView";
+import {
+  TerminalView,
+  _resetWebglStagger,
+  shouldEnableTerminalWebgl,
+  shouldUseNativeCursor,
+} from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -560,6 +565,77 @@ describe("TerminalView", () => {
     });
     // With stabilizeInteractiveCursor disabled, native cursor settings are preserved
     // (cursorBlink follows profile default, cursorStyle follows profile shape)
+  });
+
+  describe("shouldUseNativeCursor", () => {
+    it("returns false for undefined activity (shell)", () => {
+      expect(shouldUseNativeCursor(undefined)).toBe(false);
+    });
+
+    it("returns false for shell activity", () => {
+      expect(shouldUseNativeCursor({ type: "shell" })).toBe(false);
+    });
+
+    it("returns false for Codex (uses overlay caret)", () => {
+      expect(shouldUseNativeCursor({ type: "interactiveApp", name: "Codex" })).toBe(false);
+    });
+
+    it("returns true for Claude Code (manages own cursor via DEC 2026)", () => {
+      expect(shouldUseNativeCursor({ type: "interactiveApp", name: "Claude" })).toBe(true);
+    });
+
+    it("returns true for other interactive apps (vim, htop, etc.)", () => {
+      expect(shouldUseNativeCursor({ type: "interactiveApp", name: "app" })).toBe(true);
+    });
+
+    it("returns false for running activity", () => {
+      expect(shouldUseNativeCursor({ type: "running" })).toBe(false);
+    });
+  });
+
+  it("hides native cursor for shell after OSC 133 prompt boundary", async () => {
+    render(<TerminalView instanceId="t-shell-cursor" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-shell-cursor");
+
+    // Before OSC 133, native cursor should be visible (no prompt boundary yet)
+    expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+
+    // Simulate OSC 133;B (prompt end / input start) — establishes prompt boundary
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    // After OSC 133, native cursor should be hidden (overlay caret takes over)
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-native-cursor-hidden");
+    });
+    // Cursor options should reflect overlay caret mode
+    expect(createdTerminals[0].options.cursorBlink).toBe(false);
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+  });
+
+  it("does not hide native cursor for interactive TUI apps like Claude", async () => {
+    render(<TerminalView instanceId="t-tui-cursor" profile="PowerShell" syncGroup="" />);
+
+    const container = screen.getByTestId("terminal-view-t-tui-cursor");
+
+    // Even after prompt boundary established
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    // When Claude Code is detected, native cursor should be visible
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-tui-cursor", {
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-native-cursor-hidden");
+    });
   });
 
   it("registers terminal instance in store on mount", () => {
