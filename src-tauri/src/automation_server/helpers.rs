@@ -143,64 +143,55 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 /// and other escape sequences. Preserves printable text content.
 pub fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
+    let mut chars = input.chars().peekable();
 
-    while i < len {
-        let b = bytes[i];
-        if b == 0x1b {
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
             // ESC
-            i += 1;
-            if i >= len {
-                break;
-            }
-            match bytes[i] {
-                b'[' => {
+            match chars.peek() {
+                Some('[') => {
                     // CSI sequence: ESC [ ... (final byte 0x40-0x7E)
-                    i += 1;
-                    while i < len && !(0x40..=0x7E).contains(&bytes[i]) {
-                        i += 1;
-                    }
-                    if i < len {
-                        i += 1; // skip final byte
+                    chars.next();
+                    loop {
+                        match chars.next() {
+                            Some(c) if ('@'..='~').contains(&c) => break,
+                            None => break,
+                            _ => {}
+                        }
                     }
                 }
-                b']' => {
+                Some(']') => {
                     // OSC sequence: ESC ] ... (terminated by BEL or ST)
-                    i += 1;
-                    while i < len {
-                        if bytes[i] == 0x07 {
-                            // BEL
-                            i += 1;
-                            break;
+                    chars.next();
+                    loop {
+                        match chars.next() {
+                            Some('\x07') => break,        // BEL
+                            Some('\x1b') => {              // possible ST (ESC \)
+                                if chars.peek() == Some(&'\\') {
+                                    chars.next();
+                                }
+                                break;
+                            }
+                            None => break,
+                            _ => {}
                         }
-                        if bytes[i] == 0x1b && i + 1 < len && bytes[i + 1] == b'\\' {
-                            // ST (ESC \)
-                            i += 2;
-                            break;
-                        }
-                        i += 1;
                     }
                 }
-                b'(' | b')' | b'*' | b'+' => {
+                Some('(' | ')' | '*' | '+') => {
                     // Designate character set: ESC ( X
-                    i += 1;
-                    if i < len {
-                        i += 1;
-                    }
+                    chars.next();
+                    chars.next(); // skip the charset designator
                 }
-                _ => {
+                Some(_) => {
                     // Other two-char escape: ESC X
-                    i += 1;
+                    chars.next();
                 }
+                None => {}
             }
-        } else if b < 0x20 && b != b'\n' && b != b'\r' && b != b'\t' {
+        } else if c < '\x20' && c != '\n' && c != '\r' && c != '\t' {
             // Skip other control characters (but keep newline, CR, tab)
-            i += 1;
         } else {
-            out.push(b as char);
-            i += 1;
+            out.push(c);
         }
     }
 
@@ -371,5 +362,23 @@ mod tests {
     #[test]
     fn strip_ansi_mode_sequences() {
         assert_eq!(strip_ansi("\x1b[?25h\x1b[?2026hvisible"), "visible");
+    }
+
+    #[test]
+    fn strip_ansi_utf8_korean() {
+        assert_eq!(strip_ansi("안녕하세요"), "안녕하세요");
+    }
+
+    #[test]
+    fn strip_ansi_utf8_with_escapes() {
+        assert_eq!(strip_ansi("\x1b[32m한글\x1b[0m텍스트"), "한글텍스트");
+    }
+
+    #[test]
+    fn strip_ansi_utf8_mixed() {
+        assert_eq!(
+            strip_ansi("hello \x1b[1m世界\x1b[0m 🌍"),
+            "hello 世界 🌍"
+        );
     }
 }

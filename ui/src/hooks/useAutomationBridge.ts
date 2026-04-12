@@ -253,11 +253,13 @@ const handlers: HandlerMap = {
       if (srcIdx < 0 || srcIdx >= ws.panes.length || tgtIdx < 0 || tgtIdx >= ws.panes.length) {
         return err(`Pane index out of range (0-${ws.panes.length - 1})`);
       }
-      // Swap positions (x, y, w, h) between two panes
+      // Swap positions (x, y, w, h) between two panes using absolute values
       const src = ws.panes[srcIdx];
       const tgt = ws.panes[tgtIdx];
-      useWorkspaceStore.getState().resizePane(srcIdx, { x: tgt.x - src.x, y: tgt.y - src.y, w: tgt.w - src.w, h: tgt.h - src.h });
-      useWorkspaceStore.getState().resizePane(tgtIdx, { x: src.x - tgt.x, y: src.y - tgt.y, w: src.w - tgt.w, h: src.h - tgt.h });
+      const srcPos = { x: src.x, y: src.y, w: src.w, h: src.h };
+      const tgtPos = { x: tgt.x, y: tgt.y, w: tgt.w, h: tgt.h };
+      useWorkspaceStore.getState().resizePane(srcIdx, tgtPos);
+      useWorkspaceStore.getState().resizePane(tgtIdx, srcPos);
       return ok({ swapped: true });
     },
   },
@@ -427,9 +429,9 @@ const handlers: HandlerMap = {
       if (!workspaces.some((ws) => ws.id === workspaceId)) {
         return err(`Workspace '${workspaceId}' not found`);
       }
-      // Validate terminal exists
+      // Validate terminal exists (skip for workspace-level notifications with empty terminalId)
       const { instances } = useTerminalStore.getState();
-      if (!instances.some((i) => i.id === terminalId)) {
+      if (terminalId && !instances.some((i) => i.id === terminalId)) {
         return err(`Terminal '${terminalId}' not found`);
       }
       useNotificationStore.getState().addNotification({

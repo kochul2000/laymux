@@ -920,4 +920,56 @@ describe("identify_caller and enriched responses", () => {
     // New pane should be TerminalView, so terminalId should not be null
     expect(newPane.terminalId).not.toBeNull();
   });
+
+  it("swap_panes exchanges absolute positions correctly", () => {
+    // Split to get 2 panes
+    handleAutomationRequest({
+      requestId: "sw-setup",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "horizontal" },
+    });
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const srcPos = { x: ws.panes[0].x, y: ws.panes[0].y, w: ws.panes[0].w, h: ws.panes[0].h };
+    const tgtPos = { x: ws.panes[1].x, y: ws.panes[1].y, w: ws.panes[1].w, h: ws.panes[1].h };
+
+    const result = handleAutomationRequest({
+      requestId: "sw-1",
+      category: "action",
+      target: "panes",
+      method: "swap",
+      params: { sourceIndex: 0, targetIndex: 1 },
+    });
+    expect(result.success).toBe(true);
+
+    const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+    // Pane 0 should now have pane 1's original position
+    expect(after.panes[0].x).toBe(tgtPos.x);
+    expect(after.panes[0].y).toBe(tgtPos.y);
+    expect(after.panes[0].w).toBe(tgtPos.w);
+    expect(after.panes[0].h).toBe(tgtPos.h);
+    // Pane 1 should now have pane 0's original position
+    expect(after.panes[1].x).toBe(srcPos.x);
+    expect(after.panes[1].y).toBe(srcPos.y);
+    expect(after.panes[1].w).toBe(srcPos.w);
+    expect(after.panes[1].h).toBe(srcPos.h);
+  });
+
+  it("send_notification allows empty terminalId for workspace-level notification", () => {
+    const wsId = useWorkspaceStore.getState().workspaces[0]?.id;
+    const result = handleAutomationRequest({
+      requestId: "sn-empty-t",
+      category: "action",
+      target: "notifications",
+      method: "add",
+      params: {
+        terminalId: "",
+        workspaceId: wsId,
+        message: "workspace-level alert",
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
 });

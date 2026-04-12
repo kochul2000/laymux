@@ -101,7 +101,7 @@ struct ListNotificationsParam {
 struct SearchOutputParam {
     /// Terminal ID
     terminal_id: String,
-    /// Search pattern (plain text or regex)
+    /// Search pattern (plain text substring match)
     pattern: String,
     /// Number of context lines before and after each match (default: 2)
     context_lines: Option<usize>,
@@ -1037,14 +1037,20 @@ impl McpHandler {
         let workspace_id = match p.workspace_id {
             Some(id) => id,
             None => {
-                // Get active workspace ID from grid state
                 match bridge_request(&self.state, "query", "grid", "getState", json!({})).await {
-                    Ok(data) => data
-                        .get("activeWorkspaceId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    Err(_) => "unknown".to_string(),
+                    Ok(data) => match data.get("activeWorkspaceId").and_then(|v| v.as_str()) {
+                        Some(id) => id.to_string(),
+                        None => {
+                            return Ok(CallToolResult::error(vec![Content::text(
+                                "Failed to resolve active workspace",
+                            )]));
+                        }
+                    },
+                    Err(_) => {
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            "Failed to resolve active workspace",
+                        )]));
+                    }
                 }
             }
         };
@@ -1070,22 +1076,23 @@ impl McpHandler {
         let context_lines = p.context_lines.unwrap_or(2);
         let max_results = p.max_results.unwrap_or(10);
 
-        let buffers = match self.state.app_state.output_buffers.lock_or_err() {
-            Ok(g) => g,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-        };
-
-        let buf = match buffers.get(&p.terminal_id) {
-            Some(b) => b,
-            None => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Terminal '{}' not found",
-                    p.terminal_id
-                ))]));
+        // Copy raw data under lock, then release before expensive processing
+        let raw = {
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(g) => g,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            };
+            match buffers.get(&p.terminal_id) {
+                Some(b) => b.recent_lines(1000),
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Terminal '{}' not found",
+                        p.terminal_id
+                    ))]));
+                }
             }
         };
 
-        let raw = buf.recent_lines(1000); // search in last 1000 lines
         let text = super::helpers::strip_ansi(&raw);
         let lines: Vec<&str> = text.lines().collect();
 
@@ -1150,12 +1157,9 @@ impl McpHandler {
     }
 
     /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).
+    /// Derived from currently running terminal instances. Use `list_layouts` for layout information.
     #[tool]
     async fn list_profiles(&self) -> Result<CallToolResult, ErrorData> {
-        // Profiles are stored in frontend settings — use bridge
-        let settings_result =
-            bridge_request(&self.state, "query", "layouts", "list", json!({})).await;
-        // Also get profiles from terminal instances as a fallback
         let terminals = self.state.app_state.terminals.lock_or_err().ok();
         let mut profiles: Vec<Value> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -1169,16 +1173,6 @@ impl McpHandler {
                         "shell_type": session.wsl_distro.as_ref().map(|_| "bash").unwrap_or("unknown"),
                     }));
                 }
-            }
-        }
-
-        // Also fetch from settings bridge
-        if let Ok(data) = settings_result {
-            if let Some(layouts) = data.get("layouts").and_then(|v| v.as_array()) {
-                return Ok(json_result(&json!({
-                    "profiles": profiles,
-                    "layouts": layouts,
-                })));
             }
         }
 
