@@ -1133,17 +1133,28 @@ pub fn get_terminal_summaries_inner(
 | 새 단축키 추가 시 | `settings.json`의 `keybindings` 배열에 기본값을 등록하고, 키바인딩 시스템에서 액션을 디스패치한다. 컴포넌트는 그 액션만 구독한다. |
 | 모든 단축키는 오버라이드 가능 | 모든 단축키는 `settings.json`의 `keybindings`에서 사용자가 재바인딩할 수 있어야 한다. 새 단축키 추가 시 **SettingsView의 Keybindings UI에도 반드시 반영**한다 (`defaultKeybindings` 배열 + 표시 라벨). Settings UI에 나타나지 않는 단축키는 존재하지 않는 것과 같다. |
 
-```typescript
-// ❌ 금지 — 기능 코드에 키 조합 하드코딩
-function handleKeyDown(e: KeyboardEvent) {
-  if (e.ctrlKey && e.key === "c") { copySelectedPaths(); }
-}
+#### 키바인딩 vs 시스템 이벤트 구분
 
-// ✅ 사용 — 키바인딩 시스템에서 액션 디스패치, 컴포넌트는 액션만 처리
-// useKeyboardShortcuts 또는 keybindings 설정에서:
-//   { "keys": "ctrl+c", "command": "fileExplorer.copy", "when": "fileExplorerFocused" }
-// 컴포넌트에서:
-useAction("fileExplorer.copy", () => copySelectedPaths());
+입력을 처리할 때 **키바인딩**과 **시스템 이벤트**를 구분한다. 두 가지는 설계 경로가 완전히 다르다.
+
+| 구분 | 키바인딩 | 시스템 이벤트 |
+|------|---------|-------------|
+| 결정 주체 | 사용자 (오버라이드 가능) | OS (오버라이드 대상 아님) |
+| 구현 | `keybinding-registry` + `matchesKeybinding()` | 브라우저 이벤트 리스너 (`copy`, `paste` 등) |
+| Settings UI | 반드시 표시 | 표시하지 않음 |
+| 예시 | `Ctrl+Enter` 이슈 제출, `Ctrl+Alt+N` 새 워크스페이스 | 복사(`copy` event), 붙여넣기(`paste` event) |
+
+```typescript
+// ❌ 금지 — 키 조합으로 시스템 동작 감지
+if (e.ctrlKey && e.key === "v") { smartPaste(); }
+if (e.ctrlKey && e.key === "c") { copySelectedPaths(); }
+
+// ✅ 시스템 이벤트 — OS가 트리거하는 이벤트를 리슨
+container.addEventListener("paste", (e) => { smartPaste(); });
+container.addEventListener("copy", (e) => { copySelectedPaths(); });
+
+// ✅ 키바인딩 — 레지스트리에 등록, Settings UI에 반영
+if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 ```
 
 ### 15.6 앱 전용 편의 코드 격리
