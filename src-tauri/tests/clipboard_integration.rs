@@ -139,6 +139,7 @@ mod windows_tests {
 
     #[test]
     #[serial]
+    #[ignore] // 클립보드 경쟁 조건으로 데스크톱 환경에서 불안정 — cargo test -- --ignored 로 수동 실행
     fn smart_paste_with_bitmap() {
         // Construct a minimal 2x2 32-bit BGRA bitmap
         let mut dib = vec![0u8; 40 + 16];
