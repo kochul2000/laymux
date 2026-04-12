@@ -872,7 +872,15 @@ export function TerminalView({
               terminal.paste(content);
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            // Rust clipboard failed — fall back to browser clipboard
+            navigator.clipboard
+              .readText()
+              .then((text) => {
+                if (text) terminal.paste(text);
+              })
+              .catch(() => {});
+          });
       }
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
@@ -900,7 +908,15 @@ export function TerminalView({
             terminal.paste(content);
           }
         })
-        .catch(() => {}); // clipboard read failed — silently ignore
+        .catch(() => {
+          // Rust clipboard failed — fall back to browser clipboard → xterm paste
+          navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text) terminal.paste(text);
+            })
+            .catch(() => {});
+        });
     };
     outerContainer?.addEventListener("paste", handlePaste, { capture: true });
 
