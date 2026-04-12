@@ -240,6 +240,26 @@ const handlers: HandlerMap = {
         .setPaneView(p.paneIndex as number, { ...view, type: view.type as ViewType });
       return ok({ viewSet: true });
     },
+    resize: (p) => {
+      const delta = p.delta as Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>;
+      useWorkspaceStore.getState().resizePane(p.paneIndex as number, delta);
+      return ok({ resized: true });
+    },
+    swap: (p) => {
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      if (!ws) return err("No active workspace");
+      const srcIdx = p.sourceIndex as number;
+      const tgtIdx = p.targetIndex as number;
+      if (srcIdx < 0 || srcIdx >= ws.panes.length || tgtIdx < 0 || tgtIdx >= ws.panes.length) {
+        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
+      }
+      // Swap positions (x, y, w, h) between two panes
+      const src = ws.panes[srcIdx];
+      const tgt = ws.panes[tgtIdx];
+      useWorkspaceStore.getState().resizePane(srcIdx, { x: tgt.x - src.x, y: tgt.y - src.y, w: tgt.w - src.w, h: tgt.h - src.h });
+      useWorkspaceStore.getState().resizePane(tgtIdx, { x: src.x - tgt.x, y: src.y - tgt.y, w: src.w - tgt.w, h: src.h - tgt.h });
+      return ok({ swapped: true });
+    },
   },
 
   docks: {

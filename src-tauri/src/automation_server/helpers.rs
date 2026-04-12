@@ -137,6 +137,76 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// Strip ANSI escape sequences from terminal output, returning plain text.
+///
+/// Removes CSI sequences (`\x1b[...X`), OSC sequences (`\x1b]...ST`),
+/// and other escape sequences. Preserves printable text content.
+pub fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let b = bytes[i];
+        if b == 0x1b {
+            // ESC
+            i += 1;
+            if i >= len {
+                break;
+            }
+            match bytes[i] {
+                b'[' => {
+                    // CSI sequence: ESC [ ... (final byte 0x40-0x7E)
+                    i += 1;
+                    while i < len && !(0x40..=0x7E).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < len {
+                        i += 1; // skip final byte
+                    }
+                }
+                b']' => {
+                    // OSC sequence: ESC ] ... (terminated by BEL or ST)
+                    i += 1;
+                    while i < len {
+                        if bytes[i] == 0x07 {
+                            // BEL
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1b && i + 1 < len && bytes[i + 1] == b'\\' {
+                            // ST (ESC \)
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+                b'(' | b')' | b'*' | b'+' => {
+                    // Designate character set: ESC ( X
+                    i += 1;
+                    if i < len {
+                        i += 1;
+                    }
+                }
+                _ => {
+                    // Other two-char escape: ESC X
+                    i += 1;
+                }
+            }
+        } else if b < 0x20 && b != b'\n' && b != b'\r' && b != b'\t' {
+            // Skip other control characters (but keep newline, CR, tab)
+            i += 1;
+        } else {
+            out.push(b as char);
+            i += 1;
+        }
+    }
+
+    out
+}
+
 /// Process C-style escape sequences in a string into actual control characters.
 ///
 /// MCP clients pass tool parameters as literal text, so `\r\n` arrives as the
@@ -270,5 +340,36 @@ mod tests {
         // If the string already contains real CR+LF (from JSON deserialization),
         // they should pass through unchanged.
         assert_eq!(unescape_terminal_input("ls\r\n"), "ls\r\n");
+    }
+
+    #[test]
+    fn strip_ansi_plain_text() {
+        assert_eq!(strip_ansi("hello world"), "hello world");
+    }
+
+    #[test]
+    fn strip_ansi_csi_sequences() {
+        // Color codes, cursor movement
+        assert_eq!(strip_ansi("\x1b[32mgreen\x1b[0m"), "green");
+        assert_eq!(strip_ansi("\x1b[14;3Htext"), "text");
+        assert_eq!(strip_ansi("\x1b[Kcleared"), "cleared");
+    }
+
+    #[test]
+    fn strip_ansi_osc_sequences() {
+        // Title setting (BEL terminated)
+        assert_eq!(strip_ansi("\x1b]0;title\x07text"), "text");
+        // ST terminated
+        assert_eq!(strip_ansi("\x1b]0;title\x1b\\text"), "text");
+    }
+
+    #[test]
+    fn strip_ansi_preserves_newlines() {
+        assert_eq!(strip_ansi("line1\nline2\r\n"), "line1\nline2\r\n");
+    }
+
+    #[test]
+    fn strip_ansi_mode_sequences() {
+        assert_eq!(strip_ansi("\x1b[?25h\x1b[?2026hvisible"), "visible");
     }
 }

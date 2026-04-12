@@ -45,6 +45,8 @@ struct ReadOutputParam {
     terminal_id: String,
     /// Number of lines to read (default: 100)
     lines: Option<u64>,
+    /// Output format: "raw" (default, with ANSI escapes) or "text" (plain text, ANSI stripped).
+    format: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -59,6 +61,8 @@ struct CreateWorkspaceParam {
     name: String,
     /// Layout ID to use as template (optional)
     layout_id: Option<String>,
+    /// Initial working directory for terminals in the new workspace (optional)
+    cwd: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -89,6 +93,8 @@ struct SplitPaneParam {
     pane_index: u64,
     /// Split direction
     direction: SplitDirection,
+    /// Initial working directory for the new terminal (optional)
+    cwd: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -111,6 +117,27 @@ impl std::fmt::Display for NotificationLevel {
     }
 }
 
+/// Resize a pane by adjusting its dimensions.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ResizePaneParam {
+    /// Pane index to resize (0-based)
+    pane_index: u64,
+    /// Width delta (-1.0 to 1.0, e.g. 0.1 to grow 10%)
+    #[serde(default)]
+    dw: Option<f64>,
+    /// Height delta (-1.0 to 1.0, e.g. -0.1 to shrink 10%)
+    #[serde(default)]
+    dh: Option<f64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SwapPanesParam {
+    /// First pane index (0-based)
+    source_index: u64,
+    /// Second pane index (0-based)
+    target_index: u64,
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SendNotificationParam {
     /// Terminal ID
@@ -121,6 +148,18 @@ struct SendNotificationParam {
     message: String,
     /// Notification level (default: info)
     level: Option<NotificationLevel>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ExecuteCommandParam {
+    /// Terminal ID
+    terminal_id: String,
+    /// Command to execute (Enter is appended automatically)
+    command: String,
+    /// Timeout in milliseconds (default: 10000, max: 60000)
+    timeout_ms: Option<u64>,
+    /// Output format: "raw" (default) or "text" (ANSI stripped)
+    format: Option<String>,
 }
 
 // ── MCP Handler ───────────────────────────────────────────────────
@@ -304,10 +343,11 @@ impl McpHandler {
         .await
     }
 
-    /// Send input to a terminal (like typing). For control characters set
-    /// `escape` to true and use C-style sequences: `\\r\\n` for Enter,
-    /// `\\u0003` for Ctrl+C. Leave `escape` false for literal text (preserves
-    /// backslashes in Windows paths).
+    /// Send input to a terminal (like typing). Use `\\r` to submit (Enter).
+    /// For interactive TUI apps (Claude Code, vim), `\\r` submits the prompt.
+    /// Set `escape` to true for C-style sequences: `\\r` for Enter, `\\n` for
+    /// newline, `\\u0003` for Ctrl+C. Leave `escape` false for literal text
+    /// (preserves backslashes in Windows paths like `C:\\Users`).
     #[tool]
     async fn write_to_terminal(
         &self,
@@ -337,6 +377,8 @@ impl McpHandler {
     }
 
     /// Read recent terminal output from ring buffer. Contains raw ANSI escapes.
+    /// WARNING: TUI apps (Claude Code, vim) may return very large output (>100KB)
+    /// even for few lines due to escape sequences. Use `take_screenshot` for TUI apps.
     #[tool]
     async fn read_terminal_output(
         &self,
@@ -351,7 +393,11 @@ impl McpHandler {
         };
         match buffers.get(&p.terminal_id) {
             Some(buf) => {
-                let output = buf.recent_lines(lines);
+                let raw = buf.recent_lines(lines);
+                let output = match p.format.as_deref() {
+                    Some("text") => super::helpers::strip_ansi(&raw),
+                    _ => raw,
+                };
                 Ok(json_result(&json!({
                     "output": output,
                     "lines": output.lines().count(),
@@ -380,11 +426,151 @@ impl McpHandler {
         .await
     }
 
-    /// Get activity state (shell/running/interactiveApp) for all terminals.
+    /// Get activity state for all terminals. Returns "shell" or "interactiveApp" (with app name).
     #[tool]
     async fn get_terminal_states(&self) -> Result<CallToolResult, ErrorData> {
         let states = crate::activity::detect_all_terminal_states(&self.state.app_state);
         Ok(json_result(&json!({ "states": states })))
+    }
+
+    /// Execute a command in a terminal and return the output. Atomic operation:
+    /// verifies the terminal is at a shell prompt, sends the command, waits for
+    /// completion (prompt returns), and returns only the command's output.
+    /// Only works on terminals at a shell prompt (not TUI apps).
+    #[tool]
+    async fn execute_command(
+        &self,
+        Parameters(p): Parameters<ExecuteCommandParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let timeout_ms = p.timeout_ms.unwrap_or(10_000).min(60_000);
+        let strip = matches!(p.format.as_deref(), Some("text"));
+
+        // 1. Check terminal is at shell prompt
+        {
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(g) => g,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            };
+            let buf = buffers.get(&p.terminal_id);
+            if buf.is_none() {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found",
+                    p.terminal_id
+                ))]));
+            }
+            if !crate::activity::is_terminal_at_prompt_from_buffer(buf) {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Terminal is not at a shell prompt (command running or TUI app active)",
+                )]));
+            }
+        }
+
+        // 2. Record buffer position before sending command
+        let before_len = {
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(g) => g,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            };
+            buffers.get(&p.terminal_id).map(|b| b.len()).unwrap_or(0)
+        };
+
+        // 3. Write command + CR
+        {
+            let ptys = match self.state.app_state.pty_handles.lock_or_err() {
+                Ok(g) => g,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            };
+            match ptys.get(&p.terminal_id) {
+                Some(handle) => {
+                    let cmd = format!("{}\r", p.command);
+                    if let Err(e) = handle.write(cmd.as_bytes()) {
+                        return Ok(CallToolResult::error(vec![Content::text(e)]));
+                    }
+                }
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Terminal '{}' not found",
+                        p.terminal_id
+                    ))]));
+                }
+            }
+        }
+
+        // 4. Poll until prompt returns or timeout
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        // Small initial delay to let the shell process the command
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        loop {
+            if start.elapsed() > timeout {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Command timed out after {}ms",
+                    timeout_ms
+                ))]));
+            }
+
+            let at_prompt = {
+                let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+                    }
+                };
+                crate::activity::is_terminal_at_prompt_from_buffer(
+                    buffers.get(&p.terminal_id),
+                )
+            };
+
+            if at_prompt {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        // 5. Read output (new data since before_len)
+        let output = {
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(g) => g,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            };
+            match buffers.get(&p.terminal_id) {
+                Some(buf) => {
+                    let new_bytes = buf.len().saturating_sub(before_len);
+                    if new_bytes > 0 {
+                        buf.recent_bytes(new_bytes)
+                    } else {
+                        Vec::new()
+                    }
+                }
+                None => Vec::new(),
+            }
+        };
+
+        let raw_output = String::from_utf8_lossy(&output).to_string();
+        let final_output = if strip {
+            super::helpers::strip_ansi(&raw_output)
+        } else {
+            raw_output
+        };
+
+        // 6. Try to get exit code from terminal session
+        let exit_code = {
+            let terminals = self.state.app_state.terminals.lock_or_err().ok();
+            terminals.and_then(|t| {
+                t.get(&p.terminal_id)
+                    .and_then(|s| s.last_exit_code)
+            })
+        };
+
+        Ok(json_result(&json!({
+            "output": final_output,
+            "exit_code": exit_code,
+            "duration_ms": duration_ms,
+        })))
     }
 
     // ── Workspace (4) ──
@@ -427,6 +613,9 @@ impl McpHandler {
         if let Some(layout_id) = p.layout_id {
             params["layoutId"] = json!(layout_id);
         }
+        if let Some(cwd) = p.cwd {
+            params["cwd"] = json!(cwd);
+        }
         self.bridge("action", "workspaces", "add", params).await
     }
 
@@ -459,13 +648,11 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<SplitPaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.bridge(
-            "action",
-            "panes",
-            "split",
-            json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() }),
-        )
-        .await
+        let mut params = json!({ "paneIndex": p.pane_index, "direction": p.direction.to_string() });
+        if let Some(cwd) = p.cwd {
+            params["cwd"] = json!(cwd);
+        }
+        self.bridge("action", "panes", "split", params).await
     }
 
     /// Remove a pane from the active workspace grid. Remaining panes redistribute space.
@@ -479,6 +666,44 @@ impl McpHandler {
             "panes",
             "remove",
             json!({ "paneIndex": p.pane_index }),
+        )
+        .await
+    }
+
+    /// Resize a pane by adjusting its width and/or height by a delta value.
+    /// Use dw for width change and dh for height change (e.g. dw=0.1 grows width by 10%).
+    #[tool]
+    async fn resize_pane(
+        &self,
+        Parameters(p): Parameters<ResizePaneParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut delta = json!({});
+        if let Some(dw) = p.dw {
+            delta["w"] = json!(dw);
+        }
+        if let Some(dh) = p.dh {
+            delta["h"] = json!(dh);
+        }
+        self.bridge(
+            "action",
+            "panes",
+            "resize",
+            json!({ "paneIndex": p.pane_index, "delta": delta }),
+        )
+        .await
+    }
+
+    /// Swap two panes' positions in the grid.
+    #[tool]
+    async fn swap_panes(
+        &self,
+        Parameters(p): Parameters<SwapPanesParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "panes",
+            "swap",
+            json!({ "sourceIndex": p.source_index, "targetIndex": p.target_index }),
         )
         .await
     }
