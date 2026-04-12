@@ -1283,5 +1283,69 @@ describe("useKeyboardShortcuts", () => {
       fireKey("9", { ctrlKey: true, altKey: true });
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[1]);
     });
+
+    it("ArrowDown from hidden active workspace goes to next visible in sorted order", () => {
+      // [Default, WS2, WS3] — hide WS2, make WS2 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]); // hide WS2
+      useWorkspaceStore.getState().setActiveWorkspace(ids[1]); // active = WS2 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowDown from hidden WS2 should go to WS3 (next visible after WS2 in sorted order)
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+
+    it("ArrowUp from hidden active workspace goes to previous visible in sorted order", () => {
+      // [Default, WS2, WS3] — hide WS2, make WS2 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[1]); // hide WS2
+      useWorkspaceStore.getState().setActiveWorkspace(ids[1]); // active = WS2 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowUp from hidden WS2 should go to Default (previous visible before WS2)
+      fireKey("ArrowUp", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+    });
+
+    it("ArrowDown from hidden active at end wraps to first visible", () => {
+      // [Default, WS2, WS3] — hide WS3, make WS3 active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[2]); // hide WS3
+      useWorkspaceStore.getState().setActiveWorkspace(ids[2]); // active = WS3 (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowDown from hidden WS3 (end) should wrap to Default (first visible)
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[0]);
+    });
+
+    it("ArrowUp from hidden active at start wraps to last visible", () => {
+      // [Default, WS2, WS3] — hide Default, make Default active
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
+      const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
+
+      useUiStore.getState().toggleWorkspaceHidden(ids[0]); // hide Default
+      useWorkspaceStore.getState().setActiveWorkspace(ids[0]); // active = Default (hidden)
+
+      renderHook(() => useKeyboardShortcuts());
+
+      // ArrowUp from hidden Default (start) should wrap to WS3 (last visible)
+      fireKey("ArrowUp", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
   });
 });

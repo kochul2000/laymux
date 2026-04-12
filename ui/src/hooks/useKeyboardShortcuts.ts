@@ -297,8 +297,18 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           if (visibleWorkspaces.length === 0) return;
           const currentIdx = visibleWorkspaces.findIndex((ws) => ws.id === activeWorkspaceId);
-          const nextIdx = (currentIdx + 1) % visibleWorkspaces.length;
-          switchWorkspace(visibleWorkspaces[nextIdx].id);
+          if (currentIdx >= 0) {
+            // Active workspace is visible — simple cyclic navigation
+            const nextIdx = (currentIdx + 1) % visibleWorkspaces.length;
+            switchWorkspace(visibleWorkspaces[nextIdx].id);
+          } else {
+            // Active workspace is hidden — find next visible after current position in full sorted order
+            const fullIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+            const next =
+              visibleWorkspaces.find((vws) => workspaces.indexOf(vws) > fullIdx) ??
+              visibleWorkspaces[0];
+            switchWorkspace(next.id);
+          }
           return;
         }
 
@@ -307,8 +317,18 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           if (visibleWorkspaces.length === 0) return;
           const currentIdx = visibleWorkspaces.findIndex((ws) => ws.id === activeWorkspaceId);
-          const prevIdx = (currentIdx - 1 + visibleWorkspaces.length) % visibleWorkspaces.length;
-          switchWorkspace(visibleWorkspaces[prevIdx].id);
+          if (currentIdx >= 0) {
+            // Active workspace is visible — simple cyclic navigation
+            const prevIdx = (currentIdx - 1 + visibleWorkspaces.length) % visibleWorkspaces.length;
+            switchWorkspace(visibleWorkspaces[prevIdx].id);
+          } else {
+            // Active workspace is hidden — find previous visible before current position in full sorted order
+            const fullIdx = workspaces.findIndex((ws) => ws.id === activeWorkspaceId);
+            const prev =
+              [...visibleWorkspaces].reverse().find((vws) => workspaces.indexOf(vws) < fullIdx) ??
+              visibleWorkspaces[visibleWorkspaces.length - 1];
+            switchWorkspace(prev.id);
+          }
           return;
         }
 
