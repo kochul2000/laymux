@@ -1781,6 +1781,76 @@ describe("TerminalView", () => {
       vi.useRealTimers();
     });
   });
+
+  describe("cursor warmup", () => {
+    it("hides cursor during warmup and reveals after first OSC 133", async () => {
+      render(<TerminalView instanceId="t-warmup" profile="PowerShell" syncGroup="" isFocused />);
+
+      // During warmup, cursor should be hidden (cursor color matches background)
+      const term = createdTerminals.at(-1)!;
+      const bgColor = (term.options.theme as { background?: string })?.background ?? "#0C0C0C";
+      await vi.waitFor(() => {
+        const cursorColor = (term.options.theme as { cursor?: string })?.cursor;
+        expect(cursorColor).toBe(bgColor);
+      });
+
+      // Receive first OSC 133 (prompt boundary) — cursor should be revealed
+      await act(async () => {
+        await oscHandlers.get("133")?.("D;0");
+      });
+
+      await vi.waitFor(() => {
+        const cursorColor = (term.options.theme as { cursor?: string })?.cursor;
+        expect(cursorColor).not.toBe(bgColor);
+      });
+    });
+
+    it("skips warmup when stabilizeInteractiveCursor is disabled", async () => {
+      useSettingsStore.getState().updateProfile(0, { stabilizeInteractiveCursor: false });
+
+      render(
+        <TerminalView instanceId="t-warmup-disabled" profile="PowerShell" syncGroup="" isFocused />,
+      );
+
+      const term = createdTerminals.at(-1)!;
+      const bgColor = (term.options.theme as { background?: string })?.background ?? "#0C0C0C";
+
+      // Cursor should NOT be hidden (normal cursor color, not matching background)
+      await vi.waitFor(() => {
+        const cursorColor = (term.options.theme as { cursor?: string })?.cursor;
+        expect(cursorColor).not.toBe(bgColor);
+      });
+    });
+
+    it("reveals cursor after warmup timeout even without OSC 133", async () => {
+      vi.useFakeTimers();
+
+      render(
+        <TerminalView instanceId="t-warmup-timeout" profile="PowerShell" syncGroup="" isFocused />,
+      );
+
+      const term = createdTerminals.at(-1)!;
+      const bgColor = (term.options.theme as { background?: string })?.background ?? "#0C0C0C";
+
+      // During warmup, cursor matches background
+      await vi.waitFor(() => {
+        const cursorColor = (term.options.theme as { cursor?: string })?.cursor;
+        expect(cursorColor).toBe(bgColor);
+      });
+
+      // Advance past warmup timeout (3 seconds)
+      await act(async () => {
+        vi.advanceTimersByTime(3100);
+      });
+
+      await vi.waitFor(() => {
+        const cursorColor = (term.options.theme as { cursor?: string })?.cursor;
+        expect(cursorColor).not.toBe(bgColor);
+      });
+
+      vi.useRealTimers();
+    });
+  });
 });
 
 describe("shouldEnableTerminalWebgl", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -69,6 +69,10 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
 
 /** Notify gate fallback timeout — only used for output idle detector gating. */
 const NOTIFY_GATE_FALLBACK_MS = 3000;
+
+/** Cursor warmup timeout — hides cursor during shell initialization to prevent
+ * visible cursor jumping. Revealed on first OSC 133 or after this timeout. */
+const CURSOR_WARMUP_MS = 3000;
 
 // Stagger WebGL context creation to prevent WebView2 GPU process crash.
 // Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
@@ -198,6 +202,8 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
   const syncOutputActiveRef = useRef(false);
+  const [cursorWarmup, setCursorWarmup] = useState(true);
+  const cursorWarmupRef = useRef(true);
   const shadowCursorRef = useRef<ShadowCursorState>({
     commandStartLine: 0,
     commandStartX: 0,
@@ -231,12 +237,25 @@ export function TerminalView({
       selectionBackground: "#232042",
     };
 
-    const theme = colorScheme
+    const resolvedThemeBase = colorScheme
       ? {
           ...defaultTheme,
           ...colorSchemeToXtermTheme(colorScheme as unknown as WTColorScheme),
         }
       : defaultTheme;
+
+    // Cursor warmup: when stabilizeInteractiveCursor is enabled, hide the cursor
+    // during initialization to prevent visible cursor jumping during shell startup.
+    // The cursor is revealed when the first prompt boundary (OSC 133) is detected.
+    const initStabilize =
+      profileConfig?.stabilizeInteractiveCursor ??
+      settingsState.profileDefaults?.stabilizeInteractiveCursor ??
+      defaultProfileDefaults.stabilizeInteractiveCursor;
+    cursorWarmupRef.current = initStabilize;
+    const warmupBg = resolvedThemeBase.background ?? defaultTheme.background;
+    const theme = initStabilize
+      ? { ...resolvedThemeBase, cursor: warmupBg, cursorAccent: warmupBg }
+      : resolvedThemeBase;
 
     // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
     // does not reserve space for the scrollbar — it renders on top of content.
@@ -422,7 +441,13 @@ export function TerminalView({
         scheduleOverlayCaretUpdate();
       });
     };
+    const completeCursorWarmup = () => {
+      if (!cursorWarmupRef.current) return;
+      cursorWarmupRef.current = false;
+      setCursorWarmup(false);
+    };
     const handlePromptOsc = (data: string) => {
+      completeCursorWarmup();
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.hasPromptBoundary = true;
       switch (data.split(";")[0]) {
@@ -729,6 +754,12 @@ export function TerminalView({
     const notifyGateTimer = setTimeout(() => {
       notifyGate.armed = true;
     }, NOTIFY_GATE_FALLBACK_MS);
+
+    // Cursor warmup timeout — reveal cursor even if no OSC 133 is received
+    // (e.g., shells without shell integration).
+    const cursorWarmupTimer = cursorWarmupRef.current
+      ? setTimeout(() => completeCursorWarmup(), CURSOR_WARMUP_MS)
+      : undefined;
 
     // Output idle detector (monitor-silence): fires when terminal output
     // stops for OUTPUT_IDLE_TIMEOUT_MS while activity is "running".
@@ -1071,6 +1102,7 @@ export function TerminalView({
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       clearTimeout(notifyGateTimer);
+      if (cursorWarmupTimer !== undefined) clearTimeout(cursorWarmupTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
@@ -1201,7 +1233,8 @@ export function TerminalView({
       // so rgba(0,0,0,0) renders as opaque black. Hide the native cursor by
       // matching it to the background color instead.
       const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
-      term.options.theme = nativeCursorHidden
+      const hideCursor = nativeCursorHidden || cursorWarmupRef.current;
+      term.options.theme = hideCursor
         ? {
             ...resolvedTheme,
             cursor: hiddenCursorColor,
@@ -1241,6 +1274,7 @@ export function TerminalView({
     effectiveNativeCursorBlink,
     nativeCursorHidden,
     stabilizeInteractiveCursor,
+    cursorWarmup,
   ]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes

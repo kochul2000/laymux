@@ -282,8 +282,10 @@ impl SyncGroup {
 
 /// PowerShell shell integration script.
 /// Overrides `prompt` to emit:
+/// - OSC 133;A (prompt start) — enables shadow cursor prompt boundary detection
 /// - OSC 133;D (command exit code) — enables notify-on-fail
 /// - OSC 7 (current working directory) — enables sync-cwd
+/// - OSC 133;B (input start) — marks where user input begins (shadow cursor anchor)
 ///   Uses single quotes and concatenation to avoid double-quote escaping issues
 ///   with PowerShell's -Command parameter.
 fn shell_integration_powershell() -> String {
@@ -300,12 +302,13 @@ function prompt {
     $e = $global:__lmx_e; $b = $global:__lmx_b
     $loc = (Get-Location).ProviderPath
     $cwd = $loc.Replace([char]92, '/')
-    if ($cwd.StartsWith('//')) { $r = $e + ']7;' + $cwd + $b }
-    else { $r = $e + ']7;file://localhost/' + $cwd + $b }
+    $r = $e + ']133;A' + $b
+    if ($cwd.StartsWith('//')) { $r += $e + ']7;' + $cwd + $b }
+    else { $r += $e + ']7;file://localhost/' + $cwd + $b }
     if (-not $global:__lmx_f) { $r = $e + ']133;D;' + $ec + $b + $r }
     $global:__lmx_f = $false
     $global:LASTEXITCODE = $ec
-    return $r + 'PS ' + $loc + '> '
+    return $r + 'PS ' + $loc + '> ' + $e + ']133;B' + $b
 }
 "#
     .trim()

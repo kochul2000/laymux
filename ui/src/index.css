@@ -151,7 +151,10 @@
  * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
  */
 
-.terminal-sync-output-active .xterm-cursor-layer,
+/* xterm.js v6: cursor is drawn on canvas (WebGL or built-in renderer),
+ * so CSS cannot hide it. Cursor hiding during DEC 2026 frames and Codex
+ * overlay mode is handled via xterm theme options (cursor color = background).
+ * These selectors target the DOM renderer fallback only. */
 .terminal-sync-output-active .xterm-cursor {
   opacity: 0 !important;
 }
@@ -160,7 +163,6 @@
   caret-color: transparent !important;
 }
 
-.terminal-native-cursor-hidden .xterm-cursor-layer,
 .terminal-native-cursor-hidden .xterm-cursor {
   opacity: 0 !important;
 }
