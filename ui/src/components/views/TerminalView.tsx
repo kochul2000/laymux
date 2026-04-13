@@ -56,13 +56,30 @@ const LARGE_PASTE_THRESHOLD = 5120;
 const textEncoder = new TextEncoder();
 
 /**
- * Execute the smart-paste pipeline and write the result into xterm.
- * Shared by the keybinding handler (terminal.paste) and the right-click paste
- * fallback so both paths produce identical behavior (image handling, indent
- * normalization, large-paste guard).
+ * Execute the paste pipeline and write the result into xterm. Shared by the
+ * keybinding handler (terminal.paste) and the right-click paste path so both
+ * always behave identically.
+ *
+ * Honors the `smartPaste` convenience toggle internally: when the toggle is
+ * disabled we skip image handling, indent/linebreak transforms, and the
+ * large-paste guard, and fall back to a plain `navigator.clipboard.readText()`
+ * → `terminal.paste()`. Keeping the toggle check here (rather than at each
+ * call site) means an override binding like Ctrl+Shift+V still pastes — just
+ * as plain text — instead of silently doing nothing.
  */
 function runTerminalPaste(terminal: Terminal, profile: string): void {
   const { convenience: conv } = useSettingsStore.getState();
+  if (!conv.smartPaste) {
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) terminal.paste(text);
+      })
+      .catch((err) => {
+        console.warn("[TerminalView] plain paste failed:", err);
+      });
+    return;
+  }
   smartPaste(conv.pasteImageDir, profile)
     .then((result) => {
       if (result.pasteType === "none" || !result.content) return;
@@ -73,14 +90,17 @@ function runTerminalPaste(terminal: Terminal, profile: string): void {
       if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
       terminal.paste(content);
     })
-    .catch(() => {
+    .catch((err) => {
       // Rust clipboard failed — fall back to browser clipboard → xterm paste
+      console.warn("[TerminalView] smart paste failed, falling back to browser clipboard:", err);
       navigator.clipboard
         .readText()
         .then((text) => {
           if (text) terminal.paste(text);
         })
-        .catch(() => {});
+        .catch((fallbackErr) => {
+          console.warn("[TerminalView] fallback paste also failed:", fallbackErr);
+        });
     });
 }
 
@@ -649,9 +669,9 @@ export function TerminalView({
       if (isLxShortcut(e)) return false;
 
       if (matchesKeybinding(e, "terminal.paste")) {
-        // Honor the smartPaste toggle: when off, defer to xterm's native paste
-        // (only works for default Ctrl+V since the browser fires `paste` then).
-        if (!useSettingsStore.getState().convenience.smartPaste) return true;
+        // runTerminalPaste honors the smartPaste toggle internally and falls
+        // back to plain clipboard paste when it's off, so override bindings
+        // like Ctrl+Shift+V still work regardless of the toggle.
         e.preventDefault();
         runTerminalPaste(terminal, profile);
         return false;
@@ -661,10 +681,17 @@ export function TerminalView({
         // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
         if (!terminal.hasSelection()) return true;
         const { convenience: conv } = useSettingsStore.getState();
-        const text = prepareSelectionForCopy(terminal.getSelection(), {
-          smartRemoveIndent: conv.smartRemoveIndent,
+        // When smartRemoveIndent is off, copy the selection verbatim. The
+        // transform helper (`prepareSelectionForCopy`) always strips trailing
+        // whitespace/blank lines — a behavior change for users who had the
+        // toggle off under the old native-Ctrl+C path. Keep them byte-exact
+        // with xterm's native copy output, but still honor override bindings.
+        const text = conv.smartRemoveIndent
+          ? prepareSelectionForCopy(terminal.getSelection(), { smartRemoveIndent: true })
+          : terminal.getSelection();
+        clipboardWriteText(text).catch((err) => {
+          console.warn("[TerminalView] copy to clipboard failed:", err);
         });
-        clipboardWriteText(text).catch(() => {});
         e.preventDefault();
         return false;
       }

@@ -46,6 +46,14 @@ const mockRequestAnimationFrame = vi.fn((callback: FrameRequestCallback) =>
 const mockCancelAnimationFrame = vi.fn((handle: number) => window.clearTimeout(handle));
 vi.stubGlobal("requestAnimationFrame", mockRequestAnimationFrame);
 vi.stubGlobal("cancelAnimationFrame", mockCancelAnimationFrame);
+
+// jsdom doesn't expose navigator.clipboard; stub a minimal readText/writeText
+// so the plain-paste fallback in runTerminalPaste doesn't throw.
+const mockClipboardReadText = vi.fn().mockResolvedValue("");
+Object.defineProperty(globalThis.navigator, "clipboard", {
+  value: { readText: mockClipboardReadText, writeText: vi.fn().mockResolvedValue(undefined) },
+  configurable: true,
+});
 vi.mock("@xterm/xterm", () => ({
   Terminal: class MockTerminal {
     constructor(options: Record<string, unknown> = {}) {
@@ -950,15 +958,16 @@ describe("TerminalView", () => {
     });
   });
 
-  it("does not intercept Ctrl+V when smart paste disabled", async () => {
+  it("skips the smart paste pipeline when smartPaste is disabled but still consumes the key", async () => {
+    // Override bindings like Ctrl+Shift+V can't rely on the browser's native
+    // paste event, so the keybinding handler must always consume the event.
+    // When smartPaste is off we just skip the Rust clipboard pipeline and
+    // fall back to plain navigator.clipboard in runTerminalPaste.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
       convenience: {
+        ...useSettingsStore.getState().convenience,
         smartPaste: false,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace" as const,
-        copyOnSelect: false,
       },
     });
 
@@ -969,10 +978,13 @@ describe("TerminalView", () => {
     });
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
     const result = capturedKeyHandler!(event);
 
-    // Should return true (let xterm handle normally)
-    expect(result).toBe(true);
+    // Handler intercepts: return false + preventDefault, but smartPaste is
+    // bypassed — plain clipboard paste is used instead.
+    expect(result).toBe(false);
+    expect(event.preventDefault).toHaveBeenCalled();
     expect(mockSmartPaste).not.toHaveBeenCalled();
   });
 
@@ -988,6 +1000,74 @@ describe("TerminalView", () => {
     const result = capturedKeyHandler!(event);
     expect(result).toBe(true);
     expect(mockSmartPaste).not.toHaveBeenCalled();
+  });
+
+  // -- terminal.copy keybinding --
+
+  it("Ctrl+C with selection copies via clipboardWriteText (smartRemoveIndent default on)", async () => {
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("copied text");
+
+    render(<TerminalView instanceId="t-copy1" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(false);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(mockClipboardWriteText).toHaveBeenCalledWith("copied text");
+  });
+
+  it("Ctrl+C with empty selection lets xterm handle (SIGINT path)", async () => {
+    mockHasSelection.mockReturnValue(false);
+
+    render(<TerminalView instanceId="t-copy2" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(true);
+    expect(mockClipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  it("terminal.copy with smartRemoveIndent off copies raw getSelection (no trim)", async () => {
+    // Regression guard for PR review point #2: prepareSelectionForCopy always
+    // trims trailing whitespace regardless of smartRemoveIndent, so we must
+    // bypass it when the toggle is off to preserve the old native-Ctrl+C
+    // clipboard contents byte-for-byte.
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        smartRemoveIndent: false,
+      },
+    });
+    mockHasSelection.mockReturnValue(true);
+    // Selection with trailing whitespace + blank line that prepareSelectionForCopy
+    // would strip. If the raw branch is taken, the trailing spaces survive.
+    const raw = "line with trailing   \n\n";
+    mockGetSelection.mockReturnValue(raw);
+
+    render(<TerminalView instanceId="t-copy3" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
+
+    expect(mockClipboardWriteText).toHaveBeenCalledWith(raw);
   });
 
   // -- Right-click behavior --
