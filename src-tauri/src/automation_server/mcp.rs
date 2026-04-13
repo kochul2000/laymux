@@ -314,6 +314,39 @@ impl McpHandler {
             .clone()
     }
 
+    /// Prepare terminal input: apply escape sequences and optional Enter (CR).
+    fn prepare_input(data: &str, escape: bool, enter: bool) -> String {
+        let mut result = if escape {
+            super::helpers::unescape_terminal_input(data)
+        } else {
+            data.to_string()
+        };
+        if enter {
+            result.push('\r');
+        }
+        result
+    }
+
+    /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
+    fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> {
+        let ptys = self
+            .state
+            .app_state
+            .pty_handles
+            .lock_or_err()
+            .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))?;
+        match ptys.get(terminal_id) {
+            Some(handle) => handle
+                .write(data)
+                .map(|_| data.len())
+                .map_err(|e| CallToolResult::error(vec![Content::text(e)])),
+            None => Err(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{}' not found",
+                terminal_id
+            ))])),
+        }
+    }
+
     /// Bridge request to frontend via Tauri event.
     /// Returns tool-level errors (CallToolResult::error) instead of JSON-RPC errors
     /// so MCP clients can see the error message in the tool response.
@@ -496,35 +529,14 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut data = if p.escape {
-            super::helpers::unescape_terminal_input(&p.data)
-        } else {
-            p.data.clone()
-        };
-        if p.enter {
-            data.push('\r');
-        }
-        let bytes = data.as_bytes();
-        let byte_count = bytes.len();
-        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
-            Ok(guard) => guard,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
-            }
-        };
-        match ptys.get(&p.terminal_id) {
-            Some(handle) => match handle.write(bytes) {
-                Ok(_) => Ok(json_result(&json!({
-                    "written": true,
-                    "bytes": byte_count,
-                    "enter": p.enter,
-                }))),
-                Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
-            },
-            None => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Terminal '{}' not found",
-                p.terminal_id
-            ))])),
+        let data = Self::prepare_input(&p.data, p.escape, p.enter);
+        match self.write_pty(&p.terminal_id, data.as_bytes()) {
+            Ok(bytes) => Ok(json_result(&json!({
+                "written": true,
+                "bytes": bytes,
+                "enter": p.enter,
+            }))),
+            Err(e) => Ok(e),
         }
     }
 
@@ -562,36 +574,16 @@ impl McpHandler {
         };
 
         // 2. Write to the neighbor
-        let mut data = if p.escape {
-            super::helpers::unescape_terminal_input(&p.data)
-        } else {
-            p.data.clone()
-        };
-        if p.enter {
-            data.push('\r');
-        }
-        let bytes = data.as_bytes();
-        let byte_count = bytes.len();
-
-        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
-            Ok(guard) => guard,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-        };
-        match ptys.get(&target_id) {
-            Some(handle) => match handle.write(bytes) {
-                Ok(_) => Ok(json_result(&json!({
-                    "written": true,
-                    "bytes": byte_count,
-                    "enter": p.enter,
-                    "targetTerminalId": target_id,
-                    "direction": p.direction.to_string(),
-                }))),
-                Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
-            },
-            None => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Neighbor terminal '{}' not found",
-                target_id
-            ))])),
+        let data = Self::prepare_input(&p.data, p.escape, p.enter);
+        match self.write_pty(&target_id, data.as_bytes()) {
+            Ok(bytes) => Ok(json_result(&json!({
+                "written": true,
+                "bytes": bytes,
+                "enter": p.enter,
+                "targetTerminalId": target_id,
+                "direction": p.direction.to_string(),
+            }))),
+            Err(e) => Ok(e),
         }
     }
 
@@ -705,25 +697,9 @@ impl McpHandler {
         };
 
         // 2. Write command + CR
-        {
-            let ptys = match self.state.app_state.pty_handles.lock_or_err() {
-                Ok(g) => g,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-            };
-            match ptys.get(&p.terminal_id) {
-                Some(handle) => {
-                    let cmd = format!("{}\r", p.command);
-                    if let Err(e) = handle.write(cmd.as_bytes()) {
-                        return Ok(CallToolResult::error(vec![Content::text(e)]));
-                    }
-                }
-                None => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found",
-                        p.terminal_id
-                    ))]));
-                }
-            }
+        let cmd = format!("{}\r", p.command);
+        if let Err(e) = self.write_pty(&p.terminal_id, cmd.as_bytes()) {
+            return Ok(e);
         }
 
         // 3. Poll until prompt returns or timeout

@@ -104,7 +104,6 @@ laymux/
 │   │   ├── hooks/       # React hooks
 │   │   └── lib/         # Utilities (OSC parser, colors, etc.)
 │   └── package.json
-├── mcp-server/          # Claude Code MCP server integration
 ├── ARCHITECTURE.md      # Detailed architecture specification
 └── CLAUDE.md            # Development guidelines
 ```
@@ -135,6 +134,26 @@ curl http://localhost:19280/api/v1/docs
 Port discovery file location:
 - **Windows**: `%APPDATA%\laymux\automation.json`
 - **Linux**: `~/.config/laymux/automation.json`
+
+### MCP (Model Context Protocol)
+
+Embedded MCP server at `/mcp` endpoint (Streamable HTTP). 27 tools for AI agent integration:
+
+```bash
+# Claude Code MCP config (~/.claude.json)
+{
+  "mcpServers": {
+    "laymux": {
+      "type": "url",
+      "url": "http://localhost:19280/mcp"
+    }
+  }
+}
+```
+
+Key tools: `write_to_terminal` (with `enter` param), `write_to_neighbor` (direction-based shortcut), `execute_command` (run + capture output), `take_screenshot`, `identify_caller`.
+
+See `ARCHITECTURE.md` §12.7 for full tool list and implementation details.
 
 ## Keyboard Shortcuts
 
