@@ -18,6 +18,7 @@ pub mod path_utils;
 pub mod port_detect;
 pub mod process;
 pub mod pty;
+pub mod pty_trace;
 pub mod settings;
 pub mod state;
 pub mod terminal;

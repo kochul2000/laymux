@@ -11,6 +11,7 @@ use crate::osc_hooks::{self, CommandStatusField, OscAction};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::path_utils;
 use crate::pty;
+use crate::pty_trace;
 use crate::state::AppState;
 use crate::terminal::{TerminalConfig, TerminalSession};
 
@@ -111,6 +112,18 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
+        if pty_trace::is_pty_trace_enabled() {
+            let signals = pty_trace::detect_terminal_signals(&data);
+            tracing::info!(
+                terminal_id = %terminal_id,
+                direction = "pty->ui",
+                bytes = data.len(),
+                signals = ?signals,
+                preview = %pty_trace::summarize_terminal_bytes(&data),
+                "PTY chunk"
+            );
+        }
+
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
         // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
         // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
@@ -509,6 +522,17 @@ pub fn write_to_terminal(
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui->pty",
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data.as_bytes()),
+            preview = %pty_trace::summarize_terminal_bytes(data.as_bytes()),
+            "PTY write"
+        );
+    }
+
     let ptys = state.pty_handles.lock_or_err()?;
 
     let handle = ptys
