@@ -93,6 +93,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "UI",
   },
   { id: "settings.open", label: "설정 열기", defaultKeys: "Ctrl+,", group: "UI" },
+  // -- Terminal --
+  // 기본값은 OS의 시스템 클립보드 단축키(Ctrl+C / Ctrl+V)와 동일하여, 별도 설정 없이도
+  // 브라우저 `copy` / `paste` 이벤트로 동작한다. 사용자가 Ctrl+Shift+C / Ctrl+Shift+V
+  // 등으로 재바인딩하면 TerminalView의 키 이벤트 핸들러가 수동으로 copy/paste를 실행한다.
+  { id: "terminal.copy", label: "터미널 복사", defaultKeys: "Ctrl+C", group: "Terminal" },
+  { id: "terminal.paste", label: "터미널 붙여넣기", defaultKeys: "Ctrl+V", group: "Terminal" },
   // -- Issue Reporter --
   {
     id: "issueReporter.submit",

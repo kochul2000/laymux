@@ -25,6 +25,7 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { matchesKeybinding, resolveKeybinding } from "@/lib/keybinding-registry";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -609,10 +610,72 @@ export function TerminalView({
       helperTextarea.addEventListener("compositionend", handleCompositionEnd);
     };
 
-    // Custom key event handler: let IDE shortcuts pass through xterm.
-    // Returning false prevents xterm from consuming the event.
+    // Custom key event handler: let IDE shortcuts pass through xterm,
+    // and route the user-configurable terminal.copy / terminal.paste bindings
+    // when they are rebound to combos that don't fire native copy/paste events.
+    //
+    // Copy/paste are normally system events (browser `copy`/`paste` fires on
+    // Ctrl+C / Ctrl+V). Those defaults keep working through the DOM listeners
+    // below. If the user overrides the binding to e.g. Ctrl+Shift+C / Ctrl+Shift+V
+    // (the conventional Linux terminal combo), the browser won't fire those
+    // events on its own, so we dispatch the action manually here.
     terminal.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
+
+      // terminal.paste — manually trigger smart paste when the bound combo is
+      // not the OS-default Ctrl+V (which the `paste` listener below handles).
+      if (matchesKeybinding(e, "terminal.paste")) {
+        if (resolveKeybinding("terminal.paste") !== "Ctrl+V") {
+          const { convenience: conv } = useSettingsStore.getState();
+          e.preventDefault();
+          smartPaste(conv.pasteImageDir, profile)
+            .then((result) => {
+              if (result.pasteType !== "none" && result.content) {
+                const content = transformPasteContent(result.content, result.pasteType, {
+                  removeIndent: conv.smartRemoveIndent,
+                  removeLineBreak: conv.smartRemoveLineBreak,
+                });
+                if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
+                terminal.paste(content);
+              }
+            })
+            .catch(() => {
+              navigator.clipboard
+                .readText()
+                .then((text) => {
+                  if (text) terminal.paste(text);
+                })
+                .catch(() => {});
+            });
+          return false;
+        }
+        // Default Ctrl+V: let the browser `paste` event fire — handled below.
+        return true;
+      }
+
+      // terminal.copy — manually copy the current selection when rebound away
+      // from the OS-default Ctrl+C. Default Ctrl+C continues to mean
+      // "copy if selection, SIGINT otherwise" via xterm's native handling.
+      if (matchesKeybinding(e, "terminal.copy")) {
+        if (resolveKeybinding("terminal.copy") !== "Ctrl+C") {
+          if (terminal.hasSelection()) {
+            const { convenience: conv } = useSettingsStore.getState();
+            const text = prepareSelectionForCopy(terminal.getSelection(), {
+              smartRemoveIndent: conv.smartRemoveIndent,
+            });
+            clipboardWriteText(text).catch(() => {});
+            e.preventDefault();
+            return false;
+          }
+          // No selection on a non-default binding: consume the event to avoid
+          // xterm injecting a control code for the underlying key.
+          return false;
+        }
+        // Default Ctrl+C: let xterm handle natively (copy-or-SIGINT).
+        return true;
+      }
+
       return true;
     });
 
