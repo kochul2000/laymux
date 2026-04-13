@@ -30,6 +30,7 @@ import { matchesKeybinding } from "@/lib/keybinding-registry";
 import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
+  applyDec2026SetToShadowCursor,
   isOverlayCaretActivity,
   type ShadowCursorState,
 } from "@/lib/shadow-cursor-state";
@@ -524,18 +525,33 @@ export function TerminalView({
       });
       scheduleOverlayCaretUpdate();
     };
+    // After a DEC 2026 reset in TUI mode the parser may still be a few
+    // bytes from "cursor returned to input": Codex emits the restore in
+    // the next chunk, ~10–30 ms later. If `scheduleShadowCursorSync`
+    // runs in that window it reads `buffer.active.cursorX/Y` mid-flight
+    // and snaps the shadow to the footer row. We therefore suspend
+    // `scheduleShadowCursorSync` for `SHADOW_SYNC_SETTLE_MS` after each
+    // TUI DEC 2026 reset; the reset's own snapshot path (which uses the
+    // pre-frame cursor) updates the shadow immediately, and the next
+    // genuine cursor-restore from Codex is picked up after the window
+    // expires.
+    const SHADOW_SYNC_SETTLE_MS = 50;
+    let shadowSyncSuspendedUntil = 0;
     const scheduleShadowCursorSync = () => {
       if (pendingShadowCursorSync) return;
       pendingShadowCursorSync = true;
       queueMicrotask(() => {
         pendingShadowCursorSync = false;
         const shadowCursor = shadowCursorRef.current;
+        const inSettleWindow =
+          shadowCursor.hasSyncFramePosition && Date.now() < shadowSyncSuspendedUntil;
         if (
           !(shadowCursor.isInputPhase || shadowCursor.hasSyncFramePosition) ||
           shadowCursor.isComposing ||
           shadowCursor.isRepaintInProgress ||
           shadowCursor.isAltBufferActive ||
-          syncOutputActiveRef.current
+          syncOutputActiveRef.current ||
+          inSettleWindow
         ) {
           trace("shadow-sync-skip", {
             isInputPhase: shadowCursor.isInputPhase,
@@ -544,6 +560,7 @@ export function TerminalView({
             isRepaintInProgress: shadowCursor.isRepaintInProgress,
             isAltBufferActive: shadowCursor.isAltBufferActive,
             syncOutputActive: syncOutputActiveRef.current,
+            inSettleWindow,
           });
           return;
         }
@@ -653,6 +670,25 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
+          if (isOverlayCaretActivity(activityRef.current)) {
+            // Snapshot the buffer cursor *before* the frame body runs.
+            // Codex's footer-update frames don't restore the cursor
+            // before sending `\e[?2026l`, so reading the buffer at
+            // reset time lands on the footer row. The pre-frame
+            // snapshot is the cursor as the user actually sees it
+            // (the input prompt position right before the frame
+            // began). See `docs/terminal/cursor-jump-evidence/`.
+            const activeBuffer = terminal.buffer.active as { cursorX?: number };
+            Object.assign(
+              shadowCursorRef.current,
+              applyDec2026SetToShadowCursor(
+                shadowCursorRef.current,
+                activityRef.current,
+                activeBuffer.cursorX ?? 0,
+                getBufferCursorAbsY(terminal),
+              ),
+            );
+          }
         }
         if (
           hasDecModeParam(params, 1049) ||
@@ -661,6 +697,8 @@ export function TerminalView({
         ) {
           shadowCursorRef.current.isAltBufferActive = true;
           shadowCursorRef.current.hasSyncFramePosition = false;
+          shadowCursorRef.current.frameSavedCursorX = undefined;
+          shadowCursorRef.current.frameSavedCursorAbsY = undefined;
           setInputPhase(false);
         }
         return false;
@@ -687,6 +725,13 @@ export function TerminalView({
                 bufferCursorAbsY,
               ),
             );
+            // Brief settle window: block scheduleShadowCursorSync for
+            // ~50 ms so the next chunk's footer-row buffer cursor cannot
+            // overwrite the snapshot before Codex emits its
+            // restore-to-input. After the window closes onCursorMove /
+            // onWriteParsed are free to track Codex's true input cursor
+            // again.
+            shadowSyncSuspendedUntil = Date.now() + SHADOW_SYNC_SETTLE_MS;
             scheduleOverlayCaretUpdate();
           } else {
             scheduleShadowCursorSync();

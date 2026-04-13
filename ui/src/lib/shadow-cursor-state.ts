@@ -18,6 +18,21 @@ export interface ShadowCursorState {
   commandStartX: number;
   cursorX: number;
   cursorAbsY: number;
+  /**
+   * Cursor position captured the instant a DEC 2026 (synchronized
+   * output) frame opened. Codex footer-update frames do not restore
+   * the cursor before sending `\e[?2026l`, so reading the buffer at
+   * the reset instant lands on the footer row. The pre-frame snapshot
+   * is the cursor as Codex actually intends it to look to the user
+   * (i.e. the input-prompt position right before the frame began).
+   *
+   * `undefined` when no DEC 2026 frame is currently open.
+   *
+   * See `docs/terminal/cursor-jump-evidence/` for the captured trace
+   * that motivated this field.
+   */
+  frameSavedCursorX?: number;
+  frameSavedCursorAbsY?: number;
   hasPromptBoundary: boolean;
   hasSyncFramePosition: boolean;
   isComposing: boolean;
@@ -59,13 +74,39 @@ export function computeUseShadowCursor(state: ShadowCursorState): boolean {
 }
 
 /**
+ * Applied when a DEC 2026 (synchronized output) *set* sequence fires
+ * — i.e. an app is about to start a new frame. Inside a TUI overlay
+ * activity we snapshot the current buffer cursor; the matching reset
+ * will read this snapshot back. See `applyDec2026ResetToShadowCursor`
+ * for the rationale (Codex's footer frames don't restore the cursor
+ * before the matching `\e[?2026l`).
+ *
+ * No-op outside an overlay-caret activity.
+ */
+export function applyDec2026SetToShadowCursor(
+  state: ShadowCursorState,
+  activity: TerminalActivityInfo | undefined,
+  bufferCursorX: number,
+  bufferCursorAbsY: number,
+): ShadowCursorState {
+  if (!isOverlayCaretActivity(activity)) return state;
+  return {
+    ...state,
+    frameSavedCursorX: bufferCursorX,
+    frameSavedCursorAbsY: bufferCursorAbsY,
+  };
+}
+
+/**
  * Applied when a DEC 2026 (synchronized output) *reset* sequence fires
- * — i.e. an app just flushed a frame. Inside a TUI that uses DEC 2026
- * (Codex), the buffer cursor at this instant is the app's intended
- * input-cursor position, so we snapshot it as the authoritative shadow
- * cursor until the next frame. Outside that activity we return the
- * state unchanged and let the caller fall back to the OSC-133 sync
- * pathway.
+ * — i.e. an app just flushed a frame. We use the cursor snapshot taken
+ * at the matching `applyDec2026SetToShadowCursor` if one is available,
+ * because Codex's footer-update frames leave the buffer cursor on the
+ * footer row at reset time (not on the input row). When no snapshot
+ * exists — orphan reset, set lost to a chunk boundary, etc. — we fall
+ * back to the live buffer cursor, which is still the best estimate.
+ * Outside an overlay-caret activity we return the state unchanged and
+ * let the caller schedule the regular OSC 133 sync.
  *
  * Critically, this clears any lingering OSC-133 flags (`hasPromptBoundary`,
  * `isInputPhase`, `isRepaintInProgress`) — those are semantics of a
@@ -80,14 +121,18 @@ export function applyDec2026ResetToShadowCursor(
   bufferCursorAbsY: number,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
+  const cursorX = state.frameSavedCursorX ?? bufferCursorX;
+  const cursorAbsY = state.frameSavedCursorAbsY ?? bufferCursorAbsY;
   return {
     ...state,
     hasPromptBoundary: false,
     isInputPhase: false,
     isRepaintInProgress: false,
-    cursorX: bufferCursorX,
-    cursorAbsY: bufferCursorAbsY,
+    cursorX,
+    cursorAbsY,
     hasSyncFramePosition: true,
+    frameSavedCursorX: undefined,
+    frameSavedCursorAbsY: undefined,
   };
 }
 
@@ -101,5 +146,10 @@ export function applyDec2026ResetToShadowCursor(
 export function applyActivityLeftTuiToShadowCursor(
   state: ShadowCursorState,
 ): ShadowCursorState {
-  return { ...state, hasSyncFramePosition: false };
+  return {
+    ...state,
+    hasSyncFramePosition: false,
+    frameSavedCursorX: undefined,
+    frameSavedCursorAbsY: undefined,
+  };
 }

@@ -2,8 +2,14 @@ import { describe, it, expect } from "vitest";
 
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import {
+  POST_FRAME_BUFFER_CURSOR,
+  PRE_FRAME_BUFFER_CURSOR,
+  RAW_TRACE_SLICE,
+} from "./__fixtures__/codex-footer-frame";
+import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
+  applyDec2026SetToShadowCursor,
   computeUseShadowCursor,
   isOverlayCaretActivity,
   type ShadowCursorState,
@@ -105,6 +111,87 @@ describe("applyDec2026ResetToShadowCursor — the cursor-jump regression fix", (
     const shellHistory: ShadowCursorState = { ...baseState, hasPromptBoundary: true };
     const afterReset = applyDec2026ResetToShadowCursor(shellHistory, codex, 13, 7);
     expect(computeUseShadowCursor(afterReset)).toBe(true);
+  });
+});
+
+describe("Codex footer-frame regression — DEC 2026 set/reset pre-frame snapshot", () => {
+  // See `docs/terminal/cursor-jump-evidence/` for the captured trace
+  // and prose write-up. Replays the exact pre/post cursor positions
+  // observed when the user typed "Hello." into a Codex pane:
+  //
+  //   pre-frame buffer cursor = (X=2,  absY=106)  ← input prompt
+  //   in-frame footer paint   ↓
+  //   post-frame buffer cursor= (X=44, absY=108)  ← footer row
+  //
+  // Codex does NOT restore the cursor inside the same DEC 2026 wrap,
+  // so reading the buffer at the `\e[?2026l` instant captures the
+  // footer position. The fix is: snapshot the cursor at `\e[?2026h`,
+  // restore it on `\e[?2026l`.
+
+  it("DEC 2026 set saves pre-frame cursor; reset restores from save (not buffer)", () => {
+    // Sanity-check the fixture is the live capture and not someone
+    // editing the test in isolation. The cursor positions appear inside
+    // the JSON-stringified payload, so they show up backslash-escaped
+    // in the tracing log.
+    expect(RAW_TRACE_SLICE).toContain('signals=["DEC2026:set"]');
+    expect(RAW_TRACE_SLICE).toContain('signals=["DEC2026:reset"]');
+    expect(RAW_TRACE_SLICE).toContain(`\\"cursorX\\":${POST_FRAME_BUFFER_CURSOR.x}`);
+    expect(RAW_TRACE_SLICE).toContain(`\\"cursorAbsY\\":${POST_FRAME_BUFFER_CURSOR.absY}`);
+
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: PRE_FRAME_BUFFER_CURSOR.x,
+      cursorAbsY: PRE_FRAME_BUFFER_CURSOR.absY,
+    };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+    // Frame body parses and moves the buffer cursor across rows 22..26;
+    // no transitions fire here because syncOutputActive is true and the
+    // existing scheduleShadowCursorSync gate already bails out.
+    state = applyDec2026ResetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    // The shadow cursor must come from the *saved* position, not the
+    // buffer position at the reset instant.
+    expect(state.cursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
+    expect(state.hasSyncFramePosition).toBe(true);
+  });
+
+  it("falls back to buffer cursor when no DEC 2026 set fired (orphan reset)", () => {
+    // Defensive: if for some reason the set was never observed (e.g.
+    // it arrived in a chunk before the parser hooks were attached),
+    // the existing behaviour — reading the live buffer — is the best
+    // we can do. The test guards against the regression of the
+    // *normal* case but documents the orphan-reset fallback.
+    const state = applyDec2026ResetToShadowCursor(baseState, codex, 17, 9);
+    expect(state.cursorX).toBe(17);
+    expect(state.cursorAbsY).toBe(9);
+    expect(state.hasSyncFramePosition).toBe(true);
+  });
+
+  it("DEC 2026 set is a no-op outside an overlay-caret activity", () => {
+    const out = applyDec2026SetToShadowCursor(baseState, shell, 2, 106);
+    expect(out).toBe(baseState);
+  });
+
+  it("activity-left-TUI clears any pending pre-frame snapshot too", () => {
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026SetToShadowCursor(state, codex, 2, 106);
+    state = applyActivityLeftTuiToShadowCursor(state);
+    // After leaving Codex the next stray `\e[?2026l` (e.g. from the
+    // returning shell mistakenly emitting one) must NOT replay the
+    // stale Codex input position over the shell's overlay.
+    const reset = applyDec2026ResetToShadowCursor(state, codex, 99, 99);
+    expect(reset.cursorX).toBe(99);
+    expect(reset.cursorAbsY).toBe(99);
   });
 });
 
