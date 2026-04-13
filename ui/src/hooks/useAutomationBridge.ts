@@ -28,6 +28,33 @@ function err(message: string): HandlerResult {
   return { success: false, error: message };
 }
 
+// ── Shared helpers ────────────────────────────────────────────────
+
+/** Construct terminal ID from pane ID. */
+const toTerminalId = (paneId: string) => `terminal-${paneId}`;
+
+/** Extract pane ID from terminal ID. */
+const toPaneId = (terminalId: string) => terminalId.replace(/^terminal-/, "");
+
+/** Get active workspace and validate pane index, returning the workspace and pane or an error. */
+function getActivePaneCtx(paneIndex: number) {
+  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  if (!ws) return { err: err("No active workspace") } as const;
+  if (paneIndex < 0 || paneIndex >= ws.panes.length) {
+    return { err: err(`Pane index out of range (0-${ws.panes.length - 1})`) } as const;
+  }
+  return { ws, pane: ws.panes[paneIndex] } as const;
+}
+
+/** Check that a workspace ID exists, returning an error result if not. */
+function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
+  const { workspaces } = useWorkspaceStore.getState();
+  if (!workspaces.some((ws) => ws.id === workspaceId)) {
+    return err(`Workspace '${workspaceId}' not found`);
+  }
+  return null;
+}
+
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
 function rangesOverlap(a: number, aLen: number, b: number, bLen: number): boolean {
   const eps = 0.01;
@@ -54,7 +81,7 @@ function computeNeighbors(
     const other = panes[i];
     const entry = {
       paneIndex: i,
-      terminalId: other.view.type === "TerminalView" ? `terminal-${other.id}` : null,
+      terminalId: other.view.type === "TerminalView" ? toTerminalId(other.id) : null,
     };
 
     // Right: other starts where target ends on x-axis, y ranges overlap
@@ -100,7 +127,7 @@ function findTerminalContext(terminalId: string) {
   const workspace = workspaces.find((ws) => ws.id === terminal.workspaceId);
   if (!workspace) return null;
 
-  const paneId = terminalId.replace(/^terminal-/, "");
+  const paneId = toPaneId(terminalId);
   const paneIndex = workspace.panes.findIndex((p) => p.id === paneId);
   const pane = paneIndex >= 0 ? workspace.panes[paneIndex] : null;
 
@@ -112,7 +139,7 @@ function enrichPane(p: WorkspacePane, index: number) {
   return {
     ...p,
     paneIndex: index,
-    terminalId: p.view.type === "TerminalView" ? `terminal-${p.id}` : null,
+    terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
   };
 }
 
@@ -178,19 +205,15 @@ const handlers: HandlerMap = {
     },
     remove: (p) => {
       const id = p.id as string;
-      const { workspaces } = useWorkspaceStore.getState();
-      if (!workspaces.some((ws) => ws.id === id)) {
-        return err(`Workspace '${id}' not found`);
-      }
+      const wsErr = checkWorkspaceExists(id);
+      if (wsErr) return wsErr;
       useWorkspaceStore.getState().removeWorkspace(id);
       return ok({ removed: id });
     },
     rename: (p) => {
       const id = p.id as string;
-      const { workspaces } = useWorkspaceStore.getState();
-      if (!workspaces.some((ws) => ws.id === id)) {
-        return err(`Workspace '${id}' not found`);
-      }
+      const wsErr = checkWorkspaceExists(id);
+      if (wsErr) return wsErr;
       useWorkspaceStore.getState().renameWorkspace(id, p.name as string);
       return ok({ renamed: id });
     },
@@ -238,12 +261,9 @@ const handlers: HandlerMap = {
 
   panes: {
     split: (p) => {
-      const wsBefore = useWorkspaceStore.getState().getActiveWorkspace();
-      if (!wsBefore) return err("No active workspace");
       const idx = p.paneIndex as number;
-      if (idx < 0 || idx >= wsBefore.panes.length) {
-        return err(`Pane index out of range (0-${wsBefore.panes.length - 1})`);
-      }
+      const ctx = getActivePaneCtx(idx);
+      if ("err" in ctx) return ctx.err;
       useWorkspaceStore
         .getState()
         .splitPane(idx, p.direction as "horizontal" | "vertical");
@@ -260,7 +280,7 @@ const handlers: HandlerMap = {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];
       const terminalId =
-        newPane?.view.type === "TerminalView" ? `terminal-${newPane.id}` : null;
+        newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
       // Check if the terminal instance is already registered (React may not have rendered yet)
       const { instances } = useTerminalStore.getState();
       const terminalReady = terminalId
@@ -287,56 +307,39 @@ const handlers: HandlerMap = {
       });
     },
     remove: (p) => {
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      if (!ws) return err("No active workspace");
-      const idx = p.paneIndex as number;
-      if (idx < 0 || idx >= ws.panes.length) {
-        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
-      }
-      useWorkspaceStore.getState().removePane(idx);
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
+      useWorkspaceStore.getState().removePane(p.paneIndex as number);
       return ok({ removed: true });
     },
     setView: (p) => {
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      if (!ws) return err("No active workspace");
-      const idx = p.paneIndex as number;
-      if (idx < 0 || idx >= ws.panes.length) {
-        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
-      }
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
       const view = p.view as { type: string; [key: string]: unknown };
       useWorkspaceStore
         .getState()
-        .setPaneView(idx, { ...view, type: view.type as ViewType });
+        .setPaneView(p.paneIndex as number, { ...view, type: view.type as ViewType });
       return ok({ viewSet: true });
     },
     resize: (p) => {
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      if (!ws) return err("No active workspace");
-      const idx = p.paneIndex as number;
-      if (idx < 0 || idx >= ws.panes.length) {
-        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
-      }
-      const pane = ws.panes[idx];
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
+      const { pane } = ctx;
       const delta = p.delta as Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>;
-      // Convert relative deltas to absolute values — resizePane uses spread replacement
       const absolute: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">> = {};
       if (delta.x != null) absolute.x = pane.x + delta.x;
       if (delta.y != null) absolute.y = pane.y + delta.y;
       if (delta.w != null) absolute.w = pane.w + delta.w;
       if (delta.h != null) absolute.h = pane.h + delta.h;
-      useWorkspaceStore.getState().resizePane(idx, absolute);
+      useWorkspaceStore.getState().resizePane(p.paneIndex as number, absolute);
       return ok({ resized: true });
     },
     swap: (p) => {
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      if (!ws) return err("No active workspace");
-      const srcIdx = p.sourceIndex as number;
-      const tgtIdx = p.targetIndex as number;
-      if (srcIdx < 0 || srcIdx >= ws.panes.length || tgtIdx < 0 || tgtIdx >= ws.panes.length) {
-        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
-      }
-      // Atomic swap — single state update to avoid intermediate rendering
-      useWorkspaceStore.getState().swapPanes(srcIdx, tgtIdx);
+      const srcCtx = getActivePaneCtx(p.sourceIndex as number);
+      if ("err" in srcCtx) return srcCtx.err;
+      const tgtCtx = getActivePaneCtx(p.targetIndex as number);
+      if ("err" in tgtCtx) return tgtCtx.err;
+      useWorkspaceStore.getState().swapPanes(p.sourceIndex as number, p.targetIndex as number);
       return ok({ swapped: true });
     },
   },
@@ -416,7 +419,7 @@ const handlers: HandlerMap = {
       const { workspaces } = useWorkspaceStore.getState();
       const enriched = instances.map((inst) => {
         const ws = workspaces.find((w) => w.id === inst.workspaceId);
-        const paneId = inst.id.replace(/^terminal-/, "");
+        const paneId = toPaneId(inst.id);
         const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
         const pane = paneIndex >= 0 ? ws!.panes[paneIndex] : null;
         return {
@@ -490,7 +493,7 @@ const handlers: HandlerMap = {
       }
 
       // Update focusedPaneIndex to match the target terminal's pane
-      const paneId = terminalId.replace(/^terminal-/, "");
+      const paneId = toPaneId(terminalId);
       const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === terminal.workspaceId);
       const paneIndex = ws?.panes.findIndex((pa) => pa.id === paneId) ?? -1;
       if (paneIndex >= 0) {
@@ -510,11 +513,8 @@ const handlers: HandlerMap = {
     add: (p) => {
       const workspaceId = p.workspaceId as string;
       const terminalId = p.terminalId as string;
-      // Validate workspace exists
-      const { workspaces } = useWorkspaceStore.getState();
-      if (!workspaces.some((ws) => ws.id === workspaceId)) {
-        return err(`Workspace '${workspaceId}' not found`);
-      }
+      const wsErr = checkWorkspaceExists(workspaceId);
+      if (wsErr) return wsErr;
       // Validate terminal exists (skip for workspace-level notifications with empty terminalId)
       const { instances } = useTerminalStore.getState();
       if (terminalId && !instances.some((i) => i.id === terminalId)) {

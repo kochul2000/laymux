@@ -347,9 +347,28 @@ impl McpHandler {
         }
     }
 
+    /// Bridge request returning raw Value on success, or CallToolResult error.
+    /// Use this when you need to transform the result before returning.
+    async fn bridge_raw(
+        &self,
+        category: &str,
+        target: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, CallToolResult> {
+        bridge_request(&self.state, category, target, method, params)
+            .await
+            .map_err(|(_status, axum::Json(body))| {
+                let msg = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Bridge request failed");
+                CallToolResult::error(vec![Content::text(msg)])
+            })
+    }
+
     /// Bridge request to frontend via Tauri event.
-    /// Returns tool-level errors (CallToolResult::error) instead of JSON-RPC errors
-    /// so MCP clients can see the error message in the tool response.
+    /// Returns json_result on success, CallToolResult::error on failure.
     async fn bridge(
         &self,
         category: &str,
@@ -357,14 +376,46 @@ impl McpHandler {
         method: &str,
         params: Value,
     ) -> Result<CallToolResult, ErrorData> {
-        match bridge_request(&self.state, category, target, method, params).await {
+        match self.bridge_raw(category, target, method, params).await {
             Ok(data) => Ok(json_result(&data)),
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            Err(e) => Ok(e),
+        }
+    }
+
+    /// Lock output_buffers mutex, returning a tool error on poisoned lock.
+    fn lock_output_buffers(
+        &self,
+    ) -> Result<
+        std::sync::MutexGuard<'_, HashMap<String, crate::output_buffer::TerminalOutputBuffer>>,
+        CallToolResult,
+    > {
+        self.state
+            .app_state
+            .output_buffers
+            .lock_or_err()
+            .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
+    }
+
+    /// Enrich a JSON array of objects by injecting activity state from backend detection.
+    /// `id_field` is the JSON key containing the terminal ID (e.g. "id" or "terminalId").
+    /// `activity_field` is the key to insert (e.g. "activity" or "terminalActivity").
+    fn enrich_with_activity(
+        app_state: &crate::state::AppState,
+        items: &mut Vec<Value>,
+        id_field: &str,
+        activity_field: &str,
+    ) {
+        let states = crate::activity::detect_all_terminal_states(app_state);
+        for item in items.iter_mut() {
+            if let Some(id) = item.get(id_field).and_then(|v| v.as_str()) {
+                if let Some(state_info) = states.get(id) {
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.insert(
+                            activity_field.to_string(),
+                            serde_json::to_value(state_info).unwrap_or(json!(null)),
+                        );
+                    }
+                }
             }
         }
     }
@@ -445,46 +496,22 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListTerminalsParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let bridge_result =
-            bridge_request(&self.state, "query", "terminals", "list", json!({})).await;
-        match bridge_result {
-            Ok(mut data) => {
-                // Enrich with backend activity states to resolve frontend/backend inconsistency
-                let backend_states =
-                    crate::activity::detect_all_terminal_states(&self.state.app_state);
-                if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
-                    for inst in instances.iter_mut() {
-                        if let Some(id) = inst.get("id").and_then(|v| v.as_str()) {
-                            if let Some(state_info) = backend_states.get(id) {
-                                inst.as_object_mut().map(|obj| {
-                                    obj.insert(
-                                        "activity".to_string(),
-                                        serde_json::to_value(state_info).unwrap_or(json!(null)),
-                                    )
-                                });
-                            }
-                        }
-                    }
-                    // Filter by workspace_id if provided
-                    if let Some(ref ws_id) = p.workspace_id {
-                        instances.retain(|inst| {
-                            inst.get("workspaceId")
-                                .and_then(|v| v.as_str())
-                                .map(|id| id == ws_id)
-                                .unwrap_or(false)
-                        });
-                    }
-                }
-                Ok(json_result(&data))
-            }
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                Ok(CallToolResult::error(vec![Content::text(msg)]))
+        let mut data = match self.bridge_raw("query", "terminals", "list", json!({})).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
+        };
+        if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
+            Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity");
+            if let Some(ref ws_id) = p.workspace_id {
+                instances.retain(|inst| {
+                    inst.get("workspaceId")
+                        .and_then(|v| v.as_str())
+                        .map(|id| id == ws_id)
+                        .unwrap_or(false)
+                });
             }
         }
+        Ok(json_result(&data))
     }
 
     /// Identify a terminal's full context: workspace, pane position (x,y,w,h), and neighboring panes.
@@ -549,22 +576,17 @@ impl McpHandler {
         Parameters(p): Parameters<WriteToNeighborParam>,
     ) -> Result<CallToolResult, ErrorData> {
         // 1. Identify caller to find neighbor
-        let identify_result =
-            bridge_request(&self.state, "query", "terminals", "identify", json!({ "id": p.terminal_id })).await;
-        let neighbor_id = match identify_result {
-            Ok(data) => {
-                let dir_str = p.direction.to_string();
-                data.get("neighbors")
-                    .and_then(|n| n.get(&dir_str))
-                    .and_then(|n| n.get("terminalId"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            }
-            Err((_status, axum::Json(body))) => {
-                let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("identify failed");
-                return Ok(CallToolResult::error(vec![Content::text(msg)]));
-            }
+        let data = match self.bridge_raw("query", "terminals", "identify", json!({ "id": p.terminal_id })).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
         };
+        let dir_str = p.direction.to_string();
+        let neighbor_id = data
+            .get("neighbors")
+            .and_then(|n| n.get(&dir_str))
+            .and_then(|n| n.get("terminalId"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let Some(target_id) = neighbor_id else {
             return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -598,11 +620,9 @@ impl McpHandler {
         let lines = p.lines.unwrap_or(100) as usize;
         // Copy raw data under lock, then release before expensive strip_ansi
         let (raw, buffer_size) = {
-            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
-                }
+            let buffers = match self.lock_output_buffers() {
+                Ok(g) => g,
+                Err(e) => return Ok(e),
             };
             match buffers.get(&p.terminal_id) {
                 Some(buf) => (buf.recent_lines(lines), buf.len()),
@@ -674,9 +694,9 @@ impl McpHandler {
 
         // 1. Check terminal is at shell prompt and record sequence number atomically
         let before_seq = {
-            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+            let buffers = match self.lock_output_buffers() {
                 Ok(g) => g,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => return Ok(e),
             };
             match buffers.get(&p.terminal_id) {
                 Some(buf) => {
@@ -717,11 +737,9 @@ impl McpHandler {
             }
 
             let at_prompt = {
-                let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                let buffers = match self.lock_output_buffers() {
                     Ok(g) => g,
-                    Err(e) => {
-                        return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
-                    }
+                    Err(e) => return Ok(e),
                 };
                 crate::activity::is_terminal_at_prompt_from_buffer(
                     buffers.get(&p.terminal_id),
@@ -739,9 +757,9 @@ impl McpHandler {
 
         // 4. Read output using sequence number (immune to ring buffer wrap)
         let output = {
-            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+            let buffers = match self.lock_output_buffers() {
                 Ok(g) => g,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => return Ok(e),
             };
             match buffers.get(&p.terminal_id) {
                 Some(buf) => buf.bytes_since(before_seq),
@@ -780,83 +798,55 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListWorkspacesParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let bridge_result =
-            bridge_request(&self.state, "query", "workspaces", "list", json!({})).await;
-        match bridge_result {
-            Ok(data) => {
-                if p.summary.unwrap_or(false) {
-                    if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
-                        let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
-                        let summary: Vec<Value> = workspaces
-                            .iter()
-                            .map(|ws| {
-                                let ws_id = ws.get("id").and_then(|v| v.as_str());
-                                json!({
-                                    "id": ws.get("id"),
-                                    "name": ws.get("name"),
-                                    "paneCount": ws.get("panes").and_then(|p| p.as_array()).map(|a| a.len()),
-                                    "isActive": active_id.is_some() && ws_id == active_id,
-                                })
-                            })
-                            .collect();
-                        return Ok(json_result(&json!({
-                            "workspaces": summary,
-                            "activeWorkspaceId": data.get("activeWorkspaceId"),
-                        })));
-                    }
-                }
-                Ok(json_result(&data))
-            }
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                Ok(CallToolResult::error(vec![Content::text(msg)]))
+        let data = match self.bridge_raw("query", "workspaces", "list", json!({})).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
+        };
+        if p.summary.unwrap_or(false) {
+            if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
+                let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
+                let summary: Vec<Value> = workspaces
+                    .iter()
+                    .map(|ws| {
+                        let ws_id = ws.get("id").and_then(|v| v.as_str());
+                        json!({
+                            "id": ws.get("id"),
+                            "name": ws.get("name"),
+                            "paneCount": ws.get("panes").and_then(|p| p.as_array()).map(|a| a.len()),
+                            "isActive": active_id.is_some() && ws_id == active_id,
+                        })
+                    })
+                    .collect();
+                return Ok(json_result(&json!({
+                    "workspaces": summary,
+                    "activeWorkspaceId": data.get("activeWorkspaceId"),
+                })));
             }
         }
+        Ok(json_result(&data))
     }
 
     /// Get the currently active workspace with full pane details, terminal activity states,
     /// and focusedPaneIndex — a single call for complete workspace context.
     #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
-        let bridge_result =
-            bridge_request(&self.state, "query", "workspaces", "getActive", json!({})).await;
-        match bridge_result {
-            Ok(mut data) => {
-                // Enrich panes with backend activity states
-                let backend_states =
-                    crate::activity::detect_all_terminal_states(&self.state.app_state);
-                if let Some(ws) = data.get_mut("workspace") {
-                    if let Some(panes) = ws.get_mut("panes").and_then(|v| v.as_array_mut()) {
-                        for pane in panes.iter_mut() {
-                            if let Some(tid) = pane.get("terminalId").and_then(|v| v.as_str()) {
-                                if let Some(state_info) = backend_states.get(tid) {
-                                    pane.as_object_mut().map(|obj| {
-                                        obj.insert(
-                                            "terminalActivity".to_string(),
-                                            serde_json::to_value(state_info)
-                                                .unwrap_or(json!(null)),
-                                        )
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    // focusedPaneIndex is now included directly in the bridge response
-                    // from workspaces.getActive — no second bridge call needed.
-                }
-                Ok(json_result(&data))
-            }
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                Ok(CallToolResult::error(vec![Content::text(msg)]))
-            }
+        let mut data = match self.bridge_raw("query", "workspaces", "getActive", json!({})).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
+        };
+        if let Some(panes) = data
+            .get_mut("workspace")
+            .and_then(|ws| ws.get_mut("panes"))
+            .and_then(|v| v.as_array_mut())
+        {
+            Self::enrich_with_activity(
+                &self.state.app_state,
+                panes,
+                "terminalId",
+                "terminalActivity",
+            );
         }
+        Ok(json_result(&data))
     }
 
     /// Switch to a different workspace by ID or name.
@@ -869,48 +859,42 @@ impl McpHandler {
             id
         } else if let Some(name) = p.name {
             // Resolve name to ID via list
-            let list = bridge_request(&self.state, "query", "workspaces", "list", json!({})).await;
-            match list {
-                Ok(data) => {
-                    let name_lower = name.to_lowercase();
-                    let all_matches: Vec<&Value> = data.get("workspaces")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter(|ws| {
-                            ws.get("name")
-                                .and_then(|n| n.as_str())
-                                .map(|n| n.to_lowercase() == name_lower)
-                                .unwrap_or(false)
-                        }).collect())
-                        .unwrap_or_default();
-                    match all_matches.len() {
-                        0 => return Ok(CallToolResult::error(vec![Content::text(
-                            format!("Workspace '{}' not found", name)
-                        )])),
-                        1 => all_matches[0].get("id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        n => {
-                            // Multiple matches — prefer exact case match, else take first
-                            let exact = all_matches.iter().find(|ws| {
-                                ws.get("name").and_then(|v| v.as_str()) == Some(&name)
-                            });
-                            let chosen = exact.unwrap_or(&all_matches[0]);
-                            let id = chosen.get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            tracing::warn!(
-                                "switch_workspace: {} workspaces match '{}' (case-insensitive), using '{}'",
-                                n, name, id
-                            );
-                            id
-                        }
-                    }
-                }
-                Err((_status, axum::Json(body))) => {
-                    let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("Failed to list workspaces");
-                    return Ok(CallToolResult::error(vec![Content::text(msg)]));
+            let data = match self.bridge_raw("query", "workspaces", "list", json!({})).await {
+                Ok(d) => d,
+                Err(e) => return Ok(e),
+            };
+            let name_lower = name.to_lowercase();
+            let all_matches: Vec<&Value> = data.get("workspaces")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter(|ws| {
+                    ws.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|n| n.to_lowercase() == name_lower)
+                        .unwrap_or(false)
+                }).collect())
+                .unwrap_or_default();
+            match all_matches.len() {
+                0 => return Ok(CallToolResult::error(vec![Content::text(
+                    format!("Workspace '{}' not found", name)
+                )])),
+                1 => all_matches[0].get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                n => {
+                    let exact = all_matches.iter().find(|ws| {
+                        ws.get("name").and_then(|v| v.as_str()) == Some(&name)
+                    });
+                    let chosen = exact.unwrap_or(&all_matches[0]);
+                    let id = chosen.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    tracing::warn!(
+                        "switch_workspace: {} workspaces match '{}' (case-insensitive), using '{}'",
+                        n, name, id
+                    );
+                    id
                 }
             }
         } else {
@@ -1089,17 +1073,10 @@ impl McpHandler {
             Some(idx) => json!({ "paneIndex": idx }),
             None => json!({}),
         };
-        let data =
-            match bridge_request(&self.state, "action", "screenshot", "capture", params).await {
-                Ok(data) => data,
-                Err((_status, axum::Json(body))) => {
-                    let msg = body
-                        .get("error")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Screenshot failed");
-                    return Ok(CallToolResult::error(vec![Content::text(msg)]));
-                }
-            };
+        let data = match self.bridge_raw("action", "screenshot", "capture", params).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
+        };
 
         let Some(data_url) = data.get("dataUrl").and_then(|v| v.as_str()) else {
             return Ok(CallToolResult::error(vec![Content::text(
@@ -1123,46 +1100,36 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListNotificationsParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let bridge_result =
-            bridge_request(&self.state, "query", "notifications", "list", json!({})).await;
-        match bridge_result {
-            Ok(mut data) => {
-                if let Some(notifications) =
-                    data.get_mut("notifications").and_then(|v| v.as_array_mut())
-                {
-                    if let Some(ref ws_id) = p.workspace_id {
-                        notifications.retain(|n| {
-                            n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
-                        });
-                    }
-                    if let Some(ref t_id) = p.terminal_id {
-                        notifications.retain(|n| {
-                            n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
-                        });
-                    }
-                    if p.unread_only.unwrap_or(false) {
-                        notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
-                    }
-                    // Sort newest-first so limit returns the most recent N
-                    notifications.sort_by(|a, b| {
-                        let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        let ts_b = b.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        ts_b.partial_cmp(&ts_a).unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    if let Some(limit) = p.limit {
-                        notifications.truncate(limit as usize);
-                    }
-                }
-                Ok(json_result(&data))
+        let mut data = match self.bridge_raw("query", "notifications", "list", json!({})).await {
+            Ok(d) => d,
+            Err(e) => return Ok(e),
+        };
+        if let Some(notifications) =
+            data.get_mut("notifications").and_then(|v| v.as_array_mut())
+        {
+            if let Some(ref ws_id) = p.workspace_id {
+                notifications.retain(|n| {
+                    n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
+                });
             }
-            Err((_status, axum::Json(body))) => {
-                let msg = body
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Bridge request failed");
-                Ok(CallToolResult::error(vec![Content::text(msg)]))
+            if let Some(ref t_id) = p.terminal_id {
+                notifications.retain(|n| {
+                    n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
+                });
+            }
+            if p.unread_only.unwrap_or(false) {
+                notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
+            }
+            notifications.sort_by(|a, b| {
+                let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let ts_b = b.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                ts_b.partial_cmp(&ts_a).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            if let Some(limit) = p.limit {
+                notifications.truncate(limit as usize);
             }
         }
+        Ok(json_result(&data))
     }
 
     /// Create a notification in the IDE. terminal_id and workspace_id are optional —
@@ -1176,63 +1143,52 @@ impl McpHandler {
 
         // Resolve workspace_id: if terminal_id is given but workspace_id is not,
         // look up the terminal's actual workspace instead of defaulting to active.
-        let workspace_id = match p.workspace_id {
-            Some(id) => id,
-            None if !terminal_id.is_empty() => {
-                // Look up terminal's workspace from terminal list
-                match bridge_request(
-                    &self.state,
-                    "query",
-                    "terminals",
-                    "list",
-                    json!({}),
-                )
-                .await
-                {
-                    Ok(data) => {
-                        let ws_id = data
-                            .get("instances")
-                            .and_then(|v| v.as_array())
-                            .and_then(|arr| {
-                                arr.iter().find(|t| {
-                                    t.get("id").and_then(|v| v.as_str()) == Some(&terminal_id)
-                                })
-                            })
-                            .and_then(|t| t.get("workspaceId").and_then(|v| v.as_str()))
-                            .map(|s| s.to_string());
-                        match ws_id {
-                            Some(id) => id,
-                            None => {
-                                return Ok(CallToolResult::error(vec![Content::text(format!(
-                                    "Terminal '{}' not found or has no workspace",
-                                    terminal_id
-                                ))]));
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            "Failed to look up terminal workspace",
-                        )]));
-                    }
+        let workspace_id = if let Some(id) = p.workspace_id {
+            id
+        } else if !terminal_id.is_empty() {
+            // Look up terminal's actual workspace
+            let data = match self.bridge_raw("query", "terminals", "list", json!({})).await {
+                Ok(d) => d,
+                Err(_) => {
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        "Failed to look up terminal workspace",
+                    )]));
+                }
+            };
+            match data
+                .get("instances")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    arr.iter().find(|t| {
+                        t.get("id").and_then(|v| v.as_str()) == Some(&terminal_id)
+                    })
+                })
+                .and_then(|t| t.get("workspaceId").and_then(|v| v.as_str()))
+            {
+                Some(id) => id.to_string(),
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Terminal '{}' not found or has no workspace",
+                        terminal_id
+                    ))]));
                 }
             }
-            None => {
-                // No terminal, no workspace — use active workspace
-                match bridge_request(&self.state, "query", "grid", "getState", json!({})).await {
-                    Ok(data) => match data.get("activeWorkspaceId").and_then(|v| v.as_str()) {
-                        Some(id) => id.to_string(),
-                        None => {
-                            return Ok(CallToolResult::error(vec![Content::text(
-                                "Failed to resolve active workspace",
-                            )]));
-                        }
-                    },
-                    Err(_) => {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            "Failed to resolve active workspace",
-                        )]));
-                    }
+        } else {
+            // No terminal, no workspace — use active workspace
+            let data = match self.bridge_raw("query", "grid", "getState", json!({})).await {
+                Ok(d) => d,
+                Err(_) => {
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        "Failed to resolve active workspace",
+                    )]));
+                }
+            };
+            match data.get("activeWorkspaceId").and_then(|v| v.as_str()) {
+                Some(id) => id.to_string(),
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        "Failed to resolve active workspace",
+                    )]));
                 }
             }
         };
@@ -1260,9 +1216,9 @@ impl McpHandler {
 
         // Copy raw data under lock, then release before expensive processing
         let raw = {
-            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+            let buffers = match self.lock_output_buffers() {
                 Ok(g) => g,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => return Ok(e),
             };
             match buffers.get(&p.terminal_id) {
                 Some(b) => b.recent_lines(max_lines),
