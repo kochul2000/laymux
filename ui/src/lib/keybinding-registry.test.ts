@@ -31,13 +31,15 @@ describe("keybinding-registry", () => {
       expect(new Set(ids).size).toBe(ids.length);
     });
 
-    it("should not include clipboard operations (copy/paste are system events)", () => {
-      expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "fileExplorer.copy")).toBeUndefined();
-      expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste")).toBeUndefined();
-    });
-
     it("should include issueReporter.submit", () => {
       expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "issueReporter.submit")).toBeDefined();
+    });
+
+    it("should include terminal.copy / terminal.paste with OS-default combos", () => {
+      const copy = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.copy");
+      const paste = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste");
+      expect(copy?.defaultKeys).toBe("Ctrl+C");
+      expect(paste?.defaultKeys).toBe("Ctrl+V");
     });
   });
 
@@ -99,6 +101,27 @@ describe("keybinding-registry", () => {
     it("should match Ctrl+, to settings.open", () => {
       const e = makeKeyEvent(",", { ctrl: true });
       expect(matchesKeybinding(e, "settings.open")).toBe(true);
+    });
+
+    it("should match Ctrl+Shift+C to terminal.copy when overridden", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [
+          { command: "terminal.copy", keys: "Ctrl+Shift+C" },
+          { command: "terminal.paste", keys: "Ctrl+Shift+V" },
+        ],
+      });
+      const copyEvent = makeKeyEvent("C", { ctrl: true, shift: true });
+      expect(matchesKeybinding(copyEvent, "terminal.copy")).toBe(true);
+      // The OS-default Ctrl+C should no longer match the rebound action
+      const oldCopy = makeKeyEvent("c", { ctrl: true });
+      expect(matchesKeybinding(oldCopy, "terminal.copy")).toBe(false);
+    });
+
+    it("should match Ctrl+C / Ctrl+V to terminal.copy / terminal.paste by default", () => {
+      const copy = makeKeyEvent("c", { ctrl: true });
+      const paste = makeKeyEvent("v", { ctrl: true });
+      expect(matchesKeybinding(copy, "terminal.copy")).toBe(true);
+      expect(matchesKeybinding(paste, "terminal.paste")).toBe(true);
     });
   });
 });
