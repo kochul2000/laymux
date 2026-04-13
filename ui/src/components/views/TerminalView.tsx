@@ -56,6 +56,46 @@ const LARGE_PASTE_THRESHOLD = 5120;
 const textEncoder = new TextEncoder();
 
 /**
+ * Plain browser-clipboard paste. Shared by two spots in `runTerminalPaste`:
+ * the smartPaste-off fast path and the Rust-clipboard error fallback.
+ * `logPrefix` disambiguates the two in warnings.
+ */
+function pasteFromBrowserClipboard(terminal: Terminal, logPrefix: string): void {
+  navigator.clipboard
+    .readText()
+    .then((text) => {
+      if (text) terminal.paste(text);
+    })
+    .catch((err) => {
+      console.warn(`[TerminalView] ${logPrefix} failed:`, err);
+    });
+}
+
+/**
+ * Copy the current xterm selection to the system clipboard. Shared by the
+ * terminal.copy keybinding, right-click copy, and copy-on-select so all three
+ * paths produce byte-identical clipboard contents.
+ *
+ * When `smartRemoveIndent` is disabled the raw `getSelection()` string is
+ * written verbatim. `prepareSelectionForCopy` always strips trailing
+ * whitespace/blank lines, which would otherwise silently modify clipboard
+ * contents for users who have opted out of the "smart" transforms.
+ *
+ * No-op when there is no selection so every call site can delegate the
+ * has-selection check without repeating it.
+ */
+function runTerminalCopy(terminal: Terminal): void {
+  if (!terminal.hasSelection()) return;
+  const { convenience: conv } = useSettingsStore.getState();
+  const text = conv.smartRemoveIndent
+    ? prepareSelectionForCopy(terminal.getSelection(), { smartRemoveIndent: true })
+    : terminal.getSelection();
+  clipboardWriteText(text).catch((err) => {
+    console.warn("[TerminalView] copy to clipboard failed:", err);
+  });
+}
+
+/**
  * Execute the paste pipeline and write the result into xterm. Shared by the
  * keybinding handler (terminal.paste) and the right-click paste path so both
  * always behave identically.
@@ -70,14 +110,7 @@ const textEncoder = new TextEncoder();
 function runTerminalPaste(terminal: Terminal, profile: string): void {
   const { convenience: conv } = useSettingsStore.getState();
   if (!conv.smartPaste) {
-    navigator.clipboard
-      .readText()
-      .then((text) => {
-        if (text) terminal.paste(text);
-      })
-      .catch((err) => {
-        console.warn("[TerminalView] plain paste failed:", err);
-      });
+    pasteFromBrowserClipboard(terminal, "plain paste");
     return;
   }
   smartPaste(conv.pasteImageDir, profile)
@@ -93,14 +126,7 @@ function runTerminalPaste(terminal: Terminal, profile: string): void {
     .catch((err) => {
       // Rust clipboard failed — fall back to browser clipboard → xterm paste
       console.warn("[TerminalView] smart paste failed, falling back to browser clipboard:", err);
-      navigator.clipboard
-        .readText()
-        .then((text) => {
-          if (text) terminal.paste(text);
-        })
-        .catch((fallbackErr) => {
-          console.warn("[TerminalView] fallback paste also failed:", fallbackErr);
-        });
+      pasteFromBrowserClipboard(terminal, "fallback paste");
     });
 }
 
@@ -680,18 +706,7 @@ export function TerminalView({
       if (matchesKeybinding(e, "terminal.copy")) {
         // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
         if (!terminal.hasSelection()) return true;
-        const { convenience: conv } = useSettingsStore.getState();
-        // When smartRemoveIndent is off, copy the selection verbatim. The
-        // transform helper (`prepareSelectionForCopy`) always strips trailing
-        // whitespace/blank lines — a behavior change for users who had the
-        // toggle off under the old native-Ctrl+C path. Keep them byte-exact
-        // with xterm's native copy output, but still honor override bindings.
-        const text = conv.smartRemoveIndent
-          ? prepareSelectionForCopy(terminal.getSelection(), { smartRemoveIndent: true })
-          : terminal.getSelection();
-        clipboardWriteText(text).catch((err) => {
-          console.warn("[TerminalView] copy to clipboard failed:", err);
-        });
+        runTerminalCopy(terminal);
         e.preventDefault();
         return false;
       }
@@ -717,15 +732,12 @@ export function TerminalView({
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
 
-    // Copy-on-select: auto-copy to clipboard when text is selected
+    // Copy-on-select: auto-copy to clipboard when text is selected.
+    // `runTerminalCopy` handles the has-selection guard and smart-indent
+    // branching, keeping this path in lockstep with Ctrl+C and right-click.
     terminal.onSelectionChange(() => {
-      const { convenience: conv } = useSettingsStore.getState();
-      if (conv.copyOnSelect && terminal.hasSelection()) {
-        clipboardWriteText(
-          prepareSelectionForCopy(terminal.getSelection(), {
-            smartRemoveIndent: conv.smartRemoveIndent,
-          }),
-        ).catch(() => {});
+      if (useSettingsStore.getState().convenience.copyOnSelect) {
+        runTerminalCopy(terminal);
       }
     });
 
@@ -936,13 +948,8 @@ export function TerminalView({
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       if (terminal.hasSelection()) {
-        // Selection exists → copy to clipboard via Tauri, then clear
-        const { convenience: conv } = useSettingsStore.getState();
-        clipboardWriteText(
-          prepareSelectionForCopy(terminal.getSelection(), {
-            smartRemoveIndent: conv.smartRemoveIndent,
-          }),
-        ).catch(() => {});
+        // Selection exists → copy via the shared helper, then clear.
+        runTerminalCopy(terminal);
         terminal.clearSelection();
       } else {
         // No selection → paste via the shared smart-paste pipeline.

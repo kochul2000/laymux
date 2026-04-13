@@ -1151,6 +1151,31 @@ describe("TerminalView", () => {
     });
   });
 
+  it("copy-on-select with smartRemoveIndent off writes raw selection (shared runTerminalCopy path)", async () => {
+    // Proves the three copy sites (Ctrl+C, right-click, copy-on-select)
+    // share runTerminalCopy — raw-when-off semantics apply uniformly.
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        copyOnSelect: true,
+        smartRemoveIndent: false,
+      },
+    });
+    mockHasSelection.mockReturnValue(true);
+    const raw = "trailing ws   \n\n";
+    mockGetSelection.mockReturnValue(raw);
+
+    render(<TerminalView instanceId="t-cos-raw" profile="PowerShell" syncGroup="" />);
+
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+
+    await vi.waitFor(() => {
+      expect(mockClipboardWriteText).toHaveBeenCalledWith(raw);
+    });
+  });
+
   it("does not auto-copy when copyOnSelect is disabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
