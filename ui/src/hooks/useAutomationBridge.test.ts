@@ -971,6 +971,7 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect((result.data as { notification?: { workspaceId?: string } }).notification?.workspaceId).toBe(wsId);
   });
 
   it("resize_pane applies delta relative to current pane size", () => {

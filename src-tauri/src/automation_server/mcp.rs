@@ -616,6 +616,7 @@ impl McpHandler {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
+                "bytesWritten": bytes,
                 "enter": p.enter,
             }))),
             Err(e) => Ok(e),
@@ -862,6 +863,7 @@ impl McpHandler {
                 let active_workspace_id = data.get("activeWorkspaceId").cloned();
                 *data = json!({
                     "workspaces": summary,
+                    "workspaceSummaries": summary,
                     "activeWorkspaceId": active_workspace_id,
                 });
             }
@@ -1211,15 +1213,39 @@ impl McpHandler {
             }
         };
 
+        let level = p
+            .level
+            .map(|level| level.to_string())
+            .unwrap_or_else(|| "info".to_string());
+        let message = p.message;
         let mut params = json!({
             "terminalId": terminal_id,
             "workspaceId": workspace_id,
-            "message": p.message,
+            "message": message,
+            "level": level,
         });
-        if let Some(level) = p.level {
-            params["level"] = json!(level.to_string());
+        if terminal_id.is_empty() {
+            params["terminalId"] = json!("");
         }
-        self.bridge("action", "notifications", "add", params).await
+        self.bridge_transform("action", "notifications", "add", params, |data| {
+            if data.get("notification").is_none()
+                && data.get("added").and_then(|v| v.as_bool()) == Some(true)
+            {
+                *data = json!({
+                    "added": true,
+                    "notification": {
+                        "id": Value::Null,
+                        "terminalId": terminal_id,
+                        "workspaceId": workspace_id,
+                        "message": message,
+                        "level": level,
+                        "createdAt": Value::Null,
+                        "readAt": Value::Null,
+                    }
+                });
+            }
+        })
+        .await
     }
 
     /// Search terminal output for a pattern. Returns matching lines with context.

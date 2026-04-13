@@ -529,13 +529,13 @@ const handlers: HandlerMap = {
       if (terminalId && !findTerminalInstance(terminalId)) {
         return err(`Terminal '${terminalId}' not found`);
       }
-      useNotificationStore.getState().addNotification({
+      const notification = useNotificationStore.getState().addNotification({
         terminalId,
         workspaceId,
         message: p.message as string,
         level: (p.level as NotificationLevel) ?? undefined,
       });
-      return ok({ added: true });
+      return ok({ added: true, notification });
     },
     unreadCount: (p) => {
       const count = useNotificationStore.getState().getUnreadCount(p.workspaceId as string);
