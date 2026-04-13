@@ -78,6 +78,18 @@ impl Default for AppState {
     }
 }
 
+impl Drop for AppState {
+    fn drop(&mut self) {
+        if let Ok(handles) = self.pty_handles.get_mut() {
+            for (terminal_id, handle) in handles.drain() {
+                if let Err(err) = handle.terminate() {
+                    tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,6 +5,7 @@ use std::thread;
 
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
+use crate::process::headless_command;
 use crate::terminal::TerminalSession;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
@@ -82,6 +83,30 @@ pub struct PtyHandle {
 }
 
 impl PtyHandle {
+    /// Close the PTY master and terminate the direct child process tree if possible.
+    pub fn terminate(&self) -> Result<(), String> {
+        // Drop writer/master handles first so shells see EOF/HUP before a forced kill.
+        if let Ok(writer) = self.writer.lock_or_err() {
+            drop(writer);
+        }
+        if let Ok(master) = self.master.lock_or_err() {
+            drop(master);
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Some(pid) = self.child_pid {
+            let status = headless_command("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+                .map_err(|e| format!("Failed to run taskkill for PTY child {pid}: {e}"))?;
+            if !status.success() {
+                tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");
+            }
+        }
+
+        Ok(())
+    }
+
     /// Write data (user input) to the PTY.
     ///
     /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and

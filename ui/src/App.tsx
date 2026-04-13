@@ -9,6 +9,8 @@ import { createCloseHandler } from "@/lib/window-close-handler";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
+import { closeTerminalSession } from "@/lib/tauri-api";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 export function App() {
   useKeyboardShortcuts();
@@ -24,6 +26,10 @@ export function App() {
   const cleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     let cancelled = false;
+    const closeOpenTerminalSessions = async () => {
+      const terminalIds = Array.from(new Set(useTerminalStore.getState().instances.map((i) => i.id)));
+      await Promise.allSettled(terminalIds.map((id) => closeTerminalSession(id)));
+    };
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         if (cancelled) return;
@@ -34,6 +40,7 @@ export function App() {
           saveBeforeClose: async () => {
             await captureWindowGeometry();
             await saveBeforeClose();
+            await closeOpenTerminalSessions();
           },
           timeoutMs: 5000,
         });

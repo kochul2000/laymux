@@ -520,10 +520,12 @@ pub fn write_to_terminal(
 
 #[tauri::command]
 pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result<(), String> {
-    // Remove PTY handle (drop closes the PTY)
+    // Remove PTY handle and terminate the child process tree before dropping it.
     {
         let mut ptys = state.pty_handles.lock_or_err()?;
-        ptys.remove(&id);
+        if let Some(handle) = ptys.remove(&id) {
+            handle.terminate()?;
+        }
     }
 
     // Remove output buffer
