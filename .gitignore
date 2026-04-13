@@ -33,6 +33,7 @@ test-results/
 
 # Reference docs (local only)
 .reference/
+.codex/
 
 # Claude Code
 .claude/worktrees/

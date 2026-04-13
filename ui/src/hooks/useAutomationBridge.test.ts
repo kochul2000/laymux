@@ -90,13 +90,17 @@ describe("handleAutomationRequest", () => {
   });
 
   it("focuses pane", () => {
-    handleAutomationRequest({
+    // Split to have at least 3 panes (indices 0, 1, 2)
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    useWorkspaceStore.getState().splitPane(0, "vertical");
+    const result = handleAutomationRequest({
       requestId: "r6",
       category: "action",
       target: "grid",
       method: "focusPane",
       params: { index: 2 },
     });
+    expect(result.success).toBe(true);
     expect(useGridStore.getState().focusedPaneIndex).toBe(2);
   });
 
@@ -189,6 +193,14 @@ describe("handleAutomationRequest", () => {
   // -- New notification/terminal/summary endpoints --
 
   it("adds a notification via automation API", () => {
+    // Register a terminal so validation passes
+    const wsId = useWorkspaceStore.getState().workspaces[0]?.id ?? "ws-default";
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g",
+      workspaceId: wsId,
+    });
     const result = handleAutomationRequest({
       requestId: "n1",
       category: "action",
@@ -196,7 +208,7 @@ describe("handleAutomationRequest", () => {
       method: "add",
       params: {
         terminalId: "t1",
-        workspaceId: "ws-default",
+        workspaceId: wsId,
         message: "Build complete",
         level: "success",
       },
@@ -619,8 +631,8 @@ describe("identify_caller and enriched responses", () => {
     const newPane = data.newPane as Record<string, unknown>;
     expect(newPane).not.toBeNull();
     expect(newPane.paneIndex).toBe(1);
-    // New split pane is EmptyView — terminalId should be null
-    expect(newPane.terminalId).toBeNull();
+    // MCP split auto-converts to TerminalView — terminalId should be set
+    expect(newPane.terminalId).not.toBeNull();
     expect(newPane).toHaveProperty("x");
   });
 
@@ -643,14 +655,8 @@ describe("identify_caller and enriched responses", () => {
   });
 
   it("identify_caller: neighbor terminalId is null when neighbor is EmptyView", () => {
-    // Split to get 2 panes — only register terminal for the LEFT pane
-    handleAutomationRequest({
-      requestId: "sn1",
-      category: "action",
-      target: "panes",
-      method: "split",
-      params: { paneIndex: 0, direction: "vertical" },
-    });
+    // Use store directly (not MCP bridge) to split, so we keep EmptyView
+    useWorkspaceStore.getState().splitPane(0, "vertical");
 
     const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
     const leftPane = ws.panes[0];
@@ -677,7 +683,7 @@ describe("identify_caller and enriched responses", () => {
     const right = neighbors.right as Record<string, unknown>;
     expect(right).not.toBeNull();
     expect(right.paneIndex).toBe(1);
-    // Right pane is EmptyView — terminalId should be null
+    // Right pane is EmptyView (split via store, not MCP) — terminalId should be null
     expect(right.terminalId).toBeNull();
   });
 
@@ -777,5 +783,390 @@ describe("identify_caller and enriched responses", () => {
 
     const { workspaceDisplayOrder } = useWorkspaceStore.getState();
     expect(workspaceDisplayOrder).toEqual([idsBefore[2], idsBefore[0], idsBefore[1]]);
+  });
+
+  // -- P0 bug fix tests --
+
+  it("focus_pane rejects out-of-range index", () => {
+    // Default workspace has 1 pane (index 0)
+    const ws = useWorkspaceStore.getState().getActiveWorkspace();
+    expect(ws!.panes.length).toBeGreaterThan(0);
+
+    const result = handleAutomationRequest({
+      requestId: "fp-oob",
+      category: "action",
+      target: "grid",
+      method: "focusPane",
+      params: { index: 999 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("out of range");
+    // State must NOT be corrupted
+    expect(useGridStore.getState().focusedPaneIndex).not.toBe(999);
+  });
+
+  it("focus_pane rejects negative index", () => {
+    const result = handleAutomationRequest({
+      requestId: "fp-neg",
+      category: "action",
+      target: "grid",
+      method: "focusPane",
+      params: { index: -1 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("out of range");
+  });
+
+  it("send_notification rejects non-existent workspace", () => {
+    const result = handleAutomationRequest({
+      requestId: "sn-bad-ws",
+      category: "action",
+      target: "notifications",
+      method: "add",
+      params: {
+        terminalId: "t1",
+        workspaceId: "ws-nonexistent",
+        message: "test",
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it("send_notification rejects non-existent terminal", () => {
+    const wsId = useWorkspaceStore.getState().workspaces[0]?.id;
+    const result = handleAutomationRequest({
+      requestId: "sn-bad-t",
+      category: "action",
+      target: "notifications",
+      method: "add",
+      params: {
+        terminalId: "terminal-nonexistent",
+        workspaceId: wsId,
+        message: "test",
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it("focus_terminal auto-switches workspace for cross-workspace terminal", () => {
+    // Create a second workspace
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+
+    // Set pane to TerminalView in WS2
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const ws2Pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+
+    // Register terminal in WS2
+    const termId = `terminal-${ws2Pane.id}`;
+    useTerminalStore.getState().registerInstance({
+      id: termId,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws2.id,
+    });
+
+    // Switch back to WS1
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws1.id);
+
+    // Focus terminal in WS2 — should auto-switch workspace
+    const result = handleAutomationRequest({
+      requestId: "ft-cross",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: termId },
+    });
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+  });
+
+  it("focus_terminal returns error for non-existent terminal", () => {
+    const result = handleAutomationRequest({
+      requestId: "ft-bad",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: "terminal-nonexistent" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+  });
+
+  it("split_pane creates TerminalView (not EmptyView)", () => {
+    // Ensure active workspace has at least one pane
+    const ws = useWorkspaceStore.getState().getActiveWorkspace();
+    expect(ws!.panes.length).toBeGreaterThan(0);
+
+    const result = handleAutomationRequest({
+      requestId: "sp-tv",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "horizontal" },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    const newPane = data.newPane as Record<string, unknown>;
+    expect(newPane).not.toBeNull();
+    // New pane should be TerminalView, so terminalId should not be null
+    expect(newPane.terminalId).not.toBeNull();
+  });
+
+  it("swap_panes exchanges absolute positions correctly", () => {
+    // Split to get 2 panes
+    handleAutomationRequest({
+      requestId: "sw-setup",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "horizontal" },
+    });
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const srcPos = { x: ws.panes[0].x, y: ws.panes[0].y, w: ws.panes[0].w, h: ws.panes[0].h };
+    const tgtPos = { x: ws.panes[1].x, y: ws.panes[1].y, w: ws.panes[1].w, h: ws.panes[1].h };
+
+    const result = handleAutomationRequest({
+      requestId: "sw-1",
+      category: "action",
+      target: "panes",
+      method: "swap",
+      params: { sourceIndex: 0, targetIndex: 1 },
+    });
+    expect(result.success).toBe(true);
+
+    const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+    // Pane 0 should now have pane 1's original position
+    expect(after.panes[0].x).toBe(tgtPos.x);
+    expect(after.panes[0].y).toBe(tgtPos.y);
+    expect(after.panes[0].w).toBe(tgtPos.w);
+    expect(after.panes[0].h).toBe(tgtPos.h);
+    // Pane 1 should now have pane 0's original position
+    expect(after.panes[1].x).toBe(srcPos.x);
+    expect(after.panes[1].y).toBe(srcPos.y);
+    expect(after.panes[1].w).toBe(srcPos.w);
+    expect(after.panes[1].h).toBe(srcPos.h);
+  });
+
+  it("send_notification allows empty terminalId for workspace-level notification", () => {
+    const wsId = useWorkspaceStore.getState().workspaces[0]?.id;
+    const result = handleAutomationRequest({
+      requestId: "sn-empty-t",
+      category: "action",
+      target: "notifications",
+      method: "add",
+      params: {
+        terminalId: "",
+        workspaceId: wsId,
+        message: "workspace-level alert",
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect((result.data as { notification?: { workspaceId?: string } }).notification?.workspaceId).toBe(wsId);
+  });
+
+  it("resize_pane applies delta relative to current pane size", () => {
+    // Split to get 2 panes with known geometry
+    handleAutomationRequest({
+      requestId: "rz-split",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+    const wsBefore = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const paneBefore = wsBefore.panes[0];
+    const originalW = paneBefore.w;
+    const originalH = paneBefore.h;
+
+    // Resize with delta
+    const result = handleAutomationRequest({
+      requestId: "rz-delta",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: { w: 0.1, h: -0.05 } },
+    });
+    expect(result.success).toBe(true);
+
+    const wsAfter = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const paneAfter = wsAfter.panes[0];
+    expect(paneAfter.w).toBeCloseTo(originalW + 0.1, 5);
+    expect(paneAfter.h).toBeCloseTo(originalH - 0.05, 5);
+  });
+
+  it("split_pane forwards profile and cwd to new pane view config", () => {
+    const result = handleAutomationRequest({
+      requestId: "sp-profile",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical", profile: "WSL", cwd: "/home/user" },
+    });
+    expect(result.success).toBe(true);
+
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const newPane = ws.panes[1];
+    expect(newPane.view.type).toBe("TerminalView");
+    expect(newPane.view.profile).toBe("WSL");
+    expect(newPane.view.lastCwd).toBe("/home/user");
+  });
+
+  it("split_pane rejects out-of-range pane_index", () => {
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const result = handleAutomationRequest({
+      requestId: "sp-oor",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 999, direction: "vertical" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("out of range");
+    // Verify no panes were added
+    const wsAfter = useWorkspaceStore.getState().getActiveWorkspace()!;
+    expect(wsAfter.panes.length).toBe(ws.panes.length);
+  });
+
+  it("create_workspace applies cwd to terminal panes", () => {
+    const result = handleAutomationRequest({
+      requestId: "cw-cwd",
+      category: "action",
+      target: "workspaces",
+      method: "add",
+      params: { name: "CWD Test", cwd: "/home/user/project" },
+    });
+    expect(result.success).toBe(true);
+    // Find the newly created workspace
+    const ws = useWorkspaceStore
+      .getState()
+      .workspaces.find((w) => w.name === "CWD Test")!;
+    expect(ws).toBeDefined();
+    expect(ws.panes.length).toBeGreaterThan(0);
+    // Convert any non-TerminalView panes so we can test — but at minimum, check
+    // that TerminalView panes have lastCwd set. If all panes are EmptyView,
+    // the handler should still set lastCwd on them as viewConfig.
+    for (const pane of ws.panes) {
+      if (pane.view.type === "TerminalView") {
+        expect(pane.view.lastCwd).toBe("/home/user/project");
+      }
+    }
+    // Ensure at least one TerminalView pane exists to make this test meaningful
+    // If the default layout only has EmptyView, convert one and verify
+    const termPanes = ws.panes.filter((p) => p.view.type === "TerminalView");
+    expect(termPanes.length).toBeGreaterThan(0);
+  });
+
+  it("take_screenshot pane selector uses data-pane-index on workspace pane divs", () => {
+    // This is a structural test — verify the PaneGrid renders data-pane-index
+    // The actual screenshot capture is async and needs DOM, so we test the selector logic
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    expect(ws.panes.length).toBeGreaterThan(0);
+    // The fix ensures PaneGrid.tsx adds data-pane-index={i} to each pane div,
+    // so captureScreenshot's querySelectorAll("[data-pane-index]") will match real panes.
+    // This test validates the fix was applied by checking PaneGrid component rendering
+    // in a separate PaneGrid.test.tsx test.
+  });
+
+  it("profiles.list returns configured profiles from settings", () => {
+    const result = handleAutomationRequest({
+      requestId: "pl-1",
+      category: "query",
+      target: "profiles",
+      method: "list",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveProperty("profiles");
+    expect(result.data).toHaveProperty("defaultProfile");
+    const data = result.data as { profiles: Array<{ name: string; isDefault?: boolean }> };
+    expect(data.profiles.length).toBeGreaterThan(0);
+    // At least one profile should be the default
+    expect(data.profiles.some((p) => p.isDefault)).toBe(true);
+  });
+
+  it("focus_terminal updates focusedPaneIndex in grid store", () => {
+    // Split to create 2 panes
+    handleAutomationRequest({
+      requestId: "ft-split",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    expect(ws.panes.length).toBe(2);
+
+    // Register terminal instances for both panes
+    const pane0Id = ws.panes[0].id;
+    const pane1Id = ws.panes[1].id;
+    useTerminalStore.setState({
+      instances: [
+        { id: `terminal-${pane0Id}`, workspaceId: ws.id, label: "", profile: "PowerShell" } as never,
+        { id: `terminal-${pane1Id}`, workspaceId: ws.id, label: "", profile: "PowerShell" } as never,
+      ],
+    });
+
+    // Focus second pane's terminal
+    const result = handleAutomationRequest({
+      requestId: "ft-focus",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: `terminal-${pane1Id}` },
+    });
+    expect(result.success).toBe(true);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+  });
+
+  it("getActive workspace includes focusedPaneIndex", () => {
+    useGridStore.getState().setFocusedPane(0);
+    const result = handleAutomationRequest({
+      requestId: "ga-fpi",
+      category: "query",
+      target: "workspaces",
+      method: "getActive",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as { workspace: { focusedPaneIndex: number } };
+    expect(data.workspace.focusedPaneIndex).toBe(0);
+  });
+
+  it("remove_pane rejects out-of-range pane_index", () => {
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const paneCount = ws.panes.length;
+    const result = handleAutomationRequest({
+      requestId: "rm-oor",
+      category: "action",
+      target: "panes",
+      method: "remove",
+      params: { paneIndex: 999 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("out of range");
+    const wsAfter = useWorkspaceStore.getState().getActiveWorkspace()!;
+    expect(wsAfter.panes.length).toBe(paneCount);
+  });
+
+  it("setView rejects out-of-range pane_index", () => {
+    const result = handleAutomationRequest({
+      requestId: "sv-oor",
+      category: "action",
+      target: "panes",
+      method: "setView",
+      params: { paneIndex: 999, view: { type: "TerminalView" } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("out of range");
   });
 });

@@ -9,7 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import type { DockPosition, ViewType, WorkspacePane } from "@/stores/types";
+import type { DockPosition, ViewInstanceConfig, ViewType, Workspace, WorkspacePane } from "@/stores/types";
 
 interface HandlerResult {
   success: boolean;
@@ -19,6 +19,9 @@ interface HandlerResult {
 
 type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
+type ActivePaneCtx =
+  | { err: HandlerResult }
+  | { ws: Workspace; pane: WorkspacePane };
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -26,6 +29,46 @@ function ok(data: unknown): HandlerResult {
 
 function err(message: string): HandlerResult {
   return { success: false, error: message };
+}
+
+// ── Shared helpers ────────────────────────────────────────────────
+
+/** Construct terminal ID from pane ID. */
+const toTerminalId = (paneId: string) => `terminal-${paneId}`;
+
+/** Extract pane ID from terminal ID. */
+const toPaneId = (terminalId: string) => terminalId.replace(/^terminal-/, "");
+
+/** Get active workspace and validate pane index, returning the workspace and pane or an error. */
+function getActivePaneCtx(paneIndex: number): ActivePaneCtx {
+  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  if (!ws) return { err: err("No active workspace") } as const;
+  if (paneIndex < 0 || paneIndex >= ws.panes.length) {
+    return { err: err(`Pane index out of range (0-${ws.panes.length - 1})`) } as const;
+  }
+  return { ws, pane: ws.panes[paneIndex] } as const;
+}
+
+/** Check that a workspace ID exists, returning an error result if not. */
+function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
+  const { workspaces } = useWorkspaceStore.getState();
+  if (!workspaces.some((ws) => ws.id === workspaceId)) {
+    return err(`Workspace '${workspaceId}' not found`);
+  }
+  return null;
+}
+
+/** Find a terminal instance by id. */
+function findTerminalInstance(terminalId: string) {
+  return useTerminalStore.getState().instances.find((instance) => instance.id === terminalId) ?? null;
+}
+
+/** Resolve pane index for a terminal within its workspace. */
+function resolveTerminalPaneIndex(terminalId: string, workspaceId: string): number {
+  const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
+  if (!workspace) return -1;
+  const paneId = toPaneId(terminalId);
+  return workspace.panes.findIndex((pane) => pane.id === paneId);
 }
 
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
@@ -54,7 +97,7 @@ function computeNeighbors(
     const other = panes[i];
     const entry = {
       paneIndex: i,
-      terminalId: other.view.type === "TerminalView" ? `terminal-${other.id}` : null,
+      terminalId: other.view.type === "TerminalView" ? toTerminalId(other.id) : null,
     };
 
     // Right: other starts where target ends on x-axis, y ranges overlap
@@ -100,7 +143,7 @@ function findTerminalContext(terminalId: string) {
   const workspace = workspaces.find((ws) => ws.id === terminal.workspaceId);
   if (!workspace) return null;
 
-  const paneId = terminalId.replace(/^terminal-/, "");
+  const paneId = toPaneId(terminalId);
   const paneIndex = workspace.panes.findIndex((p) => p.id === paneId);
   const pane = paneIndex >= 0 ? workspace.panes[paneIndex] : null;
 
@@ -112,7 +155,7 @@ function enrichPane(p: WorkspacePane, index: number) {
   return {
     ...p,
     paneIndex: index,
-    terminalId: p.view.type === "TerminalView" ? `terminal-${p.id}` : null,
+    terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
   };
 }
 
@@ -125,8 +168,10 @@ const handlers: HandlerMap = {
     getActive: () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       if (!ws) return ok({ workspace: null });
+      const { focusedPaneIndex } = useGridStore.getState();
       const enriched = {
         ...ws,
+        focusedPaneIndex,
         panes: ws.panes.map(enrichPane),
       };
       return ok({ workspace: enriched });
@@ -144,18 +189,49 @@ const handlers: HandlerMap = {
       const after = useWorkspaceStore.getState().workspaces;
       const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
       if (!newWs) return err(`Failed to create workspace: layout '${layoutId}' not found`);
+
+      // Apply cwd to all panes — convert EmptyView to TerminalView with lastCwd
+      const cwd = p.cwd as string | undefined;
+      if (cwd) {
+        const store = useWorkspaceStore.getState();
+        // Find index of new workspace to operate on its panes
+        const wsIdx = store.workspaces.findIndex((ws) => ws.id === newWs.id);
+        if (wsIdx >= 0) {
+          // Temporarily switch active to the new workspace so setPaneView works on it
+          const prevActiveId = store.activeWorkspaceId;
+          store.setActiveWorkspace(newWs.id);
+          for (let i = 0; i < newWs.panes.length; i++) {
+            const pane = newWs.panes[i];
+            const viewConfig: ViewInstanceConfig = {
+              ...(pane.view.type === "TerminalView" ? pane.view : { type: "TerminalView" }),
+              lastCwd: cwd,
+            };
+            useWorkspaceStore.getState().setPaneView(i, viewConfig);
+          }
+          // Restore previous active workspace
+          store.setActiveWorkspace(prevActiveId);
+        }
+      }
+
+      const updatedWs = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === newWs.id)!;
       return ok({
         created: true,
-        workspace: { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length },
+        workspace: { id: updatedWs.id, name: updatedWs.name, paneCount: updatedWs.panes.length },
       });
     },
     remove: (p) => {
-      useWorkspaceStore.getState().removeWorkspace(p.id as string);
-      return ok({ removed: p.id });
+      const id = p.id as string;
+      const wsErr = checkWorkspaceExists(id);
+      if (wsErr) return wsErr;
+      useWorkspaceStore.getState().removeWorkspace(id);
+      return ok({ removed: id });
     },
     rename: (p) => {
-      useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
-      return ok({ renamed: p.id });
+      const id = p.id as string;
+      const wsErr = checkWorkspaceExists(id);
+      if (wsErr) return wsErr;
+      useWorkspaceStore.getState().renameWorkspace(id, p.name as string);
+      return ok({ renamed: id });
     },
     reorder: (p) => {
       useWorkspaceStore
@@ -183,8 +259,11 @@ const handlers: HandlerMap = {
       return ok({ editMode: p.enabled });
     },
     focusPane: (p) => {
-      useGridStore.getState().setFocusedPane(p.index as number);
-      return ok({ focusedPaneIndex: p.index });
+      const index = p.index as number;
+      const ctx = getActivePaneCtx(index);
+      if ("err" in ctx) return ctx.err;
+      useGridStore.getState().setFocusedPane(index);
+      return ok({ focusedPaneIndex: index });
     },
     simulateHover: (p) => {
       const idx = p.index != null ? (p.index as number) : null;
@@ -195,38 +274,86 @@ const handlers: HandlerMap = {
 
   panes: {
     split: (p) => {
+      const idx = p.paneIndex as number;
+      const ctx = getActivePaneCtx(idx);
+      if ("err" in ctx) return ctx.err;
       useWorkspaceStore
         .getState()
-        .splitPane(p.paneIndex as number, p.direction as "horizontal" | "vertical");
+        .splitPane(idx, p.direction as "horizontal" | "vertical");
+      const newPaneIndex = idx + 1;
+      // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
+      const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
+      const newPaneBefore = wsBeforeConvert?.panes[newPaneIndex];
+      if (newPaneBefore && newPaneBefore.view.type !== "TerminalView") {
+        const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
+        if (p.profile) viewConfig.profile = p.profile as string;
+        if (p.cwd) viewConfig.lastCwd = p.cwd as string;
+        useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig);
+      }
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      const newPaneIndex = (p.paneIndex as number) + 1;
       const newPane = ws?.panes[newPaneIndex];
+      const terminalId =
+        newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
+      // Check if the terminal instance is already registered (React may not have rendered yet)
+      const { instances } = useTerminalStore.getState();
+      const terminalReady = terminalId
+        ? instances.some((i) => i.id === terminalId)
+        : false;
       return ok({
         split: true,
         newPane: newPane
           ? {
               id: newPane.id,
-              terminalId: newPane.view.type === "TerminalView" ? `terminal-${newPane.id}` : null,
+              terminalId,
               paneIndex: newPaneIndex,
               x: newPane.x,
               y: newPane.y,
               w: newPane.w,
               h: newPane.h,
+              ready: terminalReady,
             }
           : null,
         totalPanes: ws?.panes.length ?? 0,
+        _hint: terminalId && !terminalReady
+          ? "Terminal ID is allocated but not yet registered. Poll list_terminals or wait ~500ms before writing to it."
+          : undefined,
       });
     },
     remove: (p) => {
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
       useWorkspaceStore.getState().removePane(p.paneIndex as number);
       return ok({ removed: true });
     },
     setView: (p) => {
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
       const view = p.view as { type: string; [key: string]: unknown };
       useWorkspaceStore
         .getState()
         .setPaneView(p.paneIndex as number, { ...view, type: view.type as ViewType });
       return ok({ viewSet: true });
+    },
+    resize: (p) => {
+      const ctx = getActivePaneCtx(p.paneIndex as number);
+      if ("err" in ctx) return ctx.err;
+      const { pane } = ctx;
+      const delta = p.delta as Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>;
+      const absolute: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">> = {};
+      if (delta.x != null) absolute.x = pane.x + delta.x;
+      if (delta.y != null) absolute.y = pane.y + delta.y;
+      if (delta.w != null) absolute.w = pane.w + delta.w;
+      if (delta.h != null) absolute.h = pane.h + delta.h;
+      useWorkspaceStore.getState().resizePane(p.paneIndex as number, absolute);
+      return ok({ resized: true });
+    },
+    swap: (p) => {
+      const srcCtx = getActivePaneCtx(p.sourceIndex as number);
+      if ("err" in srcCtx) return srcCtx.err;
+      const tgtCtx = getActivePaneCtx(p.targetIndex as number);
+      if ("err" in tgtCtx) return tgtCtx.err;
+      useWorkspaceStore.getState().swapPanes(p.sourceIndex as number, p.targetIndex as number);
+      return ok({ swapped: true });
     },
   },
 
@@ -305,7 +432,7 @@ const handlers: HandlerMap = {
       const { workspaces } = useWorkspaceStore.getState();
       const enriched = instances.map((inst) => {
         const ws = workspaces.find((w) => w.id === inst.workspaceId);
-        const paneId = inst.id.replace(/^terminal-/, "");
+        const paneId = toPaneId(inst.id);
         const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
         const pane = paneIndex >= 0 ? ws!.panes[paneIndex] : null;
         return {
@@ -366,8 +493,25 @@ const handlers: HandlerMap = {
       });
     },
     setFocus: (p) => {
-      useTerminalStore.getState().setTerminalFocus(p.id as string);
-      return ok({ focused: p.id });
+      const terminalId = p.id as string;
+      const terminal = findTerminalInstance(terminalId);
+      if (!terminal) return err(`Terminal '${terminalId}' not found`);
+
+      // Auto-switch workspace if terminal is in a different workspace
+      const { activeWorkspaceId } = useWorkspaceStore.getState();
+      const switchedWorkspace = terminal.workspaceId !== activeWorkspaceId;
+      if (switchedWorkspace) {
+        useWorkspaceStore.getState().setActiveWorkspace(terminal.workspaceId);
+      }
+
+      // Update focusedPaneIndex to match the target terminal's pane
+      const paneIndex = resolveTerminalPaneIndex(terminalId, terminal.workspaceId);
+      if (paneIndex >= 0) {
+        useGridStore.getState().setFocusedPane(paneIndex);
+      }
+
+      useTerminalStore.getState().setTerminalFocus(terminalId);
+      return ok({ focused: terminalId, paneIndex: paneIndex >= 0 ? paneIndex : undefined, switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined });
     },
   },
 
@@ -377,13 +521,21 @@ const handlers: HandlerMap = {
       return ok({ notifications });
     },
     add: (p) => {
-      useNotificationStore.getState().addNotification({
-        terminalId: p.terminalId as string,
-        workspaceId: p.workspaceId as string,
+      const workspaceId = p.workspaceId as string;
+      const terminalId = p.terminalId as string;
+      const wsErr = checkWorkspaceExists(workspaceId);
+      if (wsErr) return wsErr;
+      // Validate terminal exists (skip for workspace-level notifications with empty terminalId)
+      if (terminalId && !findTerminalInstance(terminalId)) {
+        return err(`Terminal '${terminalId}' not found`);
+      }
+      const notification = useNotificationStore.getState().addNotification({
+        terminalId,
+        workspaceId,
         message: p.message as string,
         level: (p.level as NotificationLevel) ?? undefined,
       });
-      return ok({ added: true });
+      return ok({ added: true, notification });
     },
     unreadCount: (p) => {
       const count = useNotificationStore.getState().getUnreadCount(p.workspaceId as string);
@@ -412,6 +564,21 @@ const handlers: HandlerMap = {
     },
   },
 
+  profiles: {
+    list: () => {
+      const { profiles, defaultProfile } = useSettingsStore.getState();
+      return ok({
+        profiles: profiles.map((p) => ({
+          name: p.name,
+          commandLine: p.commandLine || undefined,
+          startingDirectory: p.startingDirectory || undefined,
+          isDefault: p.name === defaultProfile,
+        })),
+        defaultProfile,
+      });
+    },
+  },
+
   ui: {
     openSettings: () => {
       useUiStore.getState().openSettingsModal();
@@ -437,13 +604,30 @@ const handlers: HandlerMap = {
   },
 };
 
-/** Capture a screenshot of the current UI as a base64 PNG data URL.
+/** Capture a screenshot of the current UI (or a specific pane) as a base64 PNG data URL.
  *  html2canvas cannot read WebGL canvases, so after the initial capture we
  *  composite each WebGL canvas (xterm.js terminals) onto the result manually. */
-export async function captureScreenshot(): Promise<string> {
-  const root = document.documentElement;
+export async function captureScreenshot(paneIndex?: number): Promise<string> {
+  let target: HTMLElement = document.documentElement;
+
+  // If paneIndex specified, find the specific pane div (not minimap rects or hidden workspaces)
+  if (paneIndex != null) {
+    const paneElements = document.querySelectorAll<HTMLElement>(
+      "div[data-pane-index]",
+    );
+    // Filter to only visible panes (display !== "none" means active workspace)
+    const paneEl = Array.from(paneElements).find(
+      (el) =>
+        el.getAttribute("data-pane-index") === String(paneIndex) &&
+        el.offsetParent !== null,
+    );
+    if (paneEl) {
+      target = paneEl;
+    }
+  }
+
   const scale = window.devicePixelRatio || 1;
-  const result = await html2canvas(root, {
+  const result = await html2canvas(target, {
     backgroundColor: null,
     scale,
     logging: false,
@@ -452,14 +636,15 @@ export async function captureScreenshot(): Promise<string> {
   // Composite WebGL canvases that html2canvas missed
   const ctx = result.getContext("2d");
   if (ctx) {
-    document.querySelectorAll("canvas").forEach((c) => {
+    const targetRect = target.getBoundingClientRect();
+    target.querySelectorAll("canvas").forEach((c) => {
       if (c.width === 0 || c.height === 0) return;
       const rect = c.getBoundingClientRect();
       try {
         ctx.drawImage(
           c,
-          rect.left * scale,
-          rect.top * scale,
+          (rect.left - targetRect.left) * scale,
+          (rect.top - targetRect.top) * scale,
           rect.width * scale,
           rect.height * scale,
         );
@@ -497,7 +682,8 @@ export async function handleAsyncAutomationRequest(
 ): Promise<HandlerResult> {
   if (request.target === "screenshot" && request.method === "capture") {
     try {
-      const dataUrl = await captureScreenshot();
+      const paneIndex = typeof request.params.paneIndex === "number" ? request.params.paneIndex : undefined;
+      const dataUrl = await captureScreenshot(paneIndex);
       return ok({ dataUrl });
     } catch (e) {
       return err(`Screenshot error: ${e instanceof Error ? e.message : String(e)}`);
@@ -514,9 +700,17 @@ export function useAutomationBridge() {
     let unlisten: (() => void) | null = null;
 
     onAutomationRequest(async (request) => {
-      if (cancelled) return;
+      if (cancelled) {
+        // Still respond so the backend doesn't wait until timeout
+        automationResponse(request.requestId, false, undefined, "Bridge listener cancelled");
+        return;
+      }
       const result = await handleAsyncAutomationRequest(request);
-      if (cancelled) return;
+      if (cancelled) {
+        // Respond with result anyway — backend is waiting on the oneshot channel
+        automationResponse(request.requestId, result.success, result.data, result.error);
+        return;
+      }
       automationResponse(request.requestId, result.success, result.data, result.error);
     }).then((fn) => {
       if (cancelled) {

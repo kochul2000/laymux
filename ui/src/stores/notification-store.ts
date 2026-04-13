@@ -27,7 +27,7 @@ interface NotificationStoreState {
     workspaceId: string;
     message: string;
     level?: NotificationLevel;
-  }) => void;
+  }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
   getUnreadCount: (workspaceId: string) => number;
@@ -60,6 +60,7 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     set((state) => ({
       notifications: [...state.notifications, notification],
     }));
+    return notification;
   },
 
   markWorkspaceAsRead: (workspaceId) => {

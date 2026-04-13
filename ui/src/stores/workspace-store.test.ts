@@ -147,6 +147,34 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  describe("swapPanes", () => {
+    it("atomically swaps positions of two panes", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const srcPos = { x: before.panes[0].x, y: before.panes[0].y, w: before.panes[0].w, h: before.panes[0].h };
+      const tgtPos = { x: before.panes[1].x, y: before.panes[1].y, w: before.panes[1].w, h: before.panes[1].h };
+
+      useWorkspaceStore.getState().swapPanes(0, 1);
+
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      expect(after.panes[0].x).toBe(tgtPos.x);
+      expect(after.panes[0].y).toBe(tgtPos.y);
+      expect(after.panes[0].w).toBe(tgtPos.w);
+      expect(after.panes[0].h).toBe(tgtPos.h);
+      expect(after.panes[1].x).toBe(srcPos.x);
+      expect(after.panes[1].y).toBe(srcPos.y);
+      expect(after.panes[1].w).toBe(srcPos.w);
+      expect(after.panes[1].h).toBe(srcPos.h);
+    });
+
+    it("ignores out of range indices", () => {
+      const before = useWorkspaceStore.getState().getActiveWorkspace()!;
+      useWorkspaceStore.getState().swapPanes(0, 99);
+      const after = useWorkspaceStore.getState().getActiveWorkspace()!;
+      expect(after.panes[0].x).toBe(before.panes[0].x);
+    });
+  });
+
   // Layout actions
   describe("exportAsNewLayout", () => {
     it("creates a new layout from current workspace panes", () => {
