@@ -85,6 +85,7 @@ interface WorkspaceState {
     paneIndex: number,
     delta: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>,
   ) => void;
+  swapPanes: (srcIndex: number, tgtIndex: number) => void;
   setPaneView: (paneIndex: number, view: ViewInstanceConfig) => void;
 
   // Layout actions
@@ -271,6 +272,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
     const newPanes = ws.panes.map((p, i) => (i === paneIndex ? { ...p, ...delta } : p));
+
+    set((state) => ({
+      workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),
+    }));
+  },
+
+  swapPanes: (srcIndex, tgtIndex) => {
+    const ws = get().getActiveWorkspace();
+    if (!ws) return;
+    if (srcIndex < 0 || srcIndex >= ws.panes.length) return;
+    if (tgtIndex < 0 || tgtIndex >= ws.panes.length) return;
+
+    const src = ws.panes[srcIndex];
+    const tgt = ws.panes[tgtIndex];
+    const srcPos = { x: src.x, y: src.y, w: src.w, h: src.h };
+    const tgtPos = { x: tgt.x, y: tgt.y, w: tgt.w, h: tgt.h };
+
+    const newPanes = ws.panes.map((p, i) => {
+      if (i === srcIndex) return { ...p, ...tgtPos };
+      if (i === tgtIndex) return { ...p, ...srcPos };
+      return p;
+    });
 
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),

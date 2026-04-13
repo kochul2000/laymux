@@ -103,4 +103,12 @@ describe("PaneGrid", () => {
 
     expect(onRemovePane).toHaveBeenCalledWith("pane-0");
   });
+
+  it("renders data-pane-index attribute on each pane div", () => {
+    render(<PaneGrid {...defaultProps} />);
+    const pane0 = screen.getByTestId("test-pane-0");
+    const pane1 = screen.getByTestId("test-pane-1");
+    expect(pane0.getAttribute("data-pane-index")).toBe("0");
+    expect(pane1.getAttribute("data-pane-index")).toBe("1");
+  });
 });

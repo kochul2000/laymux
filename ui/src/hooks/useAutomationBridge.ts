@@ -9,7 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import type { DockPosition, ViewType, WorkspacePane } from "@/stores/types";
+import type { DockPosition, ViewInstanceConfig, ViewType, WorkspacePane } from "@/stores/types";
 
 interface HandlerResult {
   success: boolean;
@@ -125,8 +125,10 @@ const handlers: HandlerMap = {
     getActive: () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       if (!ws) return ok({ workspace: null });
+      const { focusedPaneIndex } = useGridStore.getState();
       const enriched = {
         ...ws,
+        focusedPaneIndex,
         panes: ws.panes.map(enrichPane),
       };
       return ok({ workspace: enriched });
@@ -144,18 +146,53 @@ const handlers: HandlerMap = {
       const after = useWorkspaceStore.getState().workspaces;
       const newWs = after.find((ws) => !before.some((b) => b.id === ws.id));
       if (!newWs) return err(`Failed to create workspace: layout '${layoutId}' not found`);
+
+      // Apply cwd to all panes — convert EmptyView to TerminalView with lastCwd
+      const cwd = p.cwd as string | undefined;
+      if (cwd) {
+        const store = useWorkspaceStore.getState();
+        // Find index of new workspace to operate on its panes
+        const wsIdx = store.workspaces.findIndex((ws) => ws.id === newWs.id);
+        if (wsIdx >= 0) {
+          // Temporarily switch active to the new workspace so setPaneView works on it
+          const prevActiveId = store.activeWorkspaceId;
+          store.setActiveWorkspace(newWs.id);
+          for (let i = 0; i < newWs.panes.length; i++) {
+            const pane = newWs.panes[i];
+            const viewConfig: ViewInstanceConfig = {
+              ...(pane.view.type === "TerminalView" ? pane.view : { type: "TerminalView" }),
+              lastCwd: cwd,
+            };
+            useWorkspaceStore.getState().setPaneView(i, viewConfig);
+          }
+          // Restore previous active workspace
+          store.setActiveWorkspace(prevActiveId);
+        }
+      }
+
+      const updatedWs = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === newWs.id)!;
       return ok({
         created: true,
-        workspace: { id: newWs.id, name: newWs.name, paneCount: newWs.panes.length },
+        workspace: { id: updatedWs.id, name: updatedWs.name, paneCount: updatedWs.panes.length },
       });
     },
     remove: (p) => {
-      useWorkspaceStore.getState().removeWorkspace(p.id as string);
-      return ok({ removed: p.id });
+      const id = p.id as string;
+      const { workspaces } = useWorkspaceStore.getState();
+      if (!workspaces.some((ws) => ws.id === id)) {
+        return err(`Workspace '${id}' not found`);
+      }
+      useWorkspaceStore.getState().removeWorkspace(id);
+      return ok({ removed: id });
     },
     rename: (p) => {
-      useWorkspaceStore.getState().renameWorkspace(p.id as string, p.name as string);
-      return ok({ renamed: p.id });
+      const id = p.id as string;
+      const { workspaces } = useWorkspaceStore.getState();
+      if (!workspaces.some((ws) => ws.id === id)) {
+        return err(`Workspace '${id}' not found`);
+      }
+      useWorkspaceStore.getState().renameWorkspace(id, p.name as string);
+      return ok({ renamed: id });
     },
     reorder: (p) => {
       useWorkspaceStore
@@ -201,48 +238,93 @@ const handlers: HandlerMap = {
 
   panes: {
     split: (p) => {
+      const wsBefore = useWorkspaceStore.getState().getActiveWorkspace();
+      if (!wsBefore) return err("No active workspace");
+      const idx = p.paneIndex as number;
+      if (idx < 0 || idx >= wsBefore.panes.length) {
+        return err(`Pane index out of range (0-${wsBefore.panes.length - 1})`);
+      }
       useWorkspaceStore
         .getState()
-        .splitPane(p.paneIndex as number, p.direction as "horizontal" | "vertical");
-      const newPaneIndex = (p.paneIndex as number) + 1;
+        .splitPane(idx, p.direction as "horizontal" | "vertical");
+      const newPaneIndex = idx + 1;
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
       const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
       const newPaneBefore = wsBeforeConvert?.panes[newPaneIndex];
       if (newPaneBefore && newPaneBefore.view.type !== "TerminalView") {
-        useWorkspaceStore.getState().setPaneView(newPaneIndex, { type: "TerminalView" });
+        const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
+        if (p.profile) viewConfig.profile = p.profile as string;
+        if (p.cwd) viewConfig.lastCwd = p.cwd as string;
+        useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig);
       }
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];
+      const terminalId =
+        newPane?.view.type === "TerminalView" ? `terminal-${newPane.id}` : null;
+      // Check if the terminal instance is already registered (React may not have rendered yet)
+      const { instances } = useTerminalStore.getState();
+      const terminalReady = terminalId
+        ? instances.some((i) => i.id === terminalId)
+        : false;
       return ok({
         split: true,
         newPane: newPane
           ? {
               id: newPane.id,
-              terminalId: newPane.view.type === "TerminalView" ? `terminal-${newPane.id}` : null,
+              terminalId,
               paneIndex: newPaneIndex,
               x: newPane.x,
               y: newPane.y,
               w: newPane.w,
               h: newPane.h,
+              ready: terminalReady,
             }
           : null,
         totalPanes: ws?.panes.length ?? 0,
+        _hint: terminalId && !terminalReady
+          ? "Terminal ID is allocated but not yet registered. Poll list_terminals or wait ~500ms before writing to it."
+          : undefined,
       });
     },
     remove: (p) => {
-      useWorkspaceStore.getState().removePane(p.paneIndex as number);
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      if (!ws) return err("No active workspace");
+      const idx = p.paneIndex as number;
+      if (idx < 0 || idx >= ws.panes.length) {
+        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
+      }
+      useWorkspaceStore.getState().removePane(idx);
       return ok({ removed: true });
     },
     setView: (p) => {
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      if (!ws) return err("No active workspace");
+      const idx = p.paneIndex as number;
+      if (idx < 0 || idx >= ws.panes.length) {
+        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
+      }
       const view = p.view as { type: string; [key: string]: unknown };
       useWorkspaceStore
         .getState()
-        .setPaneView(p.paneIndex as number, { ...view, type: view.type as ViewType });
+        .setPaneView(idx, { ...view, type: view.type as ViewType });
       return ok({ viewSet: true });
     },
     resize: (p) => {
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      if (!ws) return err("No active workspace");
+      const idx = p.paneIndex as number;
+      if (idx < 0 || idx >= ws.panes.length) {
+        return err(`Pane index out of range (0-${ws.panes.length - 1})`);
+      }
+      const pane = ws.panes[idx];
       const delta = p.delta as Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>;
-      useWorkspaceStore.getState().resizePane(p.paneIndex as number, delta);
+      // Convert relative deltas to absolute values — resizePane uses spread replacement
+      const absolute: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">> = {};
+      if (delta.x != null) absolute.x = pane.x + delta.x;
+      if (delta.y != null) absolute.y = pane.y + delta.y;
+      if (delta.w != null) absolute.w = pane.w + delta.w;
+      if (delta.h != null) absolute.h = pane.h + delta.h;
+      useWorkspaceStore.getState().resizePane(idx, absolute);
       return ok({ resized: true });
     },
     swap: (p) => {
@@ -253,13 +335,8 @@ const handlers: HandlerMap = {
       if (srcIdx < 0 || srcIdx >= ws.panes.length || tgtIdx < 0 || tgtIdx >= ws.panes.length) {
         return err(`Pane index out of range (0-${ws.panes.length - 1})`);
       }
-      // Swap positions (x, y, w, h) between two panes using absolute values
-      const src = ws.panes[srcIdx];
-      const tgt = ws.panes[tgtIdx];
-      const srcPos = { x: src.x, y: src.y, w: src.w, h: src.h };
-      const tgtPos = { x: tgt.x, y: tgt.y, w: tgt.w, h: tgt.h };
-      useWorkspaceStore.getState().resizePane(srcIdx, tgtPos);
-      useWorkspaceStore.getState().resizePane(tgtIdx, srcPos);
+      // Atomic swap — single state update to avoid intermediate rendering
+      useWorkspaceStore.getState().swapPanes(srcIdx, tgtIdx);
       return ok({ swapped: true });
     },
   },
@@ -407,12 +484,21 @@ const handlers: HandlerMap = {
 
       // Auto-switch workspace if terminal is in a different workspace
       const { activeWorkspaceId } = useWorkspaceStore.getState();
-      if (terminal.workspaceId !== activeWorkspaceId) {
+      const switchedWorkspace = terminal.workspaceId !== activeWorkspaceId;
+      if (switchedWorkspace) {
         useWorkspaceStore.getState().setActiveWorkspace(terminal.workspaceId);
       }
 
+      // Update focusedPaneIndex to match the target terminal's pane
+      const paneId = terminalId.replace(/^terminal-/, "");
+      const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === terminal.workspaceId);
+      const paneIndex = ws?.panes.findIndex((pa) => pa.id === paneId) ?? -1;
+      if (paneIndex >= 0) {
+        useGridStore.getState().setFocusedPane(paneIndex);
+      }
+
       useTerminalStore.getState().setTerminalFocus(terminalId);
-      return ok({ focused: terminalId, switchedWorkspace: terminal.workspaceId !== activeWorkspaceId ? terminal.workspaceId : undefined });
+      return ok({ focused: terminalId, paneIndex: paneIndex >= 0 ? paneIndex : undefined, switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined });
     },
   },
 
@@ -469,6 +555,21 @@ const handlers: HandlerMap = {
     },
   },
 
+  profiles: {
+    list: () => {
+      const { profiles, defaultProfile } = useSettingsStore.getState();
+      return ok({
+        profiles: profiles.map((p) => ({
+          name: p.name,
+          commandLine: p.commandLine || undefined,
+          startingDirectory: p.startingDirectory || undefined,
+          isDefault: p.name === defaultProfile,
+        })),
+        defaultProfile,
+      });
+    },
+  },
+
   ui: {
     openSettings: () => {
       useUiStore.getState().openSettingsModal();
@@ -500,11 +601,16 @@ const handlers: HandlerMap = {
 export async function captureScreenshot(paneIndex?: number): Promise<string> {
   let target: HTMLElement = document.documentElement;
 
-  // If paneIndex specified, find the specific pane element
+  // If paneIndex specified, find the specific pane div (not minimap rects or hidden workspaces)
   if (paneIndex != null) {
-    const paneElements = document.querySelectorAll<HTMLElement>("[data-pane-index]");
+    const paneElements = document.querySelectorAll<HTMLElement>(
+      "div[data-pane-index]",
+    );
+    // Filter to only visible panes (display !== "none" means active workspace)
     const paneEl = Array.from(paneElements).find(
-      (el) => el.getAttribute("data-pane-index") === String(paneIndex),
+      (el) =>
+        el.getAttribute("data-pane-index") === String(paneIndex) &&
+        el.offsetParent !== null,
     );
     if (paneEl) {
       target = paneEl;
@@ -585,9 +691,17 @@ export function useAutomationBridge() {
     let unlisten: (() => void) | null = null;
 
     onAutomationRequest(async (request) => {
-      if (cancelled) return;
+      if (cancelled) {
+        // Still respond so the backend doesn't wait until timeout
+        automationResponse(request.requestId, false, undefined, "Bridge listener cancelled");
+        return;
+      }
       const result = await handleAsyncAutomationRequest(request);
-      if (cancelled) return;
+      if (cancelled) {
+        // Respond with result anyway — backend is waiting on the oneshot channel
+        automationResponse(request.requestId, result.success, result.data, result.error);
+        return;
+      }
       automationResponse(request.requestId, result.success, result.data, result.error);
     }).then((fn) => {
       if (cancelled) {

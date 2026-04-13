@@ -9,7 +9,9 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::constants::MCP_SERVER_NAME;
 use crate::lock_ext::MutexExt;
@@ -43,6 +45,48 @@ struct WriteTerminalParam {
     /// (important for Windows paths like `C:\new\tmp`).
     #[serde(default)]
     escape: bool,
+    /// When true, append CR (\\r) after data to simulate pressing Enter.
+    /// Works regardless of `escape` setting. Use this instead of manually
+    /// adding `\\r` to data — it reliably submits in all environments
+    /// (PowerShell, bash, Claude Code, Codex, etc.).
+    #[serde(default)]
+    enter: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct WriteToNeighborParam {
+    /// Your terminal ID (the caller). Use $LX_TERMINAL_ID.
+    terminal_id: String,
+    /// Direction of the neighbor to write to.
+    direction: NeighborDirection,
+    /// Text to send.
+    data: String,
+    /// When true, C-style escape sequences are converted (same as write_to_terminal).
+    #[serde(default)]
+    escape: bool,
+    /// When true, append CR after data to simulate Enter.
+    #[serde(default)]
+    enter: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum NeighborDirection {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+impl std::fmt::Display for NeighborDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NeighborDirection::Left => write!(f, "left"),
+            NeighborDirection::Right => write!(f, "right"),
+            NeighborDirection::Above => write!(f, "above"),
+            NeighborDirection::Below => write!(f, "below"),
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -107,6 +151,8 @@ struct SearchOutputParam {
     context_lines: Option<usize>,
     /// Maximum number of matches to return (default: 10)
     max_results: Option<usize>,
+    /// Maximum number of recent lines to search (default: 1000)
+    max_lines: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -247,6 +293,8 @@ pub struct McpHandler {
     state: ServerState,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
+    /// Per-terminal mutex to serialize execute_command calls on the same terminal.
+    exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,
 }
 
 impl McpHandler {
@@ -254,7 +302,16 @@ impl McpHandler {
         Self {
             state,
             tool_router: Self::tool_router(),
+            exec_locks: Arc::new(TokioMutex::new(HashMap::new())),
         }
+    }
+
+    /// Get or create a per-terminal lock for execute_command serialization.
+    async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
+        let mut map = self.exec_locks.lock().await;
+        map.entry(terminal_id.to_string())
+            .or_insert_with(|| Arc::new(TokioMutex::new(())))
+            .clone()
     }
 
     /// Bridge request to frontend via Tauri event.
@@ -439,11 +496,16 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let data = if p.escape {
+        let mut data = if p.escape {
             super::helpers::unescape_terminal_input(&p.data)
         } else {
             p.data.clone()
         };
+        if p.enter {
+            data.push('\r');
+        }
+        let bytes = data.as_bytes();
+        let byte_count = bytes.len();
         let ptys = match self.state.app_state.pty_handles.lock_or_err() {
             Ok(guard) => guard,
             Err(e) => {
@@ -451,13 +513,84 @@ impl McpHandler {
             }
         };
         match ptys.get(&p.terminal_id) {
-            Some(handle) => match handle.write(data.as_bytes()) {
-                Ok(_) => Ok(CallToolResult::success(vec![Content::text("written")])),
+            Some(handle) => match handle.write(bytes) {
+                Ok(_) => Ok(json_result(&json!({
+                    "written": true,
+                    "bytes": byte_count,
+                    "enter": p.enter,
+                }))),
                 Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
             },
             None => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 p.terminal_id
+            ))])),
+        }
+    }
+
+    /// Write to a neighboring pane by direction. Combines identify_caller + write_to_terminal
+    /// in a single call. Pass your own terminal_id (from $LX_TERMINAL_ID) and the direction
+    /// of the neighbor you want to send to.
+    #[tool]
+    async fn write_to_neighbor(
+        &self,
+        Parameters(p): Parameters<WriteToNeighborParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        // 1. Identify caller to find neighbor
+        let identify_result =
+            bridge_request(&self.state, "query", "terminals", "identify", json!({ "id": p.terminal_id })).await;
+        let neighbor_id = match identify_result {
+            Ok(data) => {
+                let dir_str = p.direction.to_string();
+                data.get("neighbors")
+                    .and_then(|n| n.get(&dir_str))
+                    .and_then(|n| n.get("terminalId"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            }
+            Err((_status, axum::Json(body))) => {
+                let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("identify failed");
+                return Ok(CallToolResult::error(vec![Content::text(msg)]));
+            }
+        };
+
+        let Some(target_id) = neighbor_id else {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "No neighbor {} of terminal '{}'",
+                p.direction, p.terminal_id
+            ))]));
+        };
+
+        // 2. Write to the neighbor
+        let mut data = if p.escape {
+            super::helpers::unescape_terminal_input(&p.data)
+        } else {
+            p.data.clone()
+        };
+        if p.enter {
+            data.push('\r');
+        }
+        let bytes = data.as_bytes();
+        let byte_count = bytes.len();
+
+        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
+            Ok(guard) => guard,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        match ptys.get(&target_id) {
+            Some(handle) => match handle.write(bytes) {
+                Ok(_) => Ok(json_result(&json!({
+                    "written": true,
+                    "bytes": byte_count,
+                    "enter": p.enter,
+                    "targetTerminalId": target_id,
+                    "direction": p.direction.to_string(),
+                }))),
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            },
+            None => Ok(CallToolResult::error(vec![Content::text(format!(
+                "Neighbor terminal '{}' not found",
+                target_id
             ))])),
         }
     }
@@ -471,30 +604,33 @@ impl McpHandler {
         Parameters(p): Parameters<ReadOutputParam>,
     ) -> Result<CallToolResult, ErrorData> {
         let lines = p.lines.unwrap_or(100) as usize;
-        let buffers = match self.state.app_state.output_buffers.lock_or_err() {
-            Ok(guard) => guard,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+        // Copy raw data under lock, then release before expensive strip_ansi
+        let (raw, buffer_size) = {
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+                }
+            };
+            match buffers.get(&p.terminal_id) {
+                Some(buf) => (buf.recent_lines(lines), buf.len()),
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Terminal '{}' not found",
+                        p.terminal_id
+                    ))]));
+                }
             }
         };
-        match buffers.get(&p.terminal_id) {
-            Some(buf) => {
-                let raw = buf.recent_lines(lines);
-                let output = match p.format.as_deref() {
-                    Some("text") => super::helpers::strip_ansi(&raw),
-                    _ => raw,
-                };
-                Ok(json_result(&json!({
-                    "output": output,
-                    "lines": output.lines().count(),
-                    "bufferSize": buf.len(),
-                })))
-            }
-            None => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Terminal '{}' not found",
-                p.terminal_id
-            ))])),
-        }
+        let output = match p.format.as_deref() {
+            Some("text") => super::helpers::strip_ansi(&raw),
+            _ => raw,
+        };
+        Ok(json_result(&json!({
+            "output": output,
+            "lines": output.lines().count(),
+            "bufferSize": buffer_size,
+        })))
     }
 
     /// Set focus to a terminal pane.
@@ -523,44 +659,52 @@ impl McpHandler {
     /// verifies the terminal is at a shell prompt, sends the command, waits for
     /// completion (prompt returns), and returns only the command's output.
     /// Only works on terminals at a shell prompt (not TUI apps).
+    /// Note: `exit_code` relies on OSC 133;D shell integration and may be `null`
+    /// if the shell doesn't support it, or briefly stale during rapid successive calls.
     #[tool]
     async fn execute_command(
         &self,
         Parameters(p): Parameters<ExecuteCommandParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        // Reject commands containing CR/LF to prevent multi-command injection
+        if p.command.contains('\r') || p.command.contains('\n') {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Command must not contain CR or LF characters (use separate execute_command calls for multiple commands)",
+            )]));
+        }
+
         let timeout_ms = p.timeout_ms.unwrap_or(10_000).min(60_000);
         let strip = matches!(p.format.as_deref(), Some("text"));
 
-        // 1. Check terminal is at shell prompt
-        {
-            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
-                Ok(g) => g,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-            };
-            let buf = buffers.get(&p.terminal_id);
-            if buf.is_none() {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Terminal '{}' not found",
-                    p.terminal_id
-                ))]));
-            }
-            if !crate::activity::is_terminal_at_prompt_from_buffer(buf) {
-                return Ok(CallToolResult::error(vec![Content::text(
-                    "Terminal is not at a shell prompt (command running or TUI app active)",
-                )]));
-            }
-        }
+        // Acquire per-terminal lock to serialize concurrent execute_command calls
+        let lock = self.terminal_exec_lock(&p.terminal_id).await;
+        let _guard = lock.lock().await;
 
-        // 2. Record buffer position before sending command
-        let before_len = {
+        // 1. Check terminal is at shell prompt and record sequence number atomically
+        let before_seq = {
             let buffers = match self.state.app_state.output_buffers.lock_or_err() {
                 Ok(g) => g,
                 Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
             };
-            buffers.get(&p.terminal_id).map(|b| b.len()).unwrap_or(0)
+            match buffers.get(&p.terminal_id) {
+                Some(buf) => {
+                    if !crate::activity::is_terminal_at_prompt_from_buffer(Some(buf)) {
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            "Terminal is not at a shell prompt (command running or TUI app active)",
+                        )]));
+                    }
+                    buf.write_seq()
+                }
+                None => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Terminal '{}' not found",
+                        p.terminal_id
+                    ))]));
+                }
+            }
         };
 
-        // 3. Write command + CR
+        // 2. Write command + CR
         {
             let ptys = match self.state.app_state.pty_handles.lock_or_err() {
                 Ok(g) => g,
@@ -582,7 +726,7 @@ impl McpHandler {
             }
         }
 
-        // 4. Poll until prompt returns or timeout
+        // 3. Poll until prompt returns or timeout
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
         // Small initial delay to let the shell process the command
@@ -617,21 +761,14 @@ impl McpHandler {
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        // 5. Read output (new data since before_len)
+        // 4. Read output using sequence number (immune to ring buffer wrap)
         let output = {
             let buffers = match self.state.app_state.output_buffers.lock_or_err() {
                 Ok(g) => g,
                 Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
             };
             match buffers.get(&p.terminal_id) {
-                Some(buf) => {
-                    let new_bytes = buf.len().saturating_sub(before_len);
-                    if new_bytes > 0 {
-                        buf.recent_bytes(new_bytes)
-                    } else {
-                        Vec::new()
-                    }
-                }
+                Some(buf) => buf.bytes_since(before_seq),
                 None => Vec::new(),
             }
         };
@@ -643,7 +780,7 @@ impl McpHandler {
             raw_output
         };
 
-        // 6. Try to get exit code from terminal session
+        // 5. Try to get exit code from terminal session
         let exit_code = {
             let terminals = self.state.app_state.terminals.lock_or_err().ok();
             terminals.and_then(|t| {
@@ -661,7 +798,7 @@ impl McpHandler {
 
     // ── Workspace (4) ──
 
-    /// List workspaces. Pass summary=true for compact output (id, name, pane_count only).
+    /// List workspaces. Pass summary=true for compact output (id, name, pane_count, isActive).
     #[tool]
     async fn list_workspaces(
         &self,
@@ -673,13 +810,16 @@ impl McpHandler {
             Ok(data) => {
                 if p.summary.unwrap_or(false) {
                     if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
+                        let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
                         let summary: Vec<Value> = workspaces
                             .iter()
                             .map(|ws| {
+                                let ws_id = ws.get("id").and_then(|v| v.as_str());
                                 json!({
                                     "id": ws.get("id"),
                                     "name": ws.get("name"),
                                     "paneCount": ws.get("panes").and_then(|p| p.as_array()).map(|a| a.len()),
+                                    "isActive": active_id.is_some() && ws_id == active_id,
                                 })
                             })
                             .collect();
@@ -728,21 +868,8 @@ impl McpHandler {
                             }
                         }
                     }
-                    // Add focusedPaneIndex from grid state bridge
-                    if let Ok(grid) = bridge_request(
-                        &self.state,
-                        "query",
-                        "grid",
-                        "getState",
-                        json!({}),
-                    )
-                    .await
-                    {
-                        if let Some(fpi) = grid.get("focusedPaneIndex") {
-                            ws.as_object_mut()
-                                .map(|obj| obj.insert("focusedPaneIndex".to_string(), fpi.clone()));
-                        }
-                    }
+                    // focusedPaneIndex is now included directly in the bridge response
+                    // from workspaces.getActive — no second bridge call needed.
                 }
                 Ok(json_result(&data))
             }
@@ -769,18 +896,40 @@ impl McpHandler {
             let list = bridge_request(&self.state, "query", "workspaces", "list", json!({})).await;
             match list {
                 Ok(data) => {
-                    let found = data.get("workspaces")
+                    let name_lower = name.to_lowercase();
+                    let all_matches: Vec<&Value> = data.get("workspaces")
                         .and_then(|v| v.as_array())
-                        .and_then(|arr| arr.iter().find(|ws| {
-                            ws.get("name").and_then(|n| n.as_str()) == Some(&name)
-                        }))
-                        .and_then(|ws| ws.get("id").and_then(|v| v.as_str()))
-                        .map(|s| s.to_string());
-                    match found {
-                        Some(id) => id,
-                        None => return Ok(CallToolResult::error(vec![Content::text(
+                        .map(|arr| arr.iter().filter(|ws| {
+                            ws.get("name")
+                                .and_then(|n| n.as_str())
+                                .map(|n| n.to_lowercase() == name_lower)
+                                .unwrap_or(false)
+                        }).collect())
+                        .unwrap_or_default();
+                    match all_matches.len() {
+                        0 => return Ok(CallToolResult::error(vec![Content::text(
                             format!("Workspace '{}' not found", name)
                         )])),
+                        1 => all_matches[0].get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        n => {
+                            // Multiple matches — prefer exact case match, else take first
+                            let exact = all_matches.iter().find(|ws| {
+                                ws.get("name").and_then(|v| v.as_str()) == Some(&name)
+                            });
+                            let chosen = exact.unwrap_or(&all_matches[0]);
+                            let id = chosen.get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            tracing::warn!(
+                                "switch_workspace: {} workspaces match '{}' (case-insensitive), using '{}'",
+                                n, name, id
+                            );
+                            id
+                        }
                     }
                 }
                 Err((_status, axum::Json(body))) => {
@@ -873,6 +1022,9 @@ impl McpHandler {
     }
 
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
+    /// The response includes a `ready` field: when false, the terminal is allocated but
+    /// not yet registered (React render pending). Poll `list_terminals` or wait ~500ms
+    /// before calling `write_to_terminal` or `execute_command` on the new terminal.
     #[tool]
     async fn split_pane(
         &self,
@@ -905,16 +1057,24 @@ impl McpHandler {
 
     /// Resize a pane by adjusting its width and/or height by a delta value.
     /// Use dw for width change and dh for height change (e.g. dw=0.1 grows width by 10%).
+    /// At least one of dw or dh must be provided. Values are clamped to -1.0..1.0.
     #[tool]
     async fn resize_pane(
         &self,
         Parameters(p): Parameters<ResizePaneParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        if p.dw.is_none() && p.dh.is_none() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "At least one of dw or dh must be provided",
+            )]));
+        }
         let mut delta = json!({});
         if let Some(dw) = p.dw {
+            let dw = dw.clamp(-1.0, 1.0);
             delta["w"] = json!(dw);
         }
         if let Some(dh) = p.dh {
+            let dh = dh.clamp(-1.0, 1.0);
             delta["h"] = json!(dh);
         }
         self.bridge(
@@ -1007,11 +1167,14 @@ impl McpHandler {
                     if p.unread_only.unwrap_or(false) {
                         notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
                     }
+                    // Sort newest-first so limit returns the most recent N
+                    notifications.sort_by(|a, b| {
+                        let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let ts_b = b.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        ts_b.partial_cmp(&ts_a).unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     if let Some(limit) = p.limit {
-                        let len = notifications.len();
-                        if len > limit as usize {
-                            *notifications = notifications.split_off(len - limit as usize);
-                        }
+                        notifications.truncate(limit as usize);
                     }
                 }
                 Ok(json_result(&data))
@@ -1033,10 +1196,53 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<SendNotificationParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        // Resolve workspace_id: use provided, or fall back to active workspace
+        let terminal_id = p.terminal_id.unwrap_or_default();
+
+        // Resolve workspace_id: if terminal_id is given but workspace_id is not,
+        // look up the terminal's actual workspace instead of defaulting to active.
         let workspace_id = match p.workspace_id {
             Some(id) => id,
+            None if !terminal_id.is_empty() => {
+                // Look up terminal's workspace from terminal list
+                match bridge_request(
+                    &self.state,
+                    "query",
+                    "terminals",
+                    "list",
+                    json!({}),
+                )
+                .await
+                {
+                    Ok(data) => {
+                        let ws_id = data
+                            .get("instances")
+                            .and_then(|v| v.as_array())
+                            .and_then(|arr| {
+                                arr.iter().find(|t| {
+                                    t.get("id").and_then(|v| v.as_str()) == Some(&terminal_id)
+                                })
+                            })
+                            .and_then(|t| t.get("workspaceId").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string());
+                        match ws_id {
+                            Some(id) => id,
+                            None => {
+                                return Ok(CallToolResult::error(vec![Content::text(format!(
+                                    "Terminal '{}' not found or has no workspace",
+                                    terminal_id
+                                ))]));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            "Failed to look up terminal workspace",
+                        )]));
+                    }
+                }
+            }
             None => {
+                // No terminal, no workspace — use active workspace
                 match bridge_request(&self.state, "query", "grid", "getState", json!({})).await {
                     Ok(data) => match data.get("activeWorkspaceId").and_then(|v| v.as_str()) {
                         Some(id) => id.to_string(),
@@ -1054,7 +1260,6 @@ impl McpHandler {
                 }
             }
         };
-        let terminal_id = p.terminal_id.unwrap_or_default();
 
         let mut params = json!({
             "terminalId": terminal_id,
@@ -1075,6 +1280,7 @@ impl McpHandler {
     ) -> Result<CallToolResult, ErrorData> {
         let context_lines = p.context_lines.unwrap_or(2);
         let max_results = p.max_results.unwrap_or(10);
+        let max_lines = p.max_lines.unwrap_or(1000);
 
         // Copy raw data under lock, then release before expensive processing
         let raw = {
@@ -1083,7 +1289,7 @@ impl McpHandler {
                 Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
             };
             match buffers.get(&p.terminal_id) {
-                Some(b) => b.recent_lines(1000),
+                Some(b) => b.recent_lines(max_lines),
                 None => {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
                         "Terminal '{}' not found",
@@ -1097,25 +1303,27 @@ impl McpHandler {
         let lines: Vec<&str> = text.lines().collect();
 
         let mut matches: Vec<Value> = Vec::new();
+        let mut total_matches: usize = 0;
         for (i, line) in lines.iter().enumerate() {
             if line.contains(&p.pattern) {
-                let start = i.saturating_sub(context_lines);
-                let end = (i + context_lines + 1).min(lines.len());
-                let context: Vec<&str> = lines[start..end].to_vec();
-                matches.push(json!({
-                    "line": i + 1,
-                    "match": line,
-                    "context": context,
-                }));
-                if matches.len() >= max_results {
-                    break;
+                total_matches += 1;
+                if matches.len() < max_results {
+                    let start = i.saturating_sub(context_lines);
+                    let end = (i + context_lines + 1).min(lines.len());
+                    let context: Vec<&str> = lines[start..end].to_vec();
+                    matches.push(json!({
+                        "line": i + 1,
+                        "match": line,
+                        "context": context,
+                    }));
                 }
             }
         }
 
         Ok(json_result(&json!({
             "matches": matches,
-            "totalMatches": matches.len(),
+            "totalMatches": total_matches,
+            "returnedMatches": matches.len(),
             "pattern": p.pattern,
         })))
     }
@@ -1157,26 +1365,77 @@ impl McpHandler {
     }
 
     /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).
-    /// Derived from currently running terminal instances. Use `list_layouts` for layout information.
+    /// Returns all configured profiles from settings, enriched with runtime info from active terminals.
     #[tool]
     async fn list_profiles(&self) -> Result<CallToolResult, ErrorData> {
-        let terminals = self.state.app_state.terminals.lock_or_err().ok();
-        let mut profiles: Vec<Value> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        // Get configured profiles from frontend settings
+        let bridge_profiles = bridge_request(
+            &self.state,
+            "query",
+            "profiles",
+            "list",
+            json!({}),
+        )
+        .await;
 
-        if let Some(terms) = terminals {
+        // Get runtime info from active terminal sessions
+        let mut runtime_info: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Ok(terms) = self.state.app_state.terminals.lock_or_err() {
             for (_, session) in terms.iter() {
                 let profile = &session.config.profile;
-                if seen.insert(profile.clone()) {
-                    profiles.push(json!({
-                        "name": profile,
-                        "shell_type": session.wsl_distro.as_ref().map(|_| "bash").unwrap_or("unknown"),
-                    }));
+                if !runtime_info.contains_key(profile) {
+                    let shell_type = session
+                        .wsl_distro
+                        .as_ref()
+                        .map(|_| "bash")
+                        .unwrap_or("unknown");
+                    runtime_info.insert(profile.clone(), shell_type.to_string());
                 }
             }
         }
 
-        Ok(json_result(&json!({ "profiles": profiles })))
+        match bridge_profiles {
+            Ok(data) => {
+                // Enrich configured profiles with runtime shell_type
+                if let Some(profiles) = data.get("profiles").and_then(|v| v.as_array()) {
+                    let enriched: Vec<Value> = profiles
+                        .iter()
+                        .map(|p| {
+                            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                            let mut profile = p.clone();
+                            if let Some(shell_type) = runtime_info.get(name) {
+                                profile["shellType"] = json!(shell_type);
+                                profile["isRunning"] = json!(true);
+                            } else {
+                                profile["isRunning"] = json!(false);
+                            }
+                            profile
+                        })
+                        .collect();
+                    Ok(json_result(&json!({
+                        "profiles": enriched,
+                        "defaultProfile": data.get("defaultProfile"),
+                    })))
+                } else {
+                    Ok(json_result(&data))
+                }
+            }
+            Err(_) => {
+                // Fallback to runtime-only profiles if bridge unavailable
+                let profiles: Vec<Value> = runtime_info
+                    .iter()
+                    .map(|(name, shell_type)| {
+                        json!({
+                            "name": name,
+                            "shellType": shell_type,
+                            "isRunning": true,
+                        })
+                    })
+                    .collect();
+                Ok(json_result(&json!({ "profiles": profiles })))
+            }
+        }
     }
 }
 
@@ -1374,5 +1633,21 @@ mod tests {
         let json = r#"{"terminal_id":"t1","data":"hello"}"#;
         let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
         assert!(!p.escape);
+    }
+
+    #[test]
+    fn execute_command_param_deserialize() {
+        let json = r#"{"terminal_id":"t1","command":"ls -la"}"#;
+        let p: ExecuteCommandParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.command, "ls -la");
+        assert!(p.timeout_ms.is_none());
+    }
+
+    #[test]
+    fn resize_pane_param_optional_fields() {
+        let json = r#"{"pane_index":0,"dw":0.1}"#;
+        let p: ResizePaneParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.dw, Some(0.1));
+        assert!(p.dh.is_none());
     }
 }

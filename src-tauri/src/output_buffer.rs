@@ -8,6 +8,9 @@ pub struct TerminalOutputBuffer {
     max_size: usize,
     /// Timestamp of the last push (used for output activity detection).
     pub last_output_at: Option<Instant>,
+    /// Monotonically increasing byte counter (total bytes ever pushed).
+    /// Unlike `len()`, this never decreases when the ring buffer wraps.
+    write_seq: u64,
 }
 
 impl TerminalOutputBuffer {
@@ -16,11 +19,13 @@ impl TerminalOutputBuffer {
             buffer: VecDeque::with_capacity(max_size.min(8192)),
             max_size,
             last_output_at: None,
+            write_seq: 0,
         }
     }
 
     pub fn push(&mut self, data: &[u8]) {
         self.last_output_at = Some(Instant::now());
+        self.write_seq += data.len() as u64;
 
         if data.len() >= self.max_size {
             // Data larger than buffer: keep only the tail
@@ -61,6 +66,22 @@ impl TerminalOutputBuffer {
             let start = self.buffer.len() - n;
             self.buffer.iter().skip(start).copied().collect()
         }
+    }
+
+    /// Monotonically increasing sequence number (total bytes ever pushed).
+    pub fn write_seq(&self) -> u64 {
+        self.write_seq
+    }
+
+    /// Return bytes written since `since_seq`, clamped to what the buffer still holds.
+    pub fn bytes_since(&self, since_seq: u64) -> Vec<u8> {
+        let new_bytes = self.write_seq.saturating_sub(since_seq) as usize;
+        if new_bytes == 0 {
+            return Vec::new();
+        }
+        // If more bytes arrived than the buffer can hold, return everything we have
+        let available = new_bytes.min(self.buffer.len());
+        self.recent_bytes(available)
     }
 
     pub fn clear(&mut self) {
@@ -176,5 +197,58 @@ mod tests {
         buf.push(b"ccc");
         assert_eq!(buf.len(), 9);
         assert_eq!(buf.recent_bytes(9), b"aaabbbccc");
+    }
+
+    #[test]
+    fn write_seq_increases_monotonically() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        assert_eq!(buf.write_seq(), 0);
+        buf.push(b"hello"); // 5 bytes
+        assert_eq!(buf.write_seq(), 5);
+        buf.push(b"world"); // 5 bytes
+        assert_eq!(buf.write_seq(), 10);
+    }
+
+    #[test]
+    fn write_seq_survives_ring_buffer_wrap() {
+        let mut buf = TerminalOutputBuffer::new(10);
+        buf.push(b"abcdefgh"); // 8 bytes, seq=8
+        assert_eq!(buf.write_seq(), 8);
+        buf.push(b"ijklmnop"); // 8 bytes, total 16 > 10 cap, evicts oldest
+        assert_eq!(buf.write_seq(), 16);
+        // len is capped but seq keeps growing
+        assert_eq!(buf.len(), 10);
+    }
+
+    #[test]
+    fn bytes_since_returns_new_data() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        buf.push(b"before");
+        let seq = buf.write_seq(); // 6
+        buf.push(b"after");
+        let new = buf.bytes_since(seq);
+        assert_eq!(new, b"after");
+    }
+
+    #[test]
+    fn bytes_since_after_wrap_returns_available() {
+        let mut buf = TerminalOutputBuffer::new(10);
+        buf.push(b"12345"); // seq=5, len=5
+        let seq = buf.write_seq();
+        buf.push(b"67890abcde"); // seq=15, len=10, buffer="0abcde" wait...
+        // 15 bytes total pushed into 10 cap buffer
+        // new_bytes = 15 - 5 = 10, but buffer only holds 10
+        let new = buf.bytes_since(seq);
+        // Should get min(10, 10) = 10 bytes (everything in buffer)
+        assert_eq!(new.len(), 10);
+    }
+
+    #[test]
+    fn bytes_since_zero_when_no_new_data() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        buf.push(b"data");
+        let seq = buf.write_seq();
+        let new = buf.bytes_since(seq);
+        assert!(new.is_empty());
     }
 }

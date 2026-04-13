@@ -112,6 +112,7 @@ export function PaneGrid({
           <div
             key={pane.id}
             data-testid={testIdFn(pane, i)}
+            data-pane-index={i}
             className="absolute overflow-hidden"
             onMouseDown={(e) => {
               e.stopPropagation();
