@@ -9,7 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import type { DockPosition, ViewInstanceConfig, ViewType, WorkspacePane } from "@/stores/types";
+import type { DockPosition, ViewInstanceConfig, ViewType, Workspace, WorkspacePane } from "@/stores/types";
 
 interface HandlerResult {
   success: boolean;
@@ -19,6 +19,9 @@ interface HandlerResult {
 
 type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
+type ActivePaneCtx =
+  | { err: HandlerResult }
+  | { ws: Workspace; pane: WorkspacePane };
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -37,7 +40,7 @@ const toTerminalId = (paneId: string) => `terminal-${paneId}`;
 const toPaneId = (terminalId: string) => terminalId.replace(/^terminal-/, "");
 
 /** Get active workspace and validate pane index, returning the workspace and pane or an error. */
-function getActivePaneCtx(paneIndex: number) {
+function getActivePaneCtx(paneIndex: number): ActivePaneCtx {
   const ws = useWorkspaceStore.getState().getActiveWorkspace();
   if (!ws) return { err: err("No active workspace") } as const;
   if (paneIndex < 0 || paneIndex >= ws.panes.length) {
@@ -53,6 +56,19 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
     return err(`Workspace '${workspaceId}' not found`);
   }
   return null;
+}
+
+/** Find a terminal instance by id. */
+function findTerminalInstance(terminalId: string) {
+  return useTerminalStore.getState().instances.find((instance) => instance.id === terminalId) ?? null;
+}
+
+/** Resolve pane index for a terminal within its workspace. */
+function resolveTerminalPaneIndex(terminalId: string, workspaceId: string): number {
+  const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
+  if (!workspace) return -1;
+  const paneId = toPaneId(terminalId);
+  return workspace.panes.findIndex((pane) => pane.id === paneId);
 }
 
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
@@ -244,11 +260,8 @@ const handlers: HandlerMap = {
     },
     focusPane: (p) => {
       const index = p.index as number;
-      const ws = useWorkspaceStore.getState().getActiveWorkspace();
-      const paneCount = ws?.panes.length ?? 0;
-      if (index < 0 || index >= paneCount) {
-        return err(`Pane index ${index} out of range (0-${paneCount - 1})`);
-      }
+      const ctx = getActivePaneCtx(index);
+      if ("err" in ctx) return ctx.err;
       useGridStore.getState().setFocusedPane(index);
       return ok({ focusedPaneIndex: index });
     },
@@ -481,8 +494,7 @@ const handlers: HandlerMap = {
     },
     setFocus: (p) => {
       const terminalId = p.id as string;
-      const { instances } = useTerminalStore.getState();
-      const terminal = instances.find((i) => i.id === terminalId);
+      const terminal = findTerminalInstance(terminalId);
       if (!terminal) return err(`Terminal '${terminalId}' not found`);
 
       // Auto-switch workspace if terminal is in a different workspace
@@ -493,9 +505,7 @@ const handlers: HandlerMap = {
       }
 
       // Update focusedPaneIndex to match the target terminal's pane
-      const paneId = toPaneId(terminalId);
-      const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === terminal.workspaceId);
-      const paneIndex = ws?.panes.findIndex((pa) => pa.id === paneId) ?? -1;
+      const paneIndex = resolveTerminalPaneIndex(terminalId, terminal.workspaceId);
       if (paneIndex >= 0) {
         useGridStore.getState().setFocusedPane(paneIndex);
       }
@@ -516,8 +526,7 @@ const handlers: HandlerMap = {
       const wsErr = checkWorkspaceExists(workspaceId);
       if (wsErr) return wsErr;
       // Validate terminal exists (skip for workspace-level notifications with empty terminalId)
-      const { instances } = useTerminalStore.getState();
-      if (terminalId && !instances.some((i) => i.id === terminalId)) {
+      if (terminalId && !findTerminalInstance(terminalId)) {
         return err(`Terminal '${terminalId}' not found`);
       }
       useNotificationStore.getState().addNotification({

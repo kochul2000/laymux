@@ -367,6 +367,26 @@ impl McpHandler {
             })
     }
 
+    /// Bridge request, transform the JSON payload in-place, then return a normal JSON tool result.
+    async fn bridge_transform<F>(
+        &self,
+        category: &str,
+        target: &str,
+        method: &str,
+        params: Value,
+        transform: F,
+    ) -> Result<CallToolResult, ErrorData>
+    where
+        F: FnOnce(&mut Value),
+    {
+        let mut data = match self.bridge_raw(category, target, method, params).await {
+            Ok(data) => data,
+            Err(e) => return Ok(e),
+        };
+        transform(&mut data);
+        Ok(json_result(&data))
+    }
+
     /// Bridge request to frontend via Tauri event.
     /// Returns json_result on success, CallToolResult::error on failure.
     async fn bridge(
@@ -394,6 +414,43 @@ impl McpHandler {
             .output_buffers
             .lock_or_err()
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
+    }
+
+    /// Read recent lines for a terminal, standardizing lock and not-found handling.
+    fn recent_output_lines(
+        &self,
+        terminal_id: &str,
+        lines: usize,
+    ) -> Result<(String, usize), CallToolResult> {
+        let buffers = self.lock_output_buffers()?;
+        match buffers.get(terminal_id) {
+            Some(buf) => Ok((buf.recent_lines(lines), buf.len())),
+            None => Err(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{}' not found",
+                terminal_id
+            ))])),
+        }
+    }
+
+    /// Resolve the workspace containing the given terminal from the bridge terminal list.
+    async fn terminal_workspace_id(&self, terminal_id: &str) -> Result<String, CallToolResult> {
+        let data = self
+            .bridge_raw("query", "terminals", "list", json!({}))
+            .await?;
+        data.get("instances")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(terminal_id))
+            })
+            .and_then(|t| t.get("workspaceId").and_then(|v| v.as_str()))
+            .map(|id| id.to_string())
+            .ok_or_else(|| {
+                CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found or has no workspace",
+                    terminal_id
+                ))])
+            })
     }
 
     /// Enrich a JSON array of objects by injecting activity state from backend detection.
@@ -496,22 +553,20 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListTerminalsParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut data = match self.bridge_raw("query", "terminals", "list", json!({})).await {
-            Ok(d) => d,
-            Err(e) => return Ok(e),
-        };
-        if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
-            Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity");
-            if let Some(ref ws_id) = p.workspace_id {
-                instances.retain(|inst| {
-                    inst.get("workspaceId")
-                        .and_then(|v| v.as_str())
-                        .map(|id| id == ws_id)
-                        .unwrap_or(false)
-                });
+        self.bridge_transform("query", "terminals", "list", json!({}), |data| {
+            if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
+                Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity");
+                if let Some(ref ws_id) = p.workspace_id {
+                    instances.retain(|inst| {
+                        inst.get("workspaceId")
+                            .and_then(|v| v.as_str())
+                            .map(|id| id == ws_id)
+                            .unwrap_or(false)
+                    });
+                }
             }
-        }
-        Ok(json_result(&data))
+        })
+        .await
     }
 
     /// Identify a terminal's full context: workspace, pane position (x,y,w,h), and neighboring panes.
@@ -618,21 +673,9 @@ impl McpHandler {
         Parameters(p): Parameters<ReadOutputParam>,
     ) -> Result<CallToolResult, ErrorData> {
         let lines = p.lines.unwrap_or(100) as usize;
-        // Copy raw data under lock, then release before expensive strip_ansi
-        let (raw, buffer_size) = {
-            let buffers = match self.lock_output_buffers() {
-                Ok(g) => g,
-                Err(e) => return Ok(e),
-            };
-            match buffers.get(&p.terminal_id) {
-                Some(buf) => (buf.recent_lines(lines), buf.len()),
-                None => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found",
-                        p.terminal_id
-                    ))]));
-                }
-            }
+        let (raw, buffer_size) = match self.recent_output_lines(&p.terminal_id, lines) {
+            Ok(output) => output,
+            Err(e) => return Ok(e),
         };
         let output = match p.format.as_deref() {
             Some("text") => super::helpers::strip_ansi(&raw),
@@ -798,11 +841,10 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListWorkspacesParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let data = match self.bridge_raw("query", "workspaces", "list", json!({})).await {
-            Ok(d) => d,
-            Err(e) => return Ok(e),
-        };
-        if p.summary.unwrap_or(false) {
+        self.bridge_transform("query", "workspaces", "list", json!({}), |data| {
+            if !p.summary.unwrap_or(false) {
+                return;
+            }
             if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
                 let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
                 let summary: Vec<Value> = workspaces
@@ -817,36 +859,35 @@ impl McpHandler {
                         })
                     })
                     .collect();
-                return Ok(json_result(&json!({
+                let active_workspace_id = data.get("activeWorkspaceId").cloned();
+                *data = json!({
                     "workspaces": summary,
-                    "activeWorkspaceId": data.get("activeWorkspaceId"),
-                })));
+                    "activeWorkspaceId": active_workspace_id,
+                });
             }
-        }
-        Ok(json_result(&data))
+        })
+        .await
     }
 
     /// Get the currently active workspace with full pane details, terminal activity states,
     /// and focusedPaneIndex — a single call for complete workspace context.
     #[tool]
     async fn get_active_workspace(&self) -> Result<CallToolResult, ErrorData> {
-        let mut data = match self.bridge_raw("query", "workspaces", "getActive", json!({})).await {
-            Ok(d) => d,
-            Err(e) => return Ok(e),
-        };
-        if let Some(panes) = data
-            .get_mut("workspace")
-            .and_then(|ws| ws.get_mut("panes"))
-            .and_then(|v| v.as_array_mut())
-        {
-            Self::enrich_with_activity(
-                &self.state.app_state,
-                panes,
-                "terminalId",
-                "terminalActivity",
-            );
-        }
-        Ok(json_result(&data))
+        self.bridge_transform("query", "workspaces", "getActive", json!({}), |data| {
+            if let Some(panes) = data
+                .get_mut("workspace")
+                .and_then(|ws| ws.get_mut("panes"))
+                .and_then(|v| v.as_array_mut())
+            {
+                Self::enrich_with_activity(
+                    &self.state.app_state,
+                    panes,
+                    "terminalId",
+                    "terminalActivity",
+                );
+            }
+        })
+        .await
     }
 
     /// Switch to a different workspace by ID or name.
@@ -1100,36 +1141,36 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ListNotificationsParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut data = match self.bridge_raw("query", "notifications", "list", json!({})).await {
-            Ok(d) => d,
-            Err(e) => return Ok(e),
-        };
-        if let Some(notifications) =
-            data.get_mut("notifications").and_then(|v| v.as_array_mut())
-        {
-            if let Some(ref ws_id) = p.workspace_id {
-                notifications.retain(|n| {
-                    n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
+        self.bridge_transform("query", "notifications", "list", json!({}), |data| {
+            if let Some(notifications) =
+                data.get_mut("notifications").and_then(|v| v.as_array_mut())
+            {
+                if let Some(ref ws_id) = p.workspace_id {
+                    notifications.retain(|n| {
+                        n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
+                    });
+                }
+                if let Some(ref t_id) = p.terminal_id {
+                    notifications.retain(|n| {
+                        n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
+                    });
+                }
+                if p.unread_only.unwrap_or(false) {
+                    notifications.retain(|n| {
+                        n.get("readAt").and_then(|v| v.as_u64()).is_none()
+                    });
+                }
+                notifications.sort_by(|a, b| {
+                    let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let ts_b = b.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    ts_b.partial_cmp(&ts_a).unwrap_or(std::cmp::Ordering::Equal)
                 });
+                if let Some(limit) = p.limit {
+                    notifications.truncate(limit as usize);
+                }
             }
-            if let Some(ref t_id) = p.terminal_id {
-                notifications.retain(|n| {
-                    n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
-                });
-            }
-            if p.unread_only.unwrap_or(false) {
-                notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
-            }
-            notifications.sort_by(|a, b| {
-                let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let ts_b = b.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                ts_b.partial_cmp(&ts_a).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            if let Some(limit) = p.limit {
-                notifications.truncate(limit as usize);
-            }
-        }
-        Ok(json_result(&data))
+        })
+        .await
     }
 
     /// Create a notification in the IDE. terminal_id and workspace_id are optional —
@@ -1146,32 +1187,9 @@ impl McpHandler {
         let workspace_id = if let Some(id) = p.workspace_id {
             id
         } else if !terminal_id.is_empty() {
-            // Look up terminal's actual workspace
-            let data = match self.bridge_raw("query", "terminals", "list", json!({})).await {
-                Ok(d) => d,
-                Err(_) => {
-                    return Ok(CallToolResult::error(vec![Content::text(
-                        "Failed to look up terminal workspace",
-                    )]));
-                }
-            };
-            match data
-                .get("instances")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| {
-                    arr.iter().find(|t| {
-                        t.get("id").and_then(|v| v.as_str()) == Some(&terminal_id)
-                    })
-                })
-                .and_then(|t| t.get("workspaceId").and_then(|v| v.as_str()))
-            {
-                Some(id) => id.to_string(),
-                None => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found or has no workspace",
-                        terminal_id
-                    ))]));
-                }
+            match self.terminal_workspace_id(&terminal_id).await {
+                Ok(id) => id,
+                Err(e) => return Ok(e),
             }
         } else {
             // No terminal, no workspace — use active workspace
@@ -1215,20 +1233,9 @@ impl McpHandler {
         let max_lines = p.max_lines.unwrap_or(1000);
 
         // Copy raw data under lock, then release before expensive processing
-        let raw = {
-            let buffers = match self.lock_output_buffers() {
-                Ok(g) => g,
-                Err(e) => return Ok(e),
-            };
-            match buffers.get(&p.terminal_id) {
-                Some(b) => b.recent_lines(max_lines),
-                None => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found",
-                        p.terminal_id
-                    ))]));
-                }
-            }
+        let (raw, _) = match self.recent_output_lines(&p.terminal_id, max_lines) {
+            Ok(output) => output,
+            Err(e) => return Ok(e),
         };
 
         let text = super::helpers::strip_ansi(&raw);
@@ -1300,16 +1307,6 @@ impl McpHandler {
     /// Returns all configured profiles from settings, enriched with runtime info from active terminals.
     #[tool]
     async fn list_profiles(&self) -> Result<CallToolResult, ErrorData> {
-        // Get configured profiles from frontend settings
-        let bridge_profiles = bridge_request(
-            &self.state,
-            "query",
-            "profiles",
-            "list",
-            json!({}),
-        )
-        .await;
-
         // Get runtime info from active terminal sessions
         let mut runtime_info: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
@@ -1327,7 +1324,7 @@ impl McpHandler {
             }
         }
 
-        match bridge_profiles {
+        match self.bridge_raw("query", "profiles", "list", json!({})).await {
             Ok(data) => {
                 // Enrich configured profiles with runtime shell_type
                 if let Some(profiles) = data.get("profiles").and_then(|v| v.as_array()) {
