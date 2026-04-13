@@ -4,6 +4,7 @@ import {
   CURSOR_TRACE_STORAGE_KEY,
   createCursorTracer,
   isCursorTraceEnabled,
+  isTruthyFlag,
 } from "./cursor-trace";
 
 function makeStorage(initial?: string) {
@@ -30,8 +31,28 @@ describe("cursor-trace", () => {
     expect(isCursorTraceEnabled({ storage: makeStorage("1") })).toBe(true);
   });
 
-  it("ignores non-'1' storage values", () => {
-    expect(isCursorTraceEnabled({ storage: makeStorage("true") })).toBe(false);
+  it("accepts the same truthy values as the Rust env_flag_enabled", () => {
+    for (const v of ["1", "true", "TRUE", "yes", "YES"]) {
+      expect(isCursorTraceEnabled({ storage: makeStorage(v) })).toBe(true);
+    }
+  });
+
+  it("treats falsy/unknown storage values as disabled", () => {
+    for (const v of ["0", "false", "no", "", "yep", "TrUe"]) {
+      expect(isCursorTraceEnabled({ storage: makeStorage(v) })).toBe(false);
+    }
+  });
+
+  it("isTruthyFlag matches the documented ruleset", () => {
+    expect(isTruthyFlag("1")).toBe(true);
+    expect(isTruthyFlag("true")).toBe(true);
+    expect(isTruthyFlag("TRUE")).toBe(true);
+    expect(isTruthyFlag("yes")).toBe(true);
+    expect(isTruthyFlag("YES")).toBe(true);
+    expect(isTruthyFlag("0")).toBe(false);
+    expect(isTruthyFlag("false")).toBe(false);
+    expect(isTruthyFlag(null)).toBe(false);
+    expect(isTruthyFlag(undefined)).toBe(false);
   });
 
   it("tracer is a no-op when disabled — does not call logger", () => {

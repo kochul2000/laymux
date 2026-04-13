@@ -24,9 +24,30 @@
 
 export const CURSOR_TRACE_STORAGE_KEY = "laymux:cursor-trace";
 
-const BUILD_TIME_ENABLED =
-  import.meta.env.VITE_LAYMUX_CURSOR_TRACE === "1" ||
-  import.meta.env.VITE_LAYMUX_CURSOR_TRACE === "true";
+/**
+ * Truthy-flag predicate used by every cursor-trace gate (build-time env,
+ * runtime localStorage). Matches the Rust `env_flag_enabled` ruleset so
+ * the two sides accept the same set of values — `1`, `true`, `TRUE`,
+ * `yes`, `YES`. Anything else (including `0`, `false`, `""`, `null`) is
+ * treated as disabled.
+ */
+export function isTruthyFlag(value: string | null | undefined): boolean {
+  if (value == null) return false;
+  switch (value) {
+    case "1":
+    case "true":
+    case "TRUE":
+    case "yes":
+    case "YES":
+      return true;
+    default:
+      return false;
+  }
+}
+
+const BUILD_TIME_ENABLED = isTruthyFlag(
+  import.meta.env.VITE_LAYMUX_CURSOR_TRACE as string | undefined,
+);
 
 type StorageLike = Pick<Storage, "getItem">;
 
@@ -51,7 +72,7 @@ export function isCursorTraceEnabled(deps: CursorTraceDeps = {}): boolean {
   const storage =
     deps.storage ??
     (typeof window === "undefined" ? null : window.localStorage);
-  return readStorage(storage) === "1";
+  return isTruthyFlag(readStorage(storage));
 }
 
 export function createCursorTracer(
