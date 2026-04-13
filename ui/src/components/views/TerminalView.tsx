@@ -25,7 +25,7 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
-import { matchesKeybinding, resolveKeybinding } from "@/lib/keybinding-registry";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -54,6 +54,35 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 const LARGE_PASTE_THRESHOLD = 5120;
 
 const textEncoder = new TextEncoder();
+
+/**
+ * Execute the smart-paste pipeline and write the result into xterm.
+ * Shared by the keybinding handler (terminal.paste) and the right-click paste
+ * fallback so both paths produce identical behavior (image handling, indent
+ * normalization, large-paste guard).
+ */
+function runTerminalPaste(terminal: Terminal, profile: string): void {
+  const { convenience: conv } = useSettingsStore.getState();
+  smartPaste(conv.pasteImageDir, profile)
+    .then((result) => {
+      if (result.pasteType === "none" || !result.content) return;
+      const content = transformPasteContent(result.content, result.pasteType, {
+        removeIndent: conv.smartRemoveIndent,
+        removeLineBreak: conv.smartRemoveLineBreak,
+      });
+      if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
+      terminal.paste(content);
+    })
+    .catch(() => {
+      // Rust clipboard failed — fall back to browser clipboard → xterm paste
+      navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (text) terminal.paste(text);
+        })
+        .catch(() => {});
+    });
+}
 
 /**
  * Check if a large paste should be blocked. Returns true if the user cancelled.
@@ -610,70 +639,34 @@ export function TerminalView({
       helperTextarea.addEventListener("compositionend", handleCompositionEnd);
     };
 
-    // Custom key event handler: let IDE shortcuts pass through xterm,
-    // and route the user-configurable terminal.copy / terminal.paste bindings
-    // when they are rebound to combos that don't fire native copy/paste events.
-    //
-    // Copy/paste are normally system events (browser `copy`/`paste` fires on
-    // Ctrl+C / Ctrl+V). Those defaults keep working through the DOM listeners
-    // below. If the user overrides the binding to e.g. Ctrl+Shift+C / Ctrl+Shift+V
-    // (the conventional Linux terminal combo), the browser won't fire those
-    // events on its own, so we dispatch the action manually here.
+    // Single entry point for all terminal key handling:
+    //   - IDE-level shortcuts → pass through to document handler (return false).
+    //   - terminal.copy / terminal.paste (default Ctrl+C / Ctrl+V, user-rebindable)
+    //     → dispatch directly, no reliance on browser `copy`/`paste` events.
+    //   - Ctrl+C with empty selection → fall through so xterm sends SIGINT.
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
 
-      // terminal.paste — manually trigger smart paste when the bound combo is
-      // not the OS-default Ctrl+V (which the `paste` listener below handles).
       if (matchesKeybinding(e, "terminal.paste")) {
-        if (resolveKeybinding("terminal.paste") !== "Ctrl+V") {
-          const { convenience: conv } = useSettingsStore.getState();
-          e.preventDefault();
-          smartPaste(conv.pasteImageDir, profile)
-            .then((result) => {
-              if (result.pasteType !== "none" && result.content) {
-                const content = transformPasteContent(result.content, result.pasteType, {
-                  removeIndent: conv.smartRemoveIndent,
-                  removeLineBreak: conv.smartRemoveLineBreak,
-                });
-                if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
-                terminal.paste(content);
-              }
-            })
-            .catch(() => {
-              navigator.clipboard
-                .readText()
-                .then((text) => {
-                  if (text) terminal.paste(text);
-                })
-                .catch(() => {});
-            });
-          return false;
-        }
-        // Default Ctrl+V: let the browser `paste` event fire — handled below.
-        return true;
+        // Honor the smartPaste toggle: when off, defer to xterm's native paste
+        // (only works for default Ctrl+V since the browser fires `paste` then).
+        if (!useSettingsStore.getState().convenience.smartPaste) return true;
+        e.preventDefault();
+        runTerminalPaste(terminal, profile);
+        return false;
       }
 
-      // terminal.copy — manually copy the current selection when rebound away
-      // from the OS-default Ctrl+C. Default Ctrl+C continues to mean
-      // "copy if selection, SIGINT otherwise" via xterm's native handling.
       if (matchesKeybinding(e, "terminal.copy")) {
-        if (resolveKeybinding("terminal.copy") !== "Ctrl+C") {
-          if (terminal.hasSelection()) {
-            const { convenience: conv } = useSettingsStore.getState();
-            const text = prepareSelectionForCopy(terminal.getSelection(), {
-              smartRemoveIndent: conv.smartRemoveIndent,
-            });
-            clipboardWriteText(text).catch(() => {});
-            e.preventDefault();
-            return false;
-          }
-          // No selection on a non-default binding: consume the event to avoid
-          // xterm injecting a control code for the underlying key.
-          return false;
-        }
-        // Default Ctrl+C: let xterm handle natively (copy-or-SIGINT).
-        return true;
+        // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
+        if (!terminal.hasSelection()) return true;
+        const { convenience: conv } = useSettingsStore.getState();
+        const text = prepareSelectionForCopy(terminal.getSelection(), {
+          smartRemoveIndent: conv.smartRemoveIndent,
+        });
+        clipboardWriteText(text).catch(() => {});
+        e.preventDefault();
+        return false;
       }
 
       return true;
@@ -696,22 +689,6 @@ export function TerminalView({
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
-
-    // Smart copy: intercept DOM copy event to apply smartRemoveIndent.
-    // xterm.js handles Ctrl+C natively (copy if selection, SIGINT if not).
-    // We hook into the resulting copy event to transform clipboard content
-    // without breaking bare Ctrl+C → SIGINT flow.
-    const handleCopy = (e: ClipboardEvent) => {
-      const { convenience: conv } = useSettingsStore.getState();
-      if (conv.smartRemoveIndent && terminal.hasSelection()) {
-        e.preventDefault();
-        const transformed = prepareSelectionForCopy(terminal.getSelection(), {
-          smartRemoveIndent: true,
-        });
-        e.clipboardData?.setData("text/plain", transformed);
-      }
-    };
-    containerRef.current?.addEventListener("copy", handleCopy);
 
     // Copy-on-select: auto-copy to clipboard when text is selected
     terminal.onSelectionChange(() => {
@@ -941,68 +918,11 @@ export function TerminalView({
         ).catch(() => {});
         terminal.clearSelection();
       } else {
-        // No selection → paste via terminal.paste() (same as Ctrl+V for bracketed paste support)
-        const { convenience: conv } = useSettingsStore.getState();
-        smartPaste(conv.pasteImageDir, profile)
-          .then((result) => {
-            if (result.pasteType !== "none" && result.content) {
-              const content = transformPasteContent(result.content, result.pasteType, {
-                removeIndent: conv.smartRemoveIndent,
-                removeLineBreak: conv.smartRemoveLineBreak,
-              });
-              if (shouldBlockLargePaste(content, conv.largePasteWarning)) {
-                return;
-              }
-              terminal.paste(content);
-            }
-          })
-          .catch(() => {
-            // Rust clipboard failed — fall back to browser clipboard
-            navigator.clipboard
-              .readText()
-              .then((text) => {
-                if (text) terminal.paste(text);
-              })
-              .catch(() => {});
-          });
+        // No selection → paste via the shared smart-paste pipeline.
+        runTerminalPaste(terminal, profile);
       }
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
-
-    // Smart paste: intercept the system paste event (Ctrl+V, Cmd+V, context menu paste, etc.)
-    // By listening to the 'paste' event instead of a specific key combo, this works
-    // regardless of OS or how the user triggers paste.
-    const handlePaste = (e: ClipboardEvent) => {
-      const { convenience } = useSettingsStore.getState();
-      if (!convenience.smartPaste) return; // Let xterm handle normally
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      smartPaste(convenience.pasteImageDir, profile)
-        .then((result) => {
-          if (result.pasteType !== "none" && result.content) {
-            const content = transformPasteContent(result.content, result.pasteType, {
-              removeIndent: convenience.smartRemoveIndent,
-              removeLineBreak: convenience.smartRemoveLineBreak,
-            });
-            if (shouldBlockLargePaste(content, convenience.largePasteWarning)) {
-              return;
-            }
-            terminal.paste(content);
-          }
-        })
-        .catch(() => {
-          // Rust clipboard failed — fall back to browser clipboard → xterm paste
-          navigator.clipboard
-            .readText()
-            .then((text) => {
-              if (text) terminal.paste(text);
-            })
-            .catch(() => {});
-        });
-    };
-    outerContainer?.addEventListener("paste", handlePaste, { capture: true });
 
     // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
     const handleWheel = (e: WheelEvent) => {
@@ -1145,13 +1065,9 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerContainer?.removeEventListener("paste", handlePaste, {
-        capture: true,
-      } as EventListenerOptions);
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
-      containerRef.current?.removeEventListener("copy", handleCopy);
       helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
       helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);

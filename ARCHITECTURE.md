@@ -1212,20 +1212,20 @@ container.addEventListener("copy", (e) => { copySelectedPaths(); });
 if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 ```
 
-##### 예외: 터미널 copy/paste 하이브리드
+##### 예외: 터미널 copy/paste는 키바인딩으로 통합
 
 터미널(xterm.js)에서는 전통적으로 Linux 환경에서 `Ctrl+Shift+C`/`Ctrl+Shift+V`를
 복사/붙여넣기로 쓰는 관행이 있어, 복사/붙여넣기도 **키바인딩으로 재바인딩할 수
-있어야 한다**. 단, 기본값(`Ctrl+C`/`Ctrl+V`)은 OS가 이미 `copy`/`paste` 이벤트를
-발화시키므로 시스템 이벤트 경로로 충분하다. 따라서 터미널은 다음 하이브리드로
-운영한다.
+있어야 한다**. 따라서 터미널은 시스템 `copy`/`paste` 이벤트 리스너를 두지 않고,
+`terminal.copy` / `terminal.paste` 키바인딩 한 경로로 통합한다.
 
 - `terminal.copy`/`terminal.paste`를 키바인딩 레지스트리에 등록(기본 `Ctrl+C`/`Ctrl+V`).
-- 시스템 이벤트(`copy`/`paste`) 리스너는 그대로 유지해 기본값/우클릭/컨텍스트 메뉴를
-  포괄한다.
 - `attachCustomKeyEventHandler`에서 `matchesKeybinding("terminal.copy/paste")`로
-  분기하되, **해상된 키가 기본값과 같으면 브라우저 이벤트에 위임**하고(중복 방지),
-  다르면 수동으로 `smartPaste` / `clipboardWriteText`를 호출한다.
+  감지하여 `smartPaste`/`clipboardWriteText`를 직접 호출한다 — 기본값/오버라이드
+  구분 없이 동일 경로.
+- `Ctrl+C`는 선택 영역이 없을 때만 xterm에 위임해 SIGINT를 그대로 전달한다(선택 상태로만
+  판단, 키 조합을 하드코딩하지 않음).
+- 우클릭 경로(`handleContextMenu`)도 같은 헬퍼(`runTerminalPaste`)를 재사용한다.
 - 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
   시스템 이벤트 전용이다.
 
