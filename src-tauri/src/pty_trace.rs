@@ -43,6 +43,13 @@ const PREVIEW_BYTE_LIMIT: usize = 240;
 /// each needle exactly once, so adding entries here is O(N·M) in the chunk
 /// but M is tiny and the detector only runs when tracing is enabled.
 ///
+/// **Chunk-boundary caveat**: the PTY callback fires per OS read, so a
+/// sequence may straddle two chunks (e.g. `ESC [` arrives in chunk N and
+/// `s` in chunk N+1). The detector is stateless and will miss such splits.
+/// This is acceptable because the trace is a sampling diagnostic, not a
+/// correctness boundary — `osc.rs` is the canonical OSC parser and is
+/// stateful.
+///
 /// Matching is **literal-prefix-only**. This is intentional for OSC 133/633
 /// (which carry optional `;param` tails — we only care that the category
 /// fired) and for `DEC2026`/`ALT1049` (`h`/`l` suffixes share a prefix).
