@@ -1,7 +1,9 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
@@ -73,24 +75,64 @@ fn chunked_write_to(writer: &mut dyn Write, data: &[u8]) -> Result<(), String> {
 
 /// Handle to a running PTY process, providing write and resize capabilities.
 pub struct PtyHandle {
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    /// `Option` so `terminate()` can `.take()` the inner writer and actually
+    /// drop it. Plain `drop(guard)` on a `MutexGuard` only releases the lock;
+    /// the underlying `Box<dyn Write + Send>` stays alive inside the `Arc`.
+    writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
+    /// Same `Option` trick as `writer` — dropping the master is what closes
+    /// the (Con)PTY device and delivers HUP to the shell.
+    master: Arc<Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>>,
     /// PID of the direct child process spawned by the PTY (`None` if the
     /// platform does not expose process IDs, e.g. serial connections).
     /// Used for Claude Code session matching via process tree traversal.
     /// Type matches `portable_pty::Child::process_id() -> Option<u32>`.
     child_pid: Option<u32>,
+    /// Flipped to `true` by the wait thread *while it still holds the `Child`
+    /// handle*, so any observer that sees `true` knows the OS has not yet
+    /// recycled the PID (Windows keeps the PID reserved until the process
+    /// handle is closed). Lets `terminate()` safely skip taskkill when the
+    /// child has already exited on its own.
+    child_exited: Arc<AtomicBool>,
 }
 
 impl PtyHandle {
-    /// Close the PTY master and terminate the direct child process tree if possible.
+    /// Time budget `terminate()` gives the shell to exit on its own after the
+    /// PTY is closed before falling back to a forced kill. Polled in small
+    /// steps so well-behaved shells return almost immediately.
+    const GRACEFUL_SHUTDOWN_TOTAL: Duration = Duration::from_millis(150);
+    const GRACEFUL_SHUTDOWN_STEP: Duration = Duration::from_millis(10);
+
+    /// Close the PTY master and terminate the direct child process tree if
+    /// possible. Order of operations:
+    ///
+    /// 1. Take the inner writer and master out of their `Mutex<Option<_>>`
+    ///    slots so the `Box`es actually drop → shell stdin sees EOF and the
+    ///    ConPTY device closes (HUP on Unix), allowing shutdown traps/exit
+    ///    hooks to run.
+    /// 2. Poll `child_exited` briefly so a graceful exit short-circuits the
+    ///    taskkill path entirely.
+    /// 3. If the child is still alive, `taskkill /T /F` the whole tree. Safe
+    ///    from PID recycling because the wait thread still holds the `Child`
+    ///    handle (keeping the PID reserved) until `child_exited` flips, and
+    ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
-        // Drop writer/master handles first so shells see EOF/HUP before a forced kill.
-        if let Ok(writer) = self.writer.lock_or_err() {
-            drop(writer);
+        if let Ok(mut guard) = self.writer.lock_or_err() {
+            let _ = guard.take();
         }
-        if let Ok(master) = self.master.lock_or_err() {
-            drop(master);
+        if let Ok(mut guard) = self.master.lock_or_err() {
+            let _ = guard.take();
+        }
+
+        let mut elapsed = Duration::ZERO;
+        while elapsed < Self::GRACEFUL_SHUTDOWN_TOTAL {
+            if self.child_exited.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
+            elapsed += Self::GRACEFUL_SHUTDOWN_STEP;
+        }
+        if self.child_exited.load(Ordering::Acquire) {
+            return Ok(());
         }
 
         #[cfg(target_os = "windows")]
@@ -112,8 +154,11 @@ impl PtyHandle {
     /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and
     /// flushed individually — see [`chunked_write_to`] for details.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
-        let mut writer = self.writer.lock_or_err()?;
-        chunked_write_to(&mut *writer, data)
+        let mut guard = self.writer.lock_or_err()?;
+        let writer = guard
+            .as_mut()
+            .ok_or_else(|| "PTY writer already closed".to_string())?;
+        chunked_write_to(writer, data)
     }
 
     /// Get the child process ID.
@@ -123,7 +168,10 @@ impl PtyHandle {
 
     /// Resize the PTY.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let master = self.master.lock_or_err()?;
+        let guard = self.master.lock_or_err()?;
+        let master = guard
+            .as_ref()
+            .ok_or_else(|| "PTY master already closed".to_string())?;
         master
             .resize(PtySize {
                 rows,
@@ -214,15 +262,25 @@ where
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
     let child_pid = child.process_id();
+    let child_exited = Arc::new(AtomicBool::new(false));
+    let exited_signal = Arc::clone(&child_exited);
 
     // Spawn a background thread to wait for the child process.
     // This prevents zombie processes on Unix (where unwait-ed children
     // linger in the process table). On Windows, this closes the process
     // handle cleanly after exit. The thread exits naturally when the
     // shell terminates (e.g., via PTY master close → SIGHUP).
+    //
+    // The `child_exited` flip MUST happen before `child` drops: while the
+    // `Box<dyn Child>` is alive the OS keeps the PID reserved to this
+    // process (Windows won't recycle it), so any observer that sees
+    // `child_exited == true` can safely conclude the PID belongs to the
+    // now-dead shell and not an unrelated process.
     thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
+        exited_signal.store(true, Ordering::Release);
+        // `child` drops here; Windows may recycle the PID after this point.
     });
     drop(pair.slave);
 
@@ -237,9 +295,10 @@ where
         .map_err(|e| format!("Failed to clone reader: {e}"))?;
 
     let handle = PtyHandle {
-        writer: Arc::new(Mutex::new(writer)),
-        master: Arc::new(Mutex::new(pair.master)),
+        writer: Arc::new(Mutex::new(Some(writer))),
+        master: Arc::new(Mutex::new(Some(pair.master))),
         child_pid,
+        child_exited,
     };
 
     // Spawn reader thread
@@ -308,6 +367,73 @@ mod tests {
         fn _assert_resize(handle: &PtyHandle) -> Result<(), String> {
             handle.resize(120, 40)
         }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn terminate_drops_writer_and_master_handles() {
+        // After terminate() runs, subsequent write()/resize() calls must
+        // surface a "closed" error rather than trying to use handles that
+        // were supposedly released. This proves the Option<Box<_>> take()
+        // actually dropped the inner handles (the old `drop(guard)` bug
+        // would have left the writer live and this test would have
+        // returned Ok or a different I/O error).
+        let session = make_test_session("PowerShell");
+        let handle = spawn_pty(&session, |_| {}).expect("spawn");
+
+        handle.terminate().expect("terminate should succeed");
+
+        let write_err = handle.write(b"echo after close\r\n").unwrap_err();
+        assert!(
+            write_err.contains("already closed"),
+            "write after terminate should report closed state, got: {write_err}"
+        );
+        let resize_err = handle.resize(80, 24).unwrap_err();
+        assert!(
+            resize_err.contains("already closed"),
+            "resize after terminate should report closed state, got: {resize_err}"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn terminate_short_circuits_when_child_already_exited() {
+        // If the shell has already exited on its own, terminate() must
+        // observe `child_exited` and return quickly *without* spending the
+        // full graceful-shutdown budget. This also exercises the P1 fix:
+        // in production, returning early here is what skips taskkill
+        // against a PID that may have been recycled.
+        let session = make_test_session("PowerShell");
+        let (tx, rx) = mpsc::channel();
+        let handle = spawn_pty(&session, move |data| {
+            let _ = tx.send(data);
+        })
+        .expect("spawn");
+
+        // Ask PowerShell to exit cleanly.
+        handle.write(b"exit\r\n").expect("write exit");
+
+        // Wait for the wait-thread to flip child_exited. Bail out if it
+        // never does (avoid hanging the test on an unexpected hang).
+        let exited = handle.child_exited.clone();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !exited.load(Ordering::Acquire) {
+            if std::time::Instant::now() > deadline {
+                panic!("shell never exited on its own after `exit` command");
+            }
+            // Drain any pending output so PowerShell isn't blocked on writes.
+            let _ = rx.recv_timeout(Duration::from_millis(50));
+        }
+
+        let start = std::time::Instant::now();
+        handle.terminate().expect("terminate should succeed");
+        let elapsed = start.elapsed();
+        // If terminate() short-circuited, it should return well under the
+        // full 150ms graceful budget. Allow generous slack for CI jitter.
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "terminate should short-circuit when child already exited, took {elapsed:?}"
+        );
     }
 
     #[test]

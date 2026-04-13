@@ -1212,6 +1212,23 @@ container.addEventListener("copy", (e) => { copySelectedPaths(); });
 if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 ```
 
+##### 예외: 터미널 copy/paste는 키바인딩으로 통합
+
+터미널(xterm.js)에서는 전통적으로 Linux 환경에서 `Ctrl+Shift+C`/`Ctrl+Shift+V`를
+복사/붙여넣기로 쓰는 관행이 있어, 복사/붙여넣기도 **키바인딩으로 재바인딩할 수
+있어야 한다**. 따라서 터미널은 시스템 `copy`/`paste` 이벤트 리스너를 두지 않고,
+`terminal.copy` / `terminal.paste` 키바인딩 한 경로로 통합한다.
+
+- `terminal.copy`/`terminal.paste`를 키바인딩 레지스트리에 등록(기본 `Ctrl+C`/`Ctrl+V`).
+- `attachCustomKeyEventHandler`에서 `matchesKeybinding("terminal.copy/paste")`로
+  감지하여 `smartPaste`/`clipboardWriteText`를 직접 호출한다 — 기본값/오버라이드
+  구분 없이 동일 경로.
+- `Ctrl+C`는 선택 영역이 없을 때만 xterm에 위임해 SIGINT를 그대로 전달한다(선택 상태로만
+  판단, 키 조합을 하드코딩하지 않음).
+- 우클릭 경로(`handleContextMenu`)도 같은 헬퍼(`runTerminalPaste`)를 재사용한다.
+- 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
+  시스템 이벤트 전용이다.
+
 ### 15.6 앱 전용 편의 코드 격리
 
 각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
