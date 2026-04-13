@@ -25,6 +25,21 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { createCursorTracer } from "@/lib/cursor-trace";
+
+/**
+ * Diagnostic cursor-trace logger. No-op when tracing is disabled (default).
+ * See `cursor-trace.ts` for how to enable. Scoped per-terminal so log lines
+ * carry the `instanceId`; we avoid caching tracers across renders because
+ * `instanceId` changes per mount and the tracer itself is cheap to create.
+ */
+function cursorTrace(
+  instanceId: string,
+  event: string,
+  payload?: Record<string, unknown>,
+): void {
+  createCursorTracer(instanceId)(event, payload);
+}
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -294,10 +309,16 @@ export function TerminalView({
       if (host) {
         host.classList.toggle("terminal-sync-output-active", active);
       }
+      cursorTrace(instanceId, "sync-output-visibility", { active });
       overlayCaretUpdaterRef.current?.();
     };
     const setImeCompositionState = (active: boolean) => {
       shadowCursorRef.current.isComposing = active;
+      cursorTrace(instanceId, "ime-composition", {
+        active,
+        cursorX: shadowCursorRef.current.cursorX,
+        cursorAbsY: shadowCursorRef.current.cursorAbsY,
+      });
       overlayCaretUpdaterRef.current?.();
       if (!active) {
         scheduleShadowCursorSync();
@@ -318,6 +339,14 @@ export function TerminalView({
         syncOutputActiveRef.current
       ) {
         overlay.style.opacity = "0";
+        cursorTrace(instanceId, "overlay-hidden", {
+          reason: "gating",
+          opened: openedRef.current,
+          focused: isFocusedRef.current,
+          stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
+          activity: activityRef.current,
+          syncOutputActive: syncOutputActiveRef.current,
+        });
         return;
       }
 
@@ -347,6 +376,7 @@ export function TerminalView({
       const shadowCursor = shadowCursorRef.current;
       if (shadowCursor.isAltBufferActive) {
         overlay.style.opacity = "0";
+        cursorTrace(instanceId, "overlay-hidden", { reason: "alt-buffer", shadowCursor });
         return;
       }
 
@@ -363,6 +393,14 @@ export function TerminalView({
         : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
       if (cursorY < 0 || cursorY >= term.rows) {
         overlay.style.opacity = "0";
+        cursorTrace(instanceId, "overlay-hidden", {
+          reason: "viewport",
+          cursorX,
+          cursorY,
+          rows: term.rows,
+          cols: term.cols,
+          useShadowCursor,
+        });
         return;
       }
 
@@ -377,6 +415,18 @@ export function TerminalView({
       overlay.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + cursorX * cellWidth)}px, ${Math.round(
         targetRect.top - hostRect.top + cursorY * cellHeight + caretMetrics.offsetY,
       )}px)`;
+      cursorTrace(instanceId, "overlay-update", {
+        useShadowCursor,
+        cursorX,
+        cursorY,
+        cursorAbsY: shadowCursor.cursorAbsY,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        isInputPhase: shadowCursor.isInputPhase,
+        isRepaintInProgress: shadowCursor.isRepaintInProgress,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+        isComposing: shadowCursor.isComposing,
+      });
     };
     const scheduleOverlayCaretUpdate = () => {
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
@@ -392,6 +442,15 @@ export function TerminalView({
       const activeBuffer = terminal.buffer.active as { cursorX?: number };
       shadowCursor.cursorX = activeBuffer.cursorX ?? 0;
       shadowCursor.cursorAbsY = getBufferCursorAbsY(terminal);
+      cursorTrace(instanceId, "shadow-sync", {
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        isInputPhase: shadowCursor.isInputPhase,
+        isRepaintInProgress: shadowCursor.isRepaintInProgress,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+      });
     };
     const setInputPhase = (active: boolean) => {
       const shadowCursor = shadowCursorRef.current;
@@ -401,6 +460,13 @@ export function TerminalView({
       } else {
         syncShadowCursorToBuffer();
       }
+      cursorTrace(instanceId, "input-phase", {
+        active,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+      });
       scheduleOverlayCaretUpdate();
     };
     const scheduleShadowCursorSync = () => {
@@ -416,6 +482,14 @@ export function TerminalView({
           shadowCursor.isAltBufferActive ||
           syncOutputActiveRef.current
         ) {
+          cursorTrace(instanceId, "shadow-sync-skip", {
+            isInputPhase: shadowCursor.isInputPhase,
+            hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+            isComposing: shadowCursor.isComposing,
+            isRepaintInProgress: shadowCursor.isRepaintInProgress,
+            isAltBufferActive: shadowCursor.isAltBufferActive,
+            syncOutputActive: syncOutputActiveRef.current,
+          });
           return;
         }
         syncShadowCursorToBuffer();
@@ -425,6 +499,11 @@ export function TerminalView({
     const handlePromptOsc = (data: string) => {
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.hasPromptBoundary = true;
+      cursorTrace(instanceId, "prompt-osc", {
+        data,
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+      });
       switch (data.split(";")[0]) {
         case "A":
           setInputPhase(false);
@@ -664,6 +743,10 @@ export function TerminalView({
 
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
+      cursorTrace(instanceId, "terminal-onData", {
+        bytes: data.length,
+        preview: JSON.stringify(data.slice(0, 80)),
+      });
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
     });
@@ -791,11 +874,13 @@ export function TerminalView({
 
       if (text.includes("\x1b]133;A") || text.includes("\x1b]633;A")) {
         shadowCursorRef.current.hasPromptBoundary = true;
+        cursorTrace(instanceId, "chunk-prompt-boundary", { code: "A" });
         setInputPhase(false);
       }
       if (text.includes("\x1b]133;B") || text.includes("\x1b]633;B")) {
         const shadowCursor = shadowCursorRef.current;
         shadowCursor.hasPromptBoundary = true;
+        cursorTrace(instanceId, "chunk-prompt-boundary", { code: "B" });
         syncShadowCursorToBuffer();
         shadowCursor.commandStartX = shadowCursor.cursorX;
         shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
@@ -808,6 +893,7 @@ export function TerminalView({
         text.includes("\x1b]633;D")
       ) {
         shadowCursorRef.current.hasPromptBoundary = true;
+        cursorTrace(instanceId, "chunk-prompt-boundary", { code: "C/D" });
         setInputPhase(false);
       }
 
@@ -819,6 +905,7 @@ export function TerminalView({
       if (enterAlt && !leaveAlt && !inAltScreen) {
         inAltScreen = true;
         shadowCursorRef.current.isAltBufferActive = true;
+        cursorTrace(instanceId, "alt-buffer", { active: true });
         setInputPhase(false);
         // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
         const cmdMatch = text.match(/\x1b\]133;E;([^\x07]*)\x07/);
@@ -845,6 +932,7 @@ export function TerminalView({
       } else if (leaveAlt && !enterAlt && inAltScreen) {
         inAltScreen = false;
         shadowCursorRef.current.isAltBufferActive = false;
+        cursorTrace(instanceId, "alt-buffer", { active: false });
         scheduleOverlayCaretUpdate();
         // If leaving an interactive app (Claude, vim, etc.), clear stale command state
         // so WorkspaceSelectorView does not show leftover info after the app exits.

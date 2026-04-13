@@ -24,6 +24,15 @@ pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
 pub const ENV_LX_PROPAGATED: &str = "LX_PROPAGATED";
 
+/// Enable verbose PTY byte-stream tracing (pty↔ui directions, detected
+/// escape-sequence signals, printable preview). Off by default — the
+/// trace logs are only useful when diagnosing cursor/flicker issues.
+pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
+
+/// Enable shadow-cursor trace logs emitted from the UI overlay. Implies
+/// PTY trace so the two streams can be correlated in a single log.
+pub const ENV_LAYMUX_CURSOR_TRACE: &str = "LAYMUX_CURSOR_TRACE";
+
 // ── Timeouts & limits ──────────────────────────────────────────────
 
 /// How long a propagation flag remains valid before expiring.
