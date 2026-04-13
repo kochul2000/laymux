@@ -7,8 +7,14 @@
  * observer effect that distorts the exact cursor/flicker behaviour we are
  * trying to diagnose.
  *
- * Enable at build time with `VITE_LAYMUX_CURSOR_TRACE=1`, or at runtime via
- * `localStorage.setItem(CURSOR_TRACE_STORAGE_KEY, "1")`.
+ * Enable at **build time** with `VITE_LAYMUX_CURSOR_TRACE=1` (baked into
+ * the Vite bundle), or at **runtime** via
+ * `localStorage.setItem(CURSOR_TRACE_STORAGE_KEY, "1")` (no rebuild
+ * needed — just refresh the webview).
+ *
+ * Note: the matching Rust PTY trace (`LAYMUX_PTY_TRACE=1`) is a separate,
+ * process-level env var. To correlate both sides in one debugging session
+ * you must enable each independently; there is no unified flag.
  *
  * Related docs:
  * - docs/terminal/fix-flicker.md

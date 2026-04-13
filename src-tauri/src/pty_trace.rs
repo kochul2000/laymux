@@ -5,9 +5,26 @@
 //! (OSC 133/633 prompt boundaries, DECSET 2026 synchronized output,
 //! ESC 7/8 / CSI s/u cursor save-restore, alt-buffer switches).
 //!
-//! The tracing is gated behind environment variables so production
-//! builds pay no cost. See [`ENV_LAYMUX_PTY_TRACE`] /
-//! [`ENV_LAYMUX_CURSOR_TRACE`] in `constants.rs`.
+//! # Scope
+//!
+//! This module only covers the **Rust-side** PTY byte trace. The matching
+//! shadow-cursor trace on the UI lives in `ui/src/lib/cursor-trace.ts` and
+//! is gated independently — there is no `LAYMUX_CURSOR_TRACE` env var on
+//! the Rust side. To see both streams together, enable Rust PTY tracing
+//! with `LAYMUX_PTY_TRACE=1` and the UI tracer with either the
+//! `VITE_LAYMUX_CURSOR_TRACE=1` build flag or
+//! `localStorage["laymux:cursor-trace"]="1"` at runtime.
+//!
+//! # Cost profile
+//!
+//! When tracing is off (the default), `is_pty_trace_enabled()` returns a
+//! cached `false` and the callers skip this module entirely. When tracing
+//! is on, each chunk is scanned twice: once by `summarize_terminal_bytes`
+//! (UTF-8 lossy + escape_default) and once by `detect_terminal_signals`
+//! (needle scan). On very large chunks (e.g. a full vim redraw) the
+//! double pass is a known tradeoff — the diagnostic user is expected to
+//! accept some observer effect. If this ever blocks a real investigation,
+//! combine both into a single streaming scanner.
 //!
 //! Related reference docs:
 //! - `docs/terminal/fix-flicker.md`
@@ -16,7 +33,7 @@
 
 use std::sync::OnceLock;
 
-use crate::constants::{ENV_LAYMUX_CURSOR_TRACE, ENV_LAYMUX_PTY_TRACE};
+use crate::constants::ENV_LAYMUX_PTY_TRACE;
 
 /// Maximum byte length of a `summarize_terminal_bytes` preview before a
 /// trailing ellipsis is appended. Chosen to fit a single log line.
@@ -25,6 +42,17 @@ const PREVIEW_BYTE_LIMIT: usize = 240;
 /// Escape-sequence signals detected in a PTY chunk. The detector scans for
 /// each needle exactly once, so adding entries here is O(N·M) in the chunk
 /// but M is tiny and the detector only runs when tracing is enabled.
+///
+/// Matching is **literal-prefix-only**. This is intentional for OSC 133/633
+/// (which carry optional `;param` tails — we only care that the category
+/// fired) and for `DEC2026`/`ALT1049` (`h`/`l` suffixes share a prefix).
+///
+/// One minor caveat: `\x1b[s` / `\x1b[u` are the 3-byte SCOSC/SCORC cursor
+/// save/restore sequences. A longer CSI that happens to end in `s`/`u` such
+/// as `\x1b[1;2s` (set scroll region) has a *different* byte sequence and
+/// does NOT match — no false positive. The only way these entries misfire
+/// is if a chunk literally contains the 3 bytes `ESC [ s` as a substring
+/// of some malformed stream, which is diagnostic noise we can live with.
 const SIGNAL_CHECKS: &[(&[u8], &str)] = &[
     (b"\x1b]133;A", "OSC133:A"),
     (b"\x1b]133;B", "OSC133:B"),
@@ -57,16 +85,6 @@ fn env_flag_enabled(name: &str) -> bool {
 pub fn is_pty_trace_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| env_flag_enabled(ENV_LAYMUX_PTY_TRACE))
-}
-
-/// Returns `true` when cursor tracing should be emitted. Setting
-/// `LAYMUX_PTY_TRACE` alone also enables this so the two streams stay
-/// interleaved in the same log.
-pub fn is_cursor_trace_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        env_flag_enabled(ENV_LAYMUX_CURSOR_TRACE) || env_flag_enabled(ENV_LAYMUX_PTY_TRACE)
-    })
 }
 
 /// Render a PTY byte slice as an escaped, length-capped preview suitable
