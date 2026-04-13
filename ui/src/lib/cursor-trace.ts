@@ -1,11 +1,13 @@
 /**
  * Shadow-cursor diagnostic tracing.
  *
- * Purely client-side: we log to `console` only. We deliberately do NOT send
- * trace events to the Rust backend — the overlay update path runs on every
- * animation frame, and pushing a Tauri `invoke` on each would introduce an
- * observer effect that distorts the exact cursor/flicker behaviour we are
- * trying to diagnose.
+ * Default sink is `console` only. Optionally — when the UI *and* Rust
+ * gates are both on — events are also **batched** once per
+ * `requestAnimationFrame` and shipped to the Rust side via a single
+ * `invoke` call, where they interleave with the PTY trace in the same
+ * `tracing` stream. The batching is what keeps the observer effect
+ * bounded: we pay at most one IPC hop per frame regardless of how
+ * many shadow-cursor events fire in that frame.
  *
  * Enable at **build time** with `VITE_LAYMUX_CURSOR_TRACE=1` (baked into
  * the Vite bundle), or at **runtime** via
@@ -21,6 +23,8 @@
  * - docs/terminal/xterm-shadow-cursor-architecture.md
  * - docs/terminal/xterm-cursor-repaint-analysis.md
  */
+
+import { invoke } from "@tauri-apps/api/core";
 
 export const CURSOR_TRACE_STORAGE_KEY = "laymux:cursor-trace";
 
@@ -75,6 +79,32 @@ export function isCursorTraceEnabled(deps: CursorTraceDeps = {}): boolean {
   return isTruthyFlag(readStorage(storage));
 }
 
+type BatchedEvent = { timestamp: string; event: string; payload?: string };
+const pendingBatches = new Map<string, BatchedEvent[]>();
+let batchFlushScheduled = false;
+
+function scheduleBatchFlush(): void {
+  if (batchFlushScheduled) return;
+  batchFlushScheduled = true;
+  const run = () => {
+    batchFlushScheduled = false;
+    if (pendingBatches.size === 0) return;
+    const snapshot = Array.from(pendingBatches.entries());
+    pendingBatches.clear();
+    for (const [terminalId, events] of snapshot) {
+      if (events.length === 0) continue;
+      void invoke("log_terminal_trace_batch", { terminalId, events }).catch(() => {
+        // Swallow: diagnostic path must never propagate errors to callers.
+      });
+    }
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(run);
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
 export function createCursorTracer(
   instanceId: string,
   deps: CursorTraceDeps = {},
@@ -83,6 +113,19 @@ export function createCursorTracer(
   const now = deps.now ?? (() => new Date().toISOString());
   return (event, payload) => {
     if (!isCursorTraceEnabled(deps)) return;
-    logger.log(`[cursor-trace][${now()}][${instanceId}] ${event}`, payload ?? {});
+    const ts = now();
+    logger.log(`[cursor-trace][${ts}][${instanceId}] ${event}`, payload ?? {});
+    // Skip the IPC path in unit tests (indicated by the caller passing a
+    // custom logger). In production it is also opt-in via the UI gate.
+    if (!deps.logger) {
+      const queue = pendingBatches.get(instanceId) ?? [];
+      queue.push({
+        timestamp: ts,
+        event,
+        payload: payload ? JSON.stringify(payload) : undefined,
+      });
+      pendingBatches.set(instanceId, queue);
+      scheduleBatchFlush();
+    }
   };
 }

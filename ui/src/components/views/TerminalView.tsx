@@ -27,6 +27,12 @@ import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { createCursorTracer } from "@/lib/cursor-trace";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
+import {
+  applyActivityLeftTuiToShadowCursor,
+  applyDec2026ResetToShadowCursor,
+  isOverlayCaretActivity,
+  type ShadowCursorState,
+} from "@/lib/shadow-cursor-state";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -163,25 +169,6 @@ function hasDecModeParam(params: readonly (number | number[])[], mode: number): 
 
 export function shouldEnableTerminalWebgl(): boolean {
   return true;
-}
-
-function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
-  // Claude Code uses DEC 2026 (synchronized output) which positions the native
-  // cursor correctly at frame end — overlay is unnecessary and creates artifacts.
-  return activity?.type === "interactiveApp" && activity.name === "Codex";
-}
-
-interface ShadowCursorState {
-  commandStartLine: number;
-  commandStartX: number;
-  cursorX: number;
-  cursorAbsY: number;
-  hasPromptBoundary: boolean;
-  hasSyncFramePosition: boolean;
-  isComposing: boolean;
-  isInputPhase: boolean;
-  isRepaintInProgress: boolean;
-  isAltBufferActive: boolean;
 }
 
 function getBufferCursorAbsY(terminal: Terminal): number {
@@ -684,14 +671,22 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
-          if (
-            isOverlayCaretActivity(activityRef.current) &&
-            !shadowCursorRef.current.hasPromptBoundary
-          ) {
-            // TUI app (Claude/Codex) using only DEC 2026 without OSC 133:
-            // cursor position at frame end is the app's intended cursor position.
-            syncShadowCursorToBuffer();
-            shadowCursorRef.current.hasSyncFramePosition = true;
+          if (isOverlayCaretActivity(activityRef.current)) {
+            // TUI DEC 2026 frame just flushed → snapshot the buffer
+            // cursor as the authoritative shadow cursor. See
+            // `shadow-cursor-state.ts` for why stale OSC 133 flags
+            // from a prior shell session must be cleared here.
+            const activeBuffer = terminal.buffer.active as { cursorX?: number };
+            const bufferCursorAbsY = getBufferCursorAbsY(terminal);
+            Object.assign(
+              shadowCursorRef.current,
+              applyDec2026ResetToShadowCursor(
+                shadowCursorRef.current,
+                activityRef.current,
+                activeBuffer.cursorX ?? 0,
+                bufferCursorAbsY,
+              ),
+            );
             scheduleOverlayCaretUpdate();
           } else {
             scheduleShadowCursorSync();
@@ -1255,6 +1250,20 @@ export function TerminalView({
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
   const font = useSettingsStore((s) => s.resolveFont(profile));
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
+  const prevActivityIsTuiRef = useRef<boolean>(false);
+  {
+    const isTui = isOverlayCaretActivity(activity);
+    if (prevActivityIsTuiRef.current && !isTui) {
+      // Leaving a TUI overlay activity (e.g. Codex exited) → clear the
+      // per-frame sync-frame snapshot so OSC 133 from the returning
+      // shell drives the overlay. See `shadow-cursor-state.ts`.
+      Object.assign(
+        shadowCursorRef.current,
+        applyActivityLeftTuiToShadowCursor(shadowCursorRef.current),
+      );
+    }
+    prevActivityIsTuiRef.current = isTui;
+  }
   activityRef.current = activity;
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);

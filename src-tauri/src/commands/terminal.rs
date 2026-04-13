@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
@@ -596,6 +597,47 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         notifs.retain(|n| n.terminal_id != id);
     }
 
+    Ok(())
+}
+
+/// One shadow-cursor trace sample emitted by the UI. The UI batches
+/// events for the duration of a single `requestAnimationFrame` tick so
+/// the hot render path pays one IPC hop per frame instead of one per
+/// event. The payload is a JSON-stringified snapshot so the Rust side
+/// does not need to mirror every shadow-cursor field type.
+#[derive(Deserialize)]
+pub struct CursorTraceEvent {
+    #[serde(alias = "ts")]
+    pub timestamp: String,
+    pub event: String,
+    #[serde(default)]
+    pub payload: Option<String>,
+}
+
+/// Diagnostic-only: flush a rAF-batched window of UI shadow-cursor
+/// events into the same `tracing` stream that carries the PTY trace,
+/// so the two layers interleave naturally in the log. Gated by
+/// `LAYMUX_CURSOR_TRACE` (or `LAYMUX_PTY_TRACE` implicitly). A no-op
+/// when either the flag is off or the batch is empty, so production
+/// builds pay nothing beyond the UI-side gate that would have stopped
+/// the `invoke` in the first place.
+#[tauri::command]
+pub fn log_terminal_trace_batch(
+    terminal_id: String,
+    events: Vec<CursorTraceEvent>,
+) -> Result<(), String> {
+    if !pty_trace::is_cursor_trace_enabled() {
+        return Ok(());
+    }
+    for ev in events {
+        tracing::info!(
+            terminal_id = %terminal_id,
+            ts = %ev.timestamp,
+            event = %ev.event,
+            payload = ev.payload.as_deref().unwrap_or(""),
+            "UI cursor trace"
+        );
+    }
     Ok(())
 }
 

@@ -94,6 +94,20 @@ pub fn is_pty_trace_enabled() -> bool {
     *ENABLED.get_or_init(|| env_flag_enabled(ENV_LAYMUX_PTY_TRACE))
 }
 
+/// Returns `true` when the UI-side cursor tracer should be allowed to send
+/// batched events to the Rust side. Off by default — callers must also be
+/// gated on the UI flag (`VITE_LAYMUX_CURSOR_TRACE` or
+/// `localStorage["laymux:cursor-trace"]="1"`). Reading both sides is how
+/// we keep the hot render path free from observer effects unless the
+/// developer has opted in at both layers.
+pub fn is_cursor_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        env_flag_enabled(crate::constants::ENV_LAYMUX_CURSOR_TRACE)
+            || env_flag_enabled(ENV_LAYMUX_PTY_TRACE)
+    })
+}
+
 /// Render a PTY byte slice as an escaped, length-capped preview suitable
 /// for a single log line. Control characters and non-UTF-8 bytes are
 /// escaped; the result is truncated on a char boundary so the function

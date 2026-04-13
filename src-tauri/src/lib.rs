@@ -109,6 +109,7 @@ pub fn run() {
             commands::create_terminal_session,
             commands::resize_terminal,
             commands::write_to_terminal,
+            commands::log_terminal_trace_batch,
             commands::close_terminal_session,
             commands::mark_claude_terminal,
             commands::is_claude_terminal,
