@@ -21,9 +21,7 @@ const baseInput = {
   isInputPhase: false,
 } as const;
 
-/** Must exceed the deferred-finalize timeout (100 ms) in the controller. */
-const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-const finalizeTick = () => tick(150);
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("resolveVisualCaretOwner", () => {
   it("hides the caret when gating conditions fail", () => {
@@ -262,10 +260,10 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
     textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
 
-    // Deferred reset: state stays active until the finalize timeout fires
+    // Deferred reset: state stays active until the microtask fires
     expect(controller.getState().active).toBe(true);
 
-    await finalizeTick();
+    await tick();
 
     expect(controller.getState()).toMatchObject({
       active: false,
@@ -369,7 +367,7 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uB2E4\uB978" }));
 
     // Let the deferred reset fire — simulates time passing (user pressed space, etc.)
-    await finalizeTick();
+    await tick();
 
     // Second composition starts fresh: "말"
     textarea.value = "\uB2E4\uB978\uB9D0";

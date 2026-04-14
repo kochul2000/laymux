@@ -385,15 +385,10 @@ export function createImeCompositionController(
 
   const handleCompositionEnd = () => {
     // Don't finalize immediately — schedule a deferred reset.
-    // If a new compositionstart arrives before the timeout fires
+    // If a new compositionstart arrives in the same event-loop tick
     // (Korean carry-over), we cancel this timeout and continue.
     // This mirrors WT's pattern where OnEndComposition decrements
     // the counter and only finalizes when it reaches 0.
-    //
-    // The timeout must be long enough for the carry-over compositionstart
-    // to arrive. On some IME / browser combinations the two events land
-    // in separate macrotasks, so setTimeout(0) is too short.  100 ms is
-    // imperceptible to the user and survives any realistic event gap.
     phase = "pending-finalize";
     latestCompositionDisplayText = "";
 
@@ -405,7 +400,7 @@ export function createImeCompositionController(
     pendingFinalizeTimeout = setTimeout(() => {
       pendingFinalizeTimeout = null;
       reset();
-    }, 100);
+    }, 0);
   };
 
   const handleInputLikeEvent = () => {
