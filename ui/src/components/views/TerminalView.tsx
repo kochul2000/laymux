@@ -1539,27 +1539,12 @@ export function TerminalView({
     }
   }, [scrollbarStyleForEffect]);
 
-  const overlayCaretColor = (() => {
-    const scheme = currentSchemeName
-      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
-      : undefined;
-    return scheme?.cursorColor || "#FFFFFF";
-  })();
-
-  const termFg = (() => {
-    const scheme = currentSchemeName
-      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
-      : undefined;
-    return scheme?.foreground || "#F0F0F0";
-  })();
-
-  // Resolve terminal background for padding area
-  const termBg = (() => {
-    const scheme = currentSchemeName
-      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
-      : undefined;
-    return scheme?.background || "#1e1e2e";
-  })();
+  const currentScheme = currentSchemeName
+    ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+    : undefined;
+  const overlayCaretColor = currentScheme?.cursorColor || "#FFFFFF";
+  const termFg = currentScheme?.foreground || "#F0F0F0";
+  const termBg = currentScheme?.background || "#1e1e2e";
 
   // Read padding from profile settings
   const padding = useSettingsStore((s) => s.profiles.find((p) => p.name === profile)?.padding);

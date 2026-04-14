@@ -4,8 +4,10 @@
  * `LAYMUX_PTY_TRACE=1 LAYMUX_CURSOR_TRACE=1` interleaved logs.
  *
  * Files (same directory):
- *   codex-footer-frame.log — the 16-line raw slice as it appeared in
- *     the live `tracing` stream (PTY chunks + UI cursor trace events).
+ *   docs/terminal/cursor-jump-evidence/codex-footer-frame.log —
+ *     the 16-line raw slice as it appeared in the live `tracing` stream
+ *     (PTY chunks + UI cursor trace events). Single source of truth;
+ *     this fixture reads that file via a relative path.
  *
  * Companion prose write-up:
  *   docs/terminal/cursor-jump-evidence/README.md
@@ -22,7 +24,7 @@ import { join } from "path";
 
 /** Raw 16-line trace slice — kept for grep-ability and forensic reads. */
 export const RAW_TRACE_SLICE: string = readFileSync(
-  join(__dirname, "codex-footer-frame.log"),
+  join(__dirname, "../../../../docs/terminal/cursor-jump-evidence/codex-footer-frame.log"),
   "utf-8",
 ).replace(/\r\n/g, "\n");
 
