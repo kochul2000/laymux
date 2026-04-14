@@ -1566,9 +1566,11 @@ export function TerminalView({
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
     "--terminal-foreground-color": string;
+    "--terminal-background-color": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
     "--terminal-foreground-color": termFg,
+    "--terminal-background-color": termBg,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };
@@ -1586,6 +1588,7 @@ export function TerminalView({
         data-testid={`terminal-composition-preview-${instanceId}`}
         className="terminal-composition-preview pointer-events-none absolute"
         style={{
+          background: termBg,
           opacity: 0,
           color: termFg,
           fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`,

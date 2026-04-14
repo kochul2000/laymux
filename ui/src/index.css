@@ -197,6 +197,7 @@
   left: 0;
   white-space: pre;
   color: var(--terminal-foreground-color, #f0f0f0);
+  background: var(--terminal-background-color, #0c0c0c);
   will-change: transform;
   z-index: 2;
 }
