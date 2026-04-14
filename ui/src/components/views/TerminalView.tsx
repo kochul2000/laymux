@@ -916,13 +916,6 @@ export function TerminalView({
         preview: JSON.stringify(data.slice(0, 80)),
         compositionActive: compositionPreviewRef.current.active,
       });
-      if (compositionPreviewRef.current.active) {
-        trace("terminal-onData-skipped", {
-          reason: "ime-composition-active",
-          bytes: data.length,
-        });
-        return;
-      }
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
     });
