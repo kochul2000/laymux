@@ -1487,6 +1487,13 @@ export function TerminalView({
     return scheme?.cursorColor || "#FFFFFF";
   })();
 
+  const termFg = (() => {
+    const scheme = currentSchemeName
+      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+      : undefined;
+    return scheme?.foreground || "#F0F0F0";
+  })();
+
   // Resolve terminal background for padding area
   const termBg = (() => {
     const scheme = currentSchemeName
@@ -1509,8 +1516,10 @@ export function TerminalView({
 
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
+    "--terminal-foreground-color": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
+    "--terminal-foreground-color": termFg,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };
@@ -1527,7 +1536,11 @@ export function TerminalView({
         ref={compositionPreviewRefEl}
         data-testid={`terminal-composition-preview-${instanceId}`}
         className="terminal-composition-preview pointer-events-none absolute"
-        style={{ opacity: 0, fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace` }}
+        style={{
+          opacity: 0,
+          color: termFg,
+          fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+        }}
       />
       <div
         ref={overlayCaretRef}
