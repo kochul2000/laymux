@@ -75,12 +75,19 @@ export function stringCellWidth(text: string): number {
   return width;
 }
 
-function readTextareaState(textarea: HTMLTextAreaElement): Pick<
+function readTextareaState(
+  textarea: HTMLTextAreaElement,
+  compositionStartUtf16Index: number,
+  compositionEndUtf16Index: number = textarea.value.length,
+): Pick<
   CompositionPreviewState,
   "text" | "caretUtf16Index" | "caretCellOffset" | "textCellWidth"
 > {
-  const caretUtf16Index = textarea.selectionStart ?? textarea.value.length;
-  const text = textarea.value;
+  const safeStart = Math.max(0, Math.min(compositionStartUtf16Index, textarea.value.length));
+  const safeEnd = Math.max(safeStart, Math.min(compositionEndUtf16Index, textarea.value.length));
+  const text = textarea.value.slice(safeStart, safeEnd);
+  const absoluteCaretUtf16Index = textarea.selectionStart ?? safeEnd;
+  const caretUtf16Index = Math.max(0, Math.min(absoluteCaretUtf16Index, safeEnd) - safeStart);
   return {
     text,
     caretUtf16Index,
@@ -171,6 +178,8 @@ export function createImeCompositionController(
 ): ImeCompositionController {
   let textarea: HTMLTextAreaElement | null = null;
   let state = createEmptyState();
+  let compositionStartUtf16Index = 0;
+  let compositionEndUtf16Index = 0;
 
   const emit = () => {
     options.onStateChange?.(state);
@@ -182,6 +191,8 @@ export function createImeCompositionController(
   };
 
   const reset = () => {
+    compositionStartUtf16Index = 0;
+    compositionEndUtf16Index = 0;
     state = createEmptyState();
     emit();
   };
@@ -189,23 +200,41 @@ export function createImeCompositionController(
   const handleCompositionStart = () => {
     const anchor = options.getAnchor();
     const nextTextarea = textarea;
+    compositionStartUtf16Index = nextTextarea?.value.length ?? 0;
+    compositionEndUtf16Index = compositionStartUtf16Index;
     update({
       active: true,
       anchorBufferX: anchor.cursorX,
       anchorBufferAbsY: anchor.cursorAbsY,
-      ...(nextTextarea ? readTextareaState(nextTextarea) : { text: "", caretUtf16Index: 0 }),
+      ...(nextTextarea
+        ? readTextareaState(
+            nextTextarea,
+            compositionStartUtf16Index,
+            compositionEndUtf16Index,
+          )
+        : { text: "", caretUtf16Index: 0, caretCellOffset: 0, textCellWidth: 0 }),
     });
   };
 
-  const handleCompositionUpdate = () => {
-    if (!textarea) return;
+  const syncPreviewFromTextareaSlice = () => {
+    if (!textarea || !state.active) return;
+    compositionEndUtf16Index = textarea.value.length;
+    update(readTextareaState(textarea, compositionStartUtf16Index, compositionEndUtf16Index));
+  };
+
+  const handleCompositionUpdate = (event: CompositionEvent) => {
     const anchor = options.getAnchor();
+    const previewText = event.data ?? "";
     update({
       active: true,
       anchorBufferX: anchor.cursorX,
       anchorBufferAbsY: anchor.cursorAbsY,
-      ...readTextareaState(textarea),
+      text: previewText,
+      caretUtf16Index: previewText.length,
+      caretCellOffset: stringCellWidth(previewText),
+      textCellWidth: stringCellWidth(previewText),
     });
+    setTimeout(syncPreviewFromTextareaSlice, 0);
   };
 
   const handleCompositionEnd = () => {
@@ -213,8 +242,7 @@ export function createImeCompositionController(
   };
 
   const handleInputLikeEvent = () => {
-    if (!textarea || !state.active) return;
-    update(readTextareaState(textarea));
+    syncPreviewFromTextareaSlice();
   };
 
   const unbind = () => {

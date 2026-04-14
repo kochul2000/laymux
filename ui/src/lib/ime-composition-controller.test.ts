@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createImeCompositionController,
   getCompositionPreviewCursor,
   getCompositionPreviewLayout,
   resolveVisualCaretOwner,
@@ -189,6 +190,69 @@ describe("getCompositionPreviewLayout", () => {
       renderedText: "가\n나",
       rowCount: 2,
       maxRowCellWidth: 9,
+    });
+  });
+});
+
+describe("createImeCompositionController", () => {
+  it("tracks only the active composition slice instead of the whole textarea value", async () => {
+    const states: string[] = [];
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 4, cursorAbsY: 9 }),
+      onStateChange: (state) => {
+        states.push(state.text);
+      },
+    });
+    const textarea = document.createElement("textarea");
+    textarea.value = "plain";
+    textarea.selectionStart = textarea.value.length;
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "plain\u3131";
+    textarea.selectionStart = textarea.value.length;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    textarea.value = "plain\uac00";
+    textarea.selectionStart = textarea.value.length;
+    textarea.dispatchEvent(new Event("input"));
+
+    expect(controller.getState()).toMatchObject({
+      active: true,
+      anchorBufferX: 4,
+      anchorBufferAbsY: 9,
+      text: "\uac00",
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
+    });
+    expect(states).not.toContain("plain\uac00");
+
+    controller.dispose();
+  });
+
+  it("resets after compositionend so the preview does not linger into the next composition", () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
+    });
+    const textarea = document.createElement("textarea");
+    textarea.value = "abc";
+    textarea.selectionStart = textarea.value.length;
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "abc\u3131";
+    textarea.selectionStart = textarea.value.length;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+
+    expect(controller.getState()).toMatchObject({
+      active: false,
+      text: "",
+      caretUtf16Index: 0,
+      caretCellOffset: 0,
+      textCellWidth: 0,
     });
   });
 });
