@@ -441,6 +441,9 @@ export function TerminalView({
           cursorAbsY: getBufferCursorAbsY(terminal),
         };
       },
+      onTrace: (event, payload) => {
+        trace(event, payload);
+      },
       onStateChange: (state) => {
         const wasActive = compositionPreviewRef.current.active;
         compositionPreviewRef.current = state;

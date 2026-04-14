@@ -11,6 +11,7 @@ export type CompositionPreviewState = {
 type CompositionControllerOptions = {
   getAnchor: () => { cursorX: number; cursorAbsY: number };
   onStateChange?: (state: CompositionPreviewState) => void;
+  onTrace?: (event: string, payload: Record<string, unknown>) => void;
 };
 
 type BufferAnchor = {
@@ -163,6 +164,14 @@ function getAnchoredCompositionState(
   };
 }
 
+function traceComposition(
+  options: CompositionControllerOptions,
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  options.onTrace?.(event, payload);
+}
+
 export type ImeCompositionController = {
   bind(textarea: HTMLTextAreaElement): void;
   dispose(): void;
@@ -303,13 +312,25 @@ export function createImeCompositionController(
           )
         : { text: "", caretUtf16Index: 0, caretCellOffset: 0, textCellWidth: 0 }),
     });
+    traceComposition(options, "ime-composition-start", {
+      baseText: compositionBaseText,
+      anchorBufferX: anchor.cursorX,
+      anchorBufferAbsY: anchor.cursorAbsY,
+      textareaValue: nextTextarea?.value ?? "",
+      selectionStart: nextTextarea?.selectionStart ?? null,
+    });
   };
 
   const syncPreviewFromTextareaSlice = () => {
     cancelPendingSync();
     if (!textarea || !state.active) return;
     compositionEndUtf16Index = textarea.value.length;
-    const anchoredState = getAnchoredCompositionState(textarea, compositionBaseText, compositionBaseAnchor);
+    const anchoredState = getAnchoredCompositionState(
+      textarea,
+      compositionBaseText,
+      compositionBaseAnchor,
+    );
+    const changedRange = getChangedRange(compositionBaseText, textarea.value);
     const previewText =
       latestCompositionDisplayText &&
       latestCompositionDisplayText.length > anchoredState.text.length &&
@@ -322,6 +343,18 @@ export function createImeCompositionController(
       caretUtf16Index: previewText.length,
       caretCellOffset: stringCellWidth(previewText),
       textCellWidth: stringCellWidth(previewText),
+    });
+    traceComposition(options, "ime-composition-sync", {
+      baseText: compositionBaseText,
+      textareaValue: textarea.value,
+      selectionStart: textarea.selectionStart ?? null,
+      latestCompositionDisplayText,
+      changedStartUtf16Index: changedRange.startUtf16Index,
+      changedEndUtf16Index: changedRange.endUtf16Index,
+      changedText: changedRange.text,
+      previewText,
+      previewAnchorBufferX: anchoredState.anchorBufferX,
+      previewAnchorBufferAbsY: anchoredState.anchorBufferAbsY,
     });
   };
 
@@ -339,14 +372,29 @@ export function createImeCompositionController(
 
   const handleCompositionUpdate = (event: CompositionEvent) => {
     latestCompositionDisplayText = event.data ?? "";
+    traceComposition(options, "ime-composition-update", {
+      eventData: event.data ?? "",
+      textareaValue: textarea?.value ?? "",
+      selectionStart: textarea?.selectionStart ?? null,
+    });
     schedulePreviewSync();
   };
 
   const handleCompositionEnd = () => {
+    traceComposition(options, "ime-composition-end", {
+      textareaValue: textarea?.value ?? "",
+      selectionStart: textarea?.selectionStart ?? null,
+      finalPreviewText: state.text,
+    });
     reset();
   };
 
   const handleInputLikeEvent = () => {
+    traceComposition(options, "ime-composition-input-like", {
+      textareaValue: textarea?.value ?? "",
+      selectionStart: textarea?.selectionStart ?? null,
+      active: state.active,
+    });
     schedulePreviewSync();
   };
 
