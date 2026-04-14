@@ -476,6 +476,11 @@ export function TerminalView({
       const term = terminalRef.current;
       if (!overlay || !previewEl || !host || !term) return;
 
+      const hideOverlay = () => {
+        overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
+      };
+
       if (
         !openedRef.current ||
         !isFocusedRef.current ||
@@ -483,8 +488,7 @@ export function TerminalView({
         (!compositionPreviewRef.current.active && !isOverlayCaretActivity(activityRef.current)) ||
         syncOutputActiveRef.current
       ) {
-        overlay.style.opacity = "0";
-        previewEl.style.opacity = "0";
+        hideOverlay();
         trace("overlay-hidden", {
           reason: "gating",
           opened: openedRef.current,
@@ -503,8 +507,7 @@ export function TerminalView({
       const targetRect = canvas?.getBoundingClientRect() ?? screen?.getBoundingClientRect();
       const hostRect = host.getBoundingClientRect();
       if (!targetRect || term.cols <= 0 || term.rows <= 0) {
-        overlay.style.opacity = "0";
-        previewEl.style.opacity = "0";
+        hideOverlay();
         return;
       }
 
@@ -516,8 +519,7 @@ export function TerminalView({
         cellWidth <= 0 ||
         cellHeight <= 0
       ) {
-        overlay.style.opacity = "0";
-        previewEl.style.opacity = "0";
+        hideOverlay();
         return;
       }
 
@@ -535,8 +537,7 @@ export function TerminalView({
         isInputPhase: shadowCursor.isInputPhase,
       });
       if (caretOwner === "alt-buffer") {
-        overlay.style.opacity = "0";
-        previewEl.style.opacity = "0";
+        hideOverlay();
         trace("overlay-hidden", { reason: "alt-buffer", shadowCursor, caretOwner });
         return;
       }
@@ -578,8 +579,7 @@ export function TerminalView({
         previewEl.textContent = "";
       }
       if (cursorY < 0 || cursorY >= term.rows) {
-        overlay.style.opacity = "0";
-        previewEl.style.opacity = "0";
+        hideOverlay();
         trace("overlay-hidden", {
           reason: "viewport",
           cursorX,
