@@ -422,8 +422,8 @@ export function TerminalView({
       if (
         !openedRef.current ||
         !isFocusedRef.current ||
-        !stabilizeInteractiveCursorRef.current ||
-        !isOverlayCaretActivity(activityRef.current) ||
+        (!compositionPreviewRef.current.active && !stabilizeInteractiveCursorRef.current) ||
+        (!compositionPreviewRef.current.active && !isOverlayCaretActivity(activityRef.current)) ||
         syncOutputActiveRef.current
       ) {
         overlay.style.opacity = "0";
