@@ -81,27 +81,11 @@ export function stringCellWidth(text: string): number {
   return width;
 }
 
-function readTextareaState(
-  textarea: HTMLTextAreaElement,
-  compositionStartUtf16Index: number,
-  compositionEndUtf16Index: number = textarea.value.length,
-): Pick<
-  CompositionPreviewState,
-  "text" | "caretUtf16Index" | "caretCellOffset" | "textCellWidth"
-> {
-  const safeStart = Math.max(0, Math.min(compositionStartUtf16Index, textarea.value.length));
-  const safeEnd = Math.max(safeStart, Math.min(compositionEndUtf16Index, textarea.value.length));
-  const text = textarea.value.slice(safeStart, safeEnd);
-  const absoluteCaretUtf16Index = textarea.selectionStart ?? safeEnd;
-  const caretUtf16Index = Math.max(0, Math.min(absoluteCaretUtf16Index, safeEnd) - safeStart);
-  return {
-    text,
-    caretUtf16Index,
-    caretCellOffset: stringCellWidth(text.slice(0, caretUtf16Index)),
-    textCellWidth: stringCellWidth(text),
-  };
-}
-
+/**
+ * Find the changed (inserted/replaced) range between two strings.
+ * Used in normal (non-carry-over) mode to extract only the active
+ * composition text from the textarea value.
+ */
 function getChangedRange(
   before: string,
   after: string,
@@ -134,33 +118,6 @@ function getChangedRange(
     startUtf16Index,
     endUtf16Index: afterEndUtf16Index,
     text: after.slice(startUtf16Index, afterEndUtf16Index),
-  };
-}
-
-function getAnchoredCompositionState(
-  textarea: HTMLTextAreaElement,
-  baseText: string,
-  baseAnchor: BufferAnchor,
-): Pick<
-  CompositionPreviewState,
-  "text" | "caretUtf16Index" | "caretCellOffset" | "textCellWidth" | "anchorBufferX" | "anchorBufferAbsY"
-> {
-  const changedRange = getChangedRange(baseText, textarea.value);
-  const shiftedPrefix = baseText.slice(changedRange.startUtf16Index);
-  const shiftedPrefixWidth = stringCellWidth(shiftedPrefix);
-  const absoluteCaretUtf16Index = textarea.selectionStart ?? changedRange.endUtf16Index;
-  const caretUtf16Index = Math.max(
-    0,
-    Math.min(absoluteCaretUtf16Index, changedRange.endUtf16Index) - changedRange.startUtf16Index,
-  );
-
-  return {
-    text: changedRange.text,
-    caretUtf16Index,
-    caretCellOffset: stringCellWidth(changedRange.text.slice(0, caretUtf16Index)),
-    textCellWidth: stringCellWidth(changedRange.text),
-    anchorBufferX: Math.max(0, baseAnchor.cursorX - shiftedPrefixWidth),
-    anchorBufferAbsY: baseAnchor.cursorAbsY,
   };
 }
 
@@ -249,18 +206,39 @@ export function getCompositionPreviewLayout(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Composition controller
+//
+// Inspired by Windows Terminal's TSF Implementation._doCompositionUpdate():
+// - Clean separation of finalized vs active composition text
+// - Deferred finalization (like WT's composition counter reaching 0)
+// - Each composition chain is tracked as a unit; carry-over is detected
+//   when compositionstart fires before the deferred reset timeout
+// ---------------------------------------------------------------------------
+
 export function createImeCompositionController(
   options: CompositionControllerOptions,
 ): ImeCompositionController {
   let textarea: HTMLTextAreaElement | null = null;
   let state = createEmptyState();
+
+  // Phase tracks the composition lifecycle:
+  //   idle → composing → pending-finalize → idle
+  //                  ↑         │  (carry-over: compositionstart before timeout)
+  //                  └─────────┘
+  let phase: "idle" | "composing" | "pending-finalize" = "idle";
+  let isCarryOver = false;
+
+  // Anchor captured at the first compositionstart — preserved across carry-overs
+  let compositionAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  // Textarea value snapshot at the start of the composition chain
   let compositionBaseText = "";
-  let compositionBaseAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  // Latest compositionupdate event.data — used for Korean split-time display
   let latestCompositionDisplayText = "";
-  let compositionStartUtf16Index = 0;
-  let compositionEndUtf16Index = 0;
+
   let pendingAnimationFrame: number | null = null;
   let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+  let pendingFinalizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const emit = () => {
     options.onStateChange?.(state);
@@ -282,79 +260,69 @@ export function createImeCompositionController(
     }
   };
 
+  const cancelPendingFinalize = () => {
+    if (pendingFinalizeTimeout !== null) {
+      clearTimeout(pendingFinalizeTimeout);
+      pendingFinalizeTimeout = null;
+    }
+  };
+
   const reset = () => {
     cancelPendingSync();
+    cancelPendingFinalize();
+    phase = "idle";
+    isCarryOver = false;
+    compositionAnchor = { cursorX: 0, cursorAbsY: 0 };
     compositionBaseText = "";
-    compositionBaseAnchor = { cursorX: 0, cursorAbsY: 0 };
     latestCompositionDisplayText = "";
-    compositionStartUtf16Index = 0;
-    compositionEndUtf16Index = 0;
     state = createEmptyState();
     emit();
   };
 
-  const handleCompositionStart = () => {
-    const anchor = options.getAnchor();
-    const nextTextarea = textarea;
-    compositionBaseText = nextTextarea?.value ?? "";
-    compositionBaseAnchor = anchor;
-    compositionStartUtf16Index = nextTextarea?.value.length ?? 0;
-    compositionEndUtf16Index = compositionStartUtf16Index;
-    update({
-      active: true,
-      anchorBufferX: anchor.cursorX,
-      anchorBufferAbsY: anchor.cursorAbsY,
-      ...(nextTextarea
-        ? readTextareaState(
-            nextTextarea,
-            compositionStartUtf16Index,
-            compositionEndUtf16Index,
-          )
-        : { text: "", caretUtf16Index: 0, caretCellOffset: 0, textCellWidth: 0 }),
-    });
-    traceComposition(options, "ime-composition-start", {
-      baseText: compositionBaseText,
-      anchorBufferX: anchor.cursorX,
-      anchorBufferAbsY: anchor.cursorAbsY,
-      textareaValue: nextTextarea?.value ?? "",
-      selectionStart: nextTextarea?.selectionStart ?? null,
-    });
-  };
-
-  const syncPreviewFromTextareaSlice = () => {
+  const syncPreview = () => {
     cancelPendingSync();
-    if (!textarea || !state.active) return;
-    compositionEndUtf16Index = textarea.value.length;
-    const anchoredState = getAnchoredCompositionState(
-      textarea,
-      compositionBaseText,
-      compositionBaseAnchor,
-    );
+    if (!textarea || phase !== "composing") return;
+
+    // Always use getChangedRange to extract only the text added since
+    // compositionBaseText. Carry-over only preserves the anchor and baseText;
+    // the preview text computation is identical for both modes.
+    // This mirrors WT's _doCompositionUpdate which always cleanly separates
+    // finalized (already echoed by shell) from active composition text.
     const changedRange = getChangedRange(compositionBaseText, textarea.value);
+    const rawText = changedRange.text;
+
+    // Korean split-time: compositionupdate may report more text than the diff
+    // (e.g., the IME shows the full syllable in progress while the textarea
+    // only has a partial jamo sequence)
     const previewText =
       latestCompositionDisplayText &&
-      latestCompositionDisplayText.length > anchoredState.text.length &&
-      latestCompositionDisplayText.endsWith(anchoredState.text)
+      latestCompositionDisplayText.length > rawText.length &&
+      latestCompositionDisplayText.endsWith(rawText)
         ? latestCompositionDisplayText
-        : anchoredState.text;
+        : rawText;
+
+    const shiftedPrefix = compositionBaseText.slice(changedRange.startUtf16Index);
+    const shiftedPrefixWidth = stringCellWidth(shiftedPrefix);
+    const anchorX = Math.max(0, compositionAnchor.cursorX - shiftedPrefixWidth);
+    const anchorAbsY = compositionAnchor.cursorAbsY;
+
     update({
-      ...anchoredState,
       text: previewText,
       caretUtf16Index: previewText.length,
       caretCellOffset: stringCellWidth(previewText),
       textCellWidth: stringCellWidth(previewText),
+      anchorBufferX: anchorX,
+      anchorBufferAbsY: anchorAbsY,
     });
+
     traceComposition(options, "ime-composition-sync", {
+      phase,
+      isCarryOver,
       baseText: compositionBaseText,
       textareaValue: textarea.value,
-      selectionStart: textarea.selectionStart ?? null,
-      latestCompositionDisplayText,
-      changedStartUtf16Index: changedRange.startUtf16Index,
-      changedEndUtf16Index: changedRange.endUtf16Index,
-      changedText: changedRange.text,
       previewText,
-      previewAnchorBufferX: anchoredState.anchorBufferX,
-      previewAnchorBufferAbsY: anchoredState.anchorBufferAbsY,
+      anchorX,
+      anchorAbsY,
     });
   };
 
@@ -362,12 +330,47 @@ export function createImeCompositionController(
     cancelPendingSync();
     pendingAnimationFrame = requestAnimationFrame(() => {
       pendingAnimationFrame = null;
-      syncPreviewFromTextareaSlice();
+      syncPreview();
     });
     pendingTimeout = setTimeout(() => {
       pendingTimeout = null;
-      syncPreviewFromTextareaSlice();
+      syncPreview();
     }, 0);
+  };
+
+  const handleCompositionStart = () => {
+    if (phase === "pending-finalize") {
+      // Carry-over detected: Korean IME committed one syllable and immediately
+      // started the next — like WT's composition counter staying above 0.
+      // Cancel the deferred reset and continue the composition chain.
+      cancelPendingFinalize();
+      isCarryOver = true;
+      // Keep compositionAnchor and compositionBaseText from the first composition
+      traceComposition(options, "ime-composition-start-carryover", {
+        baseText: compositionBaseText,
+        textareaValue: textarea?.value ?? "",
+        anchorBufferX: compositionAnchor.cursorX,
+        anchorBufferAbsY: compositionAnchor.cursorAbsY,
+      });
+    } else {
+      // Fresh composition start
+      isCarryOver = false;
+      compositionAnchor = options.getAnchor();
+      compositionBaseText = textarea?.value ?? "";
+      traceComposition(options, "ime-composition-start", {
+        baseText: compositionBaseText,
+        anchorBufferX: compositionAnchor.cursorX,
+        anchorBufferAbsY: compositionAnchor.cursorAbsY,
+        textareaValue: textarea?.value ?? "",
+      });
+    }
+
+    phase = "composing";
+    update({
+      active: true,
+      anchorBufferX: compositionAnchor.cursorX,
+      anchorBufferAbsY: compositionAnchor.cursorAbsY,
+    });
   };
 
   const handleCompositionUpdate = (event: CompositionEvent) => {
@@ -381,21 +384,33 @@ export function createImeCompositionController(
   };
 
   const handleCompositionEnd = () => {
+    // Don't finalize immediately — schedule a deferred reset.
+    // If a new compositionstart arrives in the same event-loop tick
+    // (Korean carry-over), we cancel this timeout and continue.
+    // This mirrors WT's pattern where OnEndComposition decrements
+    // the counter and only finalizes when it reaches 0.
+    phase = "pending-finalize";
+    latestCompositionDisplayText = "";
+
     traceComposition(options, "ime-composition-end", {
       textareaValue: textarea?.value ?? "",
-      selectionStart: textarea?.selectionStart ?? null,
       finalPreviewText: state.text,
     });
-    reset();
+
+    pendingFinalizeTimeout = setTimeout(() => {
+      pendingFinalizeTimeout = null;
+      reset();
+    }, 0);
   };
 
   const handleInputLikeEvent = () => {
+    if (phase === "composing") {
+      schedulePreviewSync();
+    }
     traceComposition(options, "ime-composition-input-like", {
       textareaValue: textarea?.value ?? "",
-      selectionStart: textarea?.selectionStart ?? null,
-      active: state.active,
+      phase,
     });
-    schedulePreviewSync();
   };
 
   const unbind = () => {
@@ -418,7 +433,6 @@ export function createImeCompositionController(
       textarea.addEventListener("compositionend", handleCompositionEnd);
       textarea.addEventListener("beforeinput", handleInputLikeEvent);
       textarea.addEventListener("input", handleInputLikeEvent);
-      handleInputLikeEvent();
     },
     dispose() {
       unbind();

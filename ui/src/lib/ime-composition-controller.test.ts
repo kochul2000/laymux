@@ -21,6 +21,8 @@ const baseInput = {
   isInputPhase: false,
 } as const;
 
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe("resolveVisualCaretOwner", () => {
   it("hides the caret when gating conditions fail", () => {
     expect(
@@ -222,12 +224,12 @@ describe("createImeCompositionController", () => {
     textarea.value = "plain\u3131";
     textarea.selectionStart = textarea.value.length;
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await tick();
 
     textarea.value = "plain\uac00";
     textarea.selectionStart = textarea.value.length;
     textarea.dispatchEvent(new Event("input"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await tick();
 
     expect(controller.getState()).toMatchObject({
       active: true,
@@ -243,7 +245,7 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
-  it("resets after compositionend so the preview does not linger into the next composition", () => {
+  it("resets after compositionend once the deferred finalize fires", async () => {
     const controller = createImeCompositionController({
       getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
     });
@@ -258,12 +260,167 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
     textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
 
+    // Deferred reset: state stays active until the microtask fires
+    expect(controller.getState().active).toBe(true);
+
+    await tick();
+
     expect(controller.getState()).toMatchObject({
       active: false,
       text: "",
       caretUtf16Index: 0,
       caretCellOffset: 0,
       textCellWidth: 0,
+    });
+  });
+
+  it("detects carry-over when compositionstart fires before the deferred reset", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    // First composition: "이"
+    textarea.value = "";
+    textarea.selectionStart = 0;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uC774";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uC774" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uC774" }));
+
+    // Carry-over: compositionstart fires in the same tick (before deferred reset)
+    textarea.value = "\uC774";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uC774\uB300";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
+    await tick();
+
+    // Carry-over mode: full accumulated text shown at original anchor
+    expect(controller.getState()).toMatchObject({
+      active: true,
+      text: "\uC774\uB300",
+      anchorBufferX: 20,
+      anchorBufferAbsY: 736,
+      caretUtf16Index: 2,
+      caretCellOffset: 4,
+      textCellWidth: 4,
+    });
+  });
+
+  it("detects carry-over even when compositionupdate data differs from finalized text", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    // First composition: compositionupdate shows "ㄱ" but end finalizes "이"
+    textarea.value = "";
+    textarea.selectionStart = 0;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uC774";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uC774" }));
+
+    // Carry-over in same tick
+    textarea.value = "\uC774";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uC774\uB300";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
+    await tick();
+
+    expect(controller.getState()).toMatchObject({
+      active: true,
+      text: "\uC774\uB300",
+      anchorBufferX: 20,
+      anchorBufferAbsY: 736,
+      caretUtf16Index: 2,
+      caretCellOffset: 4,
+      textCellWidth: 4,
+    });
+  });
+
+  it("starts a fresh composition after the deferred reset fires", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    // First composition: "다른"
+    textarea.value = "";
+    textarea.selectionStart = 0;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uB2E4\uB978";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB2E4\uB978" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uB2E4\uB978" }));
+
+    // Let the deferred reset fire — simulates time passing (user pressed space, etc.)
+    await tick();
+
+    // Second composition starts fresh: "말"
+    textarea.value = "\uB2E4\uB978\uB9D0";
+    textarea.selectionStart = 3;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB9D0" }));
+    await tick();
+
+    // Fresh start: only the new syllable, NOT accumulated
+    expect(controller.getState()).toMatchObject({
+      active: true,
+      text: "\uB9D0",
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
+    });
+  });
+
+  it("treats consecutive same-tick compositions as carry-over", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    // First composition: "다른"
+    textarea.value = "";
+    textarea.selectionStart = 0;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uB2E4\uB978";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB2E4\uB978" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uB2E4\uB978" }));
+
+    // Same tick: "말" starts immediately — this IS carry-over
+    textarea.value = "\uB2E4\uB978";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uB2E4\uB978\uB9D0";
+    textarea.selectionStart = 3;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB9D0" }));
+    await tick();
+
+    // Carry-over: accumulated text shown at original anchor
+    expect(controller.getState()).toMatchObject({
+      active: true,
+      text: "\uB2E4\uB978\uB9D0",
+      anchorBufferX: 20,
+      anchorBufferAbsY: 736,
+      caretUtf16Index: 3,
+      caretCellOffset: 6,
+      textCellWidth: 6,
     });
   });
 });
