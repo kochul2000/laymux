@@ -566,7 +566,7 @@ export function TerminalView({
           )}px)`;
           previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
           previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
-          previewEl.style.fontSize = `${term.options.fontSize ?? Math.max(1, cellHeight)}px`;
+          previewEl.style.fontSize = `${Math.max(1, cellHeight)}px`;
           previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
           previewEl.textContent = previewLayout.renderedText;
         } else {
