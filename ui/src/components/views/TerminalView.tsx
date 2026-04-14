@@ -501,23 +501,8 @@ export function TerminalView({
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
       }
-      if (caretOwner === "composition-preview" && compositionPreview.text) {
-        const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
-        const anchorX = compositionPreview.anchorBufferX;
-        const anchorY = compositionPreview.anchorBufferAbsY - baseY;
-        previewEl.style.opacity = "1";
-        previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
-          targetRect.top - hostRect.top + anchorY * cellHeight,
-        )}px)`;
-        previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
-        previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
-        previewEl.style.fontSize = `${Math.max(1, cellHeight)}px`;
-        previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
-        previewEl.textContent = previewLayout.renderedText;
-      } else {
-        previewEl.style.opacity = "0";
-        previewEl.textContent = "";
-      }
+      previewEl.style.opacity = "0";
+      previewEl.textContent = "";
       if (cursorY < 0 || cursorY >= term.rows) {
         overlay.style.opacity = "0";
         previewEl.style.opacity = "0";
