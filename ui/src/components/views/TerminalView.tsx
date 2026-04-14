@@ -447,7 +447,6 @@ export function TerminalView({
       },
       onTrace: (event, payload) => {
         trace(event, payload);
-        console.warn(`[ime-trace][${instanceId}] ${event}`, payload);
       },
       onStateChange: (state) => {
         const wasActive = compositionPreviewRef.current.active;
