@@ -35,11 +35,19 @@ export interface ShadowCursorState {
   frameSavedCursorAbsY?: number;
   hasPromptBoundary: boolean;
   hasSyncFramePosition: boolean;
-  isComposing: boolean;
   isInputPhase: boolean;
   isRepaintInProgress: boolean;
   isAltBufferActive: boolean;
 }
+
+export type ShadowSyncEligibility =
+  | "eligible"
+  | "composition-preview-active"
+  | "inactive"
+  | "row-mismatch"
+  | "repaint-in-progress"
+  | "alt-buffer"
+  | "sync-output-active";
 
 /**
  * Activities for which the UI replaces the native xterm cursor with an
@@ -67,10 +75,34 @@ export function isOverlayCaretActivity(
  * TUI footer repaint, is often the bottom of the screen).
  */
 export function computeUseShadowCursor(state: ShadowCursorState): boolean {
-  return (
-    (state.hasPromptBoundary && (state.isInputPhase || state.isComposing)) ||
-    state.hasSyncFramePosition
-  );
+  return (state.hasPromptBoundary && state.isInputPhase) || state.hasSyncFramePosition;
+}
+
+export function getShadowSyncEligibility(
+  state: Pick<
+    ShadowCursorState,
+    "cursorAbsY" | "isInputPhase" | "hasSyncFramePosition" | "isRepaintInProgress" | "isAltBufferActive"
+  >,
+  options: {
+    bufferAbsY?: number;
+    compositionPreviewActive: boolean;
+    syncOutputActive: boolean;
+  },
+): ShadowSyncEligibility {
+  if (options.compositionPreviewActive) return "composition-preview-active";
+  if (!(state.isInputPhase || state.hasSyncFramePosition)) return "inactive";
+  if (
+    state.hasSyncFramePosition &&
+    !state.isInputPhase &&
+    options.bufferAbsY !== undefined &&
+    options.bufferAbsY !== state.cursorAbsY
+  ) {
+    return "row-mismatch";
+  }
+  if (state.isRepaintInProgress) return "repaint-in-progress";
+  if (state.isAltBufferActive) return "alt-buffer";
+  if (options.syncOutputActive) return "sync-output-active";
+  return "eligible";
 }
 
 /**

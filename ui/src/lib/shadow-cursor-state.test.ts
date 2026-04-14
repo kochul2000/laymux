@@ -11,6 +11,7 @@ import {
   applyDec2026ResetToShadowCursor,
   applyDec2026SetToShadowCursor,
   computeUseShadowCursor,
+  getShadowSyncEligibility,
   isOverlayCaretActivity,
   type ShadowCursorState,
 } from "./shadow-cursor-state";
@@ -22,7 +23,6 @@ const baseState: ShadowCursorState = {
   cursorAbsY: 0,
   hasPromptBoundary: false,
   hasSyncFramePosition: false,
-  isComposing: false,
   isInputPhase: false,
   isRepaintInProgress: false,
   isAltBufferActive: false,
@@ -48,12 +48,6 @@ describe("computeUseShadowCursor", () => {
     ).toBe(true);
   });
 
-  it("uses shadow during IME composition even without input phase", () => {
-    expect(
-      computeUseShadowCursor({ ...baseState, hasPromptBoundary: true, isComposing: true }),
-    ).toBe(true);
-  });
-
   it("uses shadow when sync-frame snapshot is fresh (TUI DEC 2026 path)", () => {
     expect(computeUseShadowCursor({ ...baseState, hasSyncFramePosition: true })).toBe(true);
   });
@@ -61,6 +55,76 @@ describe("computeUseShadowCursor", () => {
   it("falls back to live buffer cursor when no signal is asserting shadow", () => {
     expect(computeUseShadowCursor({ ...baseState, hasPromptBoundary: true })).toBe(false);
     expect(computeUseShadowCursor(baseState)).toBe(false);
+  });
+
+  it("does not treat composition as a shadow-cursor concern any more", () => {
+    expect(
+      computeUseShadowCursor({
+        ...baseState,
+        hasPromptBoundary: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("getShadowSyncEligibility", () => {
+  it("rejects sync while composition preview is active", () => {
+    expect(
+      getShadowSyncEligibility(baseState, {
+        bufferAbsY: 0,
+        compositionPreviewActive: true,
+        syncOutputActive: false,
+      }),
+    ).toBe("composition-preview-active");
+  });
+
+  it("rejects sync when no committed shadow owner is active", () => {
+    expect(
+      getShadowSyncEligibility(baseState, {
+        bufferAbsY: 0,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("inactive");
+  });
+
+  it("rejects repaint, alt-buffer, and sync-output gates distinctly", () => {
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, isInputPhase: true, isRepaintInProgress: true },
+        { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
+      ),
+    ).toBe("repaint-in-progress");
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, isInputPhase: true, isAltBufferActive: true },
+        { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
+      ),
+    ).toBe("alt-buffer");
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, isInputPhase: true },
+        { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: true },
+      ),
+    ).toBe("sync-output-active");
+  });
+
+  it("rejects sync-frame cursor updates when the live buffer row is not the saved row", () => {
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, hasSyncFramePosition: true, cursorAbsY: 12 },
+        { bufferAbsY: 13, compositionPreviewActive: false, syncOutputActive: false },
+      ),
+    ).toBe("row-mismatch");
+  });
+
+  it("allows committed-input sync when the shadow owner is active", () => {
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, isInputPhase: true },
+        { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
+      ),
+    ).toBe("eligible");
   });
 });
 

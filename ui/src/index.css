@@ -169,6 +169,10 @@
   caret-color: transparent !important;
 }
 
+.terminal-ime-composition-active .xterm-helper-textarea {
+  caret-color: var(--terminal-overlay-caret-color, #ffffff) !important;
+}
+
 .terminal-overlay-caret {
   position: absolute;
   top: 0;
@@ -176,4 +180,18 @@
   background: var(--terminal-overlay-caret-color, #ffffff);
   will-change: transform;
   z-index: 3;
+}
+
+.terminal-composition-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: pre;
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-color: var(--terminal-overlay-caret-color, #ffffff);
+  text-underline-offset: 0.12em;
+  will-change: transform;
+  z-index: 2;
 }

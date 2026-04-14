@@ -28,9 +28,17 @@ import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { createCursorTracer } from "@/lib/cursor-trace";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import {
+  createImeCompositionController,
+  getCompositionPreviewLayout,
+  resolveVisualCaretOwner,
+  type CompositionPreviewState,
+} from "@/lib/ime-composition-controller";
+import { shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
   applyDec2026SetToShadowCursor,
+  getShadowSyncEligibility,
   isOverlayCaretActivity,
   type ShadowCursorState,
 } from "@/lib/shadow-cursor-state";
@@ -243,6 +251,7 @@ export function TerminalView({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCaretRef = useRef<HTMLDivElement>(null);
+  const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
@@ -263,6 +272,15 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
   const syncOutputActiveRef = useRef(false);
+  const compositionPreviewRef = useRef<CompositionPreviewState>({
+    active: false,
+    text: "",
+    caretUtf16Index: 0,
+    caretCellOffset: 0,
+    textCellWidth: 0,
+    anchorBufferX: 0,
+    anchorBufferAbsY: 0,
+  });
   const shadowCursorRef = useRef<ShadowCursorState>({
     commandStartLine: 0,
     commandStartX: 0,
@@ -270,7 +288,6 @@ export function TerminalView({
     cursorAbsY: 0,
     hasPromptBoundary: false,
     hasSyncFramePosition: false,
-    isComposing: false,
     isInputPhase: false,
     isRepaintInProgress: false,
     isAltBufferActive: false,
@@ -368,24 +385,39 @@ export function TerminalView({
       trace("sync-output-visibility", { active });
       overlayCaretUpdaterRef.current?.();
     };
-    const setImeCompositionState = (active: boolean) => {
-      shadowCursorRef.current.isComposing = active;
-      trace("ime-composition", {
-        active,
-        cursorX: shadowCursorRef.current.cursorX,
-        cursorAbsY: shadowCursorRef.current.cursorAbsY,
-      });
-      overlayCaretUpdaterRef.current?.();
-      if (!active) {
-        scheduleShadowCursorSync();
-      }
-    };
+    const compositionController = createImeCompositionController({
+      getAnchor: () => {
+        const activeBuffer = terminal.buffer.active as { cursorX?: number };
+        return {
+          cursorX: activeBuffer.cursorX ?? 0,
+          cursorAbsY: getBufferCursorAbsY(terminal),
+        };
+      },
+      onStateChange: (state) => {
+        const wasActive = compositionPreviewRef.current.active;
+        compositionPreviewRef.current = state;
+        wrapperRef.current?.classList.toggle("terminal-ime-composition-active", state.active);
+        trace("ime-composition-preview", state);
+        if (wasActive && !state.active) {
+          trace("ime-composition-preview-committed", {
+            anchorBufferX: compositionPreviewRef.current.anchorBufferX,
+            anchorBufferAbsY: compositionPreviewRef.current.anchorBufferAbsY,
+          });
+        }
+        overlayCaretUpdaterRef.current?.();
+        if (!state.active) {
+          scheduleShadowCursorSync();
+        }
+      },
+    });
     let overlayCaretFrame: number | undefined;
+    let helperTextarea: HTMLTextAreaElement | null = null;
     const updateOverlayCaret = () => {
       const overlay = overlayCaretRef.current;
+      const previewEl = compositionPreviewRefEl.current;
       const host = wrapperRef.current;
       const term = terminalRef.current;
-      if (!overlay || !host || !term) return;
+      if (!overlay || !previewEl || !host || !term) return;
 
       if (
         !openedRef.current ||
@@ -395,6 +427,7 @@ export function TerminalView({
         syncOutputActiveRef.current
       ) {
         overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
         trace("overlay-hidden", {
           reason: "gating",
           opened: openedRef.current,
@@ -414,6 +447,7 @@ export function TerminalView({
       const hostRect = host.getBoundingClientRect();
       if (!targetRect || term.cols <= 0 || term.rows <= 0) {
         overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
         return;
       }
 
@@ -426,29 +460,87 @@ export function TerminalView({
         cellHeight <= 0
       ) {
         overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
         return;
       }
 
+      const terminalRect = term.element?.getBoundingClientRect();
+      if (helperTextarea && terminalRect) {
+        const compositionPreview = compositionPreviewRef.current;
+        const helperAnchorX = compositionPreview.active
+          ? compositionPreview.anchorBufferX
+          : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
+        const helperAnchorY = compositionPreview.active
+          ? compositionPreview.anchorBufferAbsY - ((term.buffer.active as { baseY?: number }).baseY ?? 0)
+          : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
+        helperTextarea.style.left = `${Math.round(targetRect.left - terminalRect.left + helperAnchorX * cellWidth)}px`;
+        helperTextarea.style.top = `${Math.round(targetRect.top - terminalRect.top + helperAnchorY * cellHeight)}px`;
+        helperTextarea.style.width = `${Math.max(1, Math.round(cellWidth))}px`;
+        helperTextarea.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
+        trace("ime-anchor-update", {
+          helperAnchorX,
+          helperAnchorY,
+          compositionActive: compositionPreview.active,
+        });
+      }
+
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive) {
+      const caretOwner = resolveVisualCaretOwner({
+        opened: openedRef.current,
+        focused: isFocusedRef.current,
+        stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
+        overlayActivity: isOverlayCaretActivity(activityRef.current),
+        syncOutputActive: syncOutputActiveRef.current,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+        compositionActive: compositionPreviewRef.current.active,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        isInputPhase: shadowCursor.isInputPhase,
+      });
+      if (caretOwner === "alt-buffer") {
         overlay.style.opacity = "0";
-        trace("overlay-hidden", { reason: "alt-buffer", shadowCursor });
+        previewEl.style.opacity = "0";
+        trace("overlay-hidden", { reason: "alt-buffer", shadowCursor, caretOwner });
         return;
       }
 
       const baseY = (term.buffer.active as { baseY?: number }).baseY ?? 0;
       const useShadowCursor =
-        (shadowCursor.hasPromptBoundary &&
-          (shadowCursor.isInputPhase || shadowCursor.isComposing)) ||
-        shadowCursor.hasSyncFramePosition;
-      const cursorX = useShadowCursor
+        caretOwner === "composition-preview" ||
+        caretOwner === "sync-frame" ||
+        caretOwner === "shadow-input";
+      const compositionPreview = compositionPreviewRef.current;
+      let cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
-      const cursorY = useShadowCursor
+      let cursorY = useShadowCursor
         ? shadowCursor.cursorAbsY - baseY
         : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
+      if (caretOwner === "composition-preview") {
+        const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
+        cursorX = previewLayout.cursorX;
+        cursorY = previewLayout.cursorAbsY - baseY;
+      }
+      if (caretOwner === "composition-preview" && compositionPreview.text) {
+        const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
+        const anchorX = compositionPreview.anchorBufferX;
+        const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+        previewEl.style.opacity = "1";
+        previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
+          targetRect.top - hostRect.top + anchorY * cellHeight,
+        )}px)`;
+        previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
+        previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
+        previewEl.style.fontSize = `${Math.max(1, cellHeight)}px`;
+        previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
+        previewEl.textContent = previewLayout.renderedText;
+      } else {
+        previewEl.style.opacity = "0";
+        previewEl.textContent = "";
+      }
       if (cursorY < 0 || cursorY >= term.rows) {
         overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
         trace("overlay-hidden", {
           reason: "viewport",
           cursorX,
@@ -472,16 +564,19 @@ export function TerminalView({
         targetRect.top - hostRect.top + cursorY * cellHeight + caretMetrics.offsetY,
       )}px)`;
       trace("overlay-update", {
+        caretOwner,
         useShadowCursor,
         cursorX,
         cursorY,
+        compositionAnchorX: compositionPreview.anchorBufferX,
+        compositionAnchorAbsY: compositionPreview.anchorBufferAbsY,
+        compositionCaretCellOffset: compositionPreview.caretCellOffset,
         cursorAbsY: shadowCursor.cursorAbsY,
         hasPromptBoundary: shadowCursor.hasPromptBoundary,
         hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
         isInputPhase: shadowCursor.isInputPhase,
         isRepaintInProgress: shadowCursor.isRepaintInProgress,
         isAltBufferActive: shadowCursor.isAltBufferActive,
-        isComposing: shadowCursor.isComposing,
       });
     };
     const scheduleOverlayCaretUpdate = () => {
@@ -533,43 +628,28 @@ export function TerminalView({
     // shadow. This naturally tracks per-keystroke X advancement on the
     // input row (echo of typed glyph stays on the same row) but
     // ignores the cursor while Codex parks it on a footer row between
-    // input restores. `isComposing` is deliberately *not* a skip
-    // condition: CJK IME input echoes width-2 glyphs into the buffer
-    // mid-composition, and blocking sync there parks the overlay one
-    // wide cell behind the user's typing.
+    // input restores. Composition is now handled by the dedicated
+    // preview state/controller, so shadow sync is strictly for
+    // committed-input and sync-frame ownership.
     const scheduleShadowCursorSync = () => {
       if (pendingShadowCursorSync) return;
       pendingShadowCursorSync = true;
       queueMicrotask(() => {
         pendingShadowCursorSync = false;
         const shadowCursor = shadowCursorRef.current;
-        if (
-          !(shadowCursor.isInputPhase || shadowCursor.hasSyncFramePosition) ||
-          shadowCursor.isRepaintInProgress ||
-          shadowCursor.isAltBufferActive ||
-          syncOutputActiveRef.current
-        ) {
+        const bufferAbsY = getBufferCursorAbsY(terminal);
+        const eligibility = getShadowSyncEligibility(shadowCursor, {
+          bufferAbsY,
+          compositionPreviewActive: compositionPreviewRef.current.active,
+          syncOutputActive: syncOutputActiveRef.current,
+        });
+        if (eligibility !== "eligible") {
           trace("shadow-sync-skip", {
-            reason: "gating",
-            isInputPhase: shadowCursor.isInputPhase,
-            hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
-            isComposing: shadowCursor.isComposing,
-            isRepaintInProgress: shadowCursor.isRepaintInProgress,
-            isAltBufferActive: shadowCursor.isAltBufferActive,
-            syncOutputActive: syncOutputActiveRef.current,
+            reason: eligibility,
+            bufferAbsY,
+            shadowAbsY: shadowCursor.cursorAbsY,
           });
           return;
-        }
-        if (shadowCursor.hasSyncFramePosition && !shadowCursor.isInputPhase) {
-          const bufferAbsY = getBufferCursorAbsY(terminal);
-          if (bufferAbsY !== shadowCursor.cursorAbsY) {
-            trace("shadow-sync-skip", {
-              reason: "row-mismatch",
-              bufferAbsY,
-              shadowAbsY: shadowCursor.cursorAbsY,
-            });
-            return;
-          }
         }
         syncShadowCursorToBuffer();
         scheduleOverlayCaretUpdate();
@@ -762,6 +842,7 @@ export function TerminalView({
       return false;
     });
     const cursorMoveDisposable = terminal.onCursorMove(() => {
+      if (compositionPreviewRef.current.active) return;
       const shadowCursor = shadowCursorRef.current;
       if (shadowCursor.isAltBufferActive || syncOutputActiveRef.current) return;
       const oscPath =
@@ -772,28 +853,20 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      if (compositionPreviewRef.current.active) return;
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
       scheduleOverlayCaretUpdate();
     });
-    let helperTextarea: HTMLTextAreaElement | null = null;
-    const handleCompositionStart = () => {
-      setImeCompositionState(true);
-    };
-    const handleCompositionEnd = () => {
-      setImeCompositionState(false);
-    };
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
       ) as HTMLTextAreaElement | null;
       if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
-      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
-      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       helperTextarea = nextHelperTextarea;
-      helperTextarea.addEventListener("compositionstart", handleCompositionStart);
-      helperTextarea.addEventListener("compositionend", handleCompositionEnd);
+      compositionController.bind(helperTextarea);
+      scheduleOverlayCaretUpdate();
     };
 
     // Single entry point for all terminal key handling:
@@ -804,6 +877,10 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
+
+      if (shouldDeferTerminalKeyToIme(compositionPreviewRef.current.active, e)) {
+        return true;
+      }
 
       if (matchesKeybinding(e, "terminal.paste")) {
         // runTerminalPaste honors the smartPaste toggle internally and falls
@@ -857,7 +934,15 @@ export function TerminalView({
       trace("terminal-onData", {
         bytes: data.length,
         preview: JSON.stringify(data.slice(0, 80)),
+        compositionActive: compositionPreviewRef.current.active,
       });
+      if (compositionPreviewRef.current.active) {
+        trace("terminal-onData-skipped", {
+          reason: "ime-composition-active",
+          bytes: data.length,
+        });
+        return;
+      }
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
     });
@@ -1227,8 +1312,8 @@ export function TerminalView({
       outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
-      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
-      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
+      compositionController.dispose();
+      wrapperRef.current?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
       stopSyncOutputMonitor();
@@ -1465,6 +1550,12 @@ export function TerminalView({
       style={wrapperStyle}
     >
       <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={compositionPreviewRefEl}
+        data-testid={`terminal-composition-preview-${instanceId}`}
+        className="terminal-composition-preview pointer-events-none absolute"
+        style={{ opacity: 0, fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace` }}
+      />
       <div
         ref={overlayCaretRef}
         data-testid={`terminal-overlay-caret-${instanceId}`}

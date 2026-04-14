@@ -1,0 +1,296 @@
+export type CompositionPreviewState = {
+  active: boolean;
+  text: string;
+  caretUtf16Index: number;
+  caretCellOffset: number;
+  textCellWidth: number;
+  anchorBufferX: number;
+  anchorBufferAbsY: number;
+};
+
+type CompositionControllerOptions = {
+  getAnchor: () => { cursorX: number; cursorAbsY: number };
+  onStateChange?: (state: CompositionPreviewState) => void;
+};
+
+function createEmptyState(): CompositionPreviewState {
+  return {
+    active: false,
+    text: "",
+    caretUtf16Index: 0,
+    caretCellOffset: 0,
+    textCellWidth: 0,
+    anchorBufferX: 0,
+    anchorBufferAbsY: 0,
+  };
+}
+
+function codePointWidth(codePoint: number): number {
+  if (
+    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+    (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+  ) {
+    return 0;
+  }
+  if (
+    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+    (codePoint >= 0x2329 && codePoint <= 0x232a) ||
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+    (codePoint >= 0xff01 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    (codePoint >= 0x1f300 && codePoint <= 0x1faf6) ||
+    (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+function splitCodePoints(text: string): { segment: string; width: number }[] {
+  const out: { segment: string; width: number }[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const codePoint = text.codePointAt(i);
+    if (codePoint === undefined) continue;
+    const segment = String.fromCodePoint(codePoint);
+    out.push({ segment, width: codePointWidth(codePoint) });
+    if (codePoint > 0xffff) {
+      i += 1;
+    }
+  }
+  return out;
+}
+
+export function stringCellWidth(text: string): number {
+  let width = 0;
+  for (const item of splitCodePoints(text)) {
+    width += item.width;
+  }
+  return width;
+}
+
+function readTextareaState(textarea: HTMLTextAreaElement): Pick<
+  CompositionPreviewState,
+  "text" | "caretUtf16Index" | "caretCellOffset" | "textCellWidth"
+> {
+  const caretUtf16Index = textarea.selectionStart ?? textarea.value.length;
+  const text = textarea.value;
+  return {
+    text,
+    caretUtf16Index,
+    caretCellOffset: stringCellWidth(text.slice(0, caretUtf16Index)),
+    textCellWidth: stringCellWidth(text),
+  };
+}
+
+export type ImeCompositionController = {
+  bind(textarea: HTMLTextAreaElement): void;
+  dispose(): void;
+  getState(): CompositionPreviewState;
+};
+
+export function getCompositionPreviewCursor(
+  state: Pick<
+    CompositionPreviewState,
+    "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset"
+  >,
+  cols: number,
+): { cursorX: number; cursorAbsY: number } {
+  const compositionAbsCell = state.anchorBufferX + state.caretCellOffset;
+  if (cols <= 0) {
+    return {
+      cursorX: compositionAbsCell,
+      cursorAbsY: state.anchorBufferAbsY,
+    };
+  }
+  return {
+    cursorX: compositionAbsCell % cols,
+    cursorAbsY: state.anchorBufferAbsY + Math.floor(compositionAbsCell / cols),
+  };
+}
+
+export function getCompositionPreviewLayout(
+  state: Pick<
+    CompositionPreviewState,
+    "text" | "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset" | "textCellWidth"
+  >,
+  cols: number,
+): {
+  cursorX: number;
+  cursorAbsY: number;
+  renderedText: string;
+  rowCount: number;
+  maxRowCellWidth: number;
+} {
+  const previewCursor = getCompositionPreviewCursor(state, cols);
+  if (cols <= 0 || !state.text) {
+    return {
+      ...previewCursor,
+      renderedText: state.text,
+      rowCount: 1,
+      maxRowCellWidth: state.textCellWidth,
+    };
+  }
+
+  const segments = splitCodePoints(state.text);
+  let currentCol = state.anchorBufferX;
+  let maxRowCellWidth = Math.max(0, currentCol);
+  let rowCount = 1;
+  let renderedText = "";
+  let currentRowWidth = currentCol;
+
+  for (const { segment, width } of segments) {
+    if (width > 0 && currentCol + width > cols) {
+      renderedText += "\n";
+      rowCount += 1;
+      currentCol = 0;
+      currentRowWidth = 0;
+    }
+    renderedText += segment;
+    currentCol += width;
+    currentRowWidth += width;
+    maxRowCellWidth = Math.max(maxRowCellWidth, currentRowWidth);
+  }
+
+  return {
+    ...previewCursor,
+    renderedText,
+    rowCount,
+    maxRowCellWidth,
+  };
+}
+
+export function createImeCompositionController(
+  options: CompositionControllerOptions,
+): ImeCompositionController {
+  let textarea: HTMLTextAreaElement | null = null;
+  let state = createEmptyState();
+
+  const emit = () => {
+    options.onStateChange?.(state);
+  };
+
+  const update = (patch: Partial<CompositionPreviewState>) => {
+    state = { ...state, ...patch };
+    emit();
+  };
+
+  const reset = () => {
+    state = createEmptyState();
+    emit();
+  };
+
+  const handleCompositionStart = () => {
+    const anchor = options.getAnchor();
+    const nextTextarea = textarea;
+    update({
+      active: true,
+      anchorBufferX: anchor.cursorX,
+      anchorBufferAbsY: anchor.cursorAbsY,
+      ...(nextTextarea ? readTextareaState(nextTextarea) : { text: "", caretUtf16Index: 0 }),
+    });
+  };
+
+  const handleCompositionUpdate = () => {
+    if (!textarea) return;
+    const anchor = options.getAnchor();
+    update({
+      active: true,
+      anchorBufferX: anchor.cursorX,
+      anchorBufferAbsY: anchor.cursorAbsY,
+      ...readTextareaState(textarea),
+    });
+  };
+
+  const handleCompositionEnd = () => {
+    reset();
+  };
+
+  const handleInputLikeEvent = () => {
+    if (!textarea || !state.active) return;
+    update(readTextareaState(textarea));
+  };
+
+  const unbind = () => {
+    if (!textarea) return;
+    textarea.removeEventListener("compositionstart", handleCompositionStart);
+    textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
+    textarea.removeEventListener("compositionend", handleCompositionEnd);
+    textarea.removeEventListener("beforeinput", handleInputLikeEvent);
+    textarea.removeEventListener("input", handleInputLikeEvent);
+    textarea = null;
+  };
+
+  return {
+    bind(nextTextarea) {
+      if (textarea === nextTextarea) return;
+      unbind();
+      textarea = nextTextarea;
+      textarea.addEventListener("compositionstart", handleCompositionStart);
+      textarea.addEventListener("compositionupdate", handleCompositionUpdate);
+      textarea.addEventListener("compositionend", handleCompositionEnd);
+      textarea.addEventListener("beforeinput", handleInputLikeEvent);
+      textarea.addEventListener("input", handleInputLikeEvent);
+      handleInputLikeEvent();
+    },
+    dispose() {
+      unbind();
+      reset();
+    },
+    getState() {
+      return state;
+    },
+  };
+}
+
+export type VisualCaretOwner =
+  | "hidden"
+  | "alt-buffer"
+  | "composition-preview"
+  | "sync-frame"
+  | "shadow-input"
+  | "buffer";
+
+type VisualCaretOwnerInput = {
+  opened: boolean;
+  focused: boolean;
+  stabilizeInteractiveCursor: boolean;
+  overlayActivity: boolean;
+  syncOutputActive: boolean;
+  isAltBufferActive: boolean;
+  compositionActive: boolean;
+  hasSyncFramePosition: boolean;
+  hasPromptBoundary: boolean;
+  isInputPhase: boolean;
+};
+
+export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCaretOwner {
+  if (
+    !input.opened ||
+    !input.focused ||
+    !input.stabilizeInteractiveCursor ||
+    !input.overlayActivity ||
+    input.syncOutputActive
+  ) {
+    return "hidden";
+  }
+  if (input.isAltBufferActive) {
+    return "alt-buffer";
+  }
+  if (input.compositionActive) {
+    return "composition-preview";
+  }
+  if (input.hasSyncFramePosition) {
+    return "sync-frame";
+  }
+  if (input.hasPromptBoundary && input.isInputPhase) {
+    return "shadow-input";
+  }
+  return "buffer";
+}
