@@ -192,10 +192,6 @@
   left: 0;
   white-space: pre;
   color: var(--terminal-foreground-color, #f0f0f0);
-  text-decoration-line: underline;
-  text-decoration-style: solid;
-  text-decoration-color: var(--terminal-overlay-caret-color, #ffffff);
-  text-underline-offset: 0.12em;
   will-change: transform;
   z-index: 2;
 }
