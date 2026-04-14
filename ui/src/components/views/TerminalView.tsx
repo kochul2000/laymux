@@ -487,8 +487,8 @@ export function TerminalView({
       if (
         !openedRef.current ||
         !isFocusedRef.current ||
-        (!compositionPreviewRef.current.active && !stabilizeInteractiveCursorRef.current) ||
-        (!compositionPreviewRef.current.active && !isOverlayCaretActivity(activityRef.current)) ||
+        !stabilizeInteractiveCursorRef.current ||
+        !isOverlayCaretActivity(activityRef.current) ||
         syncOutputActiveRef.current
       ) {
         hideOverlay();

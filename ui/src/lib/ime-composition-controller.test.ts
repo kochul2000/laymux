@@ -62,14 +62,14 @@ describe("resolveVisualCaretOwner", () => {
     ).toBe("composition-preview");
   });
 
-  it("shows composition preview even when overlay caret activity is otherwise off", () => {
+  it("hides composition preview when overlay caret activity is off (non-Codex)", () => {
     expect(
       resolveVisualCaretOwner({
         ...baseInput,
         overlayActivity: false,
         compositionActive: true,
       }),
-    ).toBe("composition-preview");
+    ).toBe("hidden");
   });
 
   it("uses sync-frame when composition is inactive", () => {

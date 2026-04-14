@@ -472,11 +472,11 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (input.isAltBufferActive) {
     return "alt-buffer";
   }
-  if (input.compositionActive) {
-    return "composition-preview";
-  }
   if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
     return "hidden";
+  }
+  if (input.compositionActive) {
+    return "composition-preview";
   }
   if (input.hasSyncFramePosition) {
     return "sync-frame";
