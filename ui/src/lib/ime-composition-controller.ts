@@ -13,6 +13,11 @@ type CompositionControllerOptions = {
   onStateChange?: (state: CompositionPreviewState) => void;
 };
 
+type BufferAnchor = {
+  cursorX: number;
+  cursorAbsY: number;
+};
+
 function createEmptyState(): CompositionPreviewState {
   return {
     active: false,
@@ -93,6 +98,68 @@ function readTextareaState(
     caretUtf16Index,
     caretCellOffset: stringCellWidth(text.slice(0, caretUtf16Index)),
     textCellWidth: stringCellWidth(text),
+  };
+}
+
+function getChangedRange(
+  before: string,
+  after: string,
+): {
+  startUtf16Index: number;
+  endUtf16Index: number;
+  text: string;
+} {
+  let startUtf16Index = 0;
+  const maxPrefix = Math.min(before.length, after.length);
+  while (
+    startUtf16Index < maxPrefix &&
+    before.charCodeAt(startUtf16Index) === after.charCodeAt(startUtf16Index)
+  ) {
+    startUtf16Index += 1;
+  }
+
+  let beforeEndUtf16Index = before.length;
+  let afterEndUtf16Index = after.length;
+  while (
+    beforeEndUtf16Index > startUtf16Index &&
+    afterEndUtf16Index > startUtf16Index &&
+    before.charCodeAt(beforeEndUtf16Index - 1) === after.charCodeAt(afterEndUtf16Index - 1)
+  ) {
+    beforeEndUtf16Index -= 1;
+    afterEndUtf16Index -= 1;
+  }
+
+  return {
+    startUtf16Index,
+    endUtf16Index: afterEndUtf16Index,
+    text: after.slice(startUtf16Index, afterEndUtf16Index),
+  };
+}
+
+function getAnchoredCompositionState(
+  textarea: HTMLTextAreaElement,
+  baseText: string,
+  baseAnchor: BufferAnchor,
+): Pick<
+  CompositionPreviewState,
+  "text" | "caretUtf16Index" | "caretCellOffset" | "textCellWidth" | "anchorBufferX" | "anchorBufferAbsY"
+> {
+  const changedRange = getChangedRange(baseText, textarea.value);
+  const shiftedPrefix = baseText.slice(changedRange.startUtf16Index);
+  const shiftedPrefixWidth = stringCellWidth(shiftedPrefix);
+  const absoluteCaretUtf16Index = textarea.selectionStart ?? changedRange.endUtf16Index;
+  const caretUtf16Index = Math.max(
+    0,
+    Math.min(absoluteCaretUtf16Index, changedRange.endUtf16Index) - changedRange.startUtf16Index,
+  );
+
+  return {
+    text: changedRange.text,
+    caretUtf16Index,
+    caretCellOffset: stringCellWidth(changedRange.text.slice(0, caretUtf16Index)),
+    textCellWidth: stringCellWidth(changedRange.text),
+    anchorBufferX: Math.max(0, baseAnchor.cursorX - shiftedPrefixWidth),
+    anchorBufferAbsY: baseAnchor.cursorAbsY,
   };
 }
 
@@ -178,6 +245,8 @@ export function createImeCompositionController(
 ): ImeCompositionController {
   let textarea: HTMLTextAreaElement | null = null;
   let state = createEmptyState();
+  let compositionBaseText = "";
+  let compositionBaseAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
   let compositionStartUtf16Index = 0;
   let compositionEndUtf16Index = 0;
 
@@ -191,6 +260,8 @@ export function createImeCompositionController(
   };
 
   const reset = () => {
+    compositionBaseText = "";
+    compositionBaseAnchor = { cursorX: 0, cursorAbsY: 0 };
     compositionStartUtf16Index = 0;
     compositionEndUtf16Index = 0;
     state = createEmptyState();
@@ -200,6 +271,8 @@ export function createImeCompositionController(
   const handleCompositionStart = () => {
     const anchor = options.getAnchor();
     const nextTextarea = textarea;
+    compositionBaseText = nextTextarea?.value ?? "";
+    compositionBaseAnchor = anchor;
     compositionStartUtf16Index = nextTextarea?.value.length ?? 0;
     compositionEndUtf16Index = compositionStartUtf16Index;
     update({
@@ -219,20 +292,18 @@ export function createImeCompositionController(
   const syncPreviewFromTextareaSlice = () => {
     if (!textarea || !state.active) return;
     compositionEndUtf16Index = textarea.value.length;
-    update(readTextareaState(textarea, compositionStartUtf16Index, compositionEndUtf16Index));
+    update(getAnchoredCompositionState(textarea, compositionBaseText, compositionBaseAnchor));
   };
 
-  const handleCompositionUpdate = (event: CompositionEvent) => {
-    const anchor = options.getAnchor();
-    const previewText = event.data ?? "";
+  const handleCompositionUpdate = () => {
     update({
       active: true,
-      anchorBufferX: anchor.cursorX,
-      anchorBufferAbsY: anchor.cursorAbsY,
-      text: previewText,
-      caretUtf16Index: previewText.length,
-      caretCellOffset: stringCellWidth(previewText),
-      textCellWidth: stringCellWidth(previewText),
+      anchorBufferX: compositionBaseAnchor.cursorX,
+      anchorBufferAbsY: compositionBaseAnchor.cursorAbsY,
+      text: state.text,
+      caretUtf16Index: state.caretUtf16Index,
+      caretCellOffset: state.caretCellOffset,
+      textCellWidth: state.textCellWidth,
     });
     setTimeout(syncPreviewFromTextareaSlice, 0);
   };
