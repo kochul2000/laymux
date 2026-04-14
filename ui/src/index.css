@@ -170,7 +170,7 @@
 }
 
 .terminal-ime-composition-active .xterm-helper-textarea {
-  caret-color: var(--terminal-overlay-caret-color, #ffffff) !important;
+  caret-color: transparent !important;
 }
 
 .terminal-ime-composition-active .xterm-cursor-layer,
