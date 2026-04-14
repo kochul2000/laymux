@@ -249,6 +249,8 @@ export function createImeCompositionController(
   let compositionBaseAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
   let compositionStartUtf16Index = 0;
   let compositionEndUtf16Index = 0;
+  let pendingAnimationFrame: number | null = null;
+  let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const emit = () => {
     options.onStateChange?.(state);
@@ -259,7 +261,19 @@ export function createImeCompositionController(
     emit();
   };
 
+  const cancelPendingSync = () => {
+    if (pendingAnimationFrame !== null) {
+      cancelAnimationFrame(pendingAnimationFrame);
+      pendingAnimationFrame = null;
+    }
+    if (pendingTimeout !== null) {
+      clearTimeout(pendingTimeout);
+      pendingTimeout = null;
+    }
+  };
+
   const reset = () => {
+    cancelPendingSync();
     compositionBaseText = "";
     compositionBaseAnchor = { cursorX: 0, cursorAbsY: 0 };
     compositionStartUtf16Index = 0;
@@ -290,22 +304,26 @@ export function createImeCompositionController(
   };
 
   const syncPreviewFromTextareaSlice = () => {
+    cancelPendingSync();
     if (!textarea || !state.active) return;
     compositionEndUtf16Index = textarea.value.length;
     update(getAnchoredCompositionState(textarea, compositionBaseText, compositionBaseAnchor));
   };
 
-  const handleCompositionUpdate = () => {
-    update({
-      active: true,
-      anchorBufferX: compositionBaseAnchor.cursorX,
-      anchorBufferAbsY: compositionBaseAnchor.cursorAbsY,
-      text: state.text,
-      caretUtf16Index: state.caretUtf16Index,
-      caretCellOffset: state.caretCellOffset,
-      textCellWidth: state.textCellWidth,
+  const schedulePreviewSync = () => {
+    cancelPendingSync();
+    pendingAnimationFrame = requestAnimationFrame(() => {
+      pendingAnimationFrame = null;
+      syncPreviewFromTextareaSlice();
     });
-    setTimeout(syncPreviewFromTextareaSlice, 0);
+    pendingTimeout = setTimeout(() => {
+      pendingTimeout = null;
+      syncPreviewFromTextareaSlice();
+    }, 0);
+  };
+
+  const handleCompositionUpdate = () => {
+    schedulePreviewSync();
   };
 
   const handleCompositionEnd = () => {
@@ -313,7 +331,7 @@ export function createImeCompositionController(
   };
 
   const handleInputLikeEvent = () => {
-    syncPreviewFromTextareaSlice();
+    schedulePreviewSync();
   };
 
   const unbind = () => {

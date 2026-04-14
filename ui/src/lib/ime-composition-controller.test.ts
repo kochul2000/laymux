@@ -227,6 +227,7 @@ describe("createImeCompositionController", () => {
     textarea.value = "plain\uac00";
     textarea.selectionStart = textarea.value.length;
     textarea.dispatchEvent(new Event("input"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(controller.getState()).toMatchObject({
       active: true,
