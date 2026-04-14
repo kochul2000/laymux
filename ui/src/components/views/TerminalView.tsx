@@ -376,6 +376,54 @@ export function TerminalView({
 
     terminalRef.current = terminal;
 
+    const applyNativeCursorVisibility = () => {
+      const state = useSettingsStore.getState();
+      const liveProfile = state.profiles.find((p) => p.name === profile);
+      const liveSchemeName =
+        liveProfile?.colorScheme || state.profileDefaults?.colorScheme || "CampbellClear";
+      const liveScheme = liveSchemeName
+        ? state.colorSchemes.find((cs) => cs.name === liveSchemeName)
+        : undefined;
+      const resolvedTheme = liveScheme
+        ? { ...defaultTheme, ...colorSchemeToXtermTheme(liveScheme as unknown as WTColorScheme) }
+        : defaultTheme;
+      const resolvedCursorShape =
+        liveProfile?.cursorShape ||
+        state.profileDefaults?.cursorShape ||
+        defaultProfileDefaults.cursorShape;
+      const resolvedCursorBlink =
+        liveProfile?.cursorBlink ??
+        state.profileDefaults?.cursorBlink ??
+        defaultProfileDefaults.cursorBlink;
+      const hideNativeCursor =
+        compositionPreviewRef.current.active ||
+        (stabilizeInteractiveCursorRef.current && isOverlayCaretActivity(activityRef.current));
+      const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
+
+      if (hideNativeCursor) {
+        terminal.options.theme = {
+          ...resolvedTheme,
+          cursor: hiddenCursorColor,
+          cursorAccent: hiddenCursorColor,
+        };
+        terminal.options.cursorBlink = false;
+        terminal.options.cursorStyle = "bar";
+        terminal.options.cursorWidth = 1;
+      } else {
+        const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
+        terminal.options.theme = resolvedTheme;
+        terminal.options.cursorBlink = resolvedCursorBlink;
+        terminal.options.cursorStyle = cursorOptions.cursorStyle;
+        if (cursorOptions.cursorWidth !== undefined) {
+          terminal.options.cursorWidth = cursorOptions.cursorWidth;
+        }
+        if (cursorOptions.cursorWidth === undefined) {
+          delete (terminal.options as { cursorWidth?: number }).cursorWidth;
+        }
+      }
+      terminal.refresh(0, terminal.rows - 1);
+    };
+
     const setSyncOutputCursorVisibility = (active: boolean) => {
       syncOutputActiveRef.current = active;
       const host = wrapperRef.current;
@@ -397,6 +445,7 @@ export function TerminalView({
         const wasActive = compositionPreviewRef.current.active;
         compositionPreviewRef.current = state;
         wrapperRef.current?.classList.toggle("terminal-ime-composition-active", state.active);
+        applyNativeCursorVisibility();
         trace("ime-composition-preview", state);
         if (wasActive && !state.active) {
           trace("ime-composition-preview-committed", {
