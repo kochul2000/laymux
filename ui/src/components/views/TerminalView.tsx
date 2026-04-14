@@ -464,26 +464,6 @@ export function TerminalView({
         return;
       }
 
-      const terminalRect = term.element?.getBoundingClientRect();
-      if (helperTextarea && terminalRect) {
-        const compositionPreview = compositionPreviewRef.current;
-        const helperAnchorX = compositionPreview.active
-          ? compositionPreview.anchorBufferX
-          : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
-        const helperAnchorY = compositionPreview.active
-          ? compositionPreview.anchorBufferAbsY - ((term.buffer.active as { baseY?: number }).baseY ?? 0)
-          : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
-        helperTextarea.style.left = `${Math.round(targetRect.left - terminalRect.left + helperAnchorX * cellWidth)}px`;
-        helperTextarea.style.top = `${Math.round(targetRect.top - terminalRect.top + helperAnchorY * cellHeight)}px`;
-        helperTextarea.style.width = `${Math.max(1, Math.round(cellWidth))}px`;
-        helperTextarea.style.height = `${Math.max(1, Math.round(cellHeight))}px`;
-        trace("ime-anchor-update", {
-          helperAnchorX,
-          helperAnchorY,
-          compositionActive: compositionPreview.active,
-        });
-      }
-
       const shadowCursor = shadowCursorRef.current;
       const caretOwner = resolveVisualCaretOwner({
         opened: openedRef.current,
