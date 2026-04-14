@@ -173,6 +173,11 @@
   caret-color: var(--terminal-overlay-caret-color, #ffffff) !important;
 }
 
+.terminal-ime-composition-active .xterm-cursor-layer,
+.terminal-ime-composition-active .xterm-cursor {
+  opacity: 0 !important;
+}
+
 .terminal-ime-composition-active .composition-view {
   visibility: hidden !important;
 }

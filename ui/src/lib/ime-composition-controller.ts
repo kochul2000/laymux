@@ -299,13 +299,7 @@ type VisualCaretOwnerInput = {
 };
 
 export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCaretOwner {
-  if (
-    !input.opened ||
-    !input.focused ||
-    !input.stabilizeInteractiveCursor ||
-    !input.overlayActivity ||
-    input.syncOutputActive
-  ) {
+  if (!input.opened || !input.focused || input.syncOutputActive) {
     return "hidden";
   }
   if (input.isAltBufferActive) {
@@ -313,6 +307,9 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   }
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
+    return "hidden";
   }
   if (input.hasSyncFramePosition) {
     return "sync-frame";
