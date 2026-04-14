@@ -247,6 +247,7 @@ export function createImeCompositionController(
   let state = createEmptyState();
   let compositionBaseText = "";
   let compositionBaseAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  let latestCompositionDisplayText = "";
   let compositionStartUtf16Index = 0;
   let compositionEndUtf16Index = 0;
   let pendingAnimationFrame: number | null = null;
@@ -276,6 +277,7 @@ export function createImeCompositionController(
     cancelPendingSync();
     compositionBaseText = "";
     compositionBaseAnchor = { cursorX: 0, cursorAbsY: 0 };
+    latestCompositionDisplayText = "";
     compositionStartUtf16Index = 0;
     compositionEndUtf16Index = 0;
     state = createEmptyState();
@@ -307,7 +309,20 @@ export function createImeCompositionController(
     cancelPendingSync();
     if (!textarea || !state.active) return;
     compositionEndUtf16Index = textarea.value.length;
-    update(getAnchoredCompositionState(textarea, compositionBaseText, compositionBaseAnchor));
+    const anchoredState = getAnchoredCompositionState(textarea, compositionBaseText, compositionBaseAnchor);
+    const previewText =
+      latestCompositionDisplayText &&
+      latestCompositionDisplayText.length > anchoredState.text.length &&
+      latestCompositionDisplayText.endsWith(anchoredState.text)
+        ? latestCompositionDisplayText
+        : anchoredState.text;
+    update({
+      ...anchoredState,
+      text: previewText,
+      caretUtf16Index: previewText.length,
+      caretCellOffset: stringCellWidth(previewText),
+      textCellWidth: stringCellWidth(previewText),
+    });
   };
 
   const schedulePreviewSync = () => {
@@ -322,7 +337,8 @@ export function createImeCompositionController(
     }, 0);
   };
 
-  const handleCompositionUpdate = () => {
+  const handleCompositionUpdate = (event: CompositionEvent) => {
+    latestCompositionDisplayText = event.data ?? "";
     schedulePreviewSync();
   };
 
