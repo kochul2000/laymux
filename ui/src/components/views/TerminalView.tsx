@@ -439,10 +439,14 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getAnchor: () => {
-        const activeBuffer = terminal.buffer.active as { cursorX?: number };
+        // Use the shadow cursor, not the buffer cursor.  TUI apps (Claude Code,
+        // Codex, etc.) move the buffer cursor to the footer/status-bar during
+        // repaints, so reading it here would place the composition preview in
+        // the wrong row.  The shadow cursor tracks the real input position.
+        const shadow = shadowCursorRef.current;
         return {
-          cursorX: activeBuffer.cursorX ?? 0,
-          cursorAbsY: getBufferCursorAbsY(terminal),
+          cursorX: shadow.cursorX,
+          cursorAbsY: shadow.cursorAbsY,
         };
       },
       onTrace: (event, payload) => {
