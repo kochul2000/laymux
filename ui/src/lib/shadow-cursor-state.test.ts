@@ -78,32 +78,52 @@ describe("getShadowSyncEligibility", () => {
     ).toBe("composition-preview-active");
   });
 
-  it("rejects sync when no committed shadow owner is active", () => {
+  it("allows sync when shadow cursor has never been initialized (fresh terminal)", () => {
+    // A freshly opened terminal (e.g. from empty view) has no OSC 133
+    // prompt boundary and no DEC 2026 sync frame.  The shadow cursor is
+    // still at (0,0) and must be seeded from the buffer cursor.
     expect(
       getShadowSyncEligibility(baseState, {
         bufferAbsY: 0,
         compositionPreviewActive: false,
         syncOutputActive: false,
       }),
+    ).toBe("eligible");
+  });
+
+  it("rejects sync when prompt boundary exists but no input phase or sync frame", () => {
+    // After OSC 133 A (prompt start) but before B (input start), shadow
+    // cursor should not sync — the shell is still rendering the prompt.
+    expect(
+      getShadowSyncEligibility(
+        { ...baseState, hasPromptBoundary: true },
+        {
+          bufferAbsY: 0,
+          compositionPreviewActive: false,
+          syncOutputActive: false,
+        },
+      ),
     ).toBe("inactive");
   });
 
   it("rejects repaint, alt-buffer, and sync-output gates distinctly", () => {
+    // hasPromptBoundary must be true alongside isInputPhase to bypass
+    // the "never initialized" early-eligible path.
     expect(
       getShadowSyncEligibility(
-        { ...baseState, isInputPhase: true, isRepaintInProgress: true },
+        { ...baseState, hasPromptBoundary: true, isInputPhase: true, isRepaintInProgress: true },
         { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
       ),
     ).toBe("repaint-in-progress");
     expect(
       getShadowSyncEligibility(
-        { ...baseState, isInputPhase: true, isAltBufferActive: true },
+        { ...baseState, hasPromptBoundary: true, isInputPhase: true, isAltBufferActive: true },
         { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
       ),
     ).toBe("alt-buffer");
     expect(
       getShadowSyncEligibility(
-        { ...baseState, isInputPhase: true },
+        { ...baseState, hasPromptBoundary: true, isInputPhase: true },
         { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: true },
       ),
     ).toBe("sync-output-active");
@@ -121,7 +141,7 @@ describe("getShadowSyncEligibility", () => {
   it("allows committed-input sync when the shadow owner is active", () => {
     expect(
       getShadowSyncEligibility(
-        { ...baseState, isInputPhase: true },
+        { ...baseState, hasPromptBoundary: true, isInputPhase: true },
         { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
       ),
     ).toBe("eligible");

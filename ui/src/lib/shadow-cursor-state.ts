@@ -81,7 +81,12 @@ export function computeUseShadowCursor(state: ShadowCursorState): boolean {
 export function getShadowSyncEligibility(
   state: Pick<
     ShadowCursorState,
-    "cursorAbsY" | "isInputPhase" | "hasSyncFramePosition" | "isRepaintInProgress" | "isAltBufferActive"
+    | "cursorAbsY"
+    | "hasPromptBoundary"
+    | "isInputPhase"
+    | "hasSyncFramePosition"
+    | "isRepaintInProgress"
+    | "isAltBufferActive"
   >,
   options: {
     bufferAbsY?: number;
@@ -90,6 +95,11 @@ export function getShadowSyncEligibility(
   },
 ): ShadowSyncEligibility {
   if (options.compositionPreviewActive) return "composition-preview-active";
+  // Shadow cursor has never been initialized by any source (no OSC 133 prompt
+  // marker, no DEC 2026 sync frame).  This happens for freshly opened terminals
+  // (e.g. from empty view) or shells that don't emit OSC 133 (PowerShell).
+  // Allow sync so the shadow cursor gets seeded from the buffer cursor.
+  if (!state.hasPromptBoundary && !state.hasSyncFramePosition) return "eligible";
   if (!(state.isInputPhase || state.hasSyncFramePosition)) return "inactive";
   if (
     state.hasSyncFramePosition &&
