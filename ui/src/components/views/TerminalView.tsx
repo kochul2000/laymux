@@ -376,7 +376,14 @@ export function TerminalView({
 
     terminalRef.current = terminal;
 
+    let prevHideNativeCursor: boolean | undefined;
     const applyNativeCursorVisibility = () => {
+      const hideNativeCursor =
+        compositionPreviewRef.current.active ||
+        (stabilizeInteractiveCursorRef.current && isOverlayCaretActivity(activityRef.current));
+      if (hideNativeCursor === prevHideNativeCursor) return;
+      prevHideNativeCursor = hideNativeCursor;
+
       const state = useSettingsStore.getState();
       const liveProfile = state.profiles.find((p) => p.name === profile);
       const liveSchemeName =
@@ -395,9 +402,6 @@ export function TerminalView({
         liveProfile?.cursorBlink ??
         state.profileDefaults?.cursorBlink ??
         defaultProfileDefaults.cursorBlink;
-      const hideNativeCursor =
-        compositionPreviewRef.current.active ||
-        (stabilizeInteractiveCursorRef.current && isOverlayCaretActivity(activityRef.current));
       const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
 
       if (hideNativeCursor) {
@@ -553,20 +557,22 @@ export function TerminalView({
         const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
-      }
-      if (caretOwner === "composition-preview" && compositionPreview.text) {
-        const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
-        const anchorX = compositionPreview.anchorBufferX;
-        const anchorY = compositionPreview.anchorBufferAbsY - baseY;
-        previewEl.style.opacity = "1";
-        previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
-          targetRect.top - hostRect.top + anchorY * cellHeight,
-        )}px)`;
-        previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
-        previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
-        previewEl.style.fontSize = `${Math.max(1, cellHeight)}px`;
-        previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
-        previewEl.textContent = previewLayout.renderedText;
+        if (compositionPreview.text) {
+          const anchorX = compositionPreview.anchorBufferX;
+          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+          previewEl.style.opacity = "1";
+          previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
+            targetRect.top - hostRect.top + anchorY * cellHeight,
+          )}px)`;
+          previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
+          previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
+          previewEl.style.fontSize = `${Math.max(1, cellHeight)}px`;
+          previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
+          previewEl.textContent = previewLayout.renderedText;
+        } else {
+          previewEl.style.opacity = "0";
+          previewEl.textContent = "";
+        }
       } else {
         previewEl.style.opacity = "0";
         previewEl.textContent = "";
