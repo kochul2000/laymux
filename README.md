@@ -210,9 +210,9 @@ IDE shortcuts avoid `Ctrl+<single-key>` so they never shadow shell/readline bind
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Alt+↓/↑` | Next / previous workspace |
-| `Ctrl+Alt+←/→` | Navigate between notifications |
-| `Alt+Arrow` | Move pane focus |
+| **`Ctrl+Alt+↓/↑`** | **Next / previous workspace** |
+| **`Ctrl+Alt+←/→`** | **Navigate between notifications** |
+| **`Alt+Arrow`** | **Move pane focus** |
 | `Ctrl+Alt+1-8`, `9` | Switch to workspace 1–9 |
 | `Ctrl+Shift+I` | Toggle notification panel |
 | `Ctrl+Shift+U` | Jump to unread notification |
