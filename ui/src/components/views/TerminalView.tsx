@@ -34,6 +34,7 @@ import {
   type CompositionPreviewState,
 } from "@/lib/ime-composition-controller";
 import { shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { computeWheelZoom } from "@/lib/wheel-zoom";
 import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
@@ -1203,23 +1204,28 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
-    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
+    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller).
+    // Capture 단계로 등록해야 xterm.js viewport가 wheel을 먼저 소비하는 것을
+    // 막을 수 있다(#211). bubbling으로 등록하면 스크롤백이 남아 있을 때
+    // xterm이 이벤트를 먼저 소비해 Ctrl+Wheel 줌이 동작하지 않는다.
     const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
       const state = useSettingsStore.getState();
       const currentFont = state.resolveFont(profile);
-      const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
-      if (newSize !== currentFont.size) {
-        // Update the profile's font override
-        const idx = state.profiles.findIndex((p) => p.name === profile);
-        if (idx >= 0) {
-          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
-        }
+      const decision = computeWheelZoom(e, currentFont.size);
+      if (!decision.intercept) return;
+      // Ctrl이 눌린 wheel은 xterm 스크롤로 전달하지 않고 줌으로만 사용한다.
+      e.preventDefault();
+      e.stopPropagation();
+      if (decision.newSize === null) return;
+      const idx = state.profiles.findIndex((p) => p.name === profile);
+      if (idx >= 0) {
+        state.updateProfile(idx, { font: { ...currentFont, size: decision.newSize } });
       }
     };
-    outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
+    outerContainer?.addEventListener("wheel", handleWheel, {
+      capture: true,
+      passive: false,
+    });
 
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
@@ -1344,7 +1350,7 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerContainer?.removeEventListener("wheel", handleWheel);
+      outerContainer?.removeEventListener("wheel", handleWheel, { capture: true });
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       compositionController.dispose();
