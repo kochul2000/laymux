@@ -1,8 +1,15 @@
-# Laymux
+<p align="center">
+  <img src="Logo.svg" alt="Laymux" width="120" height="120" />
+</p>
 
-**Windows + WSL, Claude Code, Codex CLI, CJK/IME** 사용자를 위한 키보드 중심 멀티 페인 터미널 IDE.
+<h1 align="center">Laymux</h1>
 
-[English](./README.md)
+<p align="center">
+  <strong>Windows + WSL, Claude Code, Codex CLI, CJK/IME</strong> 사용자를 위한<br/>
+  키보드 중심 멀티 페인 터미널 IDE.
+</p>
+
+<p align="center"><a href="./README.md">English</a></p>
 
 ![Laymux overview](docs/screenshots/overview.png)
 

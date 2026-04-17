@@ -1,8 +1,15 @@
-# Laymux
+<p align="center">
+  <img src="Logo.svg" alt="Laymux" width="120" height="120" />
+</p>
 
-A keyboard-first multi-pane terminal IDE built for **Windows + WSL, Claude Code, Codex CLI, and CJK/IME** users.
+<h1 align="center">Laymux</h1>
 
-[한국어](./README.ko.md)
+<p align="center">
+  A keyboard-first multi-pane terminal IDE built for<br/>
+  <strong>Windows + WSL, Claude Code, Codex CLI, and CJK/IME</strong> users.
+</p>
+
+<p align="center"><a href="./README.ko.md">한국어</a></p>
 
 ![Laymux overview](docs/screenshots/overview.png)
 
