@@ -210,15 +210,15 @@ IDE 단축키는 셸·readline 바인딩과 겹치지 않도록 `Ctrl+단일키`
 
 | 단축키 | 동작 |
 |--------|------|
-| `Ctrl+Alt+1-8`, `9` | 워크스페이스 1–9 이동 |
 | `Ctrl+Alt+↓/↑` | 다음 / 이전 워크스페이스 |
+| `Ctrl+Alt+←/→` | 알림 간 내비게이션 |
+| `Alt+Arrow` | Pane 포커스 이동 |
+| `Ctrl+Alt+1-8`, `9` | 워크스페이스 1–9 이동 |
+| `Ctrl+Shift+I` | 알림 패널 토글 |
+| `Ctrl+Shift+U` | 읽지 않은 알림으로 이동 |
 | `Ctrl+Shift+W` | 워크스페이스 닫기 |
 | `Ctrl+Shift+R` | 워크스페이스 이름 변경 |
 | `Ctrl+Shift+B` | 사이드바 토글 |
-| `Ctrl+Shift+I` | 알림 패널 토글 |
-| `Ctrl+Shift+U` | 읽지 않은 알림으로 이동 |
-| `Ctrl+Alt+←/→` | 알림 간 내비게이션 |
-| `Alt+Arrow` | Pane 포커스 이동 |
 | `Delete` (편집 모드) | 포커스된 Pane 제거 |
 | `Ctrl+,` | 설정 |
 
