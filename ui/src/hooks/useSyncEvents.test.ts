@@ -246,6 +246,39 @@ describe("useSyncEvents", () => {
     expect(instance?.lastExitCode).toBeUndefined();
   });
 
+  it("clears previous lastExitCode when a new command starts", () => {
+    // Regression guard: a long-running command (sleep, ssh, sparse script) never
+    // emits a DEC-2026 burst, so computeCommandStatus derives its state from
+    // exitCode alone. If the previous command's exit code leaks through, the UI
+    // keeps showing the prior ✓/✗ badge instead of ⏳.
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "PowerShell",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      lastCommand: "previous",
+      lastExitCode: 0,
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnCommandStatus.mock.calls[0][0];
+    // Real command path (OSC 633 E with command text)
+    callback({ terminalId: "t1", command: "sleep 30" });
+
+    let instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.lastCommand).toBe("sleep 30");
+    expect(instance?.lastExitCode).toBeUndefined();
+
+    // Reset and test the preexec path (OSC 133 C without command text)
+    useTerminalStore.getState().updateInstanceInfo("t1", { lastExitCode: 1 });
+    callback({ terminalId: "t1", command: "__preexec__" });
+    instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.lastExitCode).toBeUndefined();
+  });
+
   it("updates terminal lastExitCode on command-status event with exitCode", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",

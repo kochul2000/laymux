@@ -114,6 +114,11 @@ pub struct TerminalSession {
     /// Used to detect working→idle transition for task completion notification.
     #[serde(skip)]
     pub claude_was_working: bool,
+    /// Last observed Claude "working" spinner title (full title, spinner prefix
+    /// included). Used as a fallback task description when the working→idle
+    /// transition lands on a generic idle title like `✳ Claude Code`.
+    #[serde(skip)]
+    pub claude_last_working_title: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -138,6 +143,7 @@ impl TerminalSession {
             claude_message: None,
             notify_gate_armed: false,
             claude_was_working: false,
+            claude_last_working_title: None,
         }
     }
 

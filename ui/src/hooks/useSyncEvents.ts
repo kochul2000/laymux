@@ -309,6 +309,11 @@ export function useSyncEvents() {
         if (data.command !== undefined && data.command !== "__preexec__") {
           update.lastCommand = data.command;
           update.lastCommandAt = Date.now();
+          // Clear previous command's exit code so computeCommandStatus does not
+          // keep showing the prior ✓/✗ while the new command runs — critical for
+          // long-running commands (sleep, ssh, sparse scripts) that never emit
+          // a DEC-2026 output burst to set outputActive=true.
+          update.lastExitCode = undefined;
           const appActivity = detectActivityFromCommand(data.command);
           if (appActivity) {
             update.activity = appActivity;
@@ -325,6 +330,7 @@ export function useSyncEvents() {
           }
         } else if (data.command === "__preexec__") {
           update.lastCommandAt = Date.now();
+          update.lastExitCode = undefined;
           const instance = useTerminalStore
             .getState()
             .instances.find((i) => i.id === data.terminalId);
