@@ -1173,16 +1173,23 @@ export function WorkspaceSelectorView() {
         <span className="flex items-center gap-1">
           <button
             data-testid="hide-mode-toggle"
+            data-active={hideMode ? "true" : "false"}
             onClick={() => toggleHideMode()}
-            className="flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px]"
+            className={`flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px] ${
+              hideMode ? "hover-bg-accent" : "hover-bg"
+            }`}
             style={{
               color: hideMode
                 ? "var(--accent)"
                 : hiddenWorkspaceIds.size + hiddenPaneIds.size > 0
                   ? "var(--yellow)"
                   : "var(--text-secondary)",
-              background: hideMode ? "var(--accent-12)" : "var(--active-bg)",
-              border: "none",
+              // Active: accent-20 fill + accent border so the toggle reads as
+              // the primary action while in hide mode (issue #203).
+              // Inactive: faint surface fill matching other toolbar buttons.
+              background: hideMode ? "var(--accent-20)" : "var(--active-bg)",
+              border: hideMode ? "1px solid var(--accent)" : "1px solid transparent",
+              fontWeight: hideMode ? 600 : 400,
               opacity: hideMode ? 1 : 0.7,
             }}
             title={hideMode ? "Apply and exit hide mode" : "Enter hide mode"}

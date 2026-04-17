@@ -1744,5 +1744,61 @@ describe("WorkspaceSelectorView", () => {
       const toggle = screen.getByTestId("hide-mode-toggle");
       expect(toggle.textContent).toContain("2");
     });
+
+    // Issue #203: hide mode toggle should be visually emphasized when active
+    // so users clearly perceive it as the primary action while in hide mode.
+    describe("hide mode toggle visual emphasis (issue #203)", () => {
+      it("marks the toggle as inactive when hide mode is off", () => {
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.getAttribute("data-active")).toBe("false");
+      });
+
+      it("marks the toggle as active when hide mode is on", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.getAttribute("data-active")).toBe("true");
+      });
+
+      it("applies the accent hover utility class when hide mode is on", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.className).toContain("hover-bg-accent");
+      });
+
+      it("applies the default hover utility class when hide mode is off", () => {
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.className).toContain("hover-bg");
+        expect(toggle.className).not.toContain("hover-bg-accent");
+      });
+
+      it("uses a stronger accent background when hide mode is on", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        // Background should reference the accent-20 variable (stronger than
+        // the previous accent-12) so the button reads as the primary action.
+        expect(toggle.style.background).toContain("--accent-20");
+      });
+
+      it("uses an accent border when hide mode is on", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        // Border (any side) should reference --accent to highlight the
+        // active state beyond the fill alone.
+        const borderish = [
+          toggle.style.border,
+          toggle.style.borderColor,
+          toggle.style.borderTopColor,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        expect(borderish).toContain("--accent");
+      });
+    });
   });
 });

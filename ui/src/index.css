@@ -120,6 +120,11 @@
     background: var(--red);
     color: var(--bg-base);
   }
+  /* Accent hover — used by primary-action toggles (e.g. hide mode) to make
+     the currently active mode feel responsive and distinctly highlighted. */
+  .hover-bg-accent:hover {
+    background: var(--accent-20);
+  }
 
   /* Toolbar (28px header bar) */
   .ui-toolbar {
