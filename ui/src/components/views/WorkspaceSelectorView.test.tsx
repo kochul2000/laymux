@@ -1761,6 +1761,19 @@ describe("WorkspaceSelectorView", () => {
         expect(toggle.getAttribute("data-active")).toBe("true");
       });
 
+      it("exposes aria-pressed=false when hide mode is off", () => {
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      });
+
+      it("exposes aria-pressed=true when hide mode is on", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const toggle = screen.getByTestId("hide-mode-toggle");
+        expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      });
+
       it("applies the accent hover utility class when hide mode is on", () => {
         useUiStore.getState().toggleHideMode();
         render(<WorkspaceSelectorView />);

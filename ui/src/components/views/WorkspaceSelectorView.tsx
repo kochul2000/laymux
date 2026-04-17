@@ -1174,6 +1174,7 @@ export function WorkspaceSelectorView() {
           <button
             data-testid="hide-mode-toggle"
             data-active={hideMode ? "true" : "false"}
+            aria-pressed={hideMode}
             onClick={() => toggleHideMode()}
             className={`flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px] ${
               hideMode ? "hover-bg-accent" : "hover-bg"
@@ -1184,9 +1185,6 @@ export function WorkspaceSelectorView() {
                 : hiddenWorkspaceIds.size + hiddenPaneIds.size > 0
                   ? "var(--yellow)"
                   : "var(--text-secondary)",
-              // Active: accent-20 fill + accent border so the toggle reads as
-              // the primary action while in hide mode (issue #203).
-              // Inactive: faint surface fill matching other toolbar buttons.
               background: hideMode ? "var(--accent-20)" : "var(--active-bg)",
               border: hideMode ? "1px solid var(--accent)" : "1px solid transparent",
               fontWeight: hideMode ? 600 : 400,
