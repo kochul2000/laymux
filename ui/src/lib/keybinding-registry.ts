@@ -99,6 +99,24 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
   // 등으로 재바인딩하면 TerminalView의 키 이벤트 핸들러가 수동으로 copy/paste를 실행한다.
   { id: "terminal.copy", label: "터미널 복사", defaultKeys: "Ctrl+C", group: "Terminal" },
   { id: "terminal.paste", label: "터미널 붙여넣기", defaultKeys: "Ctrl+V", group: "Terminal" },
+  {
+    id: "terminal.fontZoomIn",
+    label: "폰트 크기 키우기",
+    defaultKeys: "Ctrl+=",
+    group: "Terminal",
+  },
+  {
+    id: "terminal.fontZoomOut",
+    label: "폰트 크기 줄이기",
+    defaultKeys: "Ctrl+-",
+    group: "Terminal",
+  },
+  {
+    id: "terminal.fontZoomReset",
+    label: "폰트 크기 초기화",
+    defaultKeys: "Ctrl+0",
+    group: "Terminal",
+  },
   // -- Issue Reporter --
   {
     id: "issueReporter.submit",

@@ -941,6 +941,40 @@ export function TerminalView({
         return false;
       }
 
+      // Font zoom shortcuts (#211). Ctrl+Wheel was dropped because xterm.js
+      // viewport consumes wheel events for scrollback before any custom
+      // handler can intercept them reliably.
+      const zoomInMatch = matchesKeybinding(e, "terminal.fontZoomIn");
+      const zoomOutMatch = matchesKeybinding(e, "terminal.fontZoomOut");
+      if (zoomInMatch || zoomOutMatch) {
+        e.preventDefault();
+        const state = useSettingsStore.getState();
+        const currentFont = state.resolveFont(profile);
+        const delta = zoomInMatch ? 1 : -1;
+        const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+        if (newSize !== currentFont.size) {
+          const idx = state.profiles.findIndex((p) => p.name === profile);
+          if (idx >= 0) {
+            state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
+          }
+        }
+        return false;
+      }
+
+      if (matchesKeybinding(e, "terminal.fontZoomReset")) {
+        e.preventDefault();
+        const state = useSettingsStore.getState();
+        const currentFont = state.resolveFont(profile);
+        const defaultSize = state.profileDefaults?.font?.size ?? 14;
+        if (currentFont.size !== defaultSize) {
+          const idx = state.profiles.findIndex((p) => p.name === profile);
+          if (idx >= 0) {
+            state.updateProfile(idx, { font: { ...currentFont, size: defaultSize } });
+          }
+        }
+        return false;
+      }
+
       return true;
     });
 
@@ -1203,24 +1237,6 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
-    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
-    const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const state = useSettingsStore.getState();
-      const currentFont = state.resolveFont(profile);
-      const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
-      if (newSize !== currentFont.size) {
-        // Update the profile's font override
-        const idx = state.profiles.findIndex((p) => p.name === profile);
-        if (idx >= 0) {
-          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
-        }
-      }
-    };
-    outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
-
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
@@ -1344,7 +1360,6 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       compositionController.dispose();

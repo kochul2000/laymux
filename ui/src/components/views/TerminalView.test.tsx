@@ -1249,67 +1249,91 @@ describe("TerminalView", () => {
     expect(testIdDiv.style.cursor).toBe("");
   });
 
-  // -- Ctrl+Wheel Zoom --
+  // -- Font Zoom Shortcuts (#211) --
 
-  it("increases font size on Ctrl+Wheel scroll up", async () => {
-    // Font is now resolved from profile -> profileDefaults
+  it("increases font size on terminal.fontZoomIn keybinding", async () => {
     render(<TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom1");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
-    container.dispatchEvent(event);
 
-    // Ctrl+Wheel sets font override on the profile
+    // Default: Ctrl+=
+    const event = new KeyboardEvent("keydown", { key: "=", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(false);
+    expect(event.preventDefault).toHaveBeenCalled();
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(15);
   });
 
-  it("decreases font size on Ctrl+Wheel scroll down", async () => {
+  it("decreases font size on terminal.fontZoomOut keybinding", async () => {
     render(<TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom2");
-    const event = new WheelEvent("wheel", {
-      deltaY: 100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
-    container.dispatchEvent(event);
 
+    // Default: Ctrl+-
+    const event = new KeyboardEvent("keydown", { key: "-", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(false);
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(13);
   });
 
-  it("does not change font size on wheel without Ctrl", async () => {
+  it("resets font size to profile defaults on terminal.fontZoomReset", async () => {
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "Cascadia Mono", size: 22, weight: "normal" } });
+
+    render(<TerminalView instanceId="t-zoom-reset" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    // Default: Ctrl+0
+    const event = new KeyboardEvent("keydown", { key: "0", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(false);
+    const defaultSize = useSettingsStore.getState().profileDefaults.font.size;
+    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(defaultSize);
+  });
+
+  it("does not change font size on unrelated key presses", async () => {
     render(<TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom3");
-    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
-    container.dispatchEvent(event);
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
 
-    // No font override should be set
+    // Plain '=' without Ctrl should not trigger zoom
+    const event = new KeyboardEvent("keydown", { key: "=", ctrlKey: false });
+    const result = capturedKeyHandler!(event);
+
+    expect(result).toBe(true);
     expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
   });
 
-  it("clamps font size to minimum 6", async () => {
-    // Set profile font override to minimum
+  it("clamps font size to minimum 6 on zoom out", async () => {
     useSettingsStore
       .getState()
       .updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
 
     render(<TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom4");
-    const event = new WheelEvent("wheel", {
-      deltaY: 100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
-    container.dispatchEvent(event);
+
+    const event = new KeyboardEvent("keydown", { key: "-", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
 
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(6);
   });
@@ -1400,37 +1424,35 @@ describe("TerminalView", () => {
     });
   });
 
-  it("clamps font size to maximum 72", async () => {
+  it("clamps font size to maximum 72 on zoom in", async () => {
     useSettingsStore
       .getState()
       .updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
 
     render(<TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom5");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
-    container.dispatchEvent(event);
+
+    const event = new KeyboardEvent("keydown", { key: "=", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
 
     expect(useSettingsStore.getState().profiles[0].font?.size).toBe(72);
   });
 
-  it("prevents default browser zoom on Ctrl+Wheel", async () => {
+  it("prevents default browser zoom on font zoom keybinding", async () => {
     render(<TerminalView instanceId="t-zoom6" profile="PowerShell" syncGroup="" />);
 
-    const container = screen.getByTestId("terminal-view-t-zoom6");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
-    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
-    container.dispatchEvent(event);
+
+    const event = new KeyboardEvent("keydown", { key: "=", ctrlKey: true });
+    const preventDefaultSpy = vi.fn();
+    Object.defineProperty(event, "preventDefault", { value: preventDefaultSpy });
+    capturedKeyHandler!(event);
 
     expect(preventDefaultSpy).toHaveBeenCalled();
   });
