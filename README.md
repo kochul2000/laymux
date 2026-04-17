@@ -228,6 +228,13 @@ IDE shortcuts avoid `Ctrl+<single-key>` so they never shadow shell/readline bind
 - [`docs/terminal/`](./docs/terminal/) — cursor, IME, and flicker research notes (reference-only).
 - [`CLAUDE.md`](./CLAUDE.md) — development guidelines.
 
+## Related Projects
+
+Companion tools by the same author that pair well with Laymux's audience:
+
+- [**claude-simple-usage**](https://github.com/kochul2000/claude-simple-usage) — lightweight Claude Code usage / token tracker.
+- [**JetBrainsMonoBigHangul**](https://github.com/kochul2000/JetBrainsMonoBigHangul) — JetBrains Mono patched with enlarged Hangul glyphs for readable CJK terminals.
+
 ## License
 
 MIT

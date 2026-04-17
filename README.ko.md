@@ -228,6 +228,13 @@ IDE 단축키는 셸·readline 바인딩과 겹치지 않도록 `Ctrl+단일키`
 - [`docs/terminal/`](./docs/terminal/) — 커서·IME·플리커 리서치 문서 (레퍼런스 전용).
 - [`CLAUDE.md`](./CLAUDE.md) — 개발 가이드라인.
 
+## 관련 프로젝트
+
+같은 작성자가 만든, Laymux 사용자층과 잘 맞는 도구들:
+
+- [**claude-simple-usage**](https://github.com/kochul2000/claude-simple-usage) — 가벼운 Claude Code 사용량 / 토큰 트래커.
+- [**JetBrainsMonoBigHangul**](https://github.com/kochul2000/JetBrainsMonoBigHangul) — 한글 글리프를 키운 JetBrains Mono 패치 폰트. CJK 터미널 가독성용.
+
 ## 라이선스
 
 MIT
