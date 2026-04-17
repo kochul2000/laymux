@@ -1813,5 +1813,131 @@ describe("WorkspaceSelectorView", () => {
         expect(borderish).toContain("--accent");
       });
     });
+
+    // Per-item eye buttons (workspace-eye-*, pane-eye-*) need a visually
+    // distinct color when the item is hidden so the user can tell at a
+    // glance that the item is currently hidden and the button will restore
+    // it. Previously the hidden state used --text-secondary, which combined
+    // with the row's 0.35 opacity fade to make the icon almost invisible.
+    describe("per-item eye button hidden-state color", () => {
+      it("workspace-eye uses --accent when the workspace is visible", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("workspace-eye-ws-2");
+        expect(eye.style.color).toContain("--accent");
+        expect(eye.style.color).not.toContain("--yellow");
+      });
+
+      it("workspace-eye uses --yellow when the workspace is hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().toggleWorkspaceHidden("ws-2");
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("workspace-eye-ws-2");
+        expect(eye.style.color).toContain("--yellow");
+      });
+
+      it("pane-eye uses --accent when the pane is visible", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        expect(eye.style.color).toContain("--accent");
+        expect(eye.style.color).not.toContain("--yellow");
+      });
+
+      it("pane-eye uses --yellow when the pane is hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().togglePaneHidden("pane-a");
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        expect(eye.style.color).toContain("--yellow");
+      });
+
+      // The hidden row as a whole fades to opacity 0.35 to recede into the
+      // background. The eye button must stay at full opacity so the user
+      // can still read it as the affordance to restore the item.
+      it("workspace-eye keeps full opacity even when the workspace is hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().toggleWorkspaceHidden("ws-2");
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("workspace-eye-ws-2");
+        // Opacity either unset or explicitly 1 — never the row-fade value.
+        const op = eye.style.opacity;
+        expect(op === "" || op === "1").toBe(true);
+      });
+
+      it("pane-eye keeps full opacity even when the pane is hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().togglePaneHidden("pane-a");
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        const op = eye.style.opacity;
+        expect(op === "" || op === "1").toBe(true);
+      });
+
+      // Hover affordance: clicking the per-item eye is the whole point of
+      // hide mode, so the button itself must react to hover. Inline
+      // background/padding previously suppressed any CSS :hover feedback.
+      it("workspace-eye carries the row-eye-btn class so CSS hover applies", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("workspace-eye-ws-2");
+        expect(eye.className).toContain("row-eye-btn");
+      });
+
+      it("pane-eye carries the row-eye-btn class so CSS hover applies", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        expect(eye.className).toContain("row-eye-btn");
+      });
+
+      it("workspace-eye does not pin inline background (lets CSS :hover win)", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("workspace-eye-ws-2");
+        expect(eye.style.background).toBe("");
+        expect(eye.style.backgroundColor).toBe("");
+      });
+
+      it("pane-eye does not pin inline background (lets CSS :hover win)", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        expect(eye.style.background).toBe("");
+        expect(eye.style.backgroundColor).toBe("");
+      });
+
+      // Structural contract: the fade that signals "this row is hidden" must
+      // live on a sibling wrapper, not on the row's outer element. Otherwise
+      // CSS opacity cascades down to the eye button and washes out the
+      // yellow cue the user relies on.
+      it("does not apply opacity to the workspace-item outer element when hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().toggleWorkspaceHidden("ws-2");
+        render(<WorkspaceSelectorView />);
+        const outer = screen.getByTestId("workspace-item-ws-2");
+        expect(outer.style.opacity === "" || outer.style.opacity === "1").toBe(true);
+      });
+
+      it("does not apply opacity to the pane row outer element when the pane is hidden", () => {
+        useUiStore.getState().toggleHideMode();
+        useUiStore.getState().togglePaneHidden("pane-a");
+        render(<WorkspaceSelectorView />);
+        const eye = screen.getByTestId("pane-eye-pane-a");
+        // Walk up from the eye button to its row container and check none of
+        // the ancestors up to (and including) the workspace-item root apply
+        // the 0.35 fade directly to the eye's line.
+        const row = eye.closest<HTMLElement>('[data-testid^="ws-row-2-"]') ?? null;
+        expect(row).not.toBeNull();
+        // Inside Row 2 the pane's own containing element must not be a
+        // direct opacity-0.35 ancestor of the eye button.
+        let node: HTMLElement | null = eye.parentElement;
+        while (node && node !== row) {
+          const op = node.style.opacity;
+          expect(op === "" || op === "1").toBe(true);
+          node = node.parentElement;
+        }
+      });
+    });
   });
 });

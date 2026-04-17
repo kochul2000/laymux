@@ -237,12 +237,11 @@ function WorkspaceItem({
             : "none",
         paddingLeft: isActive ? 9 : 9,
         paddingRight: 10,
-        opacity: hideMode && isWsHidden ? 0.35 : undefined,
       }}
     >
       {/* Row 1: Index + Workspace name + terminal count + badge + close */}
       <div data-testid={`ws-row-1-${ws.id}`} className="flex items-center justify-between">
-        <span className="flex items-center gap-1.5 truncate">
+        <span className="flex min-w-0 items-center gap-1.5 truncate">
           {hideMode && (
             <button
               data-testid={`workspace-eye-${ws.id}`}
@@ -250,58 +249,65 @@ function WorkspaceItem({
                 e.stopPropagation();
                 onToggleWsHidden();
               }}
-              className="shrink-0 cursor-pointer"
+              className="row-eye-btn shrink-0 cursor-pointer"
               style={{
-                color: isWsHidden ? "var(--text-secondary)" : "var(--accent)",
-                background: "transparent",
+                color: isWsHidden ? "var(--yellow)" : "var(--accent)",
                 border: "none",
-                padding: 0,
                 lineHeight: 0,
               }}
             >
               {isWsHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
             </button>
           )}
-          {/* Keyboard shortcut index */}
+          {/* Fade the descriptive content, but keep the eye button fully
+              visible so the yellow "hidden" cue does not wash out. */}
           <span
-            className="shrink-0 text-[10px] font-medium"
-            style={{
-              color: isActive ? "var(--accent)" : "var(--text-primary)",
-              opacity: isActive ? 0.9 : 0.6,
-              minWidth: 10,
-            }}
-            title={
-              index < 9 ? `Ctrl+Alt+${index + 1}` : index === 8 ? "Ctrl+Alt+9 (last)" : undefined
-            }
+            className="flex min-w-0 items-center gap-1.5 truncate"
+            style={{ opacity: hideMode && isWsHidden ? 0.35 : undefined }}
           >
-            {index < 9 ? index + 1 : ""}
-          </span>
-          <span
-            data-testid={`workspace-name-${ws.id}`}
-            className="truncate text-sm font-medium"
-            style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              onRename();
-            }}
-          >
-            {ws.name}
-          </span>
-          {summary.terminalCount > 0 && (
             <span
-              data-testid={`terminal-count-${ws.id}`}
-              className="shrink-0 rounded px-1.5 text-[9px]"
+              className="shrink-0 text-[10px] font-medium"
               style={{
-                color: "var(--text-secondary)",
-                background: "var(--hover-bg)",
-                opacity: 0.7,
+                color: isActive ? "var(--accent)" : "var(--text-primary)",
+                opacity: isActive ? 0.9 : 0.6,
+                minWidth: 10,
+              }}
+              title={
+                index < 9 ? `Ctrl+Alt+${index + 1}` : index === 8 ? "Ctrl+Alt+9 (last)" : undefined
+              }
+            >
+              {index < 9 ? index + 1 : ""}
+            </span>
+            <span
+              data-testid={`workspace-name-${ws.id}`}
+              className="truncate text-sm font-medium"
+              style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onRename();
               }}
             >
-              {summary.terminalCount}
+              {ws.name}
             </span>
-          )}
+            {summary.terminalCount > 0 && (
+              <span
+                data-testid={`terminal-count-${ws.id}`}
+                className="shrink-0 rounded px-1.5 text-[9px]"
+                style={{
+                  color: "var(--text-secondary)",
+                  background: "var(--hover-bg)",
+                  opacity: 0.7,
+                }}
+              >
+                {summary.terminalCount}
+              </span>
+            )}
+          </span>
         </span>
-        <span className="flex items-center gap-1">
+        <span
+          className="flex items-center gap-1"
+          style={{ opacity: hideMode && isWsHidden ? 0.35 : undefined }}
+        >
           {summary.unreadCount > 0 && (
             <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
           )}
@@ -397,7 +403,11 @@ function WorkspaceItem({
 
       {/* Per-pane summaries */}
       {panes.length >= 1 ? (
-        <div data-testid={`ws-row-2-${ws.id}`} className="mt-1 flex flex-col gap-0.5">
+        <div
+          data-testid={`ws-row-2-${ws.id}`}
+          className="mt-1 flex flex-col gap-0.5"
+          style={{ opacity: hideMode && isWsHidden ? 0.35 : undefined }}
+        >
           {(() => {
             const showMinimap = panes.length >= 1;
             const minimapPanes = panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
@@ -444,7 +454,6 @@ function WorkspaceItem({
                     }
                     style={{
                       paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
-                      opacity: isPaneHidden ? 0.35 : undefined,
                       ...(isFocusedPane && !hideMode
                         ? {
                             background: "var(--accent-12)",
@@ -456,135 +465,141 @@ function WorkspaceItem({
                   >
                     {hideMode && (
                       <button
-                        className="shrink-0 cursor-pointer"
+                        className="row-eye-btn shrink-0 cursor-pointer"
                         data-testid={`pane-eye-${pane.id}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onTogglePaneHidden(pane.id);
                         }}
                         style={{
-                          color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)",
-                          background: "transparent",
+                          color: isPaneHidden ? "var(--yellow)" : "var(--accent)",
                           border: "none",
-                          padding: 0,
                           lineHeight: 0,
                         }}
                       >
                         {isPaneHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
                       </button>
                     )}
-                    {showMinimap && wsDisplay.minimap && (
-                      <span
-                        className="shrink-0"
-                        data-testid={`pane-minimap-${termId}`}
-                        style={{ opacity: isFocusedPane ? 1 : 0.5 }}
-                      >
-                        <PaneMinimap
-                          panes={minimapPanes}
-                          highlightIndex={paneIndex}
-                          width={18}
-                          height={12}
-                        />
-                      </span>
-                    )}
-                    <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      {wsDisplay.environment && (
+                    <div
+                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                      style={{ opacity: isPaneHidden ? 0.35 : undefined }}
+                    >
+                      {showMinimap && wsDisplay.minimap && (
                         <span
-                          className="shrink-0 font-medium"
-                          style={{ color: "var(--text-secondary)", opacity: isActive ? 0.9 : 0.7 }}
+                          className="shrink-0"
+                          data-testid={`pane-minimap-${termId}`}
+                          style={{ opacity: isFocusedPane ? 1 : 0.5 }}
                         >
-                          {shortLabel(ts.label)}
+                          <PaneMinimap
+                            panes={minimapPanes}
+                            highlightIndex={paneIndex}
+                            width={18}
+                            height={12}
+                          />
                         </span>
                       )}
-                      {wsDisplay.activity && (
-                        <span
-                          data-testid={`terminal-activity-${ts.id}`}
-                          className="shrink-0 rounded px-1 mr-1 text-[9px]"
-                          style={{
-                            color: actInfo.color,
-                            background:
-                              ts.activity?.type === "interactiveApp"
-                                ? ts.activity?.name === "Claude"
-                                  ? "var(--orange-15)"
-                                  : "var(--accent-12)"
-                                : "var(--active-bg)",
-                            minWidth: 40,
-                            textAlign: "center",
-                            display: "inline-block",
-                            opacity: isActive ? 1 : 0.7,
-                          }}
-                        >
-                          {actInfo.label}
-                          {ts.outputActive ? "" : ""}
-                        </span>
-                      )}
-                      {wsDisplay.path && ts.branch && (
-                        <>
+                      <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
+                        {wsDisplay.environment && (
                           <span
-                            className="shrink-0"
-                            style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}
-                          >
-                            {ts.branch}
-                          </span>
-                        </>
-                      )}
-                      {wsDisplay.path && ts.cwd && (
-                        <>
-                          <span
-                            className="truncate"
+                            className="shrink-0 font-medium"
                             style={{
-                              color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                              opacity: isActive ? 0.7 : 0.5,
-                              ...(pathEllipsis === "start"
-                                ? { direction: "rtl", textAlign: "left" }
-                                : {}),
+                              color: "var(--text-secondary)",
+                              opacity: isActive ? 0.9 : 0.7,
                             }}
                           >
-                            <bdi>
-                              {abbreviatePath(
-                                isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
-                                pathEllipsis,
-                              )}
-                            </bdi>
+                            {shortLabel(ts.label)}
                           </span>
-                        </>
-                      )}
+                        )}
+                        {wsDisplay.activity && (
+                          <span
+                            data-testid={`terminal-activity-${ts.id}`}
+                            className="shrink-0 rounded px-1 mr-1 text-[9px]"
+                            style={{
+                              color: actInfo.color,
+                              background:
+                                ts.activity?.type === "interactiveApp"
+                                  ? ts.activity?.name === "Claude"
+                                    ? "var(--orange-15)"
+                                    : "var(--accent-12)"
+                                  : "var(--active-bg)",
+                              minWidth: 40,
+                              textAlign: "center",
+                              display: "inline-block",
+                              opacity: isActive ? 1 : 0.7,
+                            }}
+                          >
+                            {actInfo.label}
+                            {ts.outputActive ? "" : ""}
+                          </span>
+                        )}
+                        {wsDisplay.path && ts.branch && (
+                          <>
+                            <span
+                              className="shrink-0"
+                              style={{ color: "var(--green)", opacity: isActive ? 1 : 0.7 }}
+                            >
+                              {ts.branch}
+                            </span>
+                          </>
+                        )}
+                        {wsDisplay.path && ts.cwd && (
+                          <>
+                            <span
+                              className="truncate"
+                              style={{
+                                color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                                opacity: isActive ? 0.7 : 0.5,
+                                ...(pathEllipsis === "start"
+                                  ? { direction: "rtl", textAlign: "left" }
+                                  : {}),
+                              }}
+                            >
+                              <bdi>
+                                {abbreviatePath(
+                                  isWindowsProfile(ts.profile) ? mntPathToWindows(ts.cwd) : ts.cwd,
+                                  pathEllipsis,
+                                )}
+                              </bdi>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {wsDisplay.result && tCmdStatus?.icon ? (
+                        <span
+                          data-testid={`pane-cmd-badge-${ts.id}`}
+                          className="shrink-0 ml-auto"
+                          style={{
+                            color: tCmdStatus.color,
+                            border: ts.hasUnreadNotification
+                              ? "1.5px solid var(--accent)"
+                              : "1.5px solid transparent",
+                            borderRadius: "var(--radius-md)",
+                            width: 16,
+                            height: 16,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            boxSizing: "border-box",
+                            fontSize: 10,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {tCmdStatus.icon}
+                        </span>
+                      ) : wsDisplay.result && ts.hasUnreadNotification ? (
+                        <span
+                          data-testid={`pane-notif-dot-${ts.id}`}
+                          className="shrink-0 ml-auto"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: "var(--accent)",
+                            display: "inline-block",
+                          }}
+                        />
+                      ) : null}
                     </div>
-                    {wsDisplay.result && tCmdStatus?.icon ? (
-                      <span
-                        data-testid={`pane-cmd-badge-${ts.id}`}
-                        className="shrink-0 ml-auto"
-                        style={{
-                          color: tCmdStatus.color,
-                          border: ts.hasUnreadNotification
-                            ? "1.5px solid var(--accent)"
-                            : "1.5px solid transparent",
-                          borderRadius: "var(--radius-md)",
-                          width: 16,
-                          height: 16,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          boxSizing: "border-box",
-                          fontSize: 10,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {tCmdStatus.icon}
-                      </span>
-                    ) : wsDisplay.result && ts.hasUnreadNotification ? (
-                      <span
-                        data-testid={`pane-notif-dot-${ts.id}`}
-                        className="shrink-0 ml-auto"
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: "var(--accent)",
-                          display: "inline-block",
-                        }}
-                      />
-                    ) : null}
                   </div>
                 );
               }
@@ -603,7 +618,6 @@ function WorkspaceItem({
                   }
                   style={{
                     paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
-                    opacity: isPaneHidden ? 0.35 : undefined,
                     ...(isFocusedPane && !hideMode
                       ? {
                           background: "var(--accent-08)",
@@ -615,44 +629,47 @@ function WorkspaceItem({
                 >
                   {hideMode && (
                     <button
-                      className="shrink-0 cursor-pointer"
+                      className="row-eye-btn shrink-0 cursor-pointer"
                       data-testid={`pane-eye-${pane.id}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onTogglePaneHidden(pane.id);
                       }}
                       style={{
-                        color: isPaneHidden ? "var(--text-secondary)" : "var(--accent)",
-                        background: "transparent",
+                        color: isPaneHidden ? "var(--yellow)" : "var(--accent)",
                         border: "none",
-                        padding: 0,
                         lineHeight: 0,
                       }}
                     >
                       {isPaneHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
                     </button>
                   )}
-                  {showMinimap && wsDisplay.minimap && (
-                    <span
-                      className="shrink-0"
-                      data-testid={`pane-minimap-empty-${pane.id}`}
-                      style={{ opacity: isFocusedPane ? 1 : 0.5 }}
-                    >
-                      <PaneMinimap
-                        panes={minimapPanes}
-                        highlightIndex={paneIndex}
-                        width={18}
-                        height={12}
-                      />
-                    </span>
-                  )}
-                  <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                    <span
-                      className="shrink-0 font-medium"
-                      style={{ color: "var(--text-secondary)", opacity: 0.4 }}
-                    >
-                      {shortLabel(pane.view.type)}
-                    </span>
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-1.5 truncate"
+                    style={{ opacity: isPaneHidden ? 0.35 : undefined }}
+                  >
+                    {showMinimap && wsDisplay.minimap && (
+                      <span
+                        className="shrink-0"
+                        data-testid={`pane-minimap-empty-${pane.id}`}
+                        style={{ opacity: isFocusedPane ? 1 : 0.5 }}
+                      >
+                        <PaneMinimap
+                          panes={minimapPanes}
+                          highlightIndex={paneIndex}
+                          width={18}
+                          height={12}
+                        />
+                      </span>
+                    )}
+                    <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
+                      <span
+                        className="shrink-0 font-medium"
+                        style={{ color: "var(--text-secondary)", opacity: 0.4 }}
+                      >
+                        {shortLabel(pane.view.type)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
