@@ -9,7 +9,13 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import type { DockPosition, ViewInstanceConfig, ViewType, Workspace, WorkspacePane } from "@/stores/types";
+import type {
+  DockPosition,
+  ViewInstanceConfig,
+  ViewType,
+  Workspace,
+  WorkspacePane,
+} from "@/stores/types";
 
 interface HandlerResult {
   success: boolean;
@@ -19,9 +25,7 @@ interface HandlerResult {
 
 type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
-type ActivePaneCtx =
-  | { err: HandlerResult }
-  | { ws: Workspace; pane: WorkspacePane };
+type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -60,7 +64,9 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
 
 /** Find a terminal instance by id. */
 function findTerminalInstance(terminalId: string) {
-  return useTerminalStore.getState().instances.find((instance) => instance.id === terminalId) ?? null;
+  return (
+    useTerminalStore.getState().instances.find((instance) => instance.id === terminalId) ?? null
+  );
 }
 
 /** Resolve pane index for a terminal within its workspace. */
@@ -277,9 +283,7 @@ const handlers: HandlerMap = {
       const idx = p.paneIndex as number;
       const ctx = getActivePaneCtx(idx);
       if ("err" in ctx) return ctx.err;
-      useWorkspaceStore
-        .getState()
-        .splitPane(idx, p.direction as "horizontal" | "vertical");
+      useWorkspaceStore.getState().splitPane(idx, p.direction as "horizontal" | "vertical");
       const newPaneIndex = idx + 1;
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
       const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
@@ -292,13 +296,10 @@ const handlers: HandlerMap = {
       }
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];
-      const terminalId =
-        newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
+      const terminalId = newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
       // Check if the terminal instance is already registered (React may not have rendered yet)
       const { instances } = useTerminalStore.getState();
-      const terminalReady = terminalId
-        ? instances.some((i) => i.id === terminalId)
-        : false;
+      const terminalReady = terminalId ? instances.some((i) => i.id === terminalId) : false;
       return ok({
         split: true,
         newPane: newPane
@@ -314,9 +315,10 @@ const handlers: HandlerMap = {
             }
           : null,
         totalPanes: ws?.panes.length ?? 0,
-        _hint: terminalId && !terminalReady
-          ? "Terminal ID is allocated but not yet registered. Poll list_terminals or wait ~500ms before writing to it."
-          : undefined,
+        _hint:
+          terminalId && !terminalReady
+            ? "Terminal ID is allocated but not yet registered. Poll list_terminals or wait ~500ms before writing to it."
+            : undefined,
       });
     },
     remove: (p) => {
@@ -453,7 +455,11 @@ const handlers: HandlerMap = {
           paneIndex: paneIndex >= 0 ? paneIndex : null,
           panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
         },
-        workspace: { id: workspace.id, name: workspace.name, isActive: workspace.id === activeWorkspaceId },
+        workspace: {
+          id: workspace.id,
+          name: workspace.name,
+          isActive: workspace.id === activeWorkspaceId,
+        },
       });
     },
     identify: (p) => {
@@ -511,7 +517,11 @@ const handlers: HandlerMap = {
       }
 
       useTerminalStore.getState().setTerminalFocus(terminalId);
-      return ok({ focused: terminalId, paneIndex: paneIndex >= 0 ? paneIndex : undefined, switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined });
+      return ok({
+        focused: terminalId,
+        paneIndex: paneIndex >= 0 ? paneIndex : undefined,
+        switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined,
+      });
     },
   },
 
@@ -601,6 +611,22 @@ const handlers: HandlerMap = {
       useUiStore.getState().setSettingsNavTarget(target);
       return ok({ navigated: true, section: target });
     },
+    toggleHideMode: () => {
+      useUiStore.getState().toggleHideMode();
+      return ok({ hideMode: useUiStore.getState().hideMode });
+    },
+    toggleWorkspaceHidden: (p) => {
+      const id = typeof p.id === "string" ? p.id : null;
+      if (!id) return err("id required");
+      useUiStore.getState().toggleWorkspaceHidden(id);
+      return ok({ hidden: useUiStore.getState().hiddenWorkspaceIds.has(id) });
+    },
+    togglePaneHidden: (p) => {
+      const id = typeof p.id === "string" ? p.id : null;
+      if (!id) return err("id required");
+      useUiStore.getState().togglePaneHidden(id);
+      return ok({ hidden: useUiStore.getState().hiddenPaneIds.has(id) });
+    },
   },
 };
 
@@ -612,14 +638,10 @@ export async function captureScreenshot(paneIndex?: number): Promise<string> {
 
   // If paneIndex specified, find the specific pane div (not minimap rects or hidden workspaces)
   if (paneIndex != null) {
-    const paneElements = document.querySelectorAll<HTMLElement>(
-      "div[data-pane-index]",
-    );
+    const paneElements = document.querySelectorAll<HTMLElement>("div[data-pane-index]");
     // Filter to only visible panes (display !== "none" means active workspace)
     const paneEl = Array.from(paneElements).find(
-      (el) =>
-        el.getAttribute("data-pane-index") === String(paneIndex) &&
-        el.offsetParent !== null,
+      (el) => el.getAttribute("data-pane-index") === String(paneIndex) && el.offsetParent !== null,
     );
     if (paneEl) {
       target = paneEl;
@@ -682,7 +704,8 @@ export async function handleAsyncAutomationRequest(
 ): Promise<HandlerResult> {
   if (request.target === "screenshot" && request.method === "capture") {
     try {
-      const paneIndex = typeof request.params.paneIndex === "number" ? request.params.paneIndex : undefined;
+      const paneIndex =
+        typeof request.params.paneIndex === "number" ? request.params.paneIndex : undefined;
       const dataUrl = await captureScreenshot(paneIndex);
       return ok({ dataUrl });
     } catch (e) {

@@ -120,6 +120,25 @@
     background: var(--red);
     color: var(--bg-base);
   }
+  /* Accent hover — used by primary-action toggles (e.g. hide mode) to make
+     the currently active mode feel responsive and distinctly highlighted. */
+  .hover-bg-accent:hover {
+    background: var(--accent-20);
+  }
+
+  /* Per-row eye buttons (workspace-eye, pane-eye) in hide mode. Needs its
+     own hover affordance so the user can tell the tiny 11px icon is the
+     click target. Padding + negative margin adds a hit area + hover
+     background pill without shifting the row layout. */
+  .row-eye-btn {
+    padding: 2px;
+    margin: -2px;
+    border-radius: var(--radius-md);
+    transition: background 0.12s ease;
+  }
+  .row-eye-btn:hover {
+    background: var(--hover-bg-strong);
+  }
 
   /* Toolbar (28px header bar) */
   .ui-toolbar {

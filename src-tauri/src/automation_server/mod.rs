@@ -110,8 +110,11 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     tracing::info!(port, "Automation server listening on 0.0.0.0:{port}");
 
     tokio::spawn(async move {
-        if let Err(e) =
-            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
+        if let Err(e) = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
         {
             tracing::error!(error = %e, "Automation server error");
         }
@@ -155,7 +158,9 @@ async fn ip_allowlist_middleware(
     } else {
         (
             StatusCode::FORBIDDEN,
-            Json(err_json("Access denied: only local/private network connections are allowed")),
+            Json(err_json(
+                "Access denied: only local/private network connections are allowed",
+            )),
         )
             .into_response()
     }
@@ -236,6 +241,15 @@ pub fn build_router(state: ServerState) -> Router {
         .route(
             "/api/v1/ui/notifications",
             post(ui_toggle_notification_panel),
+        )
+        .route("/api/v1/ui/hide-mode/toggle", post(ui_toggle_hide_mode))
+        .route(
+            "/api/v1/ui/hidden/workspace/{id}/toggle",
+            post(ui_toggle_workspace_hidden),
+        )
+        .route(
+            "/api/v1/ui/hidden/pane/{id}/toggle",
+            post(ui_toggle_pane_hidden),
         )
         .layer(middleware::from_fn(ip_allowlist_middleware))
         .layer(CorsLayer::permissive())
