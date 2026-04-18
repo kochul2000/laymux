@@ -52,6 +52,35 @@ describe("ShellActivityHandler", () => {
       const result = handler.computeStatus(raw());
       expect(result).toEqual({ icon: "—", color: "var(--text-secondary)" });
     });
+
+    it("returns ⏳ yellow when activity is running (sleep/ssh/sparse scripts)", () => {
+      // Long-running commands without DEC-2026 bursts must show ⏳ rather than
+      // inheriting the prior command's ✓/✗.
+      const result = handler.computeStatus(raw({ activity: { type: "running" } }));
+      expect(result).toEqual({ icon: "⏳", color: "var(--yellow)" });
+    });
+
+    it("activity=running takes precedence over stale exitCode=0", () => {
+      const result = handler.computeStatus(raw({ activity: { type: "running" }, exitCode: 0 }));
+      expect(result.icon).toBe("⏳");
+    });
+
+    it("activity=running takes precedence over stale exitCode≠0", () => {
+      const result = handler.computeStatus(raw({ activity: { type: "running" }, exitCode: 1 }));
+      expect(result.icon).toBe("⏳");
+    });
+
+    it("outputActive still wins over activity=running", () => {
+      const result = handler.computeStatus(
+        raw({ activity: { type: "running" }, outputActive: true }),
+      );
+      expect(result.icon).toBe("⏳");
+    });
+
+    it("activity=shell falls through to exitCode rules", () => {
+      const result = handler.computeStatus(raw({ activity: { type: "shell" }, exitCode: 0 }));
+      expect(result.icon).toBe("✓");
+    });
   });
 
   describe("computeStatusMessage", () => {
