@@ -82,14 +82,23 @@ pub struct ClaudeTitleResult {
 
 /// Process an OSC 0/2 title change for Claude Code state tracking.
 ///
-/// Given the current state (`was_detected`, `was_working`) and the new title,
+/// Given the current state (`was_detected`, `was_working`, and the last
+/// observed working spinner title `prev_working_title`) plus the new title,
 /// determines what transitions occurred. The caller is responsible for
 /// updating persistent state (`claude_detected`, `known_claude_terminals`,
-/// `session.claude_was_working`) based on the returned result.
+/// `session.claude_was_working`, `session.claude_last_working_title`) based
+/// on the returned result.
+///
+/// `prev_working_title` is used as a fallback task description when the new
+/// idle title is generic (e.g. `✳ Claude Code` with no task text). Claude
+/// frequently returns to the generic idle title on completion, so without
+/// the fallback most working→idle notifications would show a placeholder
+/// instead of the actual task name.
 pub fn process_claude_title(
     title: &str,
     was_detected: bool,
     was_working: bool,
+    prev_working_title: Option<&str>,
 ) -> ClaudeTitleResult {
     let mut result = ClaudeTitleResult::default();
     let is_claude = is_claude_title(title);
@@ -113,13 +122,21 @@ pub fn process_claude_title(
 
         // Task completion: working → idle transition
         if was_working && result.now_idle {
-            let description = title.trim_start_matches(IDLE_PREFIX).trim();
-            result.task_completed =
-                Some(if description.is_empty() || description == "Claude Code" {
-                    "Claude Code task completed".to_string()
-                } else {
-                    description.to_string()
-                });
+            let idle_description = title.trim_start_matches(IDLE_PREFIX).trim();
+            let text = if !idle_description.is_empty() && idle_description != "Claude Code" {
+                idle_description.to_string()
+            } else {
+                // Fallback to the preceding working title's task text.
+                let prev_description = prev_working_title
+                    .map(strip_claude_spinner_prefix)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && *s != "Claude Code");
+                match prev_description {
+                    Some(desc) => desc.to_string(),
+                    None => "Claude Code task completed".to_string(),
+                }
+            };
+            result.task_completed = Some(text);
         }
     }
 
@@ -209,7 +226,7 @@ mod tests {
 
     #[test]
     fn process_entry_on_first_claude_title() {
-        let r = process_claude_title("Claude Code", false, false);
+        let r = process_claude_title("Claude Code", false, false, None);
         assert!(r.entered);
         assert!(!r.exited);
         assert!(r.task_completed.is_none());
@@ -217,21 +234,21 @@ mod tests {
 
     #[test]
     fn process_no_entry_when_already_detected() {
-        let r = process_claude_title("Claude Code", true, false);
+        let r = process_claude_title("Claude Code", true, false, None);
         assert!(!r.entered);
         assert!(!r.exited);
     }
 
     #[test]
     fn process_exit_on_non_claude_title() {
-        let r = process_claude_title("bash", true, false);
+        let r = process_claude_title("bash", true, false, None);
         assert!(!r.entered);
         assert!(r.exited);
     }
 
     #[test]
     fn process_no_exit_on_spinner_title() {
-        let r = process_claude_title("\u{2810} Working...", true, false);
+        let r = process_claude_title("\u{2810} Working...", true, false, None);
         assert!(!r.exited);
         assert!(r.now_working);
         assert!(!r.now_idle);
@@ -239,7 +256,7 @@ mod tests {
 
     #[test]
     fn process_task_completed_on_working_to_idle() {
-        let r = process_claude_title("\u{2733} Fix the bug", true, true);
+        let r = process_claude_title("\u{2733} Fix the bug", true, true, None);
         assert!(!r.exited);
         assert!(r.now_idle);
         assert!(!r.now_working);
@@ -249,14 +266,14 @@ mod tests {
     #[test]
     fn process_no_completion_on_idle_without_prior_working() {
         // First idle after entry (no working phase) — not a task completion
-        let r = process_claude_title("\u{2733} Claude Code", true, false);
+        let r = process_claude_title("\u{2733} Claude Code", true, false, None);
         assert!(r.now_idle);
         assert!(r.task_completed.is_none());
     }
 
     #[test]
     fn process_completion_with_default_message() {
-        let r = process_claude_title("\u{2733} Claude Code", true, true);
+        let r = process_claude_title("\u{2733} Claude Code", true, true, None);
         assert_eq!(
             r.task_completed,
             Some("Claude Code task completed".to_string())
@@ -265,7 +282,7 @@ mod tests {
 
     #[test]
     fn process_working_to_working_no_completion() {
-        let r = process_claude_title("\u{2810} New task", true, true);
+        let r = process_claude_title("\u{2810} New task", true, true, None);
         assert!(r.now_working);
         assert!(!r.now_idle);
         assert!(r.task_completed.is_none());
@@ -274,10 +291,56 @@ mod tests {
     #[test]
     fn process_entry_then_idle_no_completion() {
         // Claude just started and immediately shows idle — no working phase
-        let r = process_claude_title("\u{2733} Claude Code", false, false);
+        let r = process_claude_title("\u{2733} Claude Code", false, false, None);
         assert!(r.entered);
         assert!(r.now_idle);
         assert!(r.task_completed.is_none());
+    }
+
+    #[test]
+    fn process_completion_falls_back_to_prev_working_title() {
+        // Common real-world case: Claude returns to the generic idle title after
+        // finishing a task. Without the fallback the notification would read
+        // "Claude Code task completed" even though the preceding working title
+        // carried the actual task description.
+        let r = process_claude_title(
+            "\u{2733} Claude Code",
+            true,
+            true,
+            Some("\u{2736} Refactor auth middleware"),
+        );
+        assert_eq!(
+            r.task_completed,
+            Some("Refactor auth middleware".to_string())
+        );
+    }
+
+    #[test]
+    fn process_completion_prefers_new_idle_title_when_specific() {
+        // If the new idle title already has task text, do not substitute.
+        let r = process_claude_title(
+            "\u{2733} Apply review feedback",
+            true,
+            true,
+            Some("\u{2736} Old task"),
+        );
+        assert_eq!(r.task_completed, Some("Apply review feedback".to_string()));
+    }
+
+    #[test]
+    fn process_completion_default_when_both_titles_generic() {
+        // Fallback to the hard-coded default if neither the new idle title nor
+        // the previous working title has a usable description.
+        let r = process_claude_title(
+            "\u{2733} Claude Code",
+            true,
+            true,
+            Some("\u{2736} Claude Code"),
+        );
+        assert_eq!(
+            r.task_completed,
+            Some("Claude Code task completed".to_string())
+        );
     }
 
     // ── strip_claude_spinner_prefix ──

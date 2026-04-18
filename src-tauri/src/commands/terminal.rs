@@ -187,20 +187,25 @@ pub fn create_terminal_session(
                 let was_detected = pty_cb_state
                     .claude_detected
                     .load(std::sync::atomic::Ordering::Relaxed);
-                let was_working = if was_detected {
+                let (was_working, prev_working_title) = if was_detected {
                     if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                        terms
-                            .get(&terminal_id)
-                            .is_some_and(|s| s.claude_was_working)
+                        match terms.get(&terminal_id) {
+                            Some(s) => (s.claude_was_working, s.claude_last_working_title.clone()),
+                            None => (false, None),
+                        }
                     } else {
-                        false
+                        (false, None)
                     }
                 } else {
-                    false
+                    (false, None)
                 };
 
-                let cr =
-                    claude_activity::process_claude_title(&event.data, was_detected, was_working);
+                let cr = claude_activity::process_claude_title(
+                    &event.data,
+                    was_detected,
+                    was_working,
+                    prev_working_title.as_deref(),
+                );
 
                 if cr.entered {
                     pty_cb_state
@@ -244,12 +249,22 @@ pub fn create_terminal_session(
                         if let Some(session) = terms.get_mut(&terminal_id) {
                             if cr.exited {
                                 session.claude_was_working = false;
+                                session.claude_last_working_title = None;
                                 if session.claude_message.is_some() {
                                     session.claude_message = None;
                                     message_changed = true;
                                 }
                             } else {
                                 session.claude_was_working = cr.now_working;
+                                if cr.now_working {
+                                    // Remember the current working title so that when the
+                                    // working→idle transition fires with a generic idle title,
+                                    // process_claude_title has a task description to fall back
+                                    // to.
+                                    session.claude_last_working_title = Some(event.data.clone());
+                                } else if cr.now_idle {
+                                    session.claude_last_working_title = None;
+                                }
                                 if let Some(ref msg) = new_message {
                                     if session.claude_message.as_deref() != Some(msg) {
                                         session.claude_message = Some(msg.clone());
