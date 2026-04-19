@@ -232,6 +232,16 @@ function abbreviateProfile(profile: string): string {
 }
 
 /**
+ * Check if a profile is a Windows-native shell (PowerShell, CMD) that uses
+ * Windows-style paths. Used to decide whether `/mnt/x/...` CWDs should be
+ * converted to `X:\...` for display.
+ */
+export function isWindowsProfile(profile: string): boolean {
+  const lower = profile.toLowerCase();
+  return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
+}
+
+/**
  * Abbreviate a file path for display.
  * @param cwd - The raw path string
  * @param ellipsis - "start" (default) truncates the beginning (shows end), "end" truncates the end (shows beginning)

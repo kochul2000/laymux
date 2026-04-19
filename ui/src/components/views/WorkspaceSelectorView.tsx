@@ -9,6 +9,7 @@ import {
   computeCommandStatus,
   abbreviatePath,
   mntPathToWindows,
+  isWindowsProfile,
   formatCommand,
   ACTIVITY_MSG_TRUNCATE_LEN,
   formatRelativeTime,
@@ -34,11 +35,6 @@ const LABEL_ABBREV: Record<string, string> = {
   Empty: "---",
   EmptyView: "---",
 };
-/** Check if a profile is a Windows-native shell (PowerShell, CMD) that uses Windows paths. */
-function isWindowsProfile(profile: string): boolean {
-  const lower = profile.toLowerCase();
-  return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
-}
 
 function getStatusDisplaySettings(
   activity: TerminalActivityInfo | undefined,

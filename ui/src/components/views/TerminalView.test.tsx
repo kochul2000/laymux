@@ -5,6 +5,10 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
+import {
+  PaneControlContext,
+  type PaneControlContextValue,
+} from "@/components/layout/PaneControlContext";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -1884,6 +1888,90 @@ describe("TerminalView", () => {
       expect(WebglAddon).toHaveBeenCalledTimes(callsBefore);
 
       vi.useRealTimers();
+    });
+  });
+
+  describe("pinned header (issue #209)", () => {
+    function makeCtx(overrides: Partial<PaneControlContextValue> = {}): PaneControlContextValue {
+      return {
+        paneControls: <div data-testid="mock-pane-controls">controls</div>,
+        mode: "pinned",
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        ...overrides,
+      };
+    }
+
+    function renderWithCtx(ctx: PaneControlContextValue, ui: React.ReactElement) {
+      return render(<PaneControlContext.Provider value={ctx}>{ui}</PaneControlContext.Provider>);
+    }
+
+    it("hides the pinned header when control bar mode is hover", () => {
+      renderWithCtx(
+        makeCtx({ mode: "hover" }),
+        <TerminalView instanceId="t-pin-hover" profile="PowerShell" syncGroup="g" />,
+      );
+      expect(screen.queryByTestId("terminal-pinned-header-t-pin-hover")).not.toBeInTheDocument();
+    });
+
+    it("renders the pinned header when control bar mode is pinned", () => {
+      renderWithCtx(
+        makeCtx({ mode: "pinned" }),
+        <TerminalView instanceId="t-pin-show" profile="PowerShell" syncGroup="g" />,
+      );
+      expect(screen.getByTestId("terminal-pinned-header-t-pin-show")).toBeInTheDocument();
+    });
+
+    it("does not render pinned header when PaneControlContext is absent", () => {
+      render(<TerminalView instanceId="t-pin-nocxt" profile="PowerShell" syncGroup="" />);
+      expect(screen.queryByTestId("terminal-pinned-header-t-pin-nocxt")).not.toBeInTheDocument();
+    });
+
+    it("renders the terminal title and CWD from the terminal store when pinned", () => {
+      renderWithCtx(
+        makeCtx({ mode: "pinned" }),
+        <TerminalView instanceId="t-pin-info" profile="WSL" syncGroup="g" />,
+      );
+
+      // store 업데이트 → title/cwd 반영
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-info", {
+          title: "zsh — /home/user/proj",
+          cwd: "/home/user/proj",
+          branch: "main",
+        });
+      });
+
+      const header = screen.getByTestId("terminal-pinned-header-t-pin-info");
+      expect(header).toHaveTextContent("zsh — /home/user/proj");
+      // abbreviatePath(/home/user/proj) → "~/proj"
+      expect(header).toHaveTextContent("~/proj");
+      expect(header).toHaveTextContent("main");
+    });
+
+    it("converts WSL /mnt paths to Windows form for Windows profiles", () => {
+      renderWithCtx(
+        makeCtx({ mode: "pinned" }),
+        <TerminalView instanceId="t-pin-mnt" profile="PowerShell" syncGroup="g" />,
+      );
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-mnt", {
+          cwd: "/mnt/d/projects/laymux",
+        });
+      });
+      const header = screen.getByTestId("terminal-pinned-header-t-pin-mnt");
+      // mntPathToWindows → D:\projects\laymux → abbreviatePath은 30자 미만이면 그대로
+      expect(header).toHaveTextContent(/D:\\projects\\laymux/);
+    });
+
+    it("does not render the pinned header for minimized mode", () => {
+      renderWithCtx(
+        makeCtx({ mode: "minimized" }),
+        <TerminalView instanceId="t-pin-mini" profile="PowerShell" syncGroup="g" />,
+      );
+      expect(screen.queryByTestId("terminal-pinned-header-t-pin-mini")).not.toBeInTheDocument();
     });
   });
 });

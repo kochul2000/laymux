@@ -62,6 +62,9 @@ import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
 } from "@/lib/terminal-serialize-registry";
+import { ViewHeader } from "@/components/ui/ViewHeader";
+import { usePaneControl } from "@/components/layout/PaneControlContext";
+import { abbreviatePath, isWindowsProfile, mntPathToWindows } from "@/lib/workspace-summary";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -1577,10 +1580,11 @@ export function TerminalView({
     <div
       ref={wrapperRef}
       data-testid={`terminal-view-${instanceId}`}
-      className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
+      className={`relative flex h-full w-full flex-col ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
       style={wrapperStyle}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <PinnedTerminalHeader instanceId={instanceId} profile={profile} />
+      <div ref={containerRef} className="min-h-0 flex-1 w-full" />
       <div
         ref={compositionPreviewRefEl}
         data-testid={`terminal-composition-preview-${instanceId}`}
@@ -1599,5 +1603,64 @@ export function TerminalView({
         style={{ opacity: 0 }}
       />
     </div>
+  );
+}
+
+/**
+ * Pinned 상태에서 터미널 상단에 표시되는 헤더.
+ * Issue #209: 터미널 뷰가 고정(pinned)되면 workspace 수준의 CWD/title을 표시한다.
+ *
+ * - `PaneControlContext`가 있고 mode === "pinned"일 때만 렌더.
+ * - 렌더되면 `ViewHeader`가 `registerHeader()`를 호출해 `PaneControlBar`의
+ *   자체 pinned 바 렌더를 억제하고, 대신 우측에 pane 컨트롤을 합성한다.
+ * - terminalStore에서 title/cwd/branch를 구독하여 원시 상태 → 표시 계산.
+ * - CWD 경로는 Windows 프로필이면 `/mnt/x` → `X:\...`로 변환, 그리고
+ *   `abbreviatePath`로 홈/접두사 축약 및 길이 제한을 적용한다.
+ */
+function PinnedTerminalHeader({ instanceId, profile }: { instanceId: string; profile: string }) {
+  const ctx = usePaneControl();
+  const instance = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId));
+
+  if (!ctx || ctx.mode !== "pinned") return null;
+
+  const title = instance?.title?.trim() || "";
+  const branch = instance?.branch?.trim() || "";
+  const rawCwd = instance?.cwd?.trim() || "";
+  const displayCwd = rawCwd
+    ? abbreviatePath(isWindowsProfile(profile) ? mntPathToWindows(rawCwd) : rawCwd)
+    : "";
+
+  return (
+    <ViewHeader testId={`terminal-pinned-header-${instanceId}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-2 truncate text-[11px]">
+        {title && (
+          <span
+            data-testid={`terminal-pinned-header-title-${instanceId}`}
+            className="min-w-0 truncate font-medium"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {title}
+          </span>
+        )}
+        {branch && (
+          <span
+            data-testid={`terminal-pinned-header-branch-${instanceId}`}
+            className="shrink-0"
+            style={{ color: "var(--green)" }}
+          >
+            {branch}
+          </span>
+        )}
+        {displayCwd && (
+          <span
+            data-testid={`terminal-pinned-header-cwd-${instanceId}`}
+            className="min-w-0 truncate"
+            style={{ color: "var(--text-secondary)", opacity: 0.8 }}
+          >
+            {displayCwd}
+          </span>
+        )}
+      </div>
+    </ViewHeader>
   );
 }
