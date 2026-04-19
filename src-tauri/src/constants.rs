@@ -55,6 +55,25 @@ pub const DEC_SYNC_OUTPUT_SET: &[u8] = b"\x1b[?2026h";
 
 pub const MCP_SERVER_NAME: &str = "laymux";
 
+/// MCP Resource URIs.
+///
+/// Resources provide read-only, subscribable views of IDE state for MCP clients.
+/// The full URI for a parameterized resource follows the pattern
+/// `terminal://{terminal_id}` / `terminal://{terminal_id}/output`.
+pub const MCP_URI_WORKSPACE_ACTIVE: &str = "workspace://active";
+pub const MCP_URI_WORKSPACE_LIST: &str = "workspace://list";
+pub const MCP_URI_PROFILE_LIST: &str = "profile://list";
+
+/// Scheme prefixes used when parsing resource URIs.
+pub const MCP_SCHEME_TERMINAL: &str = "terminal://";
+pub const MCP_SCHEME_WORKSPACE: &str = "workspace://";
+pub const MCP_SCHEME_PROFILE: &str = "profile://";
+
+/// Tauri event broadcast whenever any workspace state (list, active, panes)
+/// changes. The MCP resource bridge listens for this to emit
+/// `notifications/resources/updated` on subscribed workspace:// URIs.
+pub const EVENT_WORKSPACE_STATE_CHANGED: &str = "workspace-state-changed";
+
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
 /// notifications are enabled even without observing a user command.
@@ -84,6 +103,7 @@ mod tests {
             EVENT_TERMINAL_TITLE_CHANGED,
             EVENT_CLAUDE_MESSAGE_CHANGED,
             EVENT_TERMINAL_OUTPUT_ACTIVITY,
+            EVENT_WORKSPACE_STATE_CHANGED,
         ];
         for name in events {
             assert!(!name.is_empty(), "Event name should not be empty");
@@ -92,6 +112,16 @@ mod tests {
                 "Event '{name}' should not contain spaces"
             );
         }
+    }
+
+    #[test]
+    fn mcp_resource_uris_have_expected_schemes() {
+        assert!(MCP_URI_WORKSPACE_ACTIVE.starts_with(MCP_SCHEME_WORKSPACE));
+        assert!(MCP_URI_WORKSPACE_LIST.starts_with(MCP_SCHEME_WORKSPACE));
+        assert!(MCP_URI_PROFILE_LIST.starts_with(MCP_SCHEME_PROFILE));
+        assert!(MCP_SCHEME_TERMINAL.ends_with("://"));
+        assert!(MCP_SCHEME_WORKSPACE.ends_with("://"));
+        assert!(MCP_SCHEME_PROFILE.ends_with("://"));
     }
 
     #[test]
