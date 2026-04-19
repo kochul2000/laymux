@@ -1313,10 +1313,15 @@ export function WorkspaceSelectorView() {
               onSelect={() => handleSelectWorkspace(ws.id)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
-                duplicateWorkspace(ws.id);
-                const updated = useWorkspaceStore.getState().workspaces;
-                const newWs = updated[updated.length - 1];
-                if (newWs) setActiveWorkspace(newWs.id);
+                const result = duplicateWorkspace(ws.id);
+                if (result) {
+                  // Replay hide state (workspace + per-pane) so the duplicate
+                  // mirrors the source's hidden selections. See issue #218.
+                  useUiStore
+                    .getState()
+                    .propagateHiddenOnDuplicate(ws.id, result.newWorkspaceId, result.paneIdMap);
+                  setActiveWorkspace(result.newWorkspaceId);
+                }
               }}
               onRename={() => {
                 const newName = window.prompt("Rename workspace:", ws.name);
