@@ -36,9 +36,9 @@ use tauri::Listener;
 use uuid::Uuid;
 
 use crate::constants::{
-    EVENT_CLAUDE_MESSAGE_CHANGED, EVENT_TERMINAL_CWD_CHANGED, EVENT_TERMINAL_OUTPUT_ACTIVITY,
-    EVENT_TERMINAL_TITLE_CHANGED, EVENT_WORKSPACE_STATE_CHANGED, MCP_SCHEME_TERMINAL,
-    MCP_URI_PROFILE_LIST, MCP_URI_WORKSPACE_ACTIVE, MCP_URI_WORKSPACE_LIST,
+    EVENT_CLAUDE_MESSAGE_CHANGED, EVENT_TERMINALS_LIST_CHANGED, EVENT_TERMINAL_CWD_CHANGED,
+    EVENT_TERMINAL_OUTPUT_ACTIVITY, EVENT_TERMINAL_TITLE_CHANGED, EVENT_WORKSPACE_STATE_CHANGED,
+    MCP_SCHEME_TERMINAL, MCP_URI_PROFILE_LIST, MCP_URI_WORKSPACE_ACTIVE, MCP_URI_WORKSPACE_LIST,
 };
 use crate::lock_ext::MutexExt;
 
@@ -230,6 +230,17 @@ impl SubscriptionRegistry {
         out
     }
 
+    /// Return every `(peer_id, peer_handle)` currently registered, regardless
+    /// of subscription state. Used for `notifications/resources/list_changed`,
+    /// which the MCP spec fans out to all connected clients rather than to
+    /// per-URI subscribers.
+    pub fn all_peers(&self) -> Vec<(PeerId, Peer<RoleServer>)> {
+        self.peers
+            .iter()
+            .map(|(id, peer)| (id.clone(), peer.clone()))
+            .collect()
+    }
+
     pub fn peer_count(&self) -> usize {
         self.peers.len()
     }
@@ -254,8 +265,11 @@ pub fn new_peer_id() -> PeerId {
 ///
 /// Called once at server startup. The listener handles are leaked because
 /// they must outlive the entire process.
-pub fn spawn_resource_event_bridge(
-    app_handle: tauri::AppHandle,
+///
+/// Generic over `tauri::Runtime` so integration tests can drive the bridge
+/// with a `MockRuntime` while production uses the default `Wry` runtime.
+pub fn spawn_resource_event_bridge<R: tauri::Runtime>(
+    app_handle: tauri::AppHandle<R>,
     registry: SharedSubscriptionRegistry,
 ) {
     // Workspace-level changes invalidate both `workspace://active` and
@@ -295,6 +309,19 @@ pub fn spawn_resource_event_bridge(
             notify_uri(&registry, &ResourceUri::for_terminal_output(&terminal_id));
         });
     }
+
+    // Terminal catalog mutation → `notifications/resources/list_changed`. The
+    // dynamic `terminal://{id}` resources advertised via `list_resources` come
+    // from live `AppState.terminals`, so any create/close invalidates the list.
+    // We also push a `workspace://active` update because the pane/terminal
+    // membership reflected there changes.
+    {
+        let registry = registry.clone();
+        app_handle.listen(EVENT_TERMINALS_LIST_CHANGED, move |_evt| {
+            notify_list_changed(&registry);
+            notify_uri(&registry, MCP_URI_WORKSPACE_ACTIVE);
+        });
+    }
 }
 
 /// Extract a `terminalId` / `terminal_id` field from a Tauri event payload.
@@ -307,6 +334,33 @@ pub fn terminal_id_from_event(payload: &str) -> Option<String> {
         .or_else(|| value.get("terminal_id").and_then(|v| v.as_str()))
         .or_else(|| value.get("id").and_then(|v| v.as_str()))
         .map(|s| s.to_string())
+}
+
+/// Fan out a `notifications/resources/list_changed` to every connected peer.
+/// The MCP spec makes `list_changed` a connection-wide broadcast, not a
+/// per-URI subscription, so the registry's peer list is used directly.
+fn notify_list_changed(registry: &SharedSubscriptionRegistry) {
+    let targets = match registry.lock_or_err() {
+        Ok(g) => g.all_peers(),
+        Err(e) => {
+            tracing::warn!(error = %e, "MCP subscription registry poisoned while notifying list_changed");
+            return;
+        }
+    };
+    if targets.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        for (peer_id, peer) in targets {
+            if let Err(e) = peer.notify_resource_list_changed().await {
+                tracing::debug!(
+                    peer_id,
+                    error = %e,
+                    "notify_resource_list_changed failed; peer likely disconnected"
+                );
+            }
+        }
+    });
 }
 
 /// Fan out a `notifications/resources/updated` to every peer subscribed
@@ -513,6 +567,32 @@ mod tests {
             assert_eq!(g.subscription_count(&peer_id), 2);
             g.unsubscribe(&peer_id, "terminal://t1");
             assert_eq!(g.subscription_count(&peer_id), 1);
+        }
+    }
+
+    #[test]
+    fn all_peers_ignores_subscriptions() {
+        // `list_changed` targets every connected peer, even those that never
+        // called `resources/subscribe`. We can't construct a real Peer in a
+        // unit test, so we exercise the bookkeeping via the internal maps.
+        let reg = SubscriptionRegistry::new();
+        let p1: PeerId = new_peer_id();
+        let p2: PeerId = new_peer_id();
+        {
+            let mut g = reg.lock().unwrap();
+            // Only p1 has an entry in `by_peer`, p2 is "connected" but never
+            // subscribed. all_peers() must still yield both when both have a
+            // Peer handle registered. We can't register a real Peer here, so
+            // the shape being tested is: all_peers pulls from `peers`, not
+            // from `by_peer`.
+            g.by_peer.entry(p1.clone()).or_default();
+            g.subscribe(&p1, MCP_URI_WORKSPACE_ACTIVE);
+            // No `by_peer` entry for p2.
+            assert!(!g.by_peer.contains_key(&p2));
+            // With zero Peer handles registered, all_peers is empty — this
+            // guards the invariant that list_changed no-ops when no one is
+            // connected.
+            assert!(g.all_peers().is_empty());
         }
     }
 

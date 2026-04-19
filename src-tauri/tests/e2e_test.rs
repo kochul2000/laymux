@@ -2310,3 +2310,100 @@ mod mcp_resources_e2e {
         assert!(terminal_id_from_event("not json").is_none());
     }
 }
+
+/// Guardrail tests for the review fix: the production code must wire the
+/// terminal-catalog and workspace-lifecycle events that the MCP resource
+/// bridge listens to. These tests grep the source to prove the emit sites
+/// exist — a unit-level stand-in for end-to-end Tauri event dispatch, which
+/// requires the `tauri/test` feature that fails to link on Windows.
+#[cfg(test)]
+mod mcp_bridge_wiring {
+    use laymux_lib::constants::{EVENT_TERMINALS_LIST_CHANGED, EVENT_WORKSPACE_STATE_CHANGED};
+    use std::path::PathBuf;
+
+    fn read(rel: &str) -> String {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn workspace_bridge_handlers_emit_workspace_state_changed() {
+        // Every mutating workspace HTTP handler must broadcast
+        // `workspace-state-changed` on success. This is what drives
+        // `workspace://active` + `workspace://list` resource updates — without
+        // it the subscription would fire only on per-terminal events and
+        // never on pure workspace switch/create/rename/delete/reorder.
+        let src = read("src/automation_server/handlers_bridge.rs");
+        for marker in [
+            "workspaces.switchActive",
+            "workspaces.add",
+            "workspaces.rename",
+            "workspaces.remove",
+            "workspaces.reorder",
+        ] {
+            assert!(
+                src.contains(&format!("emit_workspace_state_changed(\n                &state,\n                \"{marker}\""))
+                    || src.contains(&format!("\"{marker}\"")),
+                "handlers_bridge.rs is missing the emit site for {marker}"
+            );
+        }
+        // The helper itself must forward to the production event constant.
+        assert!(
+            src.contains("EVENT_WORKSPACE_STATE_CHANGED"),
+            "handlers_bridge.rs must emit via EVENT_WORKSPACE_STATE_CHANGED"
+        );
+    }
+
+    #[test]
+    fn terminal_command_emits_terminals_list_changed_on_create_and_close() {
+        // The dynamic `terminal://{id}` catalog comes from live
+        // `AppState.terminals`, so create and close must both emit
+        // `terminals-list-changed` — otherwise `notifications/resources/list_changed`
+        // never fires for terminal churn despite being advertised.
+        let src = read("src/commands/terminal.rs");
+        assert!(
+            src.matches("EVENT_TERMINALS_LIST_CHANGED").count() >= 2,
+            "terminal.rs must emit EVENT_TERMINALS_LIST_CHANGED in both create and close paths"
+        );
+        assert!(
+            src.contains("\"op\": \"created\"") || src.contains("\"op\":\"created\""),
+            "terminal.rs is missing the 'created' emit payload"
+        );
+        assert!(
+            src.contains("\"op\": \"closed\"") || src.contains("\"op\":\"closed\""),
+            "terminal.rs is missing the 'closed' emit payload"
+        );
+    }
+
+    #[test]
+    fn resource_bridge_listens_for_list_changed_and_workspace_events() {
+        // The bridge must wire listeners for both events — otherwise the
+        // emits above propagate nowhere.
+        let src = read("src/automation_server/mcp_resources.rs");
+        assert!(
+            src.contains("EVENT_TERMINALS_LIST_CHANGED"),
+            "mcp_resources.rs must listen for EVENT_TERMINALS_LIST_CHANGED"
+        );
+        assert!(
+            src.contains("EVENT_WORKSPACE_STATE_CHANGED"),
+            "mcp_resources.rs must listen for EVENT_WORKSPACE_STATE_CHANGED"
+        );
+        assert!(
+            src.contains("notify_resource_list_changed"),
+            "mcp_resources.rs must call peer.notify_resource_list_changed on catalog mutation"
+        );
+        assert!(
+            src.contains("fn notify_list_changed") && src.contains("all_peers()"),
+            "mcp_resources.rs must fan out list_changed to all connected peers, not just subscribers"
+        );
+    }
+
+    #[test]
+    fn production_event_names_match_constants() {
+        // Guards against a rename drifting silently between constants and
+        // the listener / emitter string literals.
+        assert_eq!(EVENT_WORKSPACE_STATE_CHANGED, "workspace-state-changed");
+        assert_eq!(EVENT_TERMINALS_LIST_CHANGED, "terminals-list-changed");
+    }
+}

@@ -2,10 +2,30 @@ use axum::extract::{Path, State as AxumState};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use tauri::Emitter;
 
 use super::helpers::{bridge_request, err_json};
 use super::types::*;
 use super::ServerState;
+use crate::constants::EVENT_WORKSPACE_STATE_CHANGED;
+
+/// Broadcast `workspace-state-changed` so the MCP resource bridge (and any
+/// other listeners) treat `workspace://active` / `workspace://list` as dirty.
+/// Failures to emit are logged but never propagate back to the HTTP caller;
+/// an emit failure after a successful bridge action would be misleading.
+fn emit_workspace_state_changed(state: &ServerState, source: &str, detail: serde_json::Value) {
+    let payload = serde_json::json!({ "source": source, "detail": detail });
+    if let Err(e) = state
+        .app_handle
+        .emit(EVENT_WORKSPACE_STATE_CHANGED, payload)
+    {
+        tracing::warn!(
+            error = %e,
+            source,
+            "failed to emit workspace-state-changed after bridge action"
+        );
+    }
+}
 
 // -- Workspace endpoints --
 
@@ -44,7 +64,14 @@ pub async fn workspaces_switch_active(
     )
     .await
     {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &state,
+                "workspaces.switchActive",
+                serde_json::json!({ "id": body.id }),
+            );
+            (StatusCode::OK, Json(data))
+        }
         Err(e) => e,
     }
 }
@@ -62,7 +89,14 @@ pub async fn workspaces_create(
     )
     .await
     {
-        Ok(data) => (StatusCode::CREATED, Json(data)),
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &state,
+                "workspaces.add",
+                serde_json::json!({ "name": body.name, "layoutId": body.layout_id }),
+            );
+            (StatusCode::CREATED, Json(data))
+        }
         Err(e) => e,
     }
 }
@@ -81,7 +115,14 @@ pub async fn workspaces_rename(
     )
     .await
     {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &state,
+                "workspaces.rename",
+                serde_json::json!({ "id": id, "name": body.name }),
+            );
+            (StatusCode::OK, Json(data))
+        }
         Err(e) => e,
     }
 }
@@ -99,7 +140,14 @@ pub async fn workspaces_delete(
     )
     .await
     {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &state,
+                "workspaces.remove",
+                serde_json::json!({ "id": id }),
+            );
+            (StatusCode::OK, Json(data))
+        }
         Err(e) => e,
     }
 }
@@ -123,7 +171,14 @@ pub async fn workspaces_reorder(
     )
     .await
     {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &state,
+                "workspaces.reorder",
+                serde_json::json!({ "fromId": from_id, "toId": to_id, "position": position }),
+            );
+            (StatusCode::OK, Json(data))
+        }
         Err(e) => e,
     }
 }

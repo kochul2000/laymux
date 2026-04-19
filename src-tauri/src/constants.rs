@@ -74,6 +74,12 @@ pub const MCP_SCHEME_PROFILE: &str = "profile://";
 /// `notifications/resources/updated` on subscribed workspace:// URIs.
 pub const EVENT_WORKSPACE_STATE_CHANGED: &str = "workspace-state-changed";
 
+/// Tauri event broadcast whenever the set of live terminals changes (a terminal
+/// is created or closed). The MCP resource bridge listens for this to emit
+/// `notifications/resources/list_changed` to every connected peer so clients
+/// re-query `resources/list` and discover new / removed `terminal://{id}` URIs.
+pub const EVENT_TERMINALS_LIST_CHANGED: &str = "terminals-list-changed";
+
 /// Fallback delay (ms) to arm the notify gate for shells without preexec
 /// (e.g., PowerShell which doesn't emit OSC 133;C/E). After this delay,
 /// notifications are enabled even without observing a user command.
@@ -104,6 +110,7 @@ mod tests {
             EVENT_CLAUDE_MESSAGE_CHANGED,
             EVENT_TERMINAL_OUTPUT_ACTIVITY,
             EVENT_WORKSPACE_STATE_CHANGED,
+            EVENT_TERMINALS_LIST_CHANGED,
         ];
         for name in events {
             assert!(!name.is_empty(), "Event name should not be empty");
