@@ -280,6 +280,27 @@ describe("settings-store", () => {
     expect(font.size).toBe(14);
   });
 
+  it("resolveFont applies viewOverrides.fontSize when provided", () => {
+    const font = useSettingsStore.getState().resolveFont("PowerShell", { fontSize: 22 });
+    expect(font.size).toBe(22);
+    expect(font.face).toBe("Cascadia Mono");
+  });
+
+  it("resolveFont ignores viewOverrides when fontSize is undefined", () => {
+    const font = useSettingsStore.getState().resolveFont("PowerShell", {});
+    expect(font.size).toBe(14);
+  });
+
+  it("resolveFont viewOverrides.fontSize takes precedence over profile.font.size", () => {
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "Fira Code", size: 18, weight: "bold" } });
+    const font = useSettingsStore.getState().resolveFont("PowerShell", { fontSize: 26 });
+    expect(font.size).toBe(26);
+    expect(font.face).toBe("Fira Code");
+    expect(font.weight).toBe("bold");
+  });
+
   it("loadFromSettings migrates root-level font to profileDefaults when profileDefaults.font absent", () => {
     useSettingsStore.getState().loadFromSettings({
       font: { face: "Fira Code", size: 16, weight: "normal" },

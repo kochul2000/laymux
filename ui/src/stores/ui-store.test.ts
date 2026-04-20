@@ -82,36 +82,6 @@ describe("ui-store", () => {
     expect(useUiStore.getState().isAppFocused).toBe(true);
   });
 
-  // -- barModes --
-
-  it("setBarMode persists mode and getBarMode retrieves it", () => {
-    useUiStore.getState().setBarMode("pane-1", "pinned");
-    expect(useUiStore.getState().barModes["pane-1"]).toBe("pinned");
-    expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
-  });
-
-  it("getBarMode returns settings default when no persisted mode", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
-    }));
-    expect(useUiStore.getState().getBarMode("pane-unknown")).toBe("minimized");
-  });
-
-  it("getBarMode returns hover when settings default is hover", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
-    }));
-    expect(useUiStore.getState().getBarMode("pane-unknown")).toBe("hover");
-  });
-
-  it("persisted mode overrides settings default", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
-    }));
-    useUiStore.getState().setBarMode("pane-1", "pinned");
-    expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
-  });
-
   // -- unified hide mode --
 
   it("starts with hide mode off", () => {

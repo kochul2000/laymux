@@ -54,14 +54,28 @@ describe("ClaudeActivityHandler", () => {
       });
     });
 
-    it("returns shell idle status for idle title (no Claude-specific icon)", () => {
+    it("returns ✓ for idle title even without exitCode (task completed, Claude still alive)", () => {
+      // Claude keeps its process alive after a task, so lastExitCode can remain
+      // undefined. The ✳ prefix marks idle/completed — the workspace icon must
+      // match the "task completed" notification instead of falling to gray.
       expect(handler.computeStatus(raw({ title: "✳ Claude Code" }))).toEqual({
-        icon: "—",
-        color: "var(--text-secondary)",
+        icon: "✓",
+        color: "var(--green)",
       });
     });
 
-    it("falls back to shell idle status", () => {
+    it("returns ✓ for idle title with task description", () => {
+      expect(handler.computeStatus(raw({ title: "✳ Fix the bug" })).icon).toBe("✓");
+    });
+
+    it("idle title does not override active output (still running)", () => {
+      // Edge case: spinner title flips transiently while outputActive is true.
+      expect(handler.computeStatus(raw({ outputActive: true, title: "✳ Claude Code" })).icon).toBe(
+        "⏳",
+      );
+    });
+
+    it("falls back to shell idle status for non-idle unknown title", () => {
       expect(handler.computeStatus(raw({ title: "bash" }))).toEqual({
         icon: "—",
         color: "var(--text-secondary)",
@@ -180,8 +194,11 @@ describe("ClaudeActivityHandler", () => {
   });
 
   describe("Claude lifecycle scenarios", () => {
-    it("shows shell idle status before a task starts", () => {
-      expect(handler.computeStatus(raw({ title: "✳ Claude Code" })).icon).toBe("—");
+    it("shows ✓ for idle title (task completed or freshly launched and ready)", () => {
+      // The workspace icon matches the completion notification. Before any task
+      // runs, the idle title is still a valid "ready" state, which we also
+      // render as ✓ since Claude is alive and responsive.
+      expect(handler.computeStatus(raw({ title: "✳ Claude Code" })).icon).toBe("✓");
     });
 
     it("shows combined message while actively working", () => {

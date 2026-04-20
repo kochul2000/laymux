@@ -5,11 +5,14 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 import { useWorkspaceStore } from "./workspace-store";
+import { useOverridesStore } from "./overrides-store";
 import { persistSession } from "@/lib/persist-session";
 
 describe("WorkspaceStore", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -121,6 +124,25 @@ describe("WorkspaceStore", () => {
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(active.panes).toHaveLength(1);
     });
+
+    it("clears overrides for the removed pane", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+      const [paneA, paneB] = panes;
+      useOverridesStore.getState().setPaneOverride(paneA.id, { controlBarMode: "pinned" });
+      useOverridesStore.getState().setViewOverride(paneA.id, { fontSize: 20 });
+      useOverridesStore.getState().setPaneOverride(paneB.id, { controlBarMode: "minimized" });
+
+      // Remove pane A (index 0).
+      useWorkspaceStore.getState().removePane(0);
+
+      expect(useOverridesStore.getState().getPaneOverride(paneA.id)).toBeUndefined();
+      expect(useOverridesStore.getState().getViewOverride(paneA.id)).toBeUndefined();
+      // paneB의 오버라이드는 건드리지 않음.
+      expect(useOverridesStore.getState().getPaneOverride(paneB.id)?.controlBarMode).toBe(
+        "minimized",
+      );
+    });
   });
 
   describe("setPaneView", () => {
@@ -135,6 +157,32 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.getState().setPaneView(5, { type: "TerminalView" });
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(active.panes[0].view.type).toBe("EmptyView");
+    });
+
+    it("clears view overrides when view type changes", () => {
+      const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+      useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+      useOverridesStore.getState().setPaneOverride(paneId, { controlBarMode: "pinned" });
+
+      // EmptyView → TerminalView: view 오버라이드는 사라지되, pane 오버라이드는 유지.
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+      expect(useOverridesStore.getState().getViewOverride(paneId)).toBeUndefined();
+      expect(useOverridesStore.getState().getPaneOverride(paneId)?.controlBarMode).toBe("pinned");
+    });
+
+    it("preserves view overrides when only view config changes (same type)", () => {
+      // 먼저 view 타입을 TerminalView로 바꾸고 오버라이드 설정.
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+      useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+
+      // 타입은 그대로 TerminalView, profile만 교체 → 줌 유지.
+      useWorkspaceStore
+        .getState()
+        .setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+
+      expect(useOverridesStore.getState().getViewOverride(paneId)?.fontSize).toBe(20);
     });
   });
 

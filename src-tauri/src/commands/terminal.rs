@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
@@ -11,6 +12,7 @@ use crate::osc_hooks::{self, CommandStatusField, OscAction};
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::path_utils;
 use crate::pty;
+use crate::pty_trace;
 use crate::state::AppState;
 use crate::terminal::{TerminalConfig, TerminalSession};
 
@@ -111,6 +113,18 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_handle = pty::spawn_pty(&session, move |data| {
+        if pty_trace::is_pty_trace_enabled() {
+            let signals = pty_trace::detect_terminal_signals(&data);
+            tracing::info!(
+                terminal_id = %terminal_id,
+                direction = "pty->ui",
+                bytes = data.len(),
+                signals = ?signals,
+                preview = %pty_trace::summarize_terminal_bytes(&data),
+                "PTY chunk"
+            );
+        }
+
         // IMPORTANT: Each lock below is acquired and released independently (never nested).
         // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
         // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
@@ -173,20 +187,25 @@ pub fn create_terminal_session(
                 let was_detected = pty_cb_state
                     .claude_detected
                     .load(std::sync::atomic::Ordering::Relaxed);
-                let was_working = if was_detected {
+                let (was_working, prev_working_title) = if was_detected {
                     if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
-                        terms
-                            .get(&terminal_id)
-                            .is_some_and(|s| s.claude_was_working)
+                        match terms.get(&terminal_id) {
+                            Some(s) => (s.claude_was_working, s.claude_last_working_title.clone()),
+                            None => (false, None),
+                        }
                     } else {
-                        false
+                        (false, None)
                     }
                 } else {
-                    false
+                    (false, None)
                 };
 
-                let cr =
-                    claude_activity::process_claude_title(&event.data, was_detected, was_working);
+                let cr = claude_activity::process_claude_title(
+                    &event.data,
+                    was_detected,
+                    was_working,
+                    prev_working_title.as_deref(),
+                );
 
                 if cr.entered {
                     pty_cb_state
@@ -230,12 +249,22 @@ pub fn create_terminal_session(
                         if let Some(session) = terms.get_mut(&terminal_id) {
                             if cr.exited {
                                 session.claude_was_working = false;
+                                session.claude_last_working_title = None;
                                 if session.claude_message.is_some() {
                                     session.claude_message = None;
                                     message_changed = true;
                                 }
                             } else {
                                 session.claude_was_working = cr.now_working;
+                                if cr.now_working {
+                                    // Remember the current working title so that when the
+                                    // working→idle transition fires with a generic idle title,
+                                    // process_claude_title has a task description to fall back
+                                    // to.
+                                    session.claude_last_working_title = Some(event.data.clone());
+                                } else if cr.now_idle {
+                                    session.claude_last_working_title = None;
+                                }
                                 if let Some(ref msg) = new_message {
                                     if session.claude_message.as_deref() != Some(msg) {
                                         session.claude_message = Some(msg.clone());
@@ -509,6 +538,17 @@ pub fn write_to_terminal(
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui->pty",
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data.as_bytes()),
+            preview = %pty_trace::summarize_terminal_bytes(data.as_bytes()),
+            "PTY write"
+        );
+    }
+
     let ptys = state.pty_handles.lock_or_err()?;
 
     let handle = ptys
@@ -572,6 +612,47 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
         notifs.retain(|n| n.terminal_id != id);
     }
 
+    Ok(())
+}
+
+/// One shadow-cursor trace sample emitted by the UI. The UI batches
+/// events for the duration of a single `requestAnimationFrame` tick so
+/// the hot render path pays one IPC hop per frame instead of one per
+/// event. The payload is a JSON-stringified snapshot so the Rust side
+/// does not need to mirror every shadow-cursor field type.
+#[derive(Deserialize)]
+pub struct CursorTraceEvent {
+    #[serde(alias = "ts")]
+    pub timestamp: String,
+    pub event: String,
+    #[serde(default)]
+    pub payload: Option<String>,
+}
+
+/// Diagnostic-only: flush a rAF-batched window of UI shadow-cursor
+/// events into the same `tracing` stream that carries the PTY trace,
+/// so the two layers interleave naturally in the log. Gated by
+/// `LAYMUX_CURSOR_TRACE` (or `LAYMUX_PTY_TRACE` implicitly). A no-op
+/// when either the flag is off or the batch is empty, so production
+/// builds pay nothing beyond the UI-side gate that would have stopped
+/// the `invoke` in the first place.
+#[tauri::command]
+pub fn log_terminal_trace_batch(
+    terminal_id: String,
+    events: Vec<CursorTraceEvent>,
+) -> Result<(), String> {
+    if !pty_trace::is_cursor_trace_enabled() {
+        return Ok(());
+    }
+    for ev in events {
+        tracing::info!(
+            terminal_id = %terminal_id,
+            ts = %ev.timestamp,
+            event = %ev.event,
+            payload = ev.payload.as_deref().unwrap_or(""),
+            "UI cursor trace"
+        );
+    }
     Ok(())
 }
 

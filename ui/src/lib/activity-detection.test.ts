@@ -183,6 +183,19 @@ describe("detectActivityFromOutput", () => {
       detectActivityFromOutput("README.md: OpenAI Codex is available in this repository\r\n"),
     ).toBeUndefined();
   });
+
+  it("detects Codex 0.120+ box-framed banner", () => {
+    // v0.120+ emits the banner inside a Unicode box; the `>_ OpenAI Codex (v…)`
+    // line has leading `│ ` and trailing spaces + `│`, and the metadata lines
+    // are likewise boxed.
+    expect(
+      detectActivityFromOutput(
+        "│ >_ OpenAI Codex (v0.120.0)                   │\r\n" +
+          "│ model:     gpt-5.4 medium   /model to change │\r\n" +
+          "│ directory: D:\\PycharmProjects\\laymux        │\r\n",
+      ),
+    ).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
 });
 
 describe("detectCodexStatusMessageFromOutput", () => {

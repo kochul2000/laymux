@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -7,6 +7,7 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
@@ -25,7 +26,23 @@ import {
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
+import { createCursorTracer } from "@/lib/cursor-trace";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
+import {
+  createImeCompositionController,
+  getCompositionPreviewLayout,
+  resolveVisualCaretOwner,
+  type CompositionPreviewState,
+} from "@/lib/ime-composition-controller";
+import { shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import {
+  applyActivityLeftTuiToShadowCursor,
+  applyDec2026ResetToShadowCursor,
+  applyDec2026SetToShadowCursor,
+  getShadowSyncEligibility,
+  isOverlayCaretActivity,
+  type ShadowCursorState,
+} from "@/lib/shadow-cursor-state";
 
 import {
   CODEX_INPUT_PENDING_MARKER,
@@ -164,25 +181,6 @@ export function shouldEnableTerminalWebgl(): boolean {
   return true;
 }
 
-function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
-  // Claude Code uses DEC 2026 (synchronized output) which positions the native
-  // cursor correctly at frame end — overlay is unnecessary and creates artifacts.
-  return activity?.type === "interactiveApp" && activity.name === "Codex";
-}
-
-interface ShadowCursorState {
-  commandStartLine: number;
-  commandStartX: number;
-  cursorX: number;
-  cursorAbsY: number;
-  hasPromptBoundary: boolean;
-  hasSyncFramePosition: boolean;
-  isComposing: boolean;
-  isInputPhase: boolean;
-  isRepaintInProgress: boolean;
-  isAltBufferActive: boolean;
-}
-
 function getBufferCursorAbsY(terminal: Terminal): number {
   const activeBuffer = terminal.buffer.active as { baseY?: number; cursorY?: number };
   return (activeBuffer.baseY ?? 0) + (activeBuffer.cursorY ?? 0);
@@ -254,6 +252,7 @@ export function TerminalView({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCaretRef = useRef<HTMLDivElement>(null);
+  const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
@@ -274,6 +273,15 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
   const syncOutputActiveRef = useRef(false);
+  const compositionPreviewRef = useRef<CompositionPreviewState>({
+    active: false,
+    text: "",
+    caretUtf16Index: 0,
+    caretCellOffset: 0,
+    textCellWidth: 0,
+    anchorBufferX: 0,
+    anchorBufferAbsY: 0,
+  });
   const shadowCursorRef = useRef<ShadowCursorState>({
     commandStartLine: 0,
     commandStartX: 0,
@@ -281,7 +289,6 @@ export function TerminalView({
     cursorAbsY: 0,
     hasPromptBoundary: false,
     hasSyncFramePosition: false,
-    isComposing: false,
     isInputPhase: false,
     isRepaintInProgress: false,
     isAltBufferActive: false,
@@ -290,6 +297,12 @@ export function TerminalView({
 
   useEffect(() => {
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
+
+    // Diagnostic shadow-cursor tracer. Bound once per effect mount because
+    // `instanceId` is constant inside this closure; the tracer is a no-op
+    // unless `cursor-trace.ts` gating is on. See `cursor-trace.ts` for how
+    // to enable.
+    const trace = createCursorTracer(instanceId);
 
     // Resolve theme from settings color scheme (profile → profileDefaults → none)
     const settingsState = useSettingsStore.getState();
@@ -319,7 +332,10 @@ export function TerminalView({
     const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
     const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
 
-    const resolvedFont = settingsState.resolveFont(profile);
+    const resolvedFont = settingsState.resolveFont(
+      profile,
+      paneId ? useOverridesStore.getState().getViewOverride(paneId) : undefined,
+    );
     const resolvedCursorShape =
       profileConfig?.cursorShape ||
       settingsState.profileDefaults?.cursorShape ||
@@ -364,27 +380,113 @@ export function TerminalView({
 
     terminalRef.current = terminal;
 
+    let prevHideNativeCursor: boolean | undefined;
+    const applyNativeCursorVisibility = () => {
+      const hideNativeCursor =
+        compositionPreviewRef.current.active ||
+        (stabilizeInteractiveCursorRef.current && isOverlayCaretActivity(activityRef.current));
+      if (hideNativeCursor === prevHideNativeCursor) return;
+      prevHideNativeCursor = hideNativeCursor;
+
+      const state = useSettingsStore.getState();
+      const liveProfile = state.profiles.find((p) => p.name === profile);
+      const liveSchemeName =
+        liveProfile?.colorScheme || state.profileDefaults?.colorScheme || "CampbellClear";
+      const liveScheme = liveSchemeName
+        ? state.colorSchemes.find((cs) => cs.name === liveSchemeName)
+        : undefined;
+      const resolvedTheme = liveScheme
+        ? { ...defaultTheme, ...colorSchemeToXtermTheme(liveScheme as unknown as WTColorScheme) }
+        : defaultTheme;
+      const resolvedCursorShape =
+        liveProfile?.cursorShape ||
+        state.profileDefaults?.cursorShape ||
+        defaultProfileDefaults.cursorShape;
+      const resolvedCursorBlink =
+        liveProfile?.cursorBlink ??
+        state.profileDefaults?.cursorBlink ??
+        defaultProfileDefaults.cursorBlink;
+      const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
+
+      if (hideNativeCursor) {
+        terminal.options.theme = {
+          ...resolvedTheme,
+          cursor: hiddenCursorColor,
+          cursorAccent: hiddenCursorColor,
+        };
+        terminal.options.cursorBlink = false;
+        terminal.options.cursorStyle = "bar";
+        terminal.options.cursorWidth = 1;
+      } else {
+        const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
+        terminal.options.theme = resolvedTheme;
+        terminal.options.cursorBlink = resolvedCursorBlink;
+        terminal.options.cursorStyle = cursorOptions.cursorStyle;
+        if (cursorOptions.cursorWidth !== undefined) {
+          terminal.options.cursorWidth = cursorOptions.cursorWidth;
+        }
+        if (cursorOptions.cursorWidth === undefined) {
+          delete (terminal.options as { cursorWidth?: number }).cursorWidth;
+        }
+      }
+      terminal.refresh(0, terminal.rows - 1);
+    };
+
     const setSyncOutputCursorVisibility = (active: boolean) => {
       syncOutputActiveRef.current = active;
       const host = wrapperRef.current;
       if (host) {
         host.classList.toggle("terminal-sync-output-active", active);
       }
+      trace("sync-output-visibility", { active });
       overlayCaretUpdaterRef.current?.();
     };
-    const setImeCompositionState = (active: boolean) => {
-      shadowCursorRef.current.isComposing = active;
-      overlayCaretUpdaterRef.current?.();
-      if (!active) {
-        scheduleShadowCursorSync();
-      }
-    };
+    const compositionController = createImeCompositionController({
+      getAnchor: () => {
+        // Use the shadow cursor, not the buffer cursor.  TUI apps (Claude Code,
+        // Codex, etc.) move the buffer cursor to the footer/status-bar during
+        // repaints, so reading it here would place the composition preview in
+        // the wrong row.  The shadow cursor tracks the real input position.
+        const shadow = shadowCursorRef.current;
+        return {
+          cursorX: shadow.cursorX,
+          cursorAbsY: shadow.cursorAbsY,
+        };
+      },
+      onTrace: (event, payload) => {
+        trace(event, payload);
+      },
+      onStateChange: (state) => {
+        const wasActive = compositionPreviewRef.current.active;
+        compositionPreviewRef.current = state;
+        wrapperRef.current?.classList.toggle("terminal-ime-composition-active", state.active);
+        applyNativeCursorVisibility();
+        trace("ime-composition-preview", state);
+        if (wasActive && !state.active) {
+          trace("ime-composition-preview-committed", {
+            anchorBufferX: compositionPreviewRef.current.anchorBufferX,
+            anchorBufferAbsY: compositionPreviewRef.current.anchorBufferAbsY,
+          });
+        }
+        overlayCaretUpdaterRef.current?.();
+        if (!state.active) {
+          scheduleShadowCursorSync();
+        }
+      },
+    });
     let overlayCaretFrame: number | undefined;
+    let helperTextarea: HTMLTextAreaElement | null = null;
     const updateOverlayCaret = () => {
       const overlay = overlayCaretRef.current;
+      const previewEl = compositionPreviewRefEl.current;
       const host = wrapperRef.current;
       const term = terminalRef.current;
-      if (!overlay || !host || !term) return;
+      if (!overlay || !previewEl || !host || !term) return;
+
+      const hideOverlay = () => {
+        overlay.style.opacity = "0";
+        previewEl.style.opacity = "0";
+      };
 
       if (
         !openedRef.current ||
@@ -393,7 +495,15 @@ export function TerminalView({
         !isOverlayCaretActivity(activityRef.current) ||
         syncOutputActiveRef.current
       ) {
-        overlay.style.opacity = "0";
+        hideOverlay();
+        trace("overlay-hidden", {
+          reason: "gating",
+          opened: openedRef.current,
+          focused: isFocusedRef.current,
+          stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
+          activity: activityRef.current,
+          syncOutputActive: syncOutputActiveRef.current,
+        });
         return;
       }
 
@@ -404,7 +514,7 @@ export function TerminalView({
       const targetRect = canvas?.getBoundingClientRect() ?? screen?.getBoundingClientRect();
       const hostRect = host.getBoundingClientRect();
       if (!targetRect || term.cols <= 0 || term.rows <= 0) {
-        overlay.style.opacity = "0";
+        hideOverlay();
         return;
       }
 
@@ -416,29 +526,75 @@ export function TerminalView({
         cellWidth <= 0 ||
         cellHeight <= 0
       ) {
-        overlay.style.opacity = "0";
+        hideOverlay();
         return;
       }
 
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive) {
-        overlay.style.opacity = "0";
+      const caretOwner = resolveVisualCaretOwner({
+        opened: openedRef.current,
+        focused: isFocusedRef.current,
+        stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
+        overlayActivity: isOverlayCaretActivity(activityRef.current),
+        syncOutputActive: syncOutputActiveRef.current,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+        compositionActive: compositionPreviewRef.current.active,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        isInputPhase: shadowCursor.isInputPhase,
+      });
+      if (caretOwner === "alt-buffer") {
+        hideOverlay();
+        trace("overlay-hidden", { reason: "alt-buffer", shadowCursor, caretOwner });
         return;
       }
 
       const baseY = (term.buffer.active as { baseY?: number }).baseY ?? 0;
       const useShadowCursor =
-        (shadowCursor.hasPromptBoundary &&
-          (shadowCursor.isInputPhase || shadowCursor.isComposing)) ||
-        shadowCursor.hasSyncFramePosition;
-      const cursorX = useShadowCursor
+        caretOwner === "composition-preview" ||
+        caretOwner === "sync-frame" ||
+        caretOwner === "shadow-input";
+      const compositionPreview = compositionPreviewRef.current;
+      let cursorX = useShadowCursor
         ? shadowCursor.cursorX
         : ((term.buffer.active as { cursorX?: number }).cursorX ?? 0);
-      const cursorY = useShadowCursor
+      let cursorY = useShadowCursor
         ? shadowCursor.cursorAbsY - baseY
         : ((term.buffer.active as { cursorY?: number }).cursorY ?? 0);
+      if (caretOwner === "composition-preview") {
+        const previewLayout = getCompositionPreviewLayout(compositionPreview, term.cols);
+        cursorX = previewLayout.cursorX;
+        cursorY = previewLayout.cursorAbsY - baseY;
+        if (compositionPreview.text) {
+          const anchorX = compositionPreview.anchorBufferX;
+          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+          previewEl.style.opacity = "1";
+          previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
+            targetRect.top - hostRect.top + anchorY * cellHeight,
+          )}px)`;
+          previewEl.style.width = `${Math.max(cellWidth, previewLayout.maxRowCellWidth * cellWidth)}px`;
+          previewEl.style.height = `${Math.max(1, previewLayout.rowCount * cellHeight)}px`;
+          previewEl.style.fontSize = `${term.options.fontSize ?? Math.max(1, cellHeight)}px`;
+          previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
+          previewEl.textContent = previewLayout.renderedText;
+        } else {
+          previewEl.style.opacity = "0";
+          previewEl.textContent = "";
+        }
+      } else {
+        previewEl.style.opacity = "0";
+        previewEl.textContent = "";
+      }
       if (cursorY < 0 || cursorY >= term.rows) {
-        overlay.style.opacity = "0";
+        hideOverlay();
+        trace("overlay-hidden", {
+          reason: "viewport",
+          cursorX,
+          cursorY,
+          rows: term.rows,
+          cols: term.cols,
+          useShadowCursor,
+        });
         return;
       }
 
@@ -453,6 +609,21 @@ export function TerminalView({
       overlay.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + cursorX * cellWidth)}px, ${Math.round(
         targetRect.top - hostRect.top + cursorY * cellHeight + caretMetrics.offsetY,
       )}px)`;
+      trace("overlay-update", {
+        caretOwner,
+        useShadowCursor,
+        cursorX,
+        cursorY,
+        compositionAnchorX: compositionPreview.anchorBufferX,
+        compositionAnchorAbsY: compositionPreview.anchorBufferAbsY,
+        compositionCaretCellOffset: compositionPreview.caretCellOffset,
+        cursorAbsY: shadowCursor.cursorAbsY,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        isInputPhase: shadowCursor.isInputPhase,
+        isRepaintInProgress: shadowCursor.isRepaintInProgress,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+      });
     };
     const scheduleOverlayCaretUpdate = () => {
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
@@ -468,6 +639,15 @@ export function TerminalView({
       const activeBuffer = terminal.buffer.active as { cursorX?: number };
       shadowCursor.cursorX = activeBuffer.cursorX ?? 0;
       shadowCursor.cursorAbsY = getBufferCursorAbsY(terminal);
+      trace("shadow-sync", {
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        isInputPhase: shadowCursor.isInputPhase,
+        isRepaintInProgress: shadowCursor.isRepaintInProgress,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+      });
     };
     const setInputPhase = (active: boolean) => {
       const shadowCursor = shadowCursorRef.current;
@@ -477,21 +657,44 @@ export function TerminalView({
       } else {
         syncShadowCursorToBuffer();
       }
+      trace("input-phase", {
+        active,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+      });
       scheduleOverlayCaretUpdate();
     };
+    // In TUI sync-frame mode, the buffer cursor mid-frame is whichever
+    // footer/status row Codex last painted on; reading it via
+    // `scheduleShadowCursorSync` would snap the overlay to the footer.
+    // We use a row-equality gate: in `hasSyncFramePosition` mode, only
+    // sync when the buffer cursor is on the same row as the current
+    // shadow. This naturally tracks per-keystroke X advancement on the
+    // input row (echo of typed glyph stays on the same row) but
+    // ignores the cursor while Codex parks it on a footer row between
+    // input restores. Composition is now handled by the dedicated
+    // preview state/controller, so shadow sync is strictly for
+    // committed-input and sync-frame ownership.
     const scheduleShadowCursorSync = () => {
       if (pendingShadowCursorSync) return;
       pendingShadowCursorSync = true;
       queueMicrotask(() => {
         pendingShadowCursorSync = false;
         const shadowCursor = shadowCursorRef.current;
-        if (
-          !(shadowCursor.isInputPhase || shadowCursor.hasSyncFramePosition) ||
-          shadowCursor.isComposing ||
-          shadowCursor.isRepaintInProgress ||
-          shadowCursor.isAltBufferActive ||
-          syncOutputActiveRef.current
-        ) {
+        const bufferAbsY = getBufferCursorAbsY(terminal);
+        const eligibility = getShadowSyncEligibility(shadowCursor, {
+          bufferAbsY,
+          compositionPreviewActive: compositionPreviewRef.current.active,
+          syncOutputActive: syncOutputActiveRef.current,
+        });
+        if (eligibility !== "eligible") {
+          trace("shadow-sync-skip", {
+            reason: eligibility,
+            bufferAbsY,
+            shadowAbsY: shadowCursor.cursorAbsY,
+          });
           return;
         }
         syncShadowCursorToBuffer();
@@ -501,6 +704,11 @@ export function TerminalView({
     const handlePromptOsc = (data: string) => {
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.hasPromptBoundary = true;
+      trace("prompt-osc", {
+        data,
+        cursorX: shadowCursor.cursorX,
+        cursorAbsY: shadowCursor.cursorAbsY,
+      });
       switch (data.split(";")[0]) {
         case "A":
           setInputPhase(false);
@@ -595,6 +803,25 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
+          if (isOverlayCaretActivity(activityRef.current)) {
+            // Snapshot the buffer cursor *before* the frame body runs.
+            // Codex's footer-update frames don't restore the cursor
+            // before sending `\e[?2026l`, so reading the buffer at
+            // reset time lands on the footer row. The pre-frame
+            // snapshot is the cursor as the user actually sees it
+            // (the input prompt position right before the frame
+            // began). See `docs/terminal/cursor-jump-evidence/`.
+            const activeBuffer = terminal.buffer.active as { cursorX?: number };
+            Object.assign(
+              shadowCursorRef.current,
+              applyDec2026SetToShadowCursor(
+                shadowCursorRef.current,
+                activityRef.current,
+                activeBuffer.cursorX ?? 0,
+                getBufferCursorAbsY(terminal),
+              ),
+            );
+          }
         }
         if (
           hasDecModeParam(params, 1049) ||
@@ -603,6 +830,8 @@ export function TerminalView({
         ) {
           shadowCursorRef.current.isAltBufferActive = true;
           shadowCursorRef.current.hasSyncFramePosition = false;
+          shadowCursorRef.current.frameSavedCursorX = undefined;
+          shadowCursorRef.current.frameSavedCursorAbsY = undefined;
           setInputPhase(false);
         }
         return false;
@@ -613,14 +842,22 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
-          if (
-            isOverlayCaretActivity(activityRef.current) &&
-            !shadowCursorRef.current.hasPromptBoundary
-          ) {
-            // TUI app (Claude/Codex) using only DEC 2026 without OSC 133:
-            // cursor position at frame end is the app's intended cursor position.
-            syncShadowCursorToBuffer();
-            shadowCursorRef.current.hasSyncFramePosition = true;
+          if (isOverlayCaretActivity(activityRef.current)) {
+            // TUI DEC 2026 frame just flushed → snapshot the buffer
+            // cursor as the authoritative shadow cursor. See
+            // `shadow-cursor-state.ts` for why stale OSC 133 flags
+            // from a prior shell session must be cleared here.
+            const activeBuffer = terminal.buffer.active as { cursorX?: number };
+            const bufferCursorAbsY = getBufferCursorAbsY(terminal);
+            Object.assign(
+              shadowCursorRef.current,
+              applyDec2026ResetToShadowCursor(
+                shadowCursorRef.current,
+                activityRef.current,
+                activeBuffer.cursorX ?? 0,
+                bufferCursorAbsY,
+              ),
+            );
             scheduleOverlayCaretUpdate();
           } else {
             scheduleShadowCursorSync();
@@ -651,6 +888,7 @@ export function TerminalView({
       return false;
     });
     const cursorMoveDisposable = terminal.onCursorMove(() => {
+      if (compositionPreviewRef.current.active) return;
       const shadowCursor = shadowCursorRef.current;
       if (shadowCursor.isAltBufferActive || syncOutputActiveRef.current) return;
       const oscPath =
@@ -661,28 +899,33 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      if (compositionPreviewRef.current.active) return;
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
       scheduleOverlayCaretUpdate();
     });
-    let helperTextarea: HTMLTextAreaElement | null = null;
-    const handleCompositionStart = () => {
-      setImeCompositionState(true);
-    };
-    const handleCompositionEnd = () => {
-      setImeCompositionState(false);
-    };
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
       ) as HTMLTextAreaElement | null;
       if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
-      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
-      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       helperTextarea = nextHelperTextarea;
-      helperTextarea.addEventListener("compositionstart", handleCompositionStart);
-      helperTextarea.addEventListener("compositionend", handleCompositionEnd);
+      compositionController.bind(helperTextarea);
+      scheduleOverlayCaretUpdate();
+    };
+
+    // view 인스턴스 폰트 줌 조정 (zoomIn/zoomOut 공용). paneId가 없으면 no-op.
+    const adjustZoom = (delta: number) => {
+      if (!paneId) return;
+      const overrides = useOverridesStore.getState();
+      const currentFont = useSettingsStore
+        .getState()
+        .resolveFont(profile, overrides.getViewOverride(paneId));
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        overrides.setViewOverride(paneId, { fontSize: newSize });
+      }
     };
 
     // Single entry point for all terminal key handling:
@@ -693,6 +936,10 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
+
+      if (shouldDeferTerminalKeyToIme(compositionPreviewRef.current.active, e)) {
+        return true;
+      }
 
       if (matchesKeybinding(e, "terminal.paste")) {
         // runTerminalPaste honors the smartPaste toggle internally and falls
@@ -707,6 +954,23 @@ export function TerminalView({
         // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
         if (!terminal.hasSelection()) return true;
         runTerminalCopy(terminal);
+        e.preventDefault();
+        return false;
+      }
+
+      // View 인스턴스 폰트 줌: overrides-store에만 기록, 프로파일은 건드리지 않음.
+      if (matchesKeybinding(e, "terminal.zoomIn")) {
+        adjustZoom(+1);
+        e.preventDefault();
+        return false;
+      }
+      if (matchesKeybinding(e, "terminal.zoomOut")) {
+        adjustZoom(-1);
+        e.preventDefault();
+        return false;
+      }
+      if (matchesKeybinding(e, "terminal.zoomReset")) {
+        if (paneId) useOverridesStore.getState().clearViewOverride(paneId);
         e.preventDefault();
         return false;
       }
@@ -743,6 +1007,11 @@ export function TerminalView({
 
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
+      trace("terminal-onData", {
+        bytes: data.length,
+        preview: JSON.stringify(data.slice(0, 80)),
+        compositionActive: compositionPreviewRef.current.active,
+      });
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
     });
@@ -868,13 +1137,20 @@ export function TerminalView({
         }
       }
 
+      // TODO(refactor): the OSC 133/633 needles below mirror the SIGNAL_CHECKS
+      // table in `src-tauri/src/pty_trace.rs`. The A and C/D blocks also share
+      // the same body shape (mark prompt boundary, log, exit input phase).
+      // A future cleanup could collapse them into a small dispatch table —
+      // out of scope for this PR (B has different command-state capture).
       if (text.includes("\x1b]133;A") || text.includes("\x1b]633;A")) {
         shadowCursorRef.current.hasPromptBoundary = true;
+        trace("chunk-prompt-boundary", { code: "A" });
         setInputPhase(false);
       }
       if (text.includes("\x1b]133;B") || text.includes("\x1b]633;B")) {
         const shadowCursor = shadowCursorRef.current;
         shadowCursor.hasPromptBoundary = true;
+        trace("chunk-prompt-boundary", { code: "B" });
         syncShadowCursorToBuffer();
         shadowCursor.commandStartX = shadowCursor.cursorX;
         shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
@@ -887,6 +1163,7 @@ export function TerminalView({
         text.includes("\x1b]633;D")
       ) {
         shadowCursorRef.current.hasPromptBoundary = true;
+        trace("chunk-prompt-boundary", { code: "C/D" });
         setInputPhase(false);
       }
 
@@ -898,6 +1175,7 @@ export function TerminalView({
       if (enterAlt && !leaveAlt && !inAltScreen) {
         inAltScreen = true;
         shadowCursorRef.current.isAltBufferActive = true;
+        trace("alt-buffer", { active: true });
         setInputPhase(false);
         // Parse OSC 133;E directly from the same output chunk (sync, no IPC race)
         const cmdMatch = text.match(/\x1b\]133;E;([^\x07]*)\x07/);
@@ -924,6 +1202,7 @@ export function TerminalView({
       } else if (leaveAlt && !enterAlt && inAltScreen) {
         inAltScreen = false;
         shadowCursorRef.current.isAltBufferActive = false;
+        trace("alt-buffer", { active: false });
         scheduleOverlayCaretUpdate();
         // If leaving an interactive app (Claude, vim, etc.), clear stale command state
         // so WorkspaceSelectorView does not show leftover info after the app exits.
@@ -957,24 +1236,6 @@ export function TerminalView({
       }
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
-
-    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
-    const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const state = useSettingsStore.getState();
-      const currentFont = state.resolveFont(profile);
-      const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
-      if (newSize !== currentFont.size) {
-        // Update the profile's font override
-        const idx = state.profiles.findIndex((p) => p.name === profile);
-        if (idx >= 0) {
-          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
-        }
-      }
-    };
-    outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
 
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
@@ -1099,11 +1360,10 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
-      helperTextarea?.removeEventListener("compositionstart", handleCompositionStart);
-      helperTextarea?.removeEventListener("compositionend", handleCompositionEnd);
+      compositionController.dispose();
+      wrapperRef.current?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
       stopSyncOutputMonitor();
@@ -1168,8 +1428,32 @@ export function TerminalView({
     return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
-  const font = useSettingsStore((s) => s.resolveFont(profile));
+  // Split subscriptions so each returns a stable reference — composing inside
+  // the selector (spreading a new object every call) would break Zustand's
+  // strict-equality rerender gate and loop forever.
+  const viewOverride = useOverridesStore((s) => (paneId ? s.viewOverrides[paneId] : undefined));
+  const baseFont = useSettingsStore((s) => s.resolveFont(profile));
+  const font = useMemo(() => {
+    if (viewOverride?.fontSize !== undefined && viewOverride.fontSize !== baseFont.size) {
+      return { ...baseFont, size: viewOverride.fontSize };
+    }
+    return baseFont;
+  }, [baseFont, viewOverride]);
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
+  const prevActivityIsTuiRef = useRef<boolean>(false);
+  {
+    const isTui = isOverlayCaretActivity(activity);
+    if (prevActivityIsTuiRef.current && !isTui) {
+      // Leaving a TUI overlay activity (e.g. Codex exited) → clear the
+      // per-frame sync-frame snapshot so OSC 133 from the returning
+      // shell drives the overlay. See `shadow-cursor-state.ts`.
+      Object.assign(
+        shadowCursorRef.current,
+        applyActivityLeftTuiToShadowCursor(shadowCursorRef.current),
+      );
+    }
+    prevActivityIsTuiRef.current = isTui;
+  }
   activityRef.current = activity;
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
@@ -1283,20 +1567,12 @@ export function TerminalView({
     }
   }, [scrollbarStyleForEffect]);
 
-  const overlayCaretColor = (() => {
-    const scheme = currentSchemeName
-      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
-      : undefined;
-    return scheme?.cursorColor || "#FFFFFF";
-  })();
-
-  // Resolve terminal background for padding area
-  const termBg = (() => {
-    const scheme = currentSchemeName
-      ? colorSchemes.find((cs) => cs.name === currentSchemeName)
-      : undefined;
-    return scheme?.background || "#1e1e2e";
-  })();
+  const currentScheme = currentSchemeName
+    ? colorSchemes.find((cs) => cs.name === currentSchemeName)
+    : undefined;
+  const overlayCaretColor = currentScheme?.cursorColor || "#FFFFFF";
+  const termFg = currentScheme?.foreground || "#F0F0F0";
+  const termBg = currentScheme?.background || "#1e1e2e";
 
   // Read padding from profile settings
   const padding = useSettingsStore((s) => s.profiles.find((p) => p.name === profile)?.padding);
@@ -1312,8 +1588,12 @@ export function TerminalView({
 
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
+    "--terminal-foreground-color": string;
+    "--terminal-background-color": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
+    "--terminal-foreground-color": termFg,
+    "--terminal-background-color": termBg,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };
@@ -1326,6 +1606,17 @@ export function TerminalView({
       style={wrapperStyle}
     >
       <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={compositionPreviewRefEl}
+        data-testid={`terminal-composition-preview-${instanceId}`}
+        className="terminal-composition-preview pointer-events-none absolute"
+        style={{
+          background: termBg,
+          opacity: 0,
+          color: termFg,
+          fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+        }}
+      />
       <div
         ref={overlayCaretRef}
         data-testid={`terminal-overlay-caret-${instanceId}`}

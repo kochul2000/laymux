@@ -24,6 +24,22 @@ pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
 pub const ENV_LX_PROPAGATED: &str = "LX_PROPAGATED";
 
+/// Enable verbose PTY byte-stream tracing (pty↔ui directions, detected
+/// escape-sequence signals, printable preview). Off by default — the
+/// trace logs are only useful when diagnosing cursor/flicker issues.
+pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
+
+/// Enables a diagnostic path where the UI tracer ships batched
+/// shadow-cursor events to the Rust side via a single `invoke` per
+/// `requestAnimationFrame` — the server-side stream is the same
+/// `tracing` sink as the PTY trace, so both layers interleave naturally
+/// in the log. Only meaningful together with the matching UI gate
+/// (`VITE_LAYMUX_CURSOR_TRACE` build flag or
+/// `localStorage["laymux:cursor-trace"]="1"` at runtime). Setting
+/// `LAYMUX_PTY_TRACE` alone implicitly enables cursor trace collection
+/// so the two streams stay correlated.
+pub const ENV_LAYMUX_CURSOR_TRACE: &str = "LAYMUX_CURSOR_TRACE";
+
 // ── Timeouts & limits ──────────────────────────────────────────────
 
 /// How long a propagation flag remains valid before expiring.

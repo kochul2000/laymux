@@ -170,6 +170,9 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/v1/settings/profile-defaults"),
     ("PUT", "/api/v1/settings/profiles/{index}"),
     ("POST", "/api/v1/ui/notifications"),
+    ("POST", "/api/v1/ui/hide-mode/toggle"),
+    ("POST", "/api/v1/ui/hidden/workspace/{id}/toggle"),
+    ("POST", "/api/v1/ui/hidden/pane/{id}/toggle"),
     ("*", "/mcp"),
 ];
 

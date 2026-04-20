@@ -191,6 +191,18 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Toggle the notification panel overlay open/closed."
             },
             {
+                "method": "POST", "path": "/api/v1/ui/hide-mode/toggle",
+                "description": "Toggle the WorkspaceSelectorView hide mode (reveals eye toggles on each workspace/pane)."
+            },
+            {
+                "method": "POST", "path": "/api/v1/ui/hidden/workspace/{id}/toggle",
+                "description": "Toggle whether the given workspace is hidden (only has a visible effect while hide mode is on)."
+            },
+            {
+                "method": "POST", "path": "/api/v1/ui/hidden/pane/{id}/toggle",
+                "description": "Toggle whether the given pane is hidden (only has a visible effect while hide mode is on)."
+            },
+            {
                 "method": "POST", "path": "/api/v1/docks/{position}/split",
                 "description": "Split a dock pane. position: top|bottom|left|right.",
                 "body": { "paneId": "(optional) string — ID of the pane to split" }
