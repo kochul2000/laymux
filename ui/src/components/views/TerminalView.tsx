@@ -915,6 +915,19 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
 
+    // view 인스턴스 폰트 줌 조정 (zoomIn/zoomOut 공용). paneId가 없으면 no-op.
+    const adjustZoom = (delta: number) => {
+      if (!paneId) return;
+      const overrides = useOverridesStore.getState();
+      const currentFont = useSettingsStore
+        .getState()
+        .resolveFont(profile, overrides.getViewOverride(paneId));
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        overrides.setViewOverride(paneId, { fontSize: newSize });
+      }
+    };
+
     // Single entry point for all terminal key handling:
     //   - IDE-level shortcuts → pass through to document handler (return false).
     //   - terminal.copy / terminal.paste (default Ctrl+C / Ctrl+V, user-rebindable)
@@ -964,19 +977,6 @@ export function TerminalView({
 
       return true;
     });
-
-    // view 인스턴스 폰트 줌 조정 (zoomIn/zoomOut 공용). paneId가 없으면 no-op.
-    function adjustZoom(delta: number) {
-      if (!paneId) return;
-      const overrides = useOverridesStore.getState();
-      const currentFont = useSettingsStore
-        .getState()
-        .resolveFont(profile, overrides.getViewOverride(paneId));
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
-      if (newSize !== currentFont.size) {
-        overrides.setViewOverride(paneId, { fontSize: newSize });
-      }
-    }
 
     // Hide mouse cursor + control bar when user starts typing.
     // Two listeners needed: terminal.onKey for when xterm has focus (normal typing),
