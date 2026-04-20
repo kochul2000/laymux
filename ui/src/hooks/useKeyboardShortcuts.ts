@@ -231,10 +231,19 @@ export function useKeyboardShortcuts() {
         if (altKey === "D") {
           e.preventDefault();
           const { duplicateWorkspace } = useWorkspaceStore.getState();
-          duplicateWorkspace(activeWorkspaceId);
-          const updated = useWorkspaceStore.getState().workspaces;
-          const newWs = updated[updated.length - 1];
-          if (newWs) switchWorkspace(newWs.id);
+          const result = duplicateWorkspace(activeWorkspaceId);
+          if (result) {
+            // Mirror hide state (workspace + per-pane) onto the duplicate so
+            // users don't see a sudden "unhidden" copy. See issue #218.
+            useUiStore
+              .getState()
+              .propagateHiddenOnDuplicate(
+                activeWorkspaceId,
+                result.newWorkspaceId,
+                result.paneIdMap,
+              );
+            switchWorkspace(result.newWorkspaceId);
+          }
           return;
         }
 

@@ -1745,6 +1745,35 @@ describe("WorkspaceSelectorView", () => {
       expect(toggle.textContent).toContain("2");
     });
 
+    // -- issue #218: duplicate preserves hide state --
+
+    it("duplicateWorkspace copies hidden workspace flag onto the duplicate", () => {
+      // Hide ws-2 in the source, then duplicate it.
+      useUiStore.getState().toggleWorkspaceHidden("ws-2");
+      const result = useWorkspaceStore.getState().duplicateWorkspace("ws-2");
+      expect(result).not.toBeNull();
+      useUiStore
+        .getState()
+        .propagateHiddenOnDuplicate("ws-2", result!.newWorkspaceId, result!.paneIdMap);
+      expect(useUiStore.getState().hiddenWorkspaceIds.has(result!.newWorkspaceId)).toBe(true);
+    });
+
+    it("duplicateWorkspace copies hidden pane flags onto the new pane IDs", () => {
+      // Hide pane-a (inside ws-1) then duplicate ws-1.
+      useUiStore.getState().togglePaneHidden("pane-a");
+      const result = useWorkspaceStore.getState().duplicateWorkspace("ws-1");
+      expect(result).not.toBeNull();
+      useUiStore
+        .getState()
+        .propagateHiddenOnDuplicate("ws-1", result!.newWorkspaceId, result!.paneIdMap);
+
+      const newPaneA = result!.paneIdMap["pane-a"];
+      const newPaneB = result!.paneIdMap["pane-b"];
+      expect(useUiStore.getState().hiddenPaneIds.has(newPaneA)).toBe(true);
+      // pane-b was not hidden in the source, so it stays visible in the duplicate.
+      expect(useUiStore.getState().hiddenPaneIds.has(newPaneB)).toBe(false);
+    });
+
     // Issue #203: hide mode toggle should be visually emphasized when active
     // so users clearly perceive it as the primary action while in hide mode.
     describe("hide mode toggle visual emphasis (issue #203)", () => {

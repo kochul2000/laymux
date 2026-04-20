@@ -48,6 +48,19 @@ interface UiState {
   exitHideMode: () => void;
   togglePaneHidden: (paneId: string) => void;
   toggleWorkspaceHidden: (workspaceId: string) => void;
+  /**
+   * Replay hide state from a source workspace onto its freshly-created duplicate.
+   * - If the source workspace is hidden, mark the new workspace hidden too.
+   * - For each entry in `paneIdMap` (source pane id → new pane id) whose source
+   *   pane is hidden, also mark the new pane hidden.
+   * Called right after `workspaceStore.duplicateWorkspace` so the duplicate
+   * mirrors the user's hide selections.
+   */
+  propagateHiddenOnDuplicate: (
+    sourceWorkspaceId: string,
+    newWorkspaceId: string,
+    paneIdMap: Record<string, string>,
+  ) => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -99,5 +112,31 @@ export const useUiStore = create<UiState>()((set) => ({
       else next.add(workspaceId);
       saveHiddenIds(HIDDEN_WORKSPACES_KEY, next);
       return { hiddenWorkspaceIds: next };
+    }),
+  propagateHiddenOnDuplicate: (sourceWorkspaceId, newWorkspaceId, paneIdMap) =>
+    set((state) => {
+      const patch: Partial<UiState> = {};
+
+      // Workspace-level flag: if the source is hidden, mirror onto the duplicate.
+      if (state.hiddenWorkspaceIds.has(sourceWorkspaceId)) {
+        const nextWs = new Set(state.hiddenWorkspaceIds);
+        nextWs.add(newWorkspaceId);
+        saveHiddenIds(HIDDEN_WORKSPACES_KEY, nextWs);
+        patch.hiddenWorkspaceIds = nextWs;
+      }
+
+      // Pane-level flags: replay via the source→new pane ID mapping.
+      const hiddenNewPanes: string[] = [];
+      for (const [srcId, newId] of Object.entries(paneIdMap)) {
+        if (state.hiddenPaneIds.has(srcId)) hiddenNewPanes.push(newId);
+      }
+      if (hiddenNewPanes.length > 0) {
+        const nextPanes = new Set(state.hiddenPaneIds);
+        for (const id of hiddenNewPanes) nextPanes.add(id);
+        saveHiddenIds(HIDDEN_PANES_KEY, nextPanes);
+        patch.hiddenPaneIds = nextPanes;
+      }
+
+      return patch;
     }),
 }));

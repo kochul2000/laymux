@@ -74,7 +74,15 @@ interface WorkspaceState {
   getOrderedWorkspaces: () => Workspace[];
   setActiveWorkspace: (id: string) => void;
   addWorkspace: (name: string, layoutId: string) => void;
-  duplicateWorkspace: (id: string) => void;
+  /**
+   * Clone a workspace and return the IDs needed to propagate per-pane UI state
+   * (e.g. `ui-store.hiddenPaneIds`). Returns `null` if the source does not exist.
+   * `paneIdMap` is keyed by the source pane ID and maps to the freshly-minted
+   * duplicate pane ID, so callers can replay ID-keyed state onto the copy.
+   */
+  duplicateWorkspace: (
+    id: string,
+  ) => { newWorkspaceId: string; paneIdMap: Record<string, string> } | null;
   removeWorkspace: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   reorderWorkspaces: (fromId: string, toId: string, position?: "top" | "bottom") => void;
@@ -150,19 +158,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   duplicateWorkspace: (id) => {
     const { workspaces } = get();
     const source = workspaces.find((ws) => ws.id === id);
-    if (!source) return;
+    if (!source) return null;
 
-    const duplicate: Workspace = {
-      id: generateId("ws"),
-      name: `${source.name} Copy`,
-      panes: source.panes.map((p) => ({
-        id: generateId("pane"),
+    // Build the new panes alongside a source→new pane ID map so the caller can
+    // replay ID-keyed state (hidden flags, bar modes, etc.) onto the duplicate.
+    const paneIdMap: Record<string, string> = {};
+    const newPanes: WorkspacePane[] = source.panes.map((p) => {
+      const newId = generateId("pane");
+      paneIdMap[p.id] = newId;
+      return {
+        id: newId,
         x: p.x,
         y: p.y,
         w: p.w,
         h: p.h,
         view: { ...p.view },
-      })),
+      };
+    });
+
+    const duplicate: Workspace = {
+      id: generateId("ws"),
+      name: `${source.name} Copy`,
+      panes: newPanes,
     };
 
     set((state) => ({
@@ -172,6 +189,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           ? [...state.workspaceDisplayOrder, duplicate.id]
           : [],
     }));
+
+    return { newWorkspaceId: duplicate.id, paneIdMap };
   },
 
   removeWorkspace: (id) => {
