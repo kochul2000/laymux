@@ -254,7 +254,7 @@ describe("FileExplorerView", () => {
     fireEvent.click(screen.getByTestId("file-explorer-item-4"), { ctrlKey: true }); // c.txt (index 4)
 
     const view = screen.getByTestId("file-explorer-view");
-    fireEvent.keyDown(view, { key: "c", ctrlKey: true });
+    fireEvent.copy(view);
 
     expect(clipboardWriteText).toHaveBeenCalledWith("/home/user/a.txt\n/home/user/c.txt");
   });

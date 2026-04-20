@@ -9,6 +9,49 @@ export const TAURI_MOCK_SCRIPT = `
   var callbacks = {};
   var eventListeners = {};
 
+  var SETTINGS_DATA = {
+    font: { face: 'Consolas', size: 14 },
+    defaultProfile: 'PowerShell',
+    convenience: { defaultControlBarMode: 'hover' },
+    profiles: [
+      { name: 'PowerShell', commandLine: 'powershell.exe', colorScheme: '', startingDirectory: '', hidden: false },
+      { name: 'WSL', commandLine: 'wsl.exe', colorScheme: '', startingDirectory: '', hidden: false },
+    ],
+    colorSchemes: [],
+    keybindings: [],
+    layouts: [
+      {
+        id: 'default-layout',
+        name: 'Default',
+        panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: 'TerminalView' }],
+      },
+      {
+        id: 'dev-split',
+        name: 'Dev Split',
+        panes: [
+          { x: 0, y: 0, w: 1, h: 0.6, viewType: 'TerminalView' },
+          { x: 0, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
+          { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
+        ],
+      },
+    ],
+    workspaces: [
+      {
+        id: 'ws-default',
+        name: 'Default',
+        panes: [
+          { id: 'pane-e2e-1', x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'ws-default' } },
+        ],
+      },
+    ],
+    docks: [
+      { position: 'left', activeView: 'WorkspaceSelectorView', views: ['WorkspaceSelectorView', 'SettingsView'], visible: true },
+      { position: 'right', activeView: null, views: [], visible: true },
+      { position: 'top', activeView: null, views: [], visible: true },
+      { position: 'bottom', activeView: null, views: [], visible: true },
+    ],
+  };
+
   // Mock for @tauri-apps/api/event internals (used by _unlisten)
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener: function(_event, _eventId) {
@@ -56,49 +99,10 @@ export const TAURI_MOCK_SCRIPT = `
       // App commands
       switch (cmd) {
         case 'load_settings':
-          return Promise.resolve({
-            font: { face: 'Consolas', size: 14 },
-            defaultProfile: 'PowerShell',
-            convenience: { defaultControlBarMode: 'hover' },
-            profiles: [
-              { name: 'PowerShell', commandLine: 'powershell.exe', colorScheme: '', startingDirectory: '', hidden: false },
-              { name: 'WSL', commandLine: 'wsl.exe', colorScheme: '', startingDirectory: '', hidden: false },
-            ],
-            colorSchemes: [],
-            keybindings: [],
-            layouts: [
-              {
-                id: 'default-layout',
-                name: 'Default',
-                panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: 'TerminalView' }],
-              },
-              {
-                id: 'dev-split',
-                name: 'Dev Split',
-                panes: [
-                  { x: 0, y: 0, w: 1, h: 0.6, viewType: 'TerminalView' },
-                  { x: 0, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
-                  { x: 0.5, y: 0.6, w: 0.5, h: 0.4, viewType: 'TerminalView' },
-                ],
-              },
-            ],
-            workspaces: [
-              {
-                id: 'ws-default',
-                name: 'Default',
+          return Promise.resolve(SETTINGS_DATA);
 
-                panes: [
-                  { id: 'pane-e2e-1', x: 0, y: 0, w: 1, h: 1, view: { type: 'TerminalView', profile: 'PowerShell', syncGroup: 'ws-default' } },
-                ],
-              },
-            ],
-            docks: [
-              { position: 'left', activeView: 'WorkspaceSelectorView', views: ['WorkspaceSelectorView', 'SettingsView'], visible: true },
-              { position: 'right', activeView: null, views: [], visible: true },
-              { position: 'top', activeView: null, views: [], visible: true },
-              { position: 'bottom', activeView: null, views: [], visible: true },
-            ],
-          });
+        case 'load_settings_validated':
+          return Promise.resolve({ status: 'ok', settings: SETTINGS_DATA, warnings: [] });
 
         case 'save_settings':
           return Promise.resolve(undefined);
