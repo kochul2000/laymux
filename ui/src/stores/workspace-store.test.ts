@@ -5,11 +5,14 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 import { useWorkspaceStore } from "./workspace-store";
+import { useOverridesStore } from "./overrides-store";
 import { persistSession } from "@/lib/persist-session";
 
 describe("WorkspaceStore", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -121,6 +124,25 @@ describe("WorkspaceStore", () => {
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(active.panes).toHaveLength(1);
     });
+
+    it("clears overrides for the removed pane", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+      const [paneA, paneB] = panes;
+      useOverridesStore.getState().setPaneOverride(paneA.id, { controlBarMode: "pinned" });
+      useOverridesStore.getState().setViewOverride(paneA.id, { fontSize: 20 });
+      useOverridesStore.getState().setPaneOverride(paneB.id, { controlBarMode: "minimized" });
+
+      // Remove pane A (index 0).
+      useWorkspaceStore.getState().removePane(0);
+
+      expect(useOverridesStore.getState().getPaneOverride(paneA.id)).toBeUndefined();
+      expect(useOverridesStore.getState().getViewOverride(paneA.id)).toBeUndefined();
+      // paneB의 오버라이드는 건드리지 않음.
+      expect(useOverridesStore.getState().getPaneOverride(paneB.id)?.controlBarMode).toBe(
+        "minimized",
+      );
+    });
   });
 
   describe("setPaneView", () => {
@@ -135,6 +157,32 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.getState().setPaneView(5, { type: "TerminalView" });
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(active.panes[0].view.type).toBe("EmptyView");
+    });
+
+    it("clears view overrides when view type changes", () => {
+      const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+      useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+      useOverridesStore.getState().setPaneOverride(paneId, { controlBarMode: "pinned" });
+
+      // EmptyView → TerminalView: view 오버라이드는 사라지되, pane 오버라이드는 유지.
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+      expect(useOverridesStore.getState().getViewOverride(paneId)).toBeUndefined();
+      expect(useOverridesStore.getState().getPaneOverride(paneId)?.controlBarMode).toBe("pinned");
+    });
+
+    it("preserves view overrides when only view config changes (same type)", () => {
+      // 먼저 view 타입을 TerminalView로 바꾸고 오버라이드 설정.
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+      const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+      useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+
+      // 타입은 그대로 TerminalView, profile만 교체 → 줌 유지.
+      useWorkspaceStore
+        .getState()
+        .setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+
+      expect(useOverridesStore.getState().getViewOverride(paneId)?.fontSize).toBe(20);
     });
   });
 
@@ -151,8 +199,18 @@ describe("WorkspaceStore", () => {
     it("atomically swaps positions of two panes", () => {
       useWorkspaceStore.getState().splitPane(0, "vertical");
       const before = useWorkspaceStore.getState().getActiveWorkspace()!;
-      const srcPos = { x: before.panes[0].x, y: before.panes[0].y, w: before.panes[0].w, h: before.panes[0].h };
-      const tgtPos = { x: before.panes[1].x, y: before.panes[1].y, w: before.panes[1].w, h: before.panes[1].h };
+      const srcPos = {
+        x: before.panes[0].x,
+        y: before.panes[0].y,
+        w: before.panes[0].w,
+        h: before.panes[0].h,
+      };
+      const tgtPos = {
+        x: before.panes[1].x,
+        y: before.panes[1].y,
+        w: before.panes[1].w,
+        h: before.panes[1].h,
+      };
 
       useWorkspaceStore.getState().swapPanes(0, 1);
 
@@ -279,6 +337,36 @@ describe("WorkspaceStore", () => {
 
       const after = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === source.id)!;
       expect(after.panes.map((p) => p.id)).toEqual(paneIdsBefore);
+    });
+
+    it("duplicateWorkspace returns new workspace id and a source→new pane id map", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      const source = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const sourcePaneIds = source.panes.map((p) => p.id);
+
+      const result = useWorkspaceStore.getState().duplicateWorkspace(source.id);
+
+      expect(result).not.toBeNull();
+      expect(result!.newWorkspaceId).toMatch(/^ws-/);
+      expect(result!.newWorkspaceId).not.toBe(source.id);
+
+      // Map keys should cover all source pane IDs and values should be the new pane IDs.
+      const newWs = useWorkspaceStore
+        .getState()
+        .workspaces.find((ws) => ws.id === result!.newWorkspaceId)!;
+      const newPaneIds = newWs.panes.map((p) => p.id);
+
+      expect(Object.keys(result!.paneIdMap).sort()).toEqual([...sourcePaneIds].sort());
+      expect(Object.values(result!.paneIdMap).sort()).toEqual([...newPaneIds].sort());
+      // New pane IDs must not collide with source pane IDs.
+      for (const id of newPaneIds) {
+        expect(sourcePaneIds).not.toContain(id);
+      }
+    });
+
+    it("duplicateWorkspace returns null for unknown id", () => {
+      const result = useWorkspaceStore.getState().duplicateWorkspace("ws-does-not-exist");
+      expect(result).toBeNull();
     });
 
     it("renaming a non-active workspace does not change active workspace pane IDs", () => {

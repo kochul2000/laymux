@@ -82,36 +82,6 @@ describe("ui-store", () => {
     expect(useUiStore.getState().isAppFocused).toBe(true);
   });
 
-  // -- barModes --
-
-  it("setBarMode persists mode and getBarMode retrieves it", () => {
-    useUiStore.getState().setBarMode("pane-1", "pinned");
-    expect(useUiStore.getState().barModes["pane-1"]).toBe("pinned");
-    expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
-  });
-
-  it("getBarMode returns settings default when no persisted mode", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
-    }));
-    expect(useUiStore.getState().getBarMode("pane-unknown")).toBe("minimized");
-  });
-
-  it("getBarMode returns hover when settings default is hover", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
-    }));
-    expect(useUiStore.getState().getBarMode("pane-unknown")).toBe("hover");
-  });
-
-  it("persisted mode overrides settings default", () => {
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
-    }));
-    useUiStore.getState().setBarMode("pane-1", "pinned");
-    expect(useUiStore.getState().getBarMode("pane-1")).toBe("pinned");
-  });
-
   // -- unified hide mode --
 
   it("starts with hide mode off", () => {
@@ -170,5 +140,47 @@ describe("ui-store", () => {
     useUiStore.getState().toggleWorkspaceHidden("ws-1");
     useUiStore.getState().toggleWorkspaceHidden("ws-2");
     expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(2);
+  });
+
+  // -- duplicate-aware hidden propagation --
+
+  describe("propagateHiddenOnDuplicate", () => {
+    it("propagates workspace hidden flag to the new duplicate", () => {
+      useUiStore.getState().toggleWorkspaceHidden("ws-src");
+      useUiStore.getState().propagateHiddenOnDuplicate("ws-src", "ws-dup", {});
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-dup")).toBe(true);
+      // Source remains hidden.
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-src")).toBe(true);
+    });
+
+    it("does not add a workspace hidden flag when source is visible", () => {
+      useUiStore.getState().propagateHiddenOnDuplicate("ws-src", "ws-dup", {});
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-dup")).toBe(false);
+    });
+
+    it("maps hidden source panes to their new pane IDs", () => {
+      useUiStore.getState().togglePaneHidden("pane-a");
+      useUiStore.getState().togglePaneHidden("pane-b"); // also hidden, gets mapped
+      useUiStore.getState().propagateHiddenOnDuplicate("ws-src", "ws-dup", {
+        "pane-a": "pane-a-new",
+        "pane-b": "pane-b-new",
+        "pane-c": "pane-c-new", // visible source → no entry added
+      });
+      const hidden = useUiStore.getState().hiddenPaneIds;
+      expect(hidden.has("pane-a-new")).toBe(true);
+      expect(hidden.has("pane-b-new")).toBe(true);
+      expect(hidden.has("pane-c-new")).toBe(false);
+      // Source pane ids remain hidden.
+      expect(hidden.has("pane-a")).toBe(true);
+      expect(hidden.has("pane-b")).toBe(true);
+    });
+
+    it("is a no-op when neither source workspace nor panes are hidden", () => {
+      useUiStore
+        .getState()
+        .propagateHiddenOnDuplicate("ws-src", "ws-dup", { "pane-a": "pane-a-new" });
+      expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(0);
+      expect(useUiStore.getState().hiddenPaneIds.size).toBe(0);
+    });
   });
 });

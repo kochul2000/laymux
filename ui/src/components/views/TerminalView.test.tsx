@@ -4,6 +4,7 @@ import { TerminalView, _resetWebglStagger, shouldEnableTerminalWebgl } from "./T
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
@@ -201,6 +202,8 @@ describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    localStorage.clear();
     capturedKeyHandler = null;
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
@@ -1249,69 +1252,123 @@ describe("TerminalView", () => {
     expect(testIdDiv.style.cursor).toBe("");
   });
 
-  // -- Ctrl+Wheel Zoom --
+  // -- Font zoom via keybindings (Ctrl+= / Ctrl+- / Ctrl+0) --
 
-  it("increases font size on Ctrl+Wheel scroll up", async () => {
-    // Font is now resolved from profile -> profileDefaults
-    render(<TerminalView instanceId="t-zoom1" profile="PowerShell" syncGroup="" />);
+  /** xterm의 customKeyEventHandler를 직접 호출한다. 반환값은 "xterm이 이 키를 추가 처리할지". */
+  function fireTerminalKey(init: Partial<KeyboardEventInit> & { key: string }): {
+    handled: boolean;
+    preventDefault: ReturnType<typeof vi.fn>;
+  } {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+    const preventDefault = vi.spyOn(event, "preventDefault") as unknown as ReturnType<typeof vi.fn>;
+    // xterm이 처리한다고 신호: false. 추가 전달: true.
+    const result = capturedKeyHandler ? capturedKeyHandler(event) : true;
+    return { handled: !result, preventDefault };
+  }
 
-    const container = screen.getByTestId("terminal-view-t-zoom1");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    container.dispatchEvent(event);
+  it("Ctrl+= increases font size (writes view override, not profile)", async () => {
+    render(
+      <TerminalView instanceId="t-zoom1" paneId="pane-zoom1" profile="PowerShell" syncGroup="" />,
+    );
 
-    // Ctrl+Wheel sets font override on the profile
-    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(15);
-  });
+    const { handled, preventDefault } = fireTerminalKey({ key: "=", ctrlKey: true });
 
-  it("decreases font size on Ctrl+Wheel scroll down", async () => {
-    render(<TerminalView instanceId="t-zoom2" profile="PowerShell" syncGroup="" />);
-
-    const container = screen.getByTestId("terminal-view-t-zoom2");
-    const event = new WheelEvent("wheel", {
-      deltaY: 100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    container.dispatchEvent(event);
-
-    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(13);
-  });
-
-  it("does not change font size on wheel without Ctrl", async () => {
-    render(<TerminalView instanceId="t-zoom3" profile="PowerShell" syncGroup="" />);
-
-    const container = screen.getByTestId("terminal-view-t-zoom3");
-    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: false, bubbles: true });
-    container.dispatchEvent(event);
-
-    // No font override should be set
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalled();
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom1")?.fontSize).toBe(15);
     expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
   });
 
-  it("clamps font size to minimum 6", async () => {
-    // Set profile font override to minimum
-    useSettingsStore
-      .getState()
-      .updateProfile(0, { font: { face: "Cascadia Mono", size: 6, weight: "normal" } });
+  it("Ctrl+- decreases font size (writes view override, not profile)", async () => {
+    render(
+      <TerminalView instanceId="t-zoom2" paneId="pane-zoom2" profile="PowerShell" syncGroup="" />,
+    );
 
-    render(<TerminalView instanceId="t-zoom4" profile="PowerShell" syncGroup="" />);
+    const { handled } = fireTerminalKey({ key: "-", ctrlKey: true });
 
-    const container = screen.getByTestId("terminal-view-t-zoom4");
-    const event = new WheelEvent("wheel", {
-      deltaY: 100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    container.dispatchEvent(event);
+    expect(handled).toBe(true);
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom2")?.fontSize).toBe(13);
+    expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
+  });
 
-    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(6);
+  it("Ctrl+0 clears the view override (resets to profile default)", async () => {
+    useOverridesStore.getState().setViewOverride("pane-zoom-reset", { fontSize: 20 });
+
+    render(
+      <TerminalView
+        instanceId="t-zoom-reset"
+        paneId="pane-zoom-reset"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    const { handled } = fireTerminalKey({ key: "0", ctrlKey: true });
+
+    expect(handled).toBe(true);
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom-reset")).toBeUndefined();
+  });
+
+  it("does not zoom when the key is pressed without Ctrl", async () => {
+    render(
+      <TerminalView instanceId="t-zoom-nomod" paneId="pane-zoom-nomod" profile="PowerShell" syncGroup="" />,
+    );
+
+    // ctrlKey false → xterm이 처리하도록 통과, override 그대로.
+    fireTerminalKey({ key: "=", ctrlKey: false });
+    fireTerminalKey({ key: "-", ctrlKey: false });
+    fireTerminalKey({ key: "0", ctrlKey: false });
+
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom-nomod")).toBeUndefined();
+  });
+
+  it("zoomOut clamps font size to minimum 6", async () => {
+    useOverridesStore.getState().setViewOverride("pane-zoom-min", { fontSize: 6 });
+
+    render(
+      <TerminalView instanceId="t-zoom-min" paneId="pane-zoom-min" profile="PowerShell" syncGroup="" />,
+    );
+
+    fireTerminalKey({ key: "-", ctrlKey: true });
+
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom-min")?.fontSize).toBe(6);
+  });
+
+  it("zoomIn clamps font size to maximum 72", async () => {
+    useOverridesStore.getState().setViewOverride("pane-zoom-max", { fontSize: 72 });
+
+    render(
+      <TerminalView instanceId="t-zoom-max" paneId="pane-zoom-max" profile="PowerShell" syncGroup="" />,
+    );
+
+    fireTerminalKey({ key: "=", ctrlKey: true });
+
+    expect(useOverridesStore.getState().getViewOverride("pane-zoom-max")?.fontSize).toBe(72);
+  });
+
+  it("zoom on one pane does not affect another pane with the same profile", async () => {
+    render(<TerminalView instanceId="t-zoomA" paneId="pane-A" profile="PowerShell" syncGroup="" />);
+    // 각 TerminalView가 자신의 customKeyEventHandler를 등록하는데, 마지막에 등록된
+    // handler가 capturedKeyHandler에 남는다. 그래서 두 번째 render는 pane-B의
+    // handler로 capturedKeyHandler를 덮어쓴다. 이 테스트에서는 pane-A만 대상으로
+    // 하므로 pane-B는 render하지 않고 override 공간만 격리되는지 확인한다.
+
+    fireTerminalKey({ key: "=", ctrlKey: true });
+
+    expect(useOverridesStore.getState().getViewOverride("pane-A")?.fontSize).toBe(15);
+    expect(useOverridesStore.getState().getViewOverride("pane-B")).toBeUndefined();
+    expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
+  });
+
+  it("zoom keybindings are a no-op when paneId prop is absent", async () => {
+    render(<TerminalView instanceId="t-zoom-nopane" profile="PowerShell" syncGroup="" />);
+
+    fireTerminalKey({ key: "=", ctrlKey: true });
+    fireTerminalKey({ key: "-", ctrlKey: true });
+    fireTerminalKey({ key: "0", ctrlKey: true });
+
+    expect(Object.keys(useOverridesStore.getState().viewOverrides)).toHaveLength(0);
+    expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
   });
 
   // -- Scrollbar style --
@@ -1398,41 +1455,6 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockFit).toHaveBeenCalled();
     });
-  });
-
-  it("clamps font size to maximum 72", async () => {
-    useSettingsStore
-      .getState()
-      .updateProfile(0, { font: { face: "Cascadia Mono", size: 72, weight: "normal" } });
-
-    render(<TerminalView instanceId="t-zoom5" profile="PowerShell" syncGroup="" />);
-
-    const container = screen.getByTestId("terminal-view-t-zoom5");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    container.dispatchEvent(event);
-
-    expect(useSettingsStore.getState().profiles[0].font?.size).toBe(72);
-  });
-
-  it("prevents default browser zoom on Ctrl+Wheel", async () => {
-    render(<TerminalView instanceId="t-zoom6" profile="PowerShell" syncGroup="" />);
-
-    const container = screen.getByTestId("terminal-view-t-zoom6");
-    const event = new WheelEvent("wheel", {
-      deltaY: -100,
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    const preventDefaultSpy = vi.spyOn(event, "preventDefault");
-    container.dispatchEvent(event);
-
-    expect(preventDefaultSpy).toHaveBeenCalled();
   });
 
   // -- URL link click (issue #29) --

@@ -710,6 +710,57 @@ pub async fn ui_toggle_notification_panel(
     }
 }
 
+pub async fn ui_toggle_hide_mode(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "toggleHideMode",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+pub async fn ui_toggle_workspace_hidden(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "toggleWorkspaceHidden",
+        serde_json::json!({ "id": id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+pub async fn ui_toggle_pane_hidden(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "togglePaneHidden",
+        serde_json::json!({ "id": id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 // -- Screenshot --
 
 pub async fn screenshot_capture(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {

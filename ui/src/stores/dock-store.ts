@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "./types";
 import { removePaneAndRedistribute } from "./pane-removal";
+import { useOverridesStore } from "./overrides-store";
 
 export const DOCK_MIN_SIZE = 100;
 export const DOCK_MAX_SIZE = 600;
@@ -231,6 +232,7 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
   },
 
   removeDockPane: (position, paneId) => {
+    let removed = false;
     set((state) => ({
       docks: state.docks.map((d) => {
         if (d.position !== position) return d;
@@ -242,18 +244,25 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
         const result = removePaneAndRedistribute(panes, idx);
         if (!result) return d;
 
+        removed = true;
         const newActive = result[0]?.view.type ?? null;
         return { ...d, panes: result, activeView: newActive };
       }),
     }));
+    if (removed) useOverridesStore.getState().clearAll(paneId);
   },
 
   setDockPaneView: (position, paneId, view) => {
+    let prevType: string | undefined;
     set((state) => ({
       docks: state.docks.map((d) => {
         if (d.position !== position) return d;
         const panes = d.panes ?? [];
-        const newPanes = panes.map((p) => (p.id === paneId ? { ...p, view } : p));
+        const newPanes = panes.map((p) => {
+          if (p.id !== paneId) return p;
+          prevType = p.view.type;
+          return { ...p, view };
+        });
         return {
           ...d,
           panes: newPanes,
@@ -261,6 +270,9 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
         };
       }),
     }));
+    if (prevType && prevType !== view.type) {
+      useOverridesStore.getState().clearViewOverride(paneId);
+    }
   },
 
   resizeDockPane: (position, paneId, delta) => {

@@ -724,10 +724,14 @@ describe("computeCommandStatus", () => {
       expect(s.icon).toBe("⏳");
     });
 
-    it("Claude interactiveApp without lastCommand: idle with ✳ → — (shell default)", () => {
+    it("Claude interactiveApp without lastCommand: idle with ✳ → ✓", () => {
+      // Claude keeps its process alive after finishing a task, so the synthetic
+      // exitCode may have landed as 0 or not at all. Either way, the idle title
+      // is the authoritative signal that the last task finished — match the
+      // completion notification with ✓.
       const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
-      expect(s.icon).toBe("—");
-      expect(s.color).toBe("var(--text-secondary)");
+      expect(s.icon).toBe("✓");
+      expect(s.color).toBe("var(--green)");
     });
 
     it("Claude interactiveApp without lastCommand: exitCode=0 → ✓", () => {
@@ -766,11 +770,13 @@ describe("computeCommandStatus", () => {
       expect(s.text).toBe("Task completed successfully");
     });
 
-    it("Claude idle with ✳ title: no exitCode → — (shell default)", () => {
-      // Claude entered but no task completed yet. Title shows ✳ (idle prefix).
+    it("Claude idle with ✳ title: no exitCode → ✓ (matches completion notification)", () => {
+      // After Claude finishes a task the claude process stays alive, so
+      // lastExitCode can remain undefined if the synthetic event is delayed or
+      // cleared. The ✳ idle marker is the authoritative completion signal.
       const s = computeCommandStatus(undefined, false, undefined, claudeActivity, "✳ Claude Code");
-      expect(s.icon).toBe("—");
-      expect(s.color).toBe("var(--text-secondary)");
+      expect(s.icon).toBe("✓");
+      expect(s.color).toBe("var(--green)");
     });
 
     it("Claude idle without title: no exitCode → — (fallback)", () => {

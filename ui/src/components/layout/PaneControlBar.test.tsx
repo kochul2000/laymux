@@ -17,7 +17,7 @@ vi.mock("@/lib/tauri-api", () => ({
 
 import { PaneControlBar } from "./PaneControlBar";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useUiStore } from "@/stores/ui-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 
 describe("PaneControlBar", () => {
   const defaultView = { type: "TerminalView" as const, profile: "PowerShell" };
@@ -30,7 +30,8 @@ describe("PaneControlBar", () => {
 
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
-    useUiStore.setState(useUiStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    localStorage.clear();
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       convenience: { ...s.convenience, defaultControlBarMode: "hover" },
@@ -235,7 +236,7 @@ describe("PaneControlBar", () => {
 
   // -- Persistence via paneId --
 
-  it("persists mode per paneId in ui-store", async () => {
+  it("persists mode per paneId in overrides-store", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <PaneControlBar
@@ -250,8 +251,10 @@ describe("PaneControlBar", () => {
     // Pin the bar
     await user.click(screen.getByTestId("pane-control-pin"));
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
-    // Mode should be stored in ui-store
-    expect(useUiStore.getState().barModes["pane-abc"]).toBe("pinned");
+    // Mode should be stored in overrides-store as a pane instance override
+    expect(useOverridesStore.getState().getPaneOverride("pane-abc")?.controlBarMode).toBe(
+      "pinned",
+    );
     unmount();
 
     // Re-render — mode should be restored from store

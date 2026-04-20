@@ -254,6 +254,15 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
             "/api/v1/ui/notifications",
             post(ui_toggle_notification_panel),
         )
+        .route("/api/v1/ui/hide-mode/toggle", post(ui_toggle_hide_mode))
+        .route(
+            "/api/v1/ui/hidden/workspace/{id}/toggle",
+            post(ui_toggle_workspace_hidden),
+        )
+        .route(
+            "/api/v1/ui/hidden/pane/{id}/toggle",
+            post(ui_toggle_pane_hidden),
+        )
         .layer(middleware::from_fn(ip_allowlist_middleware))
         .layer(CorsLayer::permissive())
         .with_state(state)

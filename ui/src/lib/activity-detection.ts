@@ -81,9 +81,15 @@ export function detectActivityFromTitle(title: string): TerminalActivityInfo | u
 /** Detect interactive app from raw output text when command/title signals are unavailable. */
 export function detectActivityFromOutput(text: string): TerminalActivityInfo | undefined {
   const lines = normalizeOutputLines(text);
-  const hasCodexBanner = lines.some((line) => /^>[-\s]*OpenAI Codex \(v[^\s)]+\)$/i.test(line));
+  // Codex 0.120+ draws the startup banner inside a box (`│ >_ OpenAI Codex … │`)
+  // while older builds emitted it bare (`> OpenAI Codex …`). Allow optional
+  // leading box-drawing chars and optional trailing padding; the `>_` /`>`
+  // prompt marker + version `(v…)` is still the uniquely identifying signal.
+  const hasCodexBanner = lines.some((line) =>
+    /^[│|]?\s*>[-\s_]*OpenAI Codex \(v[^\s)]+\)\s*[│|]?\s*$/i.test(line),
+  );
   const hasCodexSessionMetadata = lines.some(
-    (line) => /^model:\s+/i.test(line) || /^directory:\s+/i.test(line),
+    (line) => /^\s*[│|]?\s*model:\s+/i.test(line) || /^\s*[│|]?\s*directory:\s+/i.test(line),
   );
   if (hasCodexBanner && hasCodexSessionMetadata) {
     return { type: "interactiveApp", name: "Codex" };

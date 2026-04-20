@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Layout, LayoutPane, Workspace, WorkspacePane, ViewInstanceConfig } from "./types";
 import { persistSession } from "@/lib/persist-session";
 import { removePaneAndRedistribute } from "./pane-removal";
+import { useOverridesStore } from "./overrides-store";
 
 /** Convert a workspace pane to a layout pane (preserving view config). */
 function toLayoutPane(p: WorkspacePane): LayoutPane {
@@ -73,7 +74,15 @@ interface WorkspaceState {
   getOrderedWorkspaces: () => Workspace[];
   setActiveWorkspace: (id: string) => void;
   addWorkspace: (name: string, layoutId: string) => void;
-  duplicateWorkspace: (id: string) => void;
+  /**
+   * Clone a workspace and return the IDs needed to propagate per-pane UI state
+   * (e.g. `ui-store.hiddenPaneIds`). Returns `null` if the source does not exist.
+   * `paneIdMap` is keyed by the source pane ID and maps to the freshly-minted
+   * duplicate pane ID, so callers can replay ID-keyed state onto the copy.
+   */
+  duplicateWorkspace: (
+    id: string,
+  ) => { newWorkspaceId: string; paneIdMap: Record<string, string> } | null;
   removeWorkspace: (id: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   reorderWorkspaces: (fromId: string, toId: string, position?: "top" | "bottom") => void;
@@ -149,19 +158,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   duplicateWorkspace: (id) => {
     const { workspaces } = get();
     const source = workspaces.find((ws) => ws.id === id);
-    if (!source) return;
+    if (!source) return null;
 
-    const duplicate: Workspace = {
-      id: generateId("ws"),
-      name: `${source.name} Copy`,
-      panes: source.panes.map((p) => ({
-        id: generateId("pane"),
+    // Build the new panes alongside a source→new pane ID map so the caller can
+    // replay ID-keyed state (hidden flags, bar modes, etc.) onto the duplicate.
+    const paneIdMap: Record<string, string> = {};
+    const newPanes: WorkspacePane[] = source.panes.map((p) => {
+      const newId = generateId("pane");
+      paneIdMap[p.id] = newId;
+      return {
+        id: newId,
         x: p.x,
         y: p.y,
         w: p.w,
         h: p.h,
         view: { ...p.view },
-      })),
+      };
+    });
+
+    const duplicate: Workspace = {
+      id: generateId("ws"),
+      name: `${source.name} Copy`,
+      panes: newPanes,
     };
 
     set((state) => ({
@@ -171,12 +189,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           ? [...state.workspaceDisplayOrder, duplicate.id]
           : [],
     }));
+
+    return { newWorkspaceId: duplicate.id, paneIdMap };
   },
 
   removeWorkspace: (id) => {
     const { workspaces, activeWorkspaceId } = get();
     if (workspaces.length <= 1) return;
 
+    const victim = workspaces.find((ws) => ws.id === id);
     const filtered = workspaces.filter((ws) => ws.id !== id);
     const newActive = activeWorkspaceId === id ? filtered[0].id : activeWorkspaceId;
 
@@ -185,6 +206,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       activeWorkspaceId: newActive,
       workspaceDisplayOrder: state.workspaceDisplayOrder.filter((wsId) => wsId !== id),
     }));
+
+    if (victim) {
+      const overrides = useOverridesStore.getState();
+      for (const p of victim.panes) overrides.clearAll(p.id);
+    }
   },
 
   renameWorkspace: (id, name) => {
@@ -258,12 +284,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const ws = get().getActiveWorkspace();
     if (!ws) return;
 
+    const removedPaneId = ws.panes[paneIndex]?.id;
     const result = removePaneAndRedistribute(ws.panes, paneIndex);
     if (!result) return;
 
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: result } : w)),
     }));
+
+    if (removedPaneId) useOverridesStore.getState().clearAll(removedPaneId);
   },
 
   resizePane: (paneIndex, delta) => {
@@ -305,11 +334,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (!ws) return;
     if (paneIndex < 0 || paneIndex >= ws.panes.length) return;
 
+    const prev = ws.panes[paneIndex];
+    const viewTypeChanged = prev.view.type !== view.type;
     const newPanes = ws.panes.map((p, i) => (i === paneIndex ? { ...p, view } : p));
 
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),
     }));
+
+    // View 타입이 바뀌면 view 인스턴스 오버라이드는 의미가 없어지므로 비운다.
+    // Pane 인스턴스 오버라이드(controlBar 모드 등)는 슬롯 속성이라 유지.
+    if (viewTypeChanged) useOverridesStore.getState().clearViewOverride(prev.id);
   },
 
   // Layout actions per ARCHITECTURE.md section 4.1

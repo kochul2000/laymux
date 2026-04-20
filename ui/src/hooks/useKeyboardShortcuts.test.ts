@@ -1155,6 +1155,38 @@ describe("useKeyboardShortcuts", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(newWs.id);
   });
 
+  it("Ctrl+Alt+D duplicates hidden pane state onto the new workspace (#218)", () => {
+    // Split the default workspace into two panes and hide the first one.
+    useWorkspaceStore.getState().splitPane(0, "vertical");
+    const source = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const hiddenSrcPaneId = source.panes[0].id;
+    useUiStore.getState().togglePaneHidden(hiddenSrcPaneId);
+
+    renderHook(() => useKeyboardShortcuts());
+    fireKey("d", { ctrlKey: true, altKey: true });
+
+    // The duplicate should be the new active workspace and its pane that maps
+    // from the hidden source pane must itself be hidden.
+    const newWsId = useWorkspaceStore.getState().activeWorkspaceId;
+    expect(newWsId).not.toBe(source.id);
+    const newWs = useWorkspaceStore.getState().workspaces.find((w) => w.id === newWsId)!;
+    // First pane in the duplicate corresponds to first pane in the source.
+    const dupPaneId = newWs.panes[0].id;
+    expect(useUiStore.getState().hiddenPaneIds.has(dupPaneId)).toBe(true);
+  });
+
+  it("Ctrl+Alt+D duplicates hidden workspace flag onto the new workspace (#218)", () => {
+    const source = useWorkspaceStore.getState().getActiveWorkspace()!;
+    useUiStore.getState().toggleWorkspaceHidden(source.id);
+
+    renderHook(() => useKeyboardShortcuts());
+    fireKey("d", { ctrlKey: true, altKey: true });
+
+    const newWsId = useWorkspaceStore.getState().activeWorkspaceId;
+    expect(newWsId).not.toBe(source.id);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has(newWsId)).toBe(true);
+  });
+
   it("Ctrl+Alt+w (lowercase) closes current workspace", () => {
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
     const ws2 = useWorkspaceStore.getState().workspaces[1];
