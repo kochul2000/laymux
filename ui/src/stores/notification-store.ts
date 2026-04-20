@@ -30,6 +30,14 @@ interface NotificationStoreState {
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
+  /** Remove notifications by ID. Returns the number of notifications actually removed. */
+  removeNotifications: (ids: string[]) => number;
+  /**
+   * Remove notifications created strictly before `timestamp` (epoch ms).
+   * When `readOnly` is true, only already-read notifications (readAt != null)
+   * are removed. Returns the number of notifications actually removed.
+   */
+  clearNotificationsBefore: (timestamp: number, readOnly?: boolean) => number;
   getUnreadCount: (workspaceId: string) => number;
   getLatestNotification: (workspaceId: string) => Notification | undefined;
   hasUnreadForTerminal: (terminalId: string) => boolean;
@@ -80,6 +88,33 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
         idSet.has(n.id) && n.readAt === null ? { ...n, readAt: now } : n,
       ),
     }));
+  },
+
+  removeNotifications: (ids) => {
+    const idSet = new Set(ids);
+    const before = get().notifications.length;
+    const remaining = get().notifications.filter((n) => !idSet.has(n.id));
+    const cleared = before - remaining.length;
+    if (cleared > 0) {
+      set({ notifications: remaining });
+    }
+    return cleared;
+  },
+
+  clearNotificationsBefore: (timestamp, readOnly = false) => {
+    const before = get().notifications.length;
+    const remaining = get().notifications.filter((n) => {
+      const isOlder = n.createdAt < timestamp;
+      if (!isOlder) return true;
+      // Keep older notifications only if readOnly filter excludes them (still unread).
+      if (readOnly && n.readAt === null) return true;
+      return false;
+    });
+    const cleared = before - remaining.length;
+    if (cleared > 0) {
+      set({ notifications: remaining });
+    }
+    return cleared;
   },
 
   getUnreadCount: (workspaceId) => {

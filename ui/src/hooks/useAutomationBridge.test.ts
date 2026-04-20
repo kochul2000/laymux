@@ -971,7 +971,9 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     expect(useNotificationStore.getState().notifications).toHaveLength(1);
-    expect((result.data as { notification?: { workspaceId?: string } }).notification?.workspaceId).toBe(wsId);
+    expect(
+      (result.data as { notification?: { workspaceId?: string } }).notification?.workspaceId,
+    ).toBe(wsId);
   });
 
   it("resize_pane applies delta relative to current pane size", () => {
@@ -1047,9 +1049,7 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     // Find the newly created workspace
-    const ws = useWorkspaceStore
-      .getState()
-      .workspaces.find((w) => w.name === "CWD Test")!;
+    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "CWD Test")!;
     expect(ws).toBeDefined();
     expect(ws.panes.length).toBeGreaterThan(0);
     // Convert any non-TerminalView panes so we can test — but at minimum, check
@@ -1111,8 +1111,18 @@ describe("identify_caller and enriched responses", () => {
     const pane1Id = ws.panes[1].id;
     useTerminalStore.setState({
       instances: [
-        { id: `terminal-${pane0Id}`, workspaceId: ws.id, label: "", profile: "PowerShell" } as never,
-        { id: `terminal-${pane1Id}`, workspaceId: ws.id, label: "", profile: "PowerShell" } as never,
+        {
+          id: `terminal-${pane0Id}`,
+          workspaceId: ws.id,
+          label: "",
+          profile: "PowerShell",
+        } as never,
+        {
+          id: `terminal-${pane1Id}`,
+          workspaceId: ws.id,
+          label: "",
+          profile: "PowerShell",
+        } as never,
       ],
     });
 
@@ -1168,5 +1178,187 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("out of range");
+  });
+});
+
+describe("notifications.clear bridge handler", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useNotificationStore.setState(useNotificationStore.getInitialState());
+  });
+
+  it("clears notifications by ids and returns the cleared count", () => {
+    const { addNotification } = useNotificationStore.getState();
+    addNotification({ terminalId: "t1", workspaceId: "ws-a", message: "a" });
+    addNotification({ terminalId: "t2", workspaceId: "ws-a", message: "b" });
+    addNotification({ terminalId: "t3", workspaceId: "ws-b", message: "c" });
+
+    const targets = useNotificationStore
+      .getState()
+      .notifications.slice(0, 2)
+      .map((n) => n.id);
+
+    const result = handleAutomationRequest({
+      requestId: "cn-ids",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { ids: targets },
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { cleared: number }).cleared).toBe(2);
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("clears notifications before the timestamp", () => {
+    const now = Date.now();
+    useNotificationStore.setState({
+      notifications: [
+        {
+          id: "old-1",
+          terminalId: "t1",
+          workspaceId: "ws-x",
+          message: "old",
+          level: "info",
+          createdAt: now - 10000,
+          readAt: null,
+        },
+        {
+          id: "fresh-1",
+          terminalId: "t2",
+          workspaceId: "ws-x",
+          message: "fresh",
+          level: "info",
+          createdAt: now - 100,
+          readAt: null,
+        },
+      ],
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "cn-before",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { before: now - 5000 },
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { cleared: number }).cleared).toBe(1);
+    const ids = useNotificationStore.getState().notifications.map((n) => n.id);
+    expect(ids).toEqual(["fresh-1"]);
+  });
+
+  it("with before + read_only, only clears already-read older notifications", () => {
+    const now = Date.now();
+    useNotificationStore.setState({
+      notifications: [
+        {
+          id: "old-read",
+          terminalId: "t1",
+          workspaceId: "ws-ro",
+          message: "old read",
+          level: "info",
+          createdAt: now - 10000,
+          readAt: now - 5000,
+        },
+        {
+          id: "old-unread",
+          terminalId: "t2",
+          workspaceId: "ws-ro",
+          message: "old unread",
+          level: "info",
+          createdAt: now - 9000,
+          readAt: null,
+        },
+      ],
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "cn-ro",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { before: now - 2000, read_only: true },
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { cleared: number }).cleared).toBe(1);
+    const ids = useNotificationStore.getState().notifications.map((n) => n.id);
+    expect(ids).toEqual(["old-unread"]);
+  });
+
+  it("also accepts camelCase readOnly alias", () => {
+    const now = Date.now();
+    useNotificationStore.setState({
+      notifications: [
+        {
+          id: "old-read",
+          terminalId: "t1",
+          workspaceId: "ws-ro",
+          message: "old read",
+          level: "info",
+          createdAt: now - 10000,
+          readAt: now - 5000,
+        },
+        {
+          id: "old-unread",
+          terminalId: "t2",
+          workspaceId: "ws-ro",
+          message: "old unread",
+          level: "info",
+          createdAt: now - 9000,
+          readAt: null,
+        },
+      ],
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "cn-ro-camel",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { before: now - 2000, readOnly: true },
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { cleared: number }).cleared).toBe(1);
+  });
+
+  it("errors when neither ids nor before is provided", () => {
+    const result = handleAutomationRequest({
+      requestId: "cn-none",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: {},
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/exactly one/i);
+  });
+
+  it("errors when both ids and before are provided", () => {
+    const result = handleAutomationRequest({
+      requestId: "cn-both",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { ids: ["notif-1"], before: 1 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/exactly one/i);
+  });
+
+  it("errors when ids is not an array", () => {
+    const result = handleAutomationRequest({
+      requestId: "cn-badids",
+      category: "action",
+      target: "notifications",
+      method: "clear",
+      params: { ids: "notif-1" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/array/i);
   });
 });

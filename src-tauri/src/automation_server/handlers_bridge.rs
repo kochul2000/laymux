@@ -551,6 +551,38 @@ pub async fn notifications_mark_read(
     }
 }
 
+/// DELETE /api/v1/notifications — clear notifications by IDs or before a
+/// timestamp. Enforces that exactly one of `ids` or `before` is provided.
+pub async fn notifications_clear(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<ClearNotificationsBody>,
+) -> impl IntoResponse {
+    let has_ids = body.ids.is_some();
+    let has_before = body.before.is_some();
+    if has_ids == has_before {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(super::helpers::err_json(
+                "Provide exactly one of 'ids' or 'before'",
+            )),
+        );
+    }
+    let mut params = serde_json::json!({});
+    if let Some(ids) = body.ids {
+        params["ids"] = serde_json::json!(ids);
+    }
+    if let Some(before) = body.before {
+        params["before"] = serde_json::json!(before);
+    }
+    if let Some(read_only) = body.read_only {
+        params["readOnly"] = serde_json::json!(read_only);
+    }
+    match bridge_request(&state, "action", "notifications", "clear", params).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn workspaces_get_summary(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,

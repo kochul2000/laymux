@@ -555,6 +555,32 @@ const handlers: HandlerMap = {
       useNotificationStore.getState().markWorkspaceAsRead(p.workspaceId as string);
       return ok({ marked: true });
     },
+    clear: (p) => {
+      const ids = p.ids as unknown;
+      const before = p.before as unknown;
+      const readOnlyRaw = (p.readOnly ?? p.read_only) as unknown;
+
+      const hasIds = ids !== undefined && ids !== null;
+      const hasBefore = before !== undefined && before !== null;
+      if (hasIds === hasBefore) {
+        return err("Provide exactly one of 'ids' or 'before'");
+      }
+
+      if (hasIds) {
+        if (!Array.isArray(ids) || !ids.every((v) => typeof v === "string")) {
+          return err("'ids' must be a string array");
+        }
+        const cleared = useNotificationStore.getState().removeNotifications(ids as string[]);
+        return ok({ cleared });
+      }
+
+      if (typeof before !== "number" || !Number.isFinite(before)) {
+        return err("'before' must be a finite epoch ms number");
+      }
+      const readOnly = readOnlyRaw === undefined ? false : Boolean(readOnlyRaw);
+      const cleared = useNotificationStore.getState().clearNotificationsBefore(before, readOnly);
+      return ok({ cleared });
+    },
   },
 
   layouts: {

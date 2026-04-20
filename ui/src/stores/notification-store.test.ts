@@ -179,6 +179,145 @@ describe("NotificationStore", () => {
     expect(useNotificationStore.getState().hasUnreadForTerminal("terminal-p3")).toBe(false);
   });
 
+  describe("removeNotifications", () => {
+    it("removes notifications by ID and returns the cleared count", () => {
+      const { addNotification } = useNotificationStore.getState();
+      addNotification({ terminalId: "t1", workspaceId: "ws-other-1", message: "a" });
+      addNotification({ terminalId: "t2", workspaceId: "ws-other-2", message: "b" });
+      addNotification({ terminalId: "t3", workspaceId: "ws-other-3", message: "c" });
+
+      const ids = useNotificationStore
+        .getState()
+        .notifications.slice(0, 2)
+        .map((n) => n.id);
+      const cleared = useNotificationStore.getState().removeNotifications(ids);
+
+      expect(cleared).toBe(2);
+      const remaining = useNotificationStore.getState().notifications;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].message).toBe("c");
+    });
+
+    it("returns 0 and preserves state when no ID matches", () => {
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: "ws-other",
+        message: "keep me",
+      });
+      const cleared = useNotificationStore.getState().removeNotifications(["nope-1", "nope-2"]);
+      expect(cleared).toBe(0);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    });
+
+    it("updates getUnreadCount after removal", () => {
+      const { addNotification } = useNotificationStore.getState();
+      addNotification({ terminalId: "t1", workspaceId: "ws-unread-a", message: "a" });
+      addNotification({ terminalId: "t2", workspaceId: "ws-unread-a", message: "b" });
+      expect(useNotificationStore.getState().getUnreadCount("ws-unread-a")).toBe(2);
+
+      const firstId = useNotificationStore.getState().notifications[0].id;
+      useNotificationStore.getState().removeNotifications([firstId]);
+      expect(useNotificationStore.getState().getUnreadCount("ws-unread-a")).toBe(1);
+    });
+  });
+
+  describe("clearNotificationsBefore", () => {
+    it("removes notifications with createdAt strictly before timestamp", () => {
+      const now = Date.now();
+      useNotificationStore.setState({
+        notifications: [
+          {
+            id: "old-1",
+            terminalId: "t1",
+            workspaceId: "ws-old",
+            message: "old",
+            level: "info",
+            createdAt: now - 10000,
+            readAt: now - 5000,
+          },
+          {
+            id: "old-2",
+            terminalId: "t2",
+            workspaceId: "ws-old",
+            message: "old unread",
+            level: "info",
+            createdAt: now - 5000,
+            readAt: null,
+          },
+          {
+            id: "new-1",
+            terminalId: "t3",
+            workspaceId: "ws-new",
+            message: "fresh",
+            level: "info",
+            createdAt: now - 1000,
+            readAt: null,
+          },
+        ],
+      });
+
+      const cleared = useNotificationStore.getState().clearNotificationsBefore(now - 2000);
+      expect(cleared).toBe(2);
+      const remaining = useNotificationStore.getState().notifications;
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].id).toBe("new-1");
+    });
+
+    it("with readOnly=true, only removes already-read notifications older than timestamp", () => {
+      const now = Date.now();
+      useNotificationStore.setState({
+        notifications: [
+          {
+            id: "read-old",
+            terminalId: "t1",
+            workspaceId: "ws-ro",
+            message: "read + old",
+            level: "info",
+            createdAt: now - 10000,
+            readAt: now - 5000,
+          },
+          {
+            id: "unread-old",
+            terminalId: "t2",
+            workspaceId: "ws-ro",
+            message: "unread + old",
+            level: "info",
+            createdAt: now - 8000,
+            readAt: null,
+          },
+          {
+            id: "read-new",
+            terminalId: "t3",
+            workspaceId: "ws-ro",
+            message: "read + new",
+            level: "info",
+            createdAt: now - 500,
+            readAt: now - 100,
+          },
+        ],
+      });
+
+      const cleared = useNotificationStore.getState().clearNotificationsBefore(now - 2000, true);
+      expect(cleared).toBe(1);
+      const ids = useNotificationStore.getState().notifications.map((n) => n.id);
+      expect(ids).toContain("unread-old");
+      expect(ids).toContain("read-new");
+      expect(ids).not.toContain("read-old");
+    });
+
+    it("returns 0 when nothing matches", () => {
+      const now = Date.now();
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: "ws-keep",
+        message: "keep",
+      });
+      const cleared = useNotificationStore.getState().clearNotificationsBefore(now - 100000);
+      expect(cleared).toBe(0);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    });
+  });
+
   describe("auto-dismiss for active workspace", () => {
     it("marks notification as read immediately when added to the active workspace in workspace dismiss mode", () => {
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;

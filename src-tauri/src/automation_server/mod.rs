@@ -223,6 +223,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .route("/api/v1/terminals/{id}/output", get(terminal_output))
         .route("/api/v1/notifications", get(notifications_list))
         .route("/api/v1/notifications", post(notifications_add))
+        .route("/api/v1/notifications", delete(notifications_clear))
         .route(
             "/api/v1/notifications/mark-read",
             post(notifications_mark_read),
