@@ -500,7 +500,17 @@ pub fn create_terminal_session(
         groups
             .entry(sync_group.clone())
             .or_insert_with(|| crate::terminal::SyncGroup::new(sync_group))
-            .add_terminal(id);
+            .add_terminal(id.clone());
+    }
+
+    // Notify MCP resource bridge that the terminal catalog grew. This drives
+    // `notifications/resources/list_changed` on all subscribed peers (advertised
+    // via `enable_resources_list_changed`).
+    if let Err(e) = app.emit(
+        EVENT_TERMINALS_LIST_CHANGED,
+        serde_json::json!({ "op": "created", "terminalId": id }),
+    ) {
+        tracing::warn!(error = %e, terminal_id = %id, "failed to emit terminals-list-changed on create");
     }
 
     Ok(result)
@@ -559,7 +569,11 @@ pub fn write_to_terminal(
 }
 
 #[tauri::command]
-pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result<(), String> {
+pub fn close_terminal_session(
+    id: String,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
     // Remove PTY handle and terminate the child process tree before dropping it.
     {
         let mut ptys = state.pty_handles.lock_or_err()?;
@@ -610,6 +624,15 @@ pub fn close_terminal_session(id: String, state: State<Arc<AppState>>) -> Result
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
         notifs.retain(|n| n.terminal_id != id);
+    }
+
+    // Notify MCP resource bridge that the terminal catalog shrank so clients
+    // re-query `resources/list` and drop the stale `terminal://{id}` entry.
+    if let Err(e) = app.emit(
+        EVENT_TERMINALS_LIST_CHANGED,
+        serde_json::json!({ "op": "closed", "terminalId": id }),
+    ) {
+        tracing::warn!(error = %e, terminal_id = %id, "failed to emit terminals-list-changed on close");
     }
 
     Ok(())

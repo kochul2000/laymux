@@ -4,7 +4,12 @@
 //! handling. Mounted via `nest_service("/mcp", ...)` in the existing axum router.
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
-use rmcp::model::{CallToolResult, Content, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, Content, ListResourceTemplatesResult, ListResourcesResult,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
+    ServerInfo, SubscribeRequestParams, UnsubscribeRequestParams,
+};
+use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler};
@@ -17,6 +22,10 @@ use crate::constants::MCP_SERVER_NAME;
 use crate::lock_ext::MutexExt;
 
 use super::helpers::bridge_request;
+use super::mcp_resources::{
+    self, bridge_read_failed, new_peer_id, read_result_json, read_result_text, resource_not_found,
+    resource_templates, static_resources, PeerId, ResourceUri, SharedSubscriptionRegistry,
+};
 use super::ServerState;
 
 // ── Parameter types ───────────────────────────────────────────────
@@ -295,14 +304,23 @@ pub struct McpHandler {
     tool_router: ToolRouter<Self>,
     /// Per-terminal mutex to serialize execute_command calls on the same terminal.
     exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,
+    /// Shared subscription registry: tracks `resources/subscribe` requests so
+    /// the Tauri→MCP event bridge can push `notifications/resources/updated`
+    /// to the correct peers.
+    subscriptions: SharedSubscriptionRegistry,
+    /// Process-unique id of the MCP peer this handler instance serves. Used
+    /// as the key inside [`subscriptions`].
+    peer_id: PeerId,
 }
 
 impl McpHandler {
-    pub fn new(state: ServerState) -> Self {
+    pub fn new(state: ServerState, subscriptions: SharedSubscriptionRegistry) -> Self {
         Self {
             state,
             tool_router: Self::tool_router(),
             exec_locks: Arc::new(TokioMutex::new(HashMap::new())),
+            subscriptions,
+            peer_id: new_peer_id(),
         }
     }
 
@@ -453,6 +471,92 @@ impl McpHandler {
             })
     }
 
+    /// Resolve a resource URI into its read result. Shared between
+    /// `ServerHandler::read_resource` and unit tests.
+    ///
+    /// Returns a structured `McpError` on unknown URIs so clients can
+    /// differentiate missing resources from transport errors.
+    pub(crate) async fn read_resource_inner(
+        &self,
+        uri: &str,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        let Some(parsed) = ResourceUri::parse(uri) else {
+            return Err(resource_not_found(uri));
+        };
+        match parsed {
+            ResourceUri::WorkspaceActive => {
+                let mut data = self
+                    .bridge_raw("query", "workspaces", "getActive", json!({}))
+                    .await
+                    .map_err(|_| bridge_read_failed(uri, "workspaces.getActive"))?;
+                if let Some(panes) = data
+                    .get_mut("workspace")
+                    .and_then(|ws| ws.get_mut("panes"))
+                    .and_then(|v| v.as_array_mut())
+                {
+                    Self::enrich_with_activity(
+                        &self.state.app_state,
+                        panes,
+                        "terminalId",
+                        "terminalActivity",
+                    );
+                }
+                Ok(read_result_json(uri, &data))
+            }
+            ResourceUri::WorkspaceList => {
+                let data = self
+                    .bridge_raw("query", "workspaces", "list", json!({}))
+                    .await
+                    .map_err(|_| bridge_read_failed(uri, "workspaces.list"))?;
+                let summary = workspace_list_summary(&data);
+                Ok(read_result_json(uri, &summary))
+            }
+            ResourceUri::ProfileList => {
+                let data = self
+                    .bridge_raw("query", "profiles", "list", json!({}))
+                    .await
+                    .map_err(|_| bridge_read_failed(uri, "profiles.list"))?;
+                Ok(read_result_json(uri, &data))
+            }
+            ResourceUri::Terminal(terminal_id) => {
+                // Fetch the full terminal list once and filter down to this id.
+                // Individual `query terminals get` may not exist on all bridges,
+                // so list+filter keeps behavior aligned with `list_terminals`.
+                let mut data = self
+                    .bridge_raw("query", "terminals", "list", json!({}))
+                    .await
+                    .map_err(|_| bridge_read_failed(uri, "terminals.list"))?;
+                let instance = data
+                    .get_mut("instances")
+                    .and_then(|v| v.as_array_mut())
+                    .and_then(|arr| {
+                        Self::enrich_with_activity(&self.state.app_state, arr, "id", "activity");
+                        arr.iter().find(|inst| {
+                            inst.get("id").and_then(|v| v.as_str()) == Some(terminal_id.as_str())
+                        })
+                    })
+                    .cloned();
+                match instance {
+                    Some(inst) => Ok(read_result_json(uri, &inst)),
+                    None => Err(resource_not_found(uri)),
+                }
+            }
+            ResourceUri::TerminalOutput(terminal_id) => {
+                let buffers = match self.lock_output_buffers() {
+                    Ok(b) => b,
+                    Err(_) => return Err(bridge_read_failed(uri, "output_buffers lock")),
+                };
+                let buf = buffers
+                    .get(&terminal_id)
+                    .ok_or_else(|| resource_not_found(uri))?;
+                let raw = buf.recent_lines(500);
+                drop(buffers);
+                let text = super::helpers::strip_ansi(&raw);
+                Ok(read_result_text(uri, text))
+            }
+        }
+    }
+
     /// Enrich a JSON array of objects by injecting activity state from backend detection.
     /// `id_field` is the JSON key containing the terminal ID (e.g. "id" or "terminalId").
     /// `activity_field` is the key to insert (e.g. "activity" or "terminalActivity").
@@ -478,6 +582,23 @@ impl McpHandler {
     }
 }
 
+/// Release this session's entry in the shared subscription registry.
+///
+/// `StreamableHttpService` creates a fresh [`McpHandler`] per MCP session
+/// (see `get_service` in rmcp's stateful HTTP transport). When the session
+/// ends — client DELETE, transport close, or timeout — rmcp drops the
+/// handler. Without this cleanup the peer handle captured in
+/// [`ServerHandler::on_initialized`] and every URI subscription attached
+/// to it would accumulate for the lifetime of the process, growing both
+/// the `peers` map and the per-notification iteration cost.
+impl Drop for McpHandler {
+    fn drop(&mut self) {
+        if let Ok(mut reg) = self.subscriptions.lock_or_err() {
+            reg.unregister_peer(&self.peer_id);
+        }
+    }
+}
+
 /// Create the MCP service for mounting in the axum router.
 ///
 /// Allowed hosts include loopback addresses plus common WSL2 gateway patterns.
@@ -485,9 +606,10 @@ impl McpHandler {
 /// loopback-only list rather than disabling host validation entirely.
 pub fn create_service(
     state: ServerState,
+    subscriptions: SharedSubscriptionRegistry,
 ) -> StreamableHttpService<McpHandler, LocalSessionManager> {
     StreamableHttpService::new(
-        move || Ok(McpHandler::new(state.clone())),
+        move || Ok(McpHandler::new(state.clone(), subscriptions.clone())),
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default().with_allowed_hosts(mcp_allowed_hosts()),
     )
@@ -592,13 +714,8 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<TerminalIdParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.bridge(
-            "query",
-            "terminals",
-            "get",
-            json!({ "id": p.terminal_id }),
-        )
-        .await
+        self.bridge("query", "terminals", "get", json!({ "id": p.terminal_id }))
+            .await
     }
 
     /// Send input to a terminal (like typing). Use `\\r` to submit (Enter).
@@ -632,7 +749,15 @@ impl McpHandler {
         Parameters(p): Parameters<WriteToNeighborParam>,
     ) -> Result<CallToolResult, ErrorData> {
         // 1. Identify caller to find neighbor
-        let data = match self.bridge_raw("query", "terminals", "identify", json!({ "id": p.terminal_id })).await {
+        let data = match self
+            .bridge_raw(
+                "query",
+                "terminals",
+                "identify",
+                json!({ "id": p.terminal_id }),
+            )
+            .await
+        {
             Ok(d) => d,
             Err(e) => return Ok(e),
         };
@@ -785,9 +910,7 @@ impl McpHandler {
                     Ok(g) => g,
                     Err(e) => return Ok(e),
                 };
-                crate::activity::is_terminal_at_prompt_from_buffer(
-                    buffers.get(&p.terminal_id),
-                )
+                crate::activity::is_terminal_at_prompt_from_buffer(buffers.get(&p.terminal_id))
             };
 
             if at_prompt {
@@ -821,10 +944,7 @@ impl McpHandler {
         // 5. Try to get exit code from terminal session
         let exit_code = {
             let terminals = self.state.app_state.terminals.lock_or_err().ok();
-            terminals.and_then(|t| {
-                t.get(&p.terminal_id)
-                    .and_then(|s| s.last_exit_code)
-            })
+            terminals.and_then(|t| t.get(&p.terminal_id).and_then(|s| s.last_exit_code))
         };
 
         Ok(json_result(&json!({
@@ -898,55 +1018,75 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<SwitchWorkspaceParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let ws_id = if let Some(id) = p.workspace_id {
-            id
-        } else if let Some(name) = p.name {
-            // Resolve name to ID via list
-            let data = match self.bridge_raw("query", "workspaces", "list", json!({})).await {
-                Ok(d) => d,
-                Err(e) => return Ok(e),
-            };
-            let name_lower = name.to_lowercase();
-            let all_matches: Vec<&Value> = data.get("workspaces")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter(|ws| {
-                    ws.get("name")
-                        .and_then(|n| n.as_str())
-                        .map(|n| n.to_lowercase() == name_lower)
-                        .unwrap_or(false)
-                }).collect())
-                .unwrap_or_default();
-            match all_matches.len() {
-                0 => return Ok(CallToolResult::error(vec![Content::text(
-                    format!("Workspace '{}' not found", name)
-                )])),
-                1 => all_matches[0].get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                n => {
-                    let exact = all_matches.iter().find(|ws| {
-                        ws.get("name").and_then(|v| v.as_str()) == Some(&name)
-                    });
-                    let chosen = exact.unwrap_or(&all_matches[0]);
-                    let id = chosen.get("id")
+        let ws_id =
+            if let Some(id) = p.workspace_id {
+                id
+            } else if let Some(name) = p.name {
+                // Resolve name to ID via list
+                let data = match self
+                    .bridge_raw("query", "workspaces", "list", json!({}))
+                    .await
+                {
+                    Ok(d) => d,
+                    Err(e) => return Ok(e),
+                };
+                let name_lower = name.to_lowercase();
+                let all_matches: Vec<&Value> = data
+                    .get("workspaces")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter(|ws| {
+                                ws.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|n| n.to_lowercase() == name_lower)
+                                    .unwrap_or(false)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match all_matches.len() {
+                    0 => {
+                        return Ok(CallToolResult::error(vec![Content::text(format!(
+                            "Workspace '{}' not found",
+                            name
+                        ))]))
+                    }
+                    1 => all_matches[0]
+                        .get("id")
                         .and_then(|v| v.as_str())
                         .unwrap_or_default()
-                        .to_string();
-                    tracing::warn!(
+                        .to_string(),
+                    n => {
+                        let exact = all_matches
+                            .iter()
+                            .find(|ws| ws.get("name").and_then(|v| v.as_str()) == Some(&name));
+                        let chosen = exact.unwrap_or(&all_matches[0]);
+                        let id = chosen
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        tracing::warn!(
                         "switch_workspace: {} workspaces match '{}' (case-insensitive), using '{}'",
                         n, name, id
                     );
-                    id
+                        id
+                    }
                 }
-            }
-        } else {
-            return Ok(CallToolResult::error(vec![Content::text(
-                "Either workspace_id or name is required"
-            )]));
-        };
+            } else {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Either workspace_id or name is required",
+                )]));
+            };
 
-        self.bridge("action", "workspaces", "switchActive", json!({ "id": ws_id })).await
+        self.bridge(
+            "action",
+            "workspaces",
+            "switchActive",
+            json!({ "id": ws_id }),
+        )
+        .await
     }
 
     /// Create a new workspace, optionally from a layout template. Returns the new workspace's id, name, and pane count.
@@ -1116,7 +1256,10 @@ impl McpHandler {
             Some(idx) => json!({ "paneIndex": idx }),
             None => json!({}),
         };
-        let data = match self.bridge_raw("action", "screenshot", "capture", params).await {
+        let data = match self
+            .bridge_raw("action", "screenshot", "capture", params)
+            .await
+        {
             Ok(d) => d,
             Err(e) => return Ok(e),
         };
@@ -1148,19 +1291,15 @@ impl McpHandler {
                 data.get_mut("notifications").and_then(|v| v.as_array_mut())
             {
                 if let Some(ref ws_id) = p.workspace_id {
-                    notifications.retain(|n| {
-                        n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id)
-                    });
+                    notifications
+                        .retain(|n| n.get("workspaceId").and_then(|v| v.as_str()) == Some(ws_id));
                 }
                 if let Some(ref t_id) = p.terminal_id {
-                    notifications.retain(|n| {
-                        n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id)
-                    });
+                    notifications
+                        .retain(|n| n.get("terminalId").and_then(|v| v.as_str()) == Some(t_id));
                 }
                 if p.unread_only.unwrap_or(false) {
-                    notifications.retain(|n| {
-                        n.get("readAt").and_then(|v| v.as_u64()).is_none()
-                    });
+                    notifications.retain(|n| n.get("readAt").and_then(|v| v.as_u64()).is_none());
                 }
                 notifications.sort_by(|a, b| {
                     let ts_a = a.get("createdAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -1195,7 +1334,10 @@ impl McpHandler {
             }
         } else {
             // No terminal, no workspace — use active workspace
-            let data = match self.bridge_raw("query", "grid", "getState", json!({})).await {
+            let data = match self
+                .bridge_raw("query", "grid", "getState", json!({}))
+                .await
+            {
                 Ok(d) => d,
                 Err(_) => {
                     return Ok(CallToolResult::error(vec![Content::text(
@@ -1350,7 +1492,10 @@ impl McpHandler {
             }
         }
 
-        match self.bridge_raw("query", "profiles", "list", json!({})).await {
+        match self
+            .bridge_raw("query", "profiles", "list", json!({}))
+            .await
+        {
             Ok(data) => {
                 // Enrich configured profiles with runtime shell_type
                 if let Some(profiles) = data.get("profiles").and_then(|v| v.as_array()) {
@@ -1399,7 +1544,17 @@ impl McpHandler {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpHandler {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        // Enable both Tools (existing) and Resources (issue #202).
+        // `enable_resources_subscribe` advertises server-side subscription
+        // support so clients know they can call `resources/subscribe`.
+        let caps = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_resources_subscribe()
+            .enable_resources_list_changed()
+            .build();
+
+        ServerInfo::new(caps)
             .with_server_info(rmcp::model::Implementation::new(
                 MCP_SERVER_NAME,
                 env!("CARGO_PKG_VERSION"),
@@ -1418,12 +1573,89 @@ impl ServerHandler for McpHandler {
                  ## Other env vars\n\
                  - LX_AUTOMATION_PORT: The port this MCP server runs on\n\
                  - LX_GROUP_ID: Your sync group (terminals in the same group share CWD)\n\n\
+                 ## Resources (issue #202)\n\
+                 Subscribable read-only state is exposed as MCP Resources.\n\
+                 Prefer these over the corresponding list_* tools to avoid polling:\n\
+                 - workspace://active — currently active workspace with panes & activity\n\
+                 - workspace://list   — workspace summaries\n\
+                 - profile://list     — available terminal profiles\n\
+                 - terminal://{id}    — single terminal state\n\
+                 - terminal://{id}/output — recent terminal output (ANSI stripped, text)\n\
+                 Call `resources/subscribe` on any URI to receive `notifications/resources/updated` \
+                 when the backing state changes. Tools remain available for backward compatibility.\n\n\
                  ## Common workflows\n\
                  - Find yourself: echo $LX_TERMINAL_ID (or $env:LX_TERMINAL_ID in PowerShell) → identify_caller\n\
                  - Send command to adjacent pane: identify_caller → use neighbors.right.terminalId → write_to_terminal\n\
                  - Read another pane's output: list_terminals → read_terminal_output with target terminal_id"
                     .to_string(),
             )
+    }
+
+    // ── Resources (MCP issue #202) ──────────────────────────────
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let mut resources = static_resources();
+        resources.extend(mcp_resources::dynamic_terminal_resources(
+            &self.state.app_state,
+        ));
+        Ok(ListResourcesResult::with_all_items(resources))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(
+            resource_templates(),
+        ))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        self.read_resource_inner(&request.uri).await
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        // Validate the URI parses as a known scheme before accepting.
+        if ResourceUri::parse(&request.uri).is_none() {
+            return Err(resource_not_found(&request.uri));
+        }
+        if let Ok(mut reg) = self.subscriptions.lock_or_err() {
+            reg.subscribe(&self.peer_id, &request.uri);
+        }
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        if let Ok(mut reg) = self.subscriptions.lock_or_err() {
+            reg.unsubscribe(&self.peer_id, &request.uri);
+        }
+        Ok(())
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        // Capture the peer handle so the Tauri→MCP bridge can push
+        // `notifications/resources/updated` back to this client.
+        if let Ok(mut reg) = self.subscriptions.lock_or_err() {
+            reg.register_peer(self.peer_id.clone(), context.peer.clone());
+        }
+        tracing::info!(peer_id = %self.peer_id, "MCP client initialized; peer registered");
     }
 }
 
@@ -1433,6 +1665,37 @@ fn json_result(data: &Value) -> CallToolResult {
     let text = serde_json::to_string_pretty(data)
         .unwrap_or_else(|e| format!("{{\"error\": \"serialize failed: {e}\"}}"));
     CallToolResult::success(vec![Content::text(text)])
+}
+
+/// Collapse a full workspaces/list response into a summary suitable for
+/// `workspace://list`. Mirrors the behavior of `list_workspaces(summary=true)`
+/// so MCP clients get a compact, cache-friendly payload.
+pub(crate) fn workspace_list_summary(data: &Value) -> Value {
+    let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
+    let summary: Vec<Value> = data
+        .get("workspaces")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|ws| {
+                    let ws_id = ws.get("id").and_then(|v| v.as_str());
+                    json!({
+                        "id": ws.get("id"),
+                        "name": ws.get("name"),
+                        "paneCount": ws
+                            .get("panes")
+                            .and_then(|p| p.as_array())
+                            .map(|a| a.len()),
+                        "isActive": active_id.is_some() && ws_id == active_id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "workspaces": summary,
+        "activeWorkspaceId": data.get("activeWorkspaceId").cloned().unwrap_or(Value::Null),
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────
@@ -1604,5 +1867,70 @@ mod tests {
         let p: ResizePaneParam = serde_json::from_str(json).unwrap();
         assert_eq!(p.dw, Some(0.1));
         assert!(p.dh.is_none());
+    }
+
+    // ── Resource capability tests (issue #202) ─────────────────────
+
+    /// Raw JSON shape returned by `build_capabilities_json` should advertise
+    /// both tools and resources after issue #202.
+    #[test]
+    fn server_capabilities_enable_resources_and_subscribe() {
+        let caps = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_resources_subscribe()
+            .enable_resources_list_changed()
+            .build();
+        let value = serde_json::to_value(&caps).unwrap();
+        assert!(value.get("tools").is_some(), "tools must be advertised");
+        let res = value
+            .get("resources")
+            .expect("resources capability must be present");
+        assert_eq!(res.get("subscribe").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(res.get("listChanged").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn workspace_list_summary_compacts_full_response() {
+        let data = json!({
+            "workspaces": [
+                {
+                    "id": "ws-a",
+                    "name": "alpha",
+                    "panes": [{}, {}, {}],
+                },
+                {
+                    "id": "ws-b",
+                    "name": "beta",
+                    "panes": [{}],
+                },
+            ],
+            "activeWorkspaceId": "ws-a",
+        });
+        let summary = workspace_list_summary(&data);
+        let ws = summary["workspaces"].as_array().unwrap();
+        assert_eq!(ws.len(), 2);
+        assert_eq!(ws[0]["paneCount"], 3);
+        assert_eq!(ws[0]["isActive"], true);
+        assert_eq!(ws[1]["isActive"], false);
+        assert_eq!(summary["activeWorkspaceId"], "ws-a");
+    }
+
+    #[test]
+    fn workspace_list_summary_handles_missing_active_id() {
+        let data = json!({
+            "workspaces": [{ "id": "ws-x", "name": "x", "panes": [] }],
+        });
+        let summary = workspace_list_summary(&data);
+        assert_eq!(summary["workspaces"][0]["isActive"], false);
+        assert_eq!(summary["workspaces"][0]["paneCount"], 0);
+        assert_eq!(summary["activeWorkspaceId"], Value::Null);
+    }
+
+    #[test]
+    fn workspace_list_summary_handles_empty_list() {
+        let data = json!({ "workspaces": [], "activeWorkspaceId": null });
+        let summary = workspace_list_summary(&data);
+        assert_eq!(summary["workspaces"].as_array().map(|a| a.len()), Some(0));
     }
 }

@@ -165,8 +165,9 @@ pub fn strip_ansi(input: &str) -> String {
                     chars.next();
                     loop {
                         match chars.next() {
-                            Some('\x07') => break,        // BEL
-                            Some('\x1b') => {              // possible ST (ESC \)
+                            Some('\x07') => break, // BEL
+                            Some('\x1b') => {
+                                // possible ST (ESC \)
                                 if chars.peek() == Some(&'\\') {
                                     chars.next();
                                 }
@@ -320,10 +321,7 @@ mod tests {
 
     #[test]
     fn unescape_mixed() {
-        assert_eq!(
-            unescape_terminal_input(r"echo hello\r\n"),
-            "echo hello\r\n"
-        );
+        assert_eq!(unescape_terminal_input(r"echo hello\r\n"), "echo hello\r\n");
     }
 
     #[test]
@@ -376,9 +374,6 @@ mod tests {
 
     #[test]
     fn strip_ansi_utf8_mixed() {
-        assert_eq!(
-            strip_ansi("hello \x1b[1m世界\x1b[0m 🌍"),
-            "hello 世界 🌍"
-        );
+        assert_eq!(strip_ansi("hello \x1b[1m世界\x1b[0m 🌍"), "hello 世界 🌍");
     }
 }

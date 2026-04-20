@@ -2174,3 +2174,236 @@ fn settings_load_result_round_trip_parse_error() {
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);
 }
+
+// ============================================================================
+// MCP Resources E2E Tests (issue #202)
+//
+// These exercise the Resource URI parser, static catalogue, templates, and
+// subscription registry without standing up a full MCP transport. The goal is
+// to pin down the contract that MCP clients see so future refactors cannot
+// silently drop a URI or break the subscribe/unsubscribe lifecycle.
+// ============================================================================
+
+mod mcp_resources_e2e {
+    use laymux_lib::automation_server::mcp_resources::{
+        dynamic_terminal_resources, new_peer_id, resource_templates, static_resources,
+        terminal_id_from_event, ResourceUri, SubscriptionRegistry,
+    };
+    use laymux_lib::state::AppState;
+    use laymux_lib::terminal::{TerminalConfig, TerminalSession};
+    use std::sync::Arc;
+
+    #[test]
+    fn static_resources_expose_workspace_and_profile_uris() {
+        let resources = static_resources();
+        let uris: Vec<_> = resources.into_iter().map(|r| r.raw.uri).collect();
+        assert!(uris.iter().any(|u| u == "workspace://active"));
+        assert!(uris.iter().any(|u| u == "workspace://list"));
+        assert!(uris.iter().any(|u| u == "profile://list"));
+    }
+
+    #[test]
+    fn templates_describe_terminal_family() {
+        let templates = resource_templates();
+        assert!(!templates.is_empty());
+        let shapes: Vec<_> = templates.into_iter().map(|t| t.raw.uri_template).collect();
+        assert!(shapes.iter().any(|s| s == "terminal://{terminal_id}"));
+        assert!(shapes
+            .iter()
+            .any(|s| s == "terminal://{terminal_id}/output"));
+    }
+
+    #[test]
+    fn dynamic_terminal_resources_reflect_appstate_sessions() {
+        let state = Arc::new(AppState::new());
+        {
+            let mut terms = state.terminals.lock().unwrap();
+            let cfg = TerminalConfig::default();
+            terms.insert(
+                "term-alpha".into(),
+                TerminalSession::new("term-alpha".to_string(), cfg.clone()),
+            );
+            terms.insert(
+                "term-beta".into(),
+                TerminalSession::new("term-beta".to_string(), cfg),
+            );
+        }
+
+        let resources = dynamic_terminal_resources(&state);
+        let uris: Vec<_> = resources.into_iter().map(|r| r.raw.uri).collect();
+        assert!(uris.iter().any(|u| u == "terminal://term-alpha"));
+        assert!(uris.iter().any(|u| u == "terminal://term-beta"));
+    }
+
+    #[test]
+    fn resource_uri_parses_all_supported_schemes() {
+        let cases = [
+            ("workspace://active", ResourceUri::WorkspaceActive),
+            ("workspace://list", ResourceUri::WorkspaceList),
+            ("profile://list", ResourceUri::ProfileList),
+            (
+                "terminal://abc-123",
+                ResourceUri::Terminal("abc-123".into()),
+            ),
+            (
+                "terminal://abc-123/output",
+                ResourceUri::TerminalOutput("abc-123".into()),
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(ResourceUri::parse(input), Some(expected), "uri={input}");
+        }
+    }
+
+    #[test]
+    fn resource_uri_rejects_malformed_input() {
+        for bad in [
+            "",
+            "terminal://",
+            "terminal:///output",
+            "terminal://abc/other",
+            "workspace://",
+            "file:///etc/passwd",
+            "workspace://inactive",
+        ] {
+            assert!(
+                ResourceUri::parse(bad).is_none(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn subscription_registry_tracks_and_unsubscribes() {
+        let reg = SubscriptionRegistry::new();
+        let peer_a = new_peer_id();
+        let peer_b = new_peer_id();
+        {
+            let mut g = reg.lock().unwrap();
+            // Seed entries so subscription_count reflects the URI set.
+            g.subscribe(&peer_a, "workspace://active");
+            g.subscribe(&peer_a, "terminal://t1");
+            g.subscribe(&peer_b, "workspace://active");
+            assert_eq!(g.subscription_count(&peer_a), 2);
+            assert_eq!(g.subscription_count(&peer_b), 1);
+
+            g.unsubscribe(&peer_a, "terminal://t1");
+            assert_eq!(g.subscription_count(&peer_a), 1);
+
+            g.unregister_peer(&peer_b);
+            assert_eq!(g.subscription_count(&peer_b), 0);
+        }
+    }
+
+    #[test]
+    fn terminal_id_extraction_handles_common_event_shapes() {
+        assert_eq!(
+            terminal_id_from_event(r#"{"terminalId":"t1"}"#),
+            Some("t1".into())
+        );
+        assert_eq!(
+            terminal_id_from_event(r#"{"terminal_id":"t2","foo":1}"#),
+            Some("t2".into())
+        );
+        assert_eq!(terminal_id_from_event(r#"{"id":"t3"}"#), Some("t3".into()));
+        assert!(terminal_id_from_event("{}").is_none());
+        assert!(terminal_id_from_event("not json").is_none());
+    }
+}
+
+/// Guardrail tests for the review fix: the production code must wire the
+/// terminal-catalog and workspace-lifecycle events that the MCP resource
+/// bridge listens to. These tests grep the source to prove the emit sites
+/// exist — a unit-level stand-in for end-to-end Tauri event dispatch, which
+/// requires the `tauri/test` feature that fails to link on Windows.
+#[cfg(test)]
+mod mcp_bridge_wiring {
+    use laymux_lib::constants::{EVENT_TERMINALS_LIST_CHANGED, EVENT_WORKSPACE_STATE_CHANGED};
+    use std::path::PathBuf;
+
+    fn read(rel: &str) -> String {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn workspace_bridge_handlers_emit_workspace_state_changed() {
+        // Every mutating workspace HTTP handler must broadcast
+        // `workspace-state-changed` on success. This is what drives
+        // `workspace://active` + `workspace://list` resource updates — without
+        // it the subscription would fire only on per-terminal events and
+        // never on pure workspace switch/create/rename/delete/reorder.
+        let src = read("src/automation_server/handlers_bridge.rs");
+        for marker in [
+            "workspaces.switchActive",
+            "workspaces.add",
+            "workspaces.rename",
+            "workspaces.remove",
+            "workspaces.reorder",
+        ] {
+            assert!(
+                src.contains(&format!("emit_workspace_state_changed(\n                &state,\n                \"{marker}\""))
+                    || src.contains(&format!("\"{marker}\"")),
+                "handlers_bridge.rs is missing the emit site for {marker}"
+            );
+        }
+        // The helper itself must forward to the production event constant.
+        assert!(
+            src.contains("EVENT_WORKSPACE_STATE_CHANGED"),
+            "handlers_bridge.rs must emit via EVENT_WORKSPACE_STATE_CHANGED"
+        );
+    }
+
+    #[test]
+    fn terminal_command_emits_terminals_list_changed_on_create_and_close() {
+        // The dynamic `terminal://{id}` catalog comes from live
+        // `AppState.terminals`, so create and close must both emit
+        // `terminals-list-changed` — otherwise `notifications/resources/list_changed`
+        // never fires for terminal churn despite being advertised.
+        let src = read("src/commands/terminal.rs");
+        assert!(
+            src.matches("EVENT_TERMINALS_LIST_CHANGED").count() >= 2,
+            "terminal.rs must emit EVENT_TERMINALS_LIST_CHANGED in both create and close paths"
+        );
+        assert!(
+            src.contains("\"op\": \"created\"") || src.contains("\"op\":\"created\""),
+            "terminal.rs is missing the 'created' emit payload"
+        );
+        assert!(
+            src.contains("\"op\": \"closed\"") || src.contains("\"op\":\"closed\""),
+            "terminal.rs is missing the 'closed' emit payload"
+        );
+    }
+
+    #[test]
+    fn resource_bridge_listens_for_list_changed_and_workspace_events() {
+        // The bridge must wire listeners for both events — otherwise the
+        // emits above propagate nowhere.
+        let src = read("src/automation_server/mcp_resources.rs");
+        assert!(
+            src.contains("EVENT_TERMINALS_LIST_CHANGED"),
+            "mcp_resources.rs must listen for EVENT_TERMINALS_LIST_CHANGED"
+        );
+        assert!(
+            src.contains("EVENT_WORKSPACE_STATE_CHANGED"),
+            "mcp_resources.rs must listen for EVENT_WORKSPACE_STATE_CHANGED"
+        );
+        assert!(
+            src.contains("notify_resource_list_changed"),
+            "mcp_resources.rs must call peer.notify_resource_list_changed on catalog mutation"
+        );
+        assert!(
+            src.contains("fn notify_list_changed") && src.contains("all_peers()"),
+            "mcp_resources.rs must fan out list_changed to all connected peers, not just subscribers"
+        );
+    }
+
+    #[test]
+    fn production_event_names_match_constants() {
+        // Guards against a rename drifting silently between constants and
+        // the listener / emitter string literals.
+        assert_eq!(EVENT_WORKSPACE_STATE_CHANGED, "workspace-state-changed");
+        assert_eq!(EVENT_TERMINALS_LIST_CHANGED, "terminals-list-changed");
+    }
+}

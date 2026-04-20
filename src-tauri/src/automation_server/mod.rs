@@ -2,6 +2,7 @@ pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
 pub mod mcp;
+pub mod mcp_resources;
 pub mod types;
 
 // Re-export key types used by other modules
@@ -30,6 +31,7 @@ use crate::state::AppState;
 use handlers_backend::*;
 use handlers_bridge::*;
 use helpers::err_json;
+use mcp_resources::{SharedSubscriptionRegistry, SubscriptionRegistry};
 
 /// Shared state for the axum server.
 #[derive(Clone)]
@@ -87,10 +89,17 @@ fn discovery_file_path() -> std::path::PathBuf {
 pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u16, String> {
     let server_state = ServerState {
         app_state: app_state.clone(),
-        app_handle,
+        app_handle: app_handle.clone(),
     };
 
-    let app = build_router(server_state);
+    // MCP resource subscription registry — shared between the MCP service
+    // (used inside `build_router`) and the Tauri→MCP event bridge spawned
+    // below. The bridge converts Tauri events into
+    // `notifications/resources/updated` for subscribed peers.
+    let subscriptions = SubscriptionRegistry::new();
+    mcp_resources::spawn_resource_event_bridge(app_handle.clone(), subscriptions.clone());
+
+    let app = build_router(server_state, subscriptions);
 
     let port = automation_port();
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -166,7 +175,7 @@ async fn ip_allowlist_middleware(
     }
 }
 
-pub fn build_router(state: ServerState) -> Router {
+pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistry) -> Router {
     Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
@@ -226,7 +235,10 @@ pub fn build_router(state: ServerState) -> Router {
         .route("/api/v1/terminals/states", get(terminals_states))
         .route("/api/v1/layouts", get(layouts_list))
         .route("/api/v1/screenshot", post(screenshot_capture))
-        .nest_service("/mcp", mcp::create_service(state.clone()))
+        .nest_service(
+            "/mcp",
+            mcp::create_service(state.clone(), subscriptions.clone()),
+        )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
