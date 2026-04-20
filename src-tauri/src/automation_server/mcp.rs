@@ -23,8 +23,8 @@ use crate::lock_ext::MutexExt;
 
 use super::helpers::bridge_request;
 use super::mcp_resources::{
-    self, new_peer_id, read_result_json, read_result_text, resource_not_found, resource_templates,
-    static_resources, PeerId, ResourceUri, SharedSubscriptionRegistry,
+    self, bridge_read_failed, new_peer_id, read_result_json, read_result_text, resource_not_found,
+    resource_templates, static_resources, PeerId, ResourceUri, SharedSubscriptionRegistry,
 };
 use super::ServerState;
 
@@ -488,7 +488,7 @@ impl McpHandler {
                 let mut data = self
                     .bridge_raw("query", "workspaces", "getActive", json!({}))
                     .await
-                    .map_err(|_| resource_not_found(uri))?;
+                    .map_err(|_| bridge_read_failed(uri, "workspaces.getActive"))?;
                 if let Some(panes) = data
                     .get_mut("workspace")
                     .and_then(|ws| ws.get_mut("panes"))
@@ -507,7 +507,7 @@ impl McpHandler {
                 let data = self
                     .bridge_raw("query", "workspaces", "list", json!({}))
                     .await
-                    .map_err(|_| resource_not_found(uri))?;
+                    .map_err(|_| bridge_read_failed(uri, "workspaces.list"))?;
                 let summary = workspace_list_summary(&data);
                 Ok(read_result_json(uri, &summary))
             }
@@ -515,7 +515,7 @@ impl McpHandler {
                 let data = self
                     .bridge_raw("query", "profiles", "list", json!({}))
                     .await
-                    .map_err(|_| resource_not_found(uri))?;
+                    .map_err(|_| bridge_read_failed(uri, "profiles.list"))?;
                 Ok(read_result_json(uri, &data))
             }
             ResourceUri::Terminal(terminal_id) => {
@@ -525,7 +525,7 @@ impl McpHandler {
                 let mut data = self
                     .bridge_raw("query", "terminals", "list", json!({}))
                     .await
-                    .map_err(|_| resource_not_found(uri))?;
+                    .map_err(|_| bridge_read_failed(uri, "terminals.list"))?;
                 let instance = data
                     .get_mut("instances")
                     .and_then(|v| v.as_array_mut())
@@ -544,7 +544,7 @@ impl McpHandler {
             ResourceUri::TerminalOutput(terminal_id) => {
                 let buffers = match self.lock_output_buffers() {
                     Ok(b) => b,
-                    Err(_) => return Err(resource_not_found(uri)),
+                    Err(_) => return Err(bridge_read_failed(uri, "output_buffers lock")),
                 };
                 let buf = buffers
                     .get(&terminal_id)
@@ -578,6 +578,23 @@ impl McpHandler {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Release this session's entry in the shared subscription registry.
+///
+/// `StreamableHttpService` creates a fresh [`McpHandler`] per MCP session
+/// (see `get_service` in rmcp's stateful HTTP transport). When the session
+/// ends — client DELETE, transport close, or timeout — rmcp drops the
+/// handler. Without this cleanup the peer handle captured in
+/// [`ServerHandler::on_initialized`] and every URI subscription attached
+/// to it would accumulate for the lifetime of the process, growing both
+/// the `peers` map and the per-notification iteration cost.
+impl Drop for McpHandler {
+    fn drop(&mut self) {
+        if let Ok(mut reg) = self.subscriptions.lock_or_err() {
+            reg.unregister_peer(&self.peer_id);
         }
     }
 }

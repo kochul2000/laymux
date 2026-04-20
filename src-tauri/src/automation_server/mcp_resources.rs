@@ -459,10 +459,29 @@ pub fn read_result_text(uri: &str, text: impl Into<String>) -> ReadResourceResul
 }
 
 /// Return a `resource not found` McpError in the shape expected by MCP.
+///
+/// Use this only when the URI is unrecognised, or when the resource identity
+/// embedded in the URI refers to something that genuinely does not exist (for
+/// example a `terminal://{id}` whose id has no backing session). Bridge /
+/// transport / lock failures should use [`bridge_read_failed`] so clients can
+/// distinguish "you asked for a thing that is not there" from "the server
+/// could not reach its own backend right now".
 pub fn resource_not_found(uri: &str) -> McpError {
     McpError::invalid_params(
         format!("Resource not found: {uri}"),
         Some(json!({ "uri": uri })),
+    )
+}
+
+/// Return an internal-error McpError for transport / lock / bridge failures
+/// that prevented us from reading an otherwise-valid resource. Using
+/// `internal_error` (JSON-RPC −32603) instead of `invalid_params` lets
+/// clients tell a bad URI apart from a transient backend outage and retry
+/// accordingly.
+pub fn bridge_read_failed(uri: &str, reason: &str) -> McpError {
+    McpError::internal_error(
+        format!("Bridge read failed for {uri}: {reason}"),
+        Some(json!({ "uri": uri, "reason": reason })),
     )
 }
 
@@ -683,5 +702,28 @@ mod tests {
         // URI surfaces somewhere in the payload.
         let rendered = serde_json::to_string(&json).unwrap();
         assert!(rendered.contains("terminal://ghost"));
+    }
+
+    #[test]
+    fn resource_not_found_uses_invalid_params_code() {
+        // JSON-RPC invalid_params = -32602. Clients rely on this to tell
+        // "the URI you gave me is not a resource I serve" apart from a
+        // transient backend failure.
+        let err = resource_not_found("terminal://ghost");
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json.get("code").and_then(|v| v.as_i64()), Some(-32602));
+    }
+
+    #[test]
+    fn bridge_read_failed_uses_internal_error_code() {
+        // JSON-RPC internal_error = -32603. Bridge / lock failures are
+        // server-side transient issues and must not be conflated with
+        // client-facing "not found" (-32602).
+        let err = bridge_read_failed("workspace://active", "workspaces.getActive");
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json.get("code").and_then(|v| v.as_i64()), Some(-32603));
+        let rendered = serde_json::to_string(&json).unwrap();
+        assert!(rendered.contains("workspace://active"));
+        assert!(rendered.contains("workspaces.getActive"));
     }
 }
