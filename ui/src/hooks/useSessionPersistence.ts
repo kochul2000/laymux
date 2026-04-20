@@ -14,6 +14,7 @@ import {
   type WorkspaceSortOrder,
 } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewType, Layout, Workspace, DockPosition } from "@/stores/types";
 
 /** Settings load status exposed to App for recovery UI. */
@@ -264,6 +265,17 @@ export function useSessionPersistence() {
             console.warn("[useSessionPersistence] Failed to clean orphaned cache:", err);
           });
         }
+
+        // Prune localStorage 오버라이드에서 살아있지 않은 paneId 제거.
+        // 하이드레이션 이후 워크스페이스/독 스토어의 현재 pane 집합을 기준으로 GC.
+        const alivePaneIds = new Set<string>();
+        for (const ws of useWorkspaceStore.getState().workspaces) {
+          for (const p of ws.panes) alivePaneIds.add(p.id);
+        }
+        for (const d of useDockStore.getState().docks) {
+          for (const p of d.panes ?? []) alivePaneIds.add(p.id);
+        }
+        useOverridesStore.getState().gcStale(alivePaneIds);
 
         setLoaded(true);
       })

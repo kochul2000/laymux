@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
-import { useSettingsStore } from "@/stores/settings-store";
-import { useUiStore, type ControlBarMode } from "@/stores/ui-store";
+import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
 
@@ -14,9 +14,9 @@ import { PaneControlContext } from "./PaneControlContext";
  *    모드 전환은 항상 setMode() 한번으로 완결되어야 한다.
  *
  * 기본 모드는 settings > convenience > defaultControlBarMode에서 설정.
- * per-pane 모드는 ui-store barModes에 localStorage로 persist.
+ * per-pane 모드는 Pane 인스턴스 오버라이드(overrides-store, localStorage) 로 persist.
  */
-export type { ControlBarMode } from "@/stores/ui-store";
+export type { ControlBarMode } from "@/stores/settings-store";
 
 export interface PaneControlBarActions {
   onSplitH?: () => void;
@@ -394,13 +394,23 @@ export function PaneControlBar({
   hovered,
   children,
 }: PaneControlBarProps) {
-  const mode = useUiStore((s) =>
-    paneId ? (s.barModes[paneId] ?? s.getBarMode(paneId)) : s.getBarMode("__fallback__"),
+  const persistedMode = useOverridesStore((s) =>
+    paneId ? s.paneOverrides[paneId]?.controlBarMode : undefined,
   );
-  const setBarMode = useUiStore((s) => s.setBarMode);
+  const defaultMode = useSettingsStore((s) => s.convenience.defaultControlBarMode);
+  const setPaneOverride = useOverridesStore((s) => s.setPaneOverride);
+  // Local fallback for components rendered without a paneId (tests, previews) —
+  // keeps toggling functional but doesn't persist anywhere.
+  const [localMode, setLocalMode] = useState<ControlBarMode | undefined>(undefined);
+  const mode: ControlBarMode = paneId
+    ? (persistedMode ?? defaultMode)
+    : (localMode ?? defaultMode);
   const setMode = useCallback(
-    (m: ControlBarMode) => setBarMode(paneId ?? "__fallback__", m),
-    [paneId, setBarMode],
+    (m: ControlBarMode) => {
+      if (paneId) setPaneOverride(paneId, { controlBarMode: m });
+      else setLocalMode(m);
+    },
+    [paneId, setPaneOverride],
   );
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);

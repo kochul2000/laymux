@@ -91,6 +91,7 @@ import { useSessionPersistence } from "./useSessionPersistence";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { loadSettingsValidated, type SettingsLoadResult } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 
@@ -104,6 +105,8 @@ describe("useSessionPersistence", () => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -508,5 +511,75 @@ describe("useSessionPersistence", () => {
     });
 
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
+  });
+
+  it("prunes overrides for paneIds that no longer exist after load", async () => {
+    // Seed overrides for one alive pane and one dead (non-existent) pane.
+    useOverridesStore.getState().setPaneOverride("pane-alive", { controlBarMode: "pinned" });
+    useOverridesStore.getState().setViewOverride("pane-alive", { fontSize: 20 });
+    useOverridesStore.getState().setPaneOverride("pane-dead", { controlBarMode: "minimized" });
+    useOverridesStore.getState().setViewOverride("pane-dead", { fontSize: 30 });
+
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
+      wrapOk({
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [
+          {
+            id: "l-test",
+            name: "L",
+            panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "TerminalView" }],
+          },
+        ],
+        workspaces: [
+          {
+            id: "ws-test",
+            name: "Test",
+            panes: [
+              {
+                id: "pane-alive",
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+                view: { type: "TerminalView", profile: "WSL" },
+              },
+            ],
+          },
+        ],
+        docks: [],
+        convenience: {
+          smartPaste: true,
+          pasteImageDir: "",
+          hoverIdleSeconds: 2,
+          notificationDismiss: "workspace",
+          copyOnSelect: true,
+          pathEllipsis: "start",
+          scrollbarStyle: "overlay",
+        },
+        claude: { syncCwd: "skip" },
+      }) as any,
+    );
+
+    renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const overrides = useOverridesStore.getState();
+    expect(overrides.getPaneOverride("pane-alive")?.controlBarMode).toBe("pinned");
+    expect(overrides.getViewOverride("pane-alive")?.fontSize).toBe(20);
+    expect(overrides.getPaneOverride("pane-dead")).toBeUndefined();
+    expect(overrides.getViewOverride("pane-dead")).toBeUndefined();
   });
 });

@@ -324,8 +324,13 @@ interface SettingsState {
   addKeybinding: (keybinding: Keybinding) => void;
   removeKeybinding: (index: number) => void;
   updateKeybinding: (index: number, data: Partial<Keybinding>) => void;
-  /** Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default. */
-  resolveFont: (profileName: string) => FontSettings;
+  /**
+   * Resolve effective font for a profile: profile.font -> profileDefaults.font -> hardcoded default.
+   *
+   * `viewOverrides.fontSize`가 주어지면 해석된 base 폰트의 `size`만 덮어쓴다. (face/weight는 체인 유지)
+   * View 인스턴스 오버라이드(Ctrl+Wheel 줌 등)를 반영하기 위한 경로.
+   */
+  resolveFont: (profileName: string, viewOverrides?: { fontSize?: number }) => FontSettings;
   /** Resolve effective { send, receive } for CWD sync based on profile and location. */
   resolveSyncCwdForProfile: (profileName: string, location: TerminalLocation) => SyncCwdPair;
   loadFromSettings: (
@@ -911,12 +916,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       keybindings: state.keybindings.map((kb, i) => (i === index ? { ...kb, ...data } : kb)),
     })),
 
-  resolveFont: (profileName) => {
+  resolveFont: (profileName, viewOverrides) => {
     const state = get();
     const profile = state.profiles.find((p) => p.name === profileName);
-    if (profile?.font) return profile.font;
-    if (state.profileDefaults?.font) return state.profileDefaults.font;
-    return DEFAULT_FONT;
+    const base = profile?.font ?? state.profileDefaults?.font ?? DEFAULT_FONT;
+    if (viewOverrides?.fontSize !== undefined) {
+      return { ...base, size: viewOverrides.fontSize };
+    }
+    return base;
   },
 
   resolveSyncCwdForProfile: (profileName, location) => {

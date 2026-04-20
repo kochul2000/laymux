@@ -1,28 +1,7 @@
 import { create } from "zustand";
-import { useSettingsStore, type ControlBarMode } from "./settings-store";
 
-export type { ControlBarMode } from "./settings-store";
-
-const BAR_MODES_KEY = "laymux-bar-modes";
 const HIDDEN_PANES_KEY = "laymux-hidden-panes";
 const HIDDEN_WORKSPACES_KEY = "laymux-hidden-workspaces";
-
-function loadBarModes(): Record<string, ControlBarMode> {
-  try {
-    const raw = localStorage.getItem(BAR_MODES_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveBarModes(modes: Record<string, ControlBarMode>) {
-  try {
-    localStorage.setItem(BAR_MODES_KEY, JSON.stringify(modes));
-  } catch {
-    /* ignore */
-  }
-}
 
 function loadHiddenIds(key: string): Set<string> {
   try {
@@ -47,8 +26,6 @@ interface UiState {
   connectionInfoModalOpen: boolean;
   /** External navigation target for SettingsView (e.g. "startup", "profile-0", "colorSchemes") */
   settingsNavTarget: string | null;
-  /** Per-pane control bar mode, keyed by pane ID. Persisted via localStorage. */
-  barModes: Record<string, ControlBarMode>;
   /** Whether the app window is currently focused (not blurred to another app). */
   isAppFocused: boolean;
   /** Whether hide mode is active in WorkspaceSelectorView (unified for workspaces + panes). */
@@ -66,8 +43,6 @@ interface UiState {
   toggleConnectionInfoModal: () => void;
   closeConnectionInfoModal: () => void;
   setSettingsNavTarget: (target: string | null) => void;
-  setBarMode: (paneId: string, mode: ControlBarMode) => void;
-  getBarMode: (paneId: string) => ControlBarMode;
   setAppFocused: (focused: boolean) => void;
   toggleHideMode: () => void;
   exitHideMode: () => void;
@@ -75,12 +50,11 @@ interface UiState {
   toggleWorkspaceHidden: (workspaceId: string) => void;
 }
 
-export const useUiStore = create<UiState>()((set, get) => ({
+export const useUiStore = create<UiState>()((set) => ({
   settingsModalOpen: false,
   notificationPanelOpen: false,
   connectionInfoModalOpen: false,
   settingsNavTarget: null,
-  barModes: loadBarModes(),
   isAppFocused: true,
   hideMode: false,
   hiddenPaneIds: loadHiddenIds(HIDDEN_PANES_KEY),
@@ -107,15 +81,6 @@ export const useUiStore = create<UiState>()((set, get) => ({
     })),
   closeConnectionInfoModal: () => set({ connectionInfoModalOpen: false }),
   setSettingsNavTarget: (target) => set({ settingsNavTarget: target }),
-  setBarMode: (paneId, mode) => {
-    set((state) => {
-      const barModes = { ...state.barModes, [paneId]: mode };
-      saveBarModes(barModes);
-      return { barModes };
-    });
-  },
-  getBarMode: (paneId) =>
-    get().barModes[paneId] ?? useSettingsStore.getState().convenience.defaultControlBarMode,
   setAppFocused: (focused) => set({ isAppFocused: focused }),
   toggleHideMode: () => set((state) => ({ hideMode: !state.hideMode })),
   exitHideMode: () => set({ hideMode: false }),

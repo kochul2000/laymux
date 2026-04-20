@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -7,6 +7,7 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
@@ -331,7 +332,10 @@ export function TerminalView({
     const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
     const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
 
-    const resolvedFont = settingsState.resolveFont(profile);
+    const resolvedFont = settingsState.resolveFont(
+      profile,
+      paneId ? useOverridesStore.getState().getViewOverride(paneId) : undefined,
+    );
     const resolvedCursorShape =
       profileConfig?.cursorShape ||
       settingsState.profileDefaults?.cursorShape ||
@@ -911,6 +915,19 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
 
+    // view 인스턴스 폰트 줌 조정 (zoomIn/zoomOut 공용). paneId가 없으면 no-op.
+    const adjustZoom = (delta: number) => {
+      if (!paneId) return;
+      const overrides = useOverridesStore.getState();
+      const currentFont = useSettingsStore
+        .getState()
+        .resolveFont(profile, overrides.getViewOverride(paneId));
+      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      if (newSize !== currentFont.size) {
+        overrides.setViewOverride(paneId, { fontSize: newSize });
+      }
+    };
+
     // Single entry point for all terminal key handling:
     //   - IDE-level shortcuts → pass through to document handler (return false).
     //   - terminal.copy / terminal.paste (default Ctrl+C / Ctrl+V, user-rebindable)
@@ -937,6 +954,23 @@ export function TerminalView({
         // No selection: let xterm process the raw key (default Ctrl+C → SIGINT).
         if (!terminal.hasSelection()) return true;
         runTerminalCopy(terminal);
+        e.preventDefault();
+        return false;
+      }
+
+      // View 인스턴스 폰트 줌: overrides-store에만 기록, 프로파일은 건드리지 않음.
+      if (matchesKeybinding(e, "terminal.zoomIn")) {
+        adjustZoom(+1);
+        e.preventDefault();
+        return false;
+      }
+      if (matchesKeybinding(e, "terminal.zoomOut")) {
+        adjustZoom(-1);
+        e.preventDefault();
+        return false;
+      }
+      if (matchesKeybinding(e, "terminal.zoomReset")) {
+        if (paneId) useOverridesStore.getState().clearViewOverride(paneId);
         e.preventDefault();
         return false;
       }
@@ -1203,24 +1237,6 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
-    // Ctrl+Wheel: zoom font size (up = bigger, down = smaller)
-    const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const state = useSettingsStore.getState();
-      const currentFont = state.resolveFont(profile);
-      const delta = e.deltaY < 0 ? 1 : -1;
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
-      if (newSize !== currentFont.size) {
-        // Update the profile's font override
-        const idx = state.profiles.findIndex((p) => p.name === profile);
-        if (idx >= 0) {
-          state.updateProfile(idx, { font: { ...currentFont, size: newSize } });
-        }
-      }
-    };
-    outerContainer?.addEventListener("wheel", handleWheel, { passive: false });
-
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
@@ -1344,7 +1360,6 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
-      outerContainer?.removeEventListener("wheel", handleWheel);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       compositionController.dispose();
@@ -1413,7 +1428,17 @@ export function TerminalView({
     return prof?.colorScheme || s.profileDefaults?.colorScheme || "CampbellClear";
   });
   const colorSchemes = useSettingsStore((s) => s.colorSchemes ?? []);
-  const font = useSettingsStore((s) => s.resolveFont(profile));
+  // Split subscriptions so each returns a stable reference — composing inside
+  // the selector (spreading a new object every call) would break Zustand's
+  // strict-equality rerender gate and loop forever.
+  const viewOverride = useOverridesStore((s) => (paneId ? s.viewOverrides[paneId] : undefined));
+  const baseFont = useSettingsStore((s) => s.resolveFont(profile));
+  const font = useMemo(() => {
+    if (viewOverride?.fontSize !== undefined && viewOverride.fontSize !== baseFont.size) {
+      return { ...baseFont, size: viewOverride.fontSize };
+    }
+    return baseFont;
+  }, [baseFont, viewOverride]);
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
   const prevActivityIsTuiRef = useRef<boolean>(false);
   {
