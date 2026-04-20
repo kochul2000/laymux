@@ -138,7 +138,15 @@ pub fn process_claude_title(
     // Exit detection: was detected but title no longer matches any Claude pattern
     if was_detected && !is_claude {
         result.exited = true;
-        return result; // No further processing on exit
+        // Working → exit: treat the in-flight working phase as a completed
+        // task (policy established in commit 580e201). Claude can drop from
+        // a spinner title straight to the shell prompt when the user runs
+        // `/exit` right after a response, so without this the completion
+        // notification silently disappears.
+        if was_working {
+            result.task_completed = Some(completion_text_from_prev(prev_working_title));
+        }
+        return result;
     }
 
     // Working/idle state tracking (only when Claude is active)
@@ -154,21 +162,25 @@ pub fn process_claude_title(
             let text = if !idle_description.is_empty() && idle_description != "Claude Code" {
                 idle_description.to_string()
             } else {
-                // Fallback to the preceding working title's task text.
-                let prev_description = prev_working_title
-                    .map(strip_claude_spinner_prefix)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty() && *s != "Claude Code");
-                match prev_description {
-                    Some(desc) => desc.to_string(),
-                    None => "Claude Code task completed".to_string(),
-                }
+                completion_text_from_prev(prev_working_title)
             };
             result.task_completed = Some(text);
         }
     }
 
     result
+}
+
+/// Build a completion notification text from the previous working title.
+/// Falls back to a generic default when the working title is missing or
+/// carries no specific task description.
+fn completion_text_from_prev(prev_working_title: Option<&str>) -> String {
+    prev_working_title
+        .map(strip_claude_spinner_prefix)
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "Claude Code")
+        .map(str::to_string)
+        .unwrap_or_else(|| "Claude Code task completed".to_string())
 }
 
 #[cfg(test)]
@@ -272,6 +284,54 @@ mod tests {
         let r = process_claude_title("bash", true, false, None);
         assert!(!r.entered);
         assert!(r.exited);
+    }
+
+    // ── working→exit task completion (regression guard) ──
+    // Regression guard for commit 580e201 policy: when Claude drops from a
+    // working spinner straight to a non-Claude title (e.g. shell prompt),
+    // the working phase is treated as a completed task so the user still
+    // gets a success notification. Without this, `/exit` right after a
+    // response — or any same-frame working→shell transition — silently
+    // loses the notification.
+
+    #[test]
+    fn process_working_to_exit_uses_prev_working_title() {
+        let r = process_claude_title("bash", true, true, Some("\u{2736} Fix login bug"));
+        assert!(r.exited);
+        assert_eq!(r.task_completed, Some("Fix login bug".to_string()));
+    }
+
+    #[test]
+    fn process_working_to_exit_generic_title_uses_default() {
+        let r = process_claude_title(
+            "/home/user/project",
+            true,
+            true,
+            Some("\u{2736} Claude Code"),
+        );
+        assert!(r.exited);
+        assert_eq!(
+            r.task_completed,
+            Some("Claude Code task completed".to_string())
+        );
+    }
+
+    #[test]
+    fn process_working_to_exit_without_prev_title_uses_default() {
+        let r = process_claude_title("bash", true, true, None);
+        assert!(r.exited);
+        assert_eq!(
+            r.task_completed,
+            Some("Claude Code task completed".to_string())
+        );
+    }
+
+    #[test]
+    fn process_idle_to_exit_no_task_completion() {
+        // Claude exited from idle state (✳). No working phase to complete.
+        let r = process_claude_title("bash", true, false, Some("\u{2736} Old task"));
+        assert!(r.exited);
+        assert!(r.task_completed.is_none());
     }
 
     #[test]
