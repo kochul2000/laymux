@@ -1219,6 +1219,77 @@ describe("TerminalView", () => {
     expect(mockClipboardWriteText).not.toHaveBeenCalled();
   });
 
+  // -- Issue #230: drag ending outside the terminal still copies selection --
+
+  it("auto-copies when drag starts in terminal and pointerup fires on window (outside)", async () => {
+    // Reproduces #230: user drags inside the terminal, pointer leaves the
+    // terminal DOM (or even the browser), and the drag ends outside. The
+    // onSelectionChange path may miss the final confirmation, so a
+    // pointerdown→window-pointerup watcher guarantees the copy happens.
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+    });
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("dragged outside text");
+
+    render(<TerminalView instanceId="t-drag-outside" profile="PowerShell" syncGroup="" />);
+
+    // Wait for terminal.open() → ResizeObserver path to settle. The test
+    // harness resolves ResizeObserver asynchronously, but the pointerdown
+    // listener is attached synchronously in the main effect, so we can
+    // dispatch immediately on the outer container.
+    const outer = screen.getByTestId("terminal-view-t-drag-outside");
+
+    // Simulate drag start inside the terminal.
+    outer.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    // Clear any copies triggered by onSelectionChange during the drag.
+    mockClipboardWriteText.mockClear();
+
+    // Drag ends outside — pointerup fires on window, not the terminal.
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(mockClipboardWriteText).toHaveBeenCalledWith("dragged outside text");
+    });
+  });
+
+  it("does not copy on window pointerup without a preceding pointerdown in the terminal", async () => {
+    // Guard: an unrelated pointerup anywhere on the page must not copy.
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+    });
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("unrelated selection");
+
+    render(<TerminalView instanceId="t-drag-guard" profile="PowerShell" syncGroup="" />);
+
+    // No pointerdown on the terminal → nothing should be listening for pointerup.
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+
+    // onSelectionChange path is independent; this guard only asserts the
+    // pointerup-driven copy doesn't fire spuriously.
+    expect(mockClipboardWriteText).not.toHaveBeenCalledWith("unrelated selection");
+  });
+
+  it("does not copy on pointerup when copyOnSelect is disabled", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: false },
+    });
+    mockHasSelection.mockReturnValue(true);
+    mockGetSelection.mockReturnValue("ignored text");
+
+    render(<TerminalView instanceId="t-drag-off" profile="PowerShell" syncGroup="" />);
+    const outer = screen.getByTestId("terminal-view-t-drag-off");
+
+    outer.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+
+    expect(mockClipboardWriteText).not.toHaveBeenCalled();
+  });
+
   // -- Hide mouse cursor on typing --
 
   it("hides mouse cursor when typing in terminal (onKey)", async () => {
