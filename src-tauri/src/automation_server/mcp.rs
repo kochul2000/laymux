@@ -54,11 +54,11 @@ struct WriteTerminalParam {
     /// (important for Windows paths like `C:\new\tmp`).
     #[serde(default)]
     escape: bool,
-    /// When true, append CR (\\r) after data to simulate pressing Enter.
-    /// Works regardless of `escape` setting. Use this instead of manually
-    /// adding `\\r` to data — it reliably submits in all environments
-    /// (PowerShell, bash, Claude Code, Codex, etc.).
-    #[serde(default)]
+    /// When true (default), append CR (\\r) after data to simulate pressing
+    /// Enter — reliably submits in PowerShell, bash, Claude Code, Codex, etc.
+    /// Set to `false` to type without submitting (e.g. inserting text mid-line
+    /// in vim, composing a multi-line prompt). Works regardless of `escape`.
+    #[serde(default = "default_true")]
     enter: bool,
 }
 
@@ -73,9 +73,14 @@ struct WriteToNeighborParam {
     /// When true, C-style escape sequences are converted (same as write_to_terminal).
     #[serde(default)]
     escape: bool,
-    /// When true, append CR after data to simulate Enter.
-    #[serde(default)]
+    /// When true (default), append CR after data to simulate Enter. Set to
+    /// `false` to type without submitting. See `write_to_terminal` for details.
+    #[serde(default = "default_true")]
     enter: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -734,8 +739,11 @@ impl McpHandler {
             .await
     }
 
-    /// Send input to a terminal (like typing). Use `\\r` to submit (Enter).
-    /// For interactive TUI apps (Claude Code, vim), `\\r` submits the prompt.
+    /// Send input to a terminal. By default the input is submitted (Enter key)
+    /// after sending — suitable for running commands or replying to TUI prompts
+    /// (Claude Code, Codex, REPLs). Pass `enter: false` to type without
+    /// submitting (e.g. inserting text mid-line in vim, composing a multi-line
+    /// prompt before a manual submit).
     /// Set `escape` to true for C-style sequences: `\\r` for Enter, `\\n` for
     /// newline, `\\u0003` for Ctrl+C. Leave `escape` false for literal text
     /// (preserves backslashes in Windows paths like `C:\\Users`).
@@ -758,7 +766,8 @@ impl McpHandler {
 
     /// Write to a neighboring pane by direction. Combines identify_caller + write_to_terminal
     /// in a single call. Pass your own terminal_id (from $LX_TERMINAL_ID) and the direction
-    /// of the neighbor you want to send to.
+    /// of the neighbor you want to send to. Like `write_to_terminal`, input is
+    /// submitted by default; pass `enter: false` to type without submitting.
     #[tool]
     async fn write_to_neighbor(
         &self,
@@ -1916,6 +1925,52 @@ mod tests {
         let json = r#"{"terminal_id":"t1","data":"hello"}"#;
         let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
         assert!(!p.escape);
+    }
+
+    #[test]
+    fn write_terminal_enter_defaults_to_true() {
+        // enter 필드를 생략하면 자동으로 Enter 제출이 기본 — 대부분의 MCP 호출
+        // 의도(= 프롬프트 제출)와 일치시키기 위함.
+        let json = r#"{"terminal_id":"t1","data":"hello"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(p.enter, "enter must default to true");
+    }
+
+    #[test]
+    fn write_terminal_enter_can_be_disabled() {
+        let json = r#"{"terminal_id":"t1","data":"hello","enter":false}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(!p.enter);
+    }
+
+    #[test]
+    fn write_to_neighbor_enter_defaults_to_true() {
+        let json = r#"{"terminal_id":"t1","direction":"right","data":"hello"}"#;
+        let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
+        assert!(
+            p.enter,
+            "enter must default to true for neighbor writes too"
+        );
+    }
+
+    #[test]
+    fn write_to_neighbor_enter_can_be_disabled() {
+        let json = r#"{"terminal_id":"t1","direction":"right","data":"hello","enter":false}"#;
+        let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
+        assert!(!p.enter);
+    }
+
+    #[test]
+    fn prepare_input_default_flags_submit_plain_text() {
+        // 기본 플래그 조합(escape=false, enter=true)에서 평문 뒤에 CR이 붙는지 확인.
+        let out = McpHandler::prepare_input("ls", false, true);
+        assert_eq!(out, "ls\r");
+    }
+
+    #[test]
+    fn prepare_input_enter_false_does_not_append_cr() {
+        let out = McpHandler::prepare_input("ls", false, false);
+        assert_eq!(out, "ls");
     }
 
     #[test]
