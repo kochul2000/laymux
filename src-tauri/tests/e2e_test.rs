@@ -2406,4 +2406,24 @@ mod mcp_bridge_wiring {
         assert_eq!(EVENT_WORKSPACE_STATE_CHANGED, "workspace-state-changed");
         assert_eq!(EVENT_TERMINALS_LIST_CHANGED, "terminals-list-changed");
     }
+
+    #[test]
+    fn resource_bridge_uses_tauri_async_runtime_spawn() {
+        // Tauri event listener callbacks are invoked on threads that may not
+        // have an active Tokio runtime (see crash: "there is no reactor
+        // running, must be called from the context of a Tokio 1.x runtime"
+        // at mcp_resources.rs, 0.3.0). Using `tokio::spawn` there panics —
+        // force the bridge to go through `tauri::async_runtime::spawn`, which
+        // holds its own runtime handle and is safe from any thread.
+        let src = read("src/automation_server/mcp_resources.rs");
+        assert!(
+            !src.contains("tokio::spawn("),
+            "mcp_resources.rs must not call tokio::spawn directly — listener callbacks can run \
+             off the Tokio runtime and panic. Use tauri::async_runtime::spawn instead."
+        );
+        assert!(
+            src.contains("tauri::async_runtime::spawn"),
+            "mcp_resources.rs must dispatch peer notifications via tauri::async_runtime::spawn"
+        );
+    }
 }

@@ -1968,7 +1968,7 @@ dependencies = [
 
 [[package]]
 name = "laymux"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "clipboard-win",

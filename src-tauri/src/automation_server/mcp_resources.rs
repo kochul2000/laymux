@@ -339,6 +339,10 @@ pub fn terminal_id_from_event(payload: &str) -> Option<String> {
 /// Fan out a `notifications/resources/list_changed` to every connected peer.
 /// The MCP spec makes `list_changed` a connection-wide broadcast, not a
 /// per-URI subscription, so the registry's peer list is used directly.
+///
+/// Uses `tauri::async_runtime::spawn` rather than `tokio::spawn` because this
+/// is invoked from Tauri event listener callbacks, which can run on threads
+/// without an active Tokio runtime context.
 fn notify_list_changed(registry: &SharedSubscriptionRegistry) {
     let targets = match registry.lock_or_err() {
         Ok(g) => g.all_peers(),
@@ -350,7 +354,7 @@ fn notify_list_changed(registry: &SharedSubscriptionRegistry) {
     if targets.is_empty() {
         return;
     }
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         for (peer_id, peer) in targets {
             if let Err(e) = peer.notify_resource_list_changed().await {
                 tracing::debug!(
@@ -377,7 +381,7 @@ fn notify_uri(registry: &SharedSubscriptionRegistry, uri: &str) {
         return;
     }
     let uri_owned = uri.to_string();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         for (peer_id, peer) in targets {
             let param = ResourceUpdatedNotificationParam::new(uri_owned.clone());
             if let Err(e) = peer.notify_resource_updated(param).await {
