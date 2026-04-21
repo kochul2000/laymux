@@ -1537,6 +1537,17 @@ export function TerminalView({
         }
       }
       fitAddonRef.current?.fit();
+      // xterm's WebGL renderer caches glyphs in a texture atlas keyed on the
+      // previous cell dimensions. When fontSize / fontFamily change, fit()
+      // re-measures the cells but the atlas still holds stale glyphs, which
+      // manifests as text clustering to the left of each row (issue #224).
+      // Clearing the atlas after fit() forces a full re-rasterise at the new
+      // cell size. Safe no-op if the WebGL renderer is not active.
+      try {
+        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+      } catch {
+        /* older xterm builds / mocks may lack this method */
+      }
       term.refresh(0, term.rows - 1);
     } catch {
       /* xterm mock may not support options setter */
@@ -1550,6 +1561,46 @@ export function TerminalView({
     nativeCursorHidden,
     stabilizeInteractiveCursor,
   ]);
+
+  // Browser zoom / monitor DPR changes invalidate the WebGL texture atlas:
+  // the renderer rasterises glyphs at a resolution tied to the current
+  // devicePixelRatio, and a stale atlas after zoom leaves characters drawn
+  // at the old pixel size, collapsing to the left side of each cell
+  // (issue #224). `window.matchMedia` with a resolution query fires whenever
+  // DPR changes, at which point we re-fit and force the atlas to rebuild.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    let mql: MediaQueryList | null = null;
+    let cancelled = false;
+    const onChange = () => {
+      if (cancelled) return;
+      const term = terminalRef.current;
+      if (!term) return;
+      try {
+        fitAddonRef.current?.fit();
+        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+        term.refresh(0, term.rows - 1);
+      } catch {
+        /* addon/renderer may not be active yet */
+      }
+      // Re-subscribe to the NEW ratio so the listener keeps firing on
+      // subsequent zoom steps. matchMedia with a fixed resolution only
+      // fires once per crossing of its threshold.
+      attach();
+    };
+    const attach = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const query = `(resolution: ${dpr}dppx)`;
+      mql?.removeEventListener?.("change", onChange);
+      mql = window.matchMedia(query);
+      mql.addEventListener?.("change", onChange);
+    };
+    attach();
+    return () => {
+      cancelled = true;
+      mql?.removeEventListener?.("change", onChange);
+    };
+  }, []);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
   const scrollbarStyleForEffect = useSettingsStore(
