@@ -103,6 +103,21 @@ pub struct ClaudeTitleResult {
 /// frequently returns to the generic idle title on completion, so without
 /// the fallback most working→idle notifications would show a placeholder
 /// instead of the actual task name.
+///
+/// ## `was_detected` contract
+///
+/// `entered` fires only when the title literally contains `"Claude Code"`
+/// (intentionally strict — a bare `✶` or Braille spinner also matches
+/// unrelated TUI apps). For command-text detection (e.g. the frontend
+/// observing `claude` via OSC 133;E and calling `mark_claude_terminal`),
+/// the caller MUST resolve `was_detected=true` before the first title
+/// arrives — see `resolve_claude_detected` in `commands/terminal.rs`.
+/// Once `was_detected=true` the spinner-only path works correctly:
+/// `detected = was_detected || entered = true`, the working/idle block
+/// runs, and the subsequent ✳ idle emits the expected completion. The
+/// regression guards `process_spinner_only_with_was_detected_enters_session`
+/// and `process_working_plain_idle_sequence_no_spurious_completion` lock
+/// this behavior in.
 pub fn process_claude_title(
     title: &str,
     was_detected: bool,
@@ -459,5 +474,116 @@ mod tests {
         assert!(!r.in_claude_session);
         assert!(!r.entered);
         assert!(!r.exited);
+    }
+
+    #[test]
+    fn process_spinner_only_with_was_detected_enters_session() {
+        // Simulates the post-`resolve_claude_detected` path for a command-
+        // detected session whose very first title is a spinner-only title
+        // (e.g. "✶ Task" / Braille "⠋ Working"). `was_detected=true` was
+        // already synced from `known_claude_terminals`, so this call must
+        // register working state even though the title does not contain
+        // "Claude Code" literally. Without this path, a command-detected
+        // session would silently skip working tracking and miss the later
+        // working→idle completion notification.
+        let r = process_claude_title("\u{2736} Task", true, false, None);
+        assert!(
+            r.in_claude_session,
+            "command-detected session's first spinner title must enter session tracking"
+        );
+        assert!(r.now_working);
+        assert!(!r.now_idle);
+        assert!(!r.entered);
+        assert!(!r.exited);
+    }
+
+    #[test]
+    fn process_braille_spinner_with_was_detected_enters_session() {
+        // Braille variant of the previous test — Claude Code uses Braille
+        // patterns for its spinner animation.
+        let r = process_claude_title("\u{280B} Working", true, false, None);
+        assert!(r.in_claude_session);
+        assert!(r.now_working);
+    }
+
+    #[test]
+    fn process_working_plain_idle_sequence_no_spurious_completion() {
+        // End-to-end regression guard for the "working → plain → idle"
+        // sequence. Simulates what the PTY callback does: after each call,
+        // it writes `claude_was_working = cr.now_working` and clears
+        // `claude_last_working_title` when the current title is not
+        // working. If Bug #1's fix regressed, step 2 would leave
+        // was_working stuck at true, and step 3 would emit a false
+        // "task completed" notification.
+
+        // Step 1: working spinner
+        let r1 = process_claude_title("\u{2736} Fix bug", true, false, None);
+        assert!(r1.now_working);
+        assert!(r1.in_claude_session);
+        // Simulated caller state after step 1:
+        let was_working_after_1 = r1.now_working; // true
+        let prev_title_after_1 = if r1.now_working {
+            Some("\u{2736} Fix bug".to_string())
+        } else {
+            None
+        };
+
+        // Step 2: plain "Claude Code" (no spinner, no ✳)
+        let r2 = process_claude_title(
+            "Claude Code",
+            true,
+            was_working_after_1,
+            prev_title_after_1.as_deref(),
+        );
+        assert!(
+            r2.in_claude_session,
+            "plain title must signal state refresh so was_working resets"
+        );
+        assert!(!r2.now_working);
+        assert!(!r2.now_idle);
+        assert!(r2.task_completed.is_none());
+        // Simulated caller state after step 2:
+        let was_working_after_2 = r2.now_working; // false — reset!
+        let prev_title_after_2: Option<String> = if r2.now_working {
+            Some("Claude Code".to_string())
+        } else {
+            None // cleared because plain isn't a working title
+        };
+
+        // Step 3: idle ✳
+        let r3 = process_claude_title(
+            "\u{2733} Claude Code",
+            true,
+            was_working_after_2,
+            prev_title_after_2.as_deref(),
+        );
+        assert!(r3.now_idle);
+        assert!(
+            r3.task_completed.is_none(),
+            "step 2 reset was_working, so the idle transition must NOT emit a completion"
+        );
+    }
+
+    #[test]
+    fn process_working_to_idle_direct_still_fires_completion() {
+        // Sanity counter-test: without a plain title in the middle, the
+        // normal working→idle path still produces a completion. This
+        // guards against over-aggressive fixes that would suppress valid
+        // completions alongside spurious ones.
+        let r1 = process_claude_title("\u{2736} Fix bug", true, false, None);
+        assert!(r1.now_working);
+
+        let r2 = process_claude_title(
+            "\u{2733} Claude Code",
+            true,
+            r1.now_working,
+            Some("\u{2736} Fix bug"),
+        );
+        assert!(r2.now_idle);
+        assert_eq!(
+            r2.task_completed,
+            Some("Fix bug".to_string()),
+            "direct working→idle must still emit the completion"
+        );
     }
 }
