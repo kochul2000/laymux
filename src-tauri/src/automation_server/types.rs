@@ -112,6 +112,21 @@ pub struct MarkReadBody {
     pub workspace_id: String,
 }
 
+/// Body for `DELETE /api/v1/notifications`.
+///
+/// Provide exactly one of `ids` or `before`. When `before` is set, `read_only`
+/// controls whether only already-read notifications are cleared.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearNotificationsBody {
+    #[serde(default)]
+    pub ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub before: Option<u64>,
+    #[serde(default)]
+    pub read_only: Option<bool>,
+}
+
 #[derive(Deserialize)]
 pub struct FocusTerminalBody {
     pub id: String,
@@ -158,6 +173,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/terminals/{id}/output"),
     ("GET", "/api/v1/notifications"),
     ("POST", "/api/v1/notifications"),
+    ("DELETE", "/api/v1/notifications"),
     ("POST", "/api/v1/notifications/mark-read"),
     ("GET", "/api/v1/workspaces/{id}/summary"),
     ("POST", "/api/v1/terminals/{id}/focus"),
@@ -278,5 +294,32 @@ mod tests {
         let json = r#"{"id":"terminal-1"}"#;
         let body: FocusTerminalBody = serde_json::from_str(json).unwrap();
         assert_eq!(body.id, "terminal-1");
+    }
+
+    #[test]
+    fn clear_notifications_body_ids() {
+        let json = r#"{"ids":["notif-1","notif-2"]}"#;
+        let body: ClearNotificationsBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.ids.as_deref().unwrap().len(), 2);
+        assert!(body.before.is_none());
+        assert!(body.read_only.is_none());
+    }
+
+    #[test]
+    fn clear_notifications_body_before_camel_case_read_only() {
+        let json = r#"{"before":1776000000000,"readOnly":true}"#;
+        let body: ClearNotificationsBody = serde_json::from_str(json).unwrap();
+        assert!(body.ids.is_none());
+        assert_eq!(body.before, Some(1776000000000));
+        assert_eq!(body.read_only, Some(true));
+    }
+
+    #[test]
+    fn clear_notifications_body_empty() {
+        let json = "{}";
+        let body: ClearNotificationsBody = serde_json::from_str(json).unwrap();
+        assert!(body.ids.is_none());
+        assert!(body.before.is_none());
+        assert!(body.read_only.is_none());
     }
 }

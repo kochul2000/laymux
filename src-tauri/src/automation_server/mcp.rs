@@ -151,6 +151,22 @@ struct ListNotificationsParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ClearNotificationsParam {
+    /// Specific notification IDs to clear. Mutually exclusive with `before`.
+    #[serde(default)]
+    ids: Option<Vec<String>>,
+    /// Clear notifications created strictly before this epoch ms.
+    /// Mutually exclusive with `ids`.
+    #[serde(default)]
+    before: Option<u64>,
+    /// Combined with `before`: when true, only already-read notifications
+    /// (readAt != null) older than the timestamp are cleared. Unread older
+    /// notifications are preserved. Ignored when `ids` is used. Default false.
+    #[serde(default)]
+    read_only: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SearchOutputParam {
     /// Terminal ID
     terminal_id: String,
@@ -1314,6 +1330,55 @@ impl McpHandler {
         .await
     }
 
+    /// Clear notifications by ID list or before a timestamp.
+    /// Provide exactly one of `ids` or `before`. When using `before`, set
+    /// `read_only=true` to preserve older unread notifications. Returns the
+    /// number of notifications actually cleared.
+    #[tool]
+    async fn clear_notifications(
+        &self,
+        Parameters(p): Parameters<ClearNotificationsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let has_ids = p.ids.is_some();
+        let has_before = p.before.is_some();
+        if has_ids == has_before {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Provide exactly one of 'ids' or 'before'",
+            )]));
+        }
+        let ids_count = p.ids.as_ref().map(|v| v.len());
+        let before = p.before;
+        let read_only = p.read_only.unwrap_or(false);
+
+        let mut params = json!({});
+        if let Some(ids) = p.ids {
+            params["ids"] = json!(ids);
+        }
+        if let Some(before) = p.before {
+            params["before"] = json!(before);
+        }
+        if let Some(read_only) = p.read_only {
+            params["readOnly"] = json!(read_only);
+        }
+        match self
+            .bridge_raw("action", "notifications", "clear", params)
+            .await
+        {
+            Ok(data) => {
+                let cleared = data.get("cleared").and_then(|v| v.as_u64()).unwrap_or(0);
+                tracing::info!(
+                    cleared,
+                    ids_count = ?ids_count,
+                    before = ?before,
+                    read_only,
+                    "notifications.clear (MCP)"
+                );
+                Ok(json_result(&data))
+            }
+            Err(e) => Ok(e),
+        }
+    }
+
     /// Create a notification in the IDE. terminal_id and workspace_id are optional —
     /// omit both for a global notification on the active workspace.
     #[tool]
@@ -1569,7 +1634,7 @@ impl ServerHandler for McpHandler {
                  - Which workspace you are in (id, name, whether it is active)\n\
                  - Your pane position in the grid (x, y, w, h as 0-1 normalized coordinates, pane index)\n\
                  - Neighboring panes (left, right, above, below) and their terminal IDs\n\
-                 - Your terminal metadata (cwd, branch, activity state)\n\n\
+                 - Your terminal metadata (cwd, activity state)\n\n\
                  ## Other env vars\n\
                  - LX_AUTOMATION_PORT: The port this MCP server runs on\n\
                  - LX_GROUP_ID: Your sync group (terminals in the same group share CWD)\n\n\

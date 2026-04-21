@@ -156,6 +156,12 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "workspaceId": "string" }
             },
             {
+                "method": "DELETE", "path": "/api/v1/notifications",
+                "description": "Clear notifications by ID list or by age. Provide exactly one of 'ids' or 'before'. With 'before', set 'readOnly' to preserve older unread items.",
+                "body": { "ids": "(optional) string[] — specific notification IDs to clear", "before": "(optional) number — epoch ms; clears notifications older than this", "readOnly": "(optional) boolean — with 'before', clear only already-read notifications" },
+                "response": "{ cleared: number }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/workspaces/{id}/summary",
                 "description": "Get aggregated workspace summary: branch, cwd, ports, unreadCount, latestNotification, hasUnread.",
                 "response": "{ summary: { workspaceId, branch, cwd, ports, unreadCount, latestNotification, hasUnread } }"
