@@ -232,12 +232,9 @@ pub fn create_terminal_session(
 
         // ── DEC 2026 burst detection: sustained TUI activity ──
         // See activity::BurstDetector for sliding window + throttle logic.
-        if data.len() >= DEC_SYNC_OUTPUT_SET.len()
-            && data
-                .windows(DEC_SYNC_OUTPUT_SET.len())
-                .any(|w| w == DEC_SYNC_OUTPUT_SET)
-            && pty_cb_state.burst_detector.record_hit()
-        {
+        // The scanner carries a 7-byte tail across calls so markers straddling
+        // PTY chunk boundaries are still detected (see #232).
+        if pty_cb_state.scan_dec_sync_marker(&data) && pty_cb_state.burst_detector.record_hit() {
             let _ = app_clone.emit(
                 EVENT_TERMINAL_OUTPUT_ACTIVITY,
                 serde_json::json!({ "terminalId": terminal_id }),

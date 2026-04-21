@@ -374,11 +374,140 @@ impl BurstDetector {
     }
 }
 
+// ── Boundary-safe marker scanner ──
+
+/// Scans streamed byte chunks for a fixed-length marker, correctly detecting
+/// the marker even when it straddles chunk boundaries in PTY callback streams.
+///
+/// PTY callbacks do not guarantee byte-aligned chunks, so a marker like
+/// `\x1b[?2026h` (DEC Synchronized Output set) may be split between two
+/// callback invocations — e.g. chunk A ends with `...\x1b[?20` and chunk B
+/// begins with `26h...`. A naive `windows(N).any(...)` on each chunk misses
+/// such splits entirely.
+///
+/// `MarkerTailScanner` keeps the last `N - 1` bytes of the previous chunk in
+/// an internal tail buffer and prepends them to the next chunk before
+/// scanning. The tail buffer length is bounded by `N - 1` so the overhead is
+/// a constant `N + chunk_len` bytes per call.
+///
+/// Contract:
+/// - Returns `true` if the marker appears at least once across the combined
+///   `tail || data` slice. Multiple occurrences within a single call still
+///   return `true` exactly once — callers treat the return value as a
+///   "marker seen?" flag, matching the previous `windows().any()` semantics
+///   and preventing double-counting within the same callback invocation.
+/// - On each call, the tail is refreshed to the last `min(N - 1, total_len)`
+///   bytes of the combined slice (total_len = tail_len + data.len()) so the
+///   next chunk can complete any marker that was left mid-sequence.
+/// - The scanner keeps no allocation across calls; the tail is a fixed-size
+///   array and `data` is borrowed.
+pub struct MarkerTailScanner<const N: usize> {
+    marker: &'static [u8],
+    tail: [u8; N],
+    tail_len: usize,
+}
+
+impl<const N: usize> MarkerTailScanner<N> {
+    /// Construct a scanner for the given marker. The marker's length must equal
+    /// `N`; otherwise scanning is a no-op that always returns `false`.
+    ///
+    /// `N` is the tail-buffer capacity and is expected to equal the marker
+    /// length. We only need to retain `N - 1` bytes of tail to catch splits,
+    /// but allocating `N` keeps the `tail` array size identical to the marker
+    /// length and simplifies const-generic bookkeeping.
+    pub const fn new(marker: &'static [u8]) -> Self {
+        Self {
+            marker,
+            tail: [0u8; N],
+            tail_len: 0,
+        }
+    }
+
+    /// Scan `data` for the marker, honoring any tail carried from a previous
+    /// call. Updates the tail to the last `min(N - 1, combined_len)` bytes of
+    /// the combined slice so a boundary-split marker is detected on the next
+    /// call.
+    pub fn scan(&mut self, data: &[u8]) -> bool {
+        let marker_len = self.marker.len();
+        if marker_len == 0 || marker_len != N {
+            return false;
+        }
+
+        let tail_retain = marker_len - 1; // bytes we must keep for the next call
+        let combined_len = self.tail_len + data.len();
+
+        // Build the combined slice. Fast path: if no tail, scan `data` directly.
+        let hit = if self.tail_len == 0 {
+            combined_len >= marker_len && data.windows(marker_len).any(|w| w == self.marker)
+        } else {
+            // Allocate a small stack buffer (2N capacity: previous tail + new tail-scan window).
+            // We only need to scan the region that includes the boundary: tail + first
+            // (marker_len - 1) bytes of data. Anything further into `data` is covered by
+            // scanning `data` on its own.
+            let mut boundary = [0u8; 32]; // N is small (≤16 for DEC 2026); guard for larger markers
+            let scan_prefix_len = tail_retain.min(data.len());
+            let boundary_len = self.tail_len + scan_prefix_len;
+            if boundary_len <= boundary.len() {
+                boundary[..self.tail_len].copy_from_slice(&self.tail[..self.tail_len]);
+                boundary[self.tail_len..boundary_len].copy_from_slice(&data[..scan_prefix_len]);
+                let boundary_hit = boundary_len >= marker_len
+                    && boundary[..boundary_len]
+                        .windows(marker_len)
+                        .any(|w| w == self.marker);
+                let data_hit =
+                    data.len() >= marker_len && data.windows(marker_len).any(|w| w == self.marker);
+                boundary_hit || data_hit
+            } else {
+                // Fallback for unusually large markers: heap-allocate the combined slice.
+                let mut combined = Vec::with_capacity(boundary_len);
+                combined.extend_from_slice(&self.tail[..self.tail_len]);
+                combined.extend_from_slice(&data[..scan_prefix_len]);
+                let boundary_hit = combined.windows(marker_len).any(|w| w == self.marker);
+                let data_hit =
+                    data.len() >= marker_len && data.windows(marker_len).any(|w| w == self.marker);
+                boundary_hit || data_hit
+            }
+        };
+
+        // Refresh the tail to the last `tail_retain` bytes of the combined stream.
+        // This ensures the NEXT call's boundary scan covers any marker that just
+        // began at the end of this call.
+        let new_tail_len = tail_retain.min(combined_len);
+        if new_tail_len == 0 {
+            self.tail_len = 0;
+        } else if new_tail_len <= data.len() {
+            // All new tail bytes come from the end of `data`.
+            let start = data.len() - new_tail_len;
+            self.tail[..new_tail_len].copy_from_slice(&data[start..]);
+            self.tail_len = new_tail_len;
+        } else {
+            // Some bytes from the previous tail must also be retained.
+            // Layout of the combined buffer: [prev_tail (tail_len)] [data (data.len())]
+            // new_tail_len > data.len(), so we keep the last `(new_tail_len - data.len())`
+            // bytes of prev_tail followed by all of `data`.
+            let from_prev = new_tail_len - data.len();
+            let prev_start = self.tail_len - from_prev;
+            // Copy prev-tail suffix to a scratch slot first to avoid aliasing.
+            let mut scratch = [0u8; N];
+            scratch[..from_prev].copy_from_slice(&self.tail[prev_start..self.tail_len]);
+            scratch[from_prev..new_tail_len].copy_from_slice(data);
+            self.tail[..new_tail_len].copy_from_slice(&scratch[..new_tail_len]);
+            self.tail_len = new_tail_len;
+        }
+
+        hit
+    }
+}
+
 /// Bundled per-terminal state captured by the PTY callback closure.
 /// Groups individual `Arc<Atomic*>` fields into a single `Arc<PtyCallbackState>`.
 pub struct PtyCallbackState {
     pub claude_detected: AtomicBool,
     pub burst_detector: BurstDetector,
+    /// Boundary-aware DEC 2026 marker scanner. Mutex because `scan` mutates
+    /// the internal tail, while the enclosing `PtyCallbackState` is shared
+    /// via `Arc` across the PTY callback closure.
+    dec_sync_scanner: std::sync::Mutex<MarkerTailScanner<8>>,
 }
 
 impl PtyCallbackState {
@@ -386,6 +515,27 @@ impl PtyCallbackState {
         Self {
             claude_detected: AtomicBool::new(false),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
+            dec_sync_scanner: std::sync::Mutex::new(MarkerTailScanner::new(
+                crate::constants::DEC_SYNC_OUTPUT_SET,
+            )),
+        }
+    }
+
+    /// Scan `data` for DEC 2026 Synchronized Output set markers, correctly
+    /// handling markers split across PTY chunk boundaries.
+    ///
+    /// Returns `true` if a marker was seen in the combined `previous_tail ||
+    /// data` stream. Caller feeds the result into `burst_detector.record_hit()`
+    /// at most once per callback invocation, preserving the original
+    /// "one hit per callback" accounting.
+    ///
+    /// On lock poisoning the scanner is skipped (returns `false`) — the old
+    /// behavior silently missed all hits too, so this is no worse and avoids
+    /// leaking a poisoned-lock panic into the PTY thread.
+    pub fn scan_dec_sync_marker(&self, data: &[u8]) -> bool {
+        match self.dec_sync_scanner.lock() {
+            Ok(mut scanner) => scanner.scan(data),
+            Err(_) => false,
         }
     }
 }
@@ -641,5 +791,139 @@ mod tests {
         assert!(!detector.record_hit());
         assert!(detector.record_hit()); // 2nd → emit
         assert!(detector.record_hit()); // still above threshold, 0ms throttle → emit again
+    }
+
+    // ── MarkerTailScanner: boundary-split DEC 2026 detection ──
+    //
+    // Regression cover for #232: PTY chunks are not byte-aligned so
+    // `\x1b[?2026h` may be split across successive callback invocations. The
+    // scanner must detect the marker regardless of where the split falls.
+
+    use crate::constants::DEC_SYNC_OUTPUT_SET;
+
+    #[test]
+    fn scanner_detects_marker_inside_single_chunk() {
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(scanner.scan(b"prefix\x1b[?2026hsuffix"));
+    }
+
+    #[test]
+    fn scanner_no_false_positive_in_plain_text() {
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"total 42\ndrwxr-xr-x  2 user user 4096\n"));
+    }
+
+    #[test]
+    fn scanner_detects_marker_split_at_exact_midpoint() {
+        // `\x1b[?2026h` is 8 bytes; split 4|4 — neither half is long enough to
+        // contain the marker, so without the tail buffer the hit would be lost.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"padding\x1b[?2")); // prefix + first half
+        assert!(scanner.scan(b"026hmore")); // second half + trailing bytes
+    }
+
+    #[test]
+    fn scanner_detects_marker_split_at_start_boundary() {
+        // Marker is the final byte of chunk 1 and the remaining 7 bytes of chunk 2.
+        // Without a 7-byte tail, the 1-byte suffix of chunk 1 is discarded and the
+        // next chunk's `[?2026h` misses the leading ESC.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"hello\x1b"));
+        assert!(scanner.scan(b"[?2026h"));
+    }
+
+    #[test]
+    fn scanner_detects_marker_split_at_end_boundary() {
+        // Chunk 1 ends with the full 7-byte prefix of the marker; chunk 2 starts
+        // with the final byte `h`.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"world\x1b[?2026"));
+        assert!(scanner.scan(b"h after"));
+    }
+
+    #[test]
+    fn scanner_single_hit_per_call_regardless_of_count() {
+        // Preserve the old `windows().any()` semantics: multiple markers in the
+        // same chunk still report as a single hit so `record_hit()` is called
+        // at most once per PTY callback.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(scanner.scan(b"\x1b[?2026h\x1b[?2026h\x1b[?2026h"));
+    }
+
+    #[test]
+    fn scanner_does_not_double_count_across_boundary_and_body() {
+        // Marker split across a boundary AND a second full marker later in
+        // chunk 2. The scanner reports one hit; the caller still invokes
+        // `record_hit()` once, matching pre-fix behavior.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"pad\x1b[?20"));
+        assert!(scanner.scan(b"26h middle \x1b[?2026h tail"));
+    }
+
+    #[test]
+    fn scanner_no_hit_when_no_marker_across_chunks() {
+        // Tail retention must not fabricate hits when neither chunk nor their
+        // combination contains the marker.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b"abcdefg"));
+        assert!(!scanner.scan(b"hijklmn"));
+        assert!(!scanner.scan(b"\x1b[?202xx")); // close but wrong byte
+    }
+
+    #[test]
+    fn scanner_handles_tiny_chunks_sequentially() {
+        // Feed the marker one byte at a time — exercises the tail-growing code
+        // path where `data.len() < tail_retain` and some prev-tail bytes must
+        // be retained for the next call.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        let marker = DEC_SYNC_OUTPUT_SET;
+        for (i, b) in marker.iter().enumerate() {
+            let hit = scanner.scan(std::slice::from_ref(b));
+            if i < marker.len() - 1 {
+                assert!(!hit, "unexpected hit after {} bytes", i + 1);
+            } else {
+                assert!(hit, "missing hit on final byte of marker");
+            }
+        }
+    }
+
+    #[test]
+    fn scanner_handles_empty_chunk() {
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(!scanner.scan(b""));
+        // Empty chunk must not clobber a partial tail from the previous call.
+        assert!(!scanner.scan(b"\x1b[?202"));
+        assert!(!scanner.scan(b""));
+        assert!(scanner.scan(b"6h"));
+    }
+
+    #[test]
+    fn scanner_detects_consecutive_markers_across_splits() {
+        // Two markers with the second straddling the boundary.
+        let mut scanner = MarkerTailScanner::<8>::new(DEC_SYNC_OUTPUT_SET);
+        assert!(scanner.scan(b"\x1b[?2026h frame1 \x1b[?2")); // first complete, second partial
+        assert!(scanner.scan(b"026h frame2 done")); // completes second
+    }
+
+    #[test]
+    fn pty_callback_state_scan_preserves_tail_across_calls() {
+        // Integration-style test against `PtyCallbackState::scan_dec_sync_marker`
+        // — the actual entry point invoked by the PTY callback.
+        let state = PtyCallbackState::new(2000, 3, 1000);
+        assert!(!state.scan_dec_sync_marker(b"noise\x1b[?20"));
+        assert!(state.scan_dec_sync_marker(b"26h more"));
+    }
+
+    #[test]
+    fn pty_callback_state_scan_single_hit_matches_burst_accounting() {
+        // The original `windows().any()` returned at most a single `true` per
+        // callback, so `burst_detector.record_hit()` was called at most once.
+        // The new scanner must keep that contract even when a boundary-split
+        // marker AND an in-body marker both occur in the second chunk.
+        let state = PtyCallbackState::new(2000, 3, 1000);
+        assert!(!state.scan_dec_sync_marker(b"head\x1b[?"));
+        // Chunk 2 completes the split marker AND contains another full marker.
+        // Caller calls `record_hit()` once — treat as single hit.
+        assert!(state.scan_dec_sync_marker(b"2026h middle \x1b[?2026h"));
     }
 }
