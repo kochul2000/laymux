@@ -32,6 +32,7 @@ const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
   callback?.();
 });
 const mockRefresh = vi.fn();
+const mockClearTextureAtlas = vi.fn();
 const mockRegisterCsiHandler = vi.fn();
 const mockRegisterOscHandler = vi.fn();
 const mockRegisterEscHandler = vi.fn();
@@ -79,6 +80,7 @@ vi.mock("@xterm/xterm", () => ({
     getSelection = mockGetSelection;
     clearSelection = mockClearSelection;
     refresh = mockRefresh;
+    clearTextureAtlas = mockClearTextureAtlas;
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
@@ -1311,7 +1313,12 @@ describe("TerminalView", () => {
 
   it("does not zoom when the key is pressed without Ctrl", async () => {
     render(
-      <TerminalView instanceId="t-zoom-nomod" paneId="pane-zoom-nomod" profile="PowerShell" syncGroup="" />,
+      <TerminalView
+        instanceId="t-zoom-nomod"
+        paneId="pane-zoom-nomod"
+        profile="PowerShell"
+        syncGroup=""
+      />,
     );
 
     // ctrlKey false → xterm이 처리하도록 통과, override 그대로.
@@ -1326,7 +1333,12 @@ describe("TerminalView", () => {
     useOverridesStore.getState().setViewOverride("pane-zoom-min", { fontSize: 6 });
 
     render(
-      <TerminalView instanceId="t-zoom-min" paneId="pane-zoom-min" profile="PowerShell" syncGroup="" />,
+      <TerminalView
+        instanceId="t-zoom-min"
+        paneId="pane-zoom-min"
+        profile="PowerShell"
+        syncGroup=""
+      />,
     );
 
     fireTerminalKey({ key: "-", ctrlKey: true });
@@ -1338,7 +1350,12 @@ describe("TerminalView", () => {
     useOverridesStore.getState().setViewOverride("pane-zoom-max", { fontSize: 72 });
 
     render(
-      <TerminalView instanceId="t-zoom-max" paneId="pane-zoom-max" profile="PowerShell" syncGroup="" />,
+      <TerminalView
+        instanceId="t-zoom-max"
+        paneId="pane-zoom-max"
+        profile="PowerShell"
+        syncGroup=""
+      />,
     );
 
     fireTerminalKey({ key: "=", ctrlKey: true });
@@ -1369,6 +1386,104 @@ describe("TerminalView", () => {
 
     expect(Object.keys(useOverridesStore.getState().viewOverrides)).toHaveLength(0);
     expect(useSettingsStore.getState().profiles[0].font).toBeUndefined();
+  });
+
+  // -- Regression: issue #224 — resize/zoom leaves glyphs left-clustered --
+  //
+  // When fontSize changes (zoom, settings update) the WebGL renderer's
+  // texture atlas still holds glyphs measured at the OLD cell dimensions.
+  // xterm's `refresh()` alone does not rebuild the atlas, so cells drawn
+  // afterwards use stale cell widths and glyphs visibly collapse to the
+  // left. The fix: call `term.clearTextureAtlas()` whenever fontSize or
+  // fontFamily changes, *after* `fit()` so the renderer re-measures first.
+  it("clears texture atlas when fontSize changes (issue #224)", async () => {
+    render(
+      <TerminalView
+        instanceId="t-atlas-fontsize"
+        paneId="pane-atlas-fontsize"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    // Clear the initial-mount bookkeeping calls so we only observe the
+    // font-change-triggered invocation.
+    mockClearTextureAtlas.mockClear();
+    mockFit.mockClear();
+
+    act(() => {
+      useOverridesStore.getState().setViewOverride("pane-atlas-fontsize", { fontSize: 20 });
+    });
+
+    await vi.waitFor(() => {
+      // fit() must run so xterm re-measures cell geometry, then the atlas
+      // must be cleared so the new glyph sizes are re-rasterised.
+      expect(mockFit).toHaveBeenCalled();
+      expect(mockClearTextureAtlas).toHaveBeenCalled();
+    });
+  });
+
+  it("clears texture atlas when devicePixelRatio changes (issue #224)", async () => {
+    // Install a `window.matchMedia` stub that captures the change listener
+    // so the test can synthesise a DPR change without actually zooming.
+    type DprMql = {
+      matches: boolean;
+      media: string;
+      listeners: Array<(e: MediaQueryListEvent) => void>;
+      addEventListener: (type: string, cb: (e: MediaQueryListEvent) => void) => void;
+      removeEventListener: (type: string, cb: (e: MediaQueryListEvent) => void) => void;
+      dispatchEvent: (e: Event) => boolean;
+      onchange: null;
+      addListener: () => void;
+      removeListener: () => void;
+    };
+    const mqls: DprMql[] = [];
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn((query: string) => {
+      const mql: DprMql = {
+        matches: true,
+        media: query,
+        listeners: [],
+        addEventListener: (type, cb) => {
+          if (type === "change") mql.listeners.push(cb);
+        },
+        removeEventListener: (type, cb) => {
+          if (type === "change") mql.listeners = mql.listeners.filter((l) => l !== cb);
+        },
+        dispatchEvent: () => true,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+      };
+      mqls.push(mql);
+      return mql as unknown as MediaQueryList;
+    }) as unknown as typeof window.matchMedia;
+
+    try {
+      render(<TerminalView instanceId="t-atlas-dpr" profile="PowerShell" syncGroup="" />);
+
+      mockClearTextureAtlas.mockClear();
+      mockFit.mockClear();
+
+      // Simulate DPR change (e.g. browser zoom). The listener registered by
+      // TerminalView must respond by re-fitting and clearing the atlas.
+      expect(mqls.length).toBeGreaterThan(0);
+      const listeners = mqls.flatMap((mql) => mql.listeners);
+      expect(listeners.length).toBeGreaterThan(0);
+
+      act(() => {
+        for (const listener of listeners) {
+          listener(new Event("change") as MediaQueryListEvent);
+        }
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalled();
+        expect(mockClearTextureAtlas).toHaveBeenCalled();
+      });
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   // -- Scrollbar style --
