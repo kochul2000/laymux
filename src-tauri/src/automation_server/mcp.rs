@@ -1346,6 +1346,10 @@ impl McpHandler {
                 "Provide exactly one of 'ids' or 'before'",
             )]));
         }
+        let ids_count = p.ids.as_ref().map(|v| v.len());
+        let before = p.before;
+        let read_only = p.read_only.unwrap_or(false);
+
         let mut params = json!({});
         if let Some(ids) = p.ids {
             params["ids"] = json!(ids);
@@ -1356,8 +1360,23 @@ impl McpHandler {
         if let Some(read_only) = p.read_only {
             params["readOnly"] = json!(read_only);
         }
-        self.bridge("action", "notifications", "clear", params)
+        match self
+            .bridge_raw("action", "notifications", "clear", params)
             .await
+        {
+            Ok(data) => {
+                let cleared = data.get("cleared").and_then(|v| v.as_u64()).unwrap_or(0);
+                tracing::info!(
+                    cleared,
+                    ids_count = ?ids_count,
+                    before = ?before,
+                    read_only,
+                    "notifications.clear (MCP)"
+                );
+                Ok(json_result(&data))
+            }
+            Err(e) => Ok(e),
+        }
     }
 
     /// Create a notification in the IDE. terminal_id and workspace_id are optional —

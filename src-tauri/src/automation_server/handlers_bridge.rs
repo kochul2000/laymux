@@ -567,6 +567,10 @@ pub async fn notifications_clear(
             )),
         );
     }
+    let ids_count = body.ids.as_ref().map(|v| v.len());
+    let before = body.before;
+    let read_only = body.read_only.unwrap_or(false);
+
     let mut params = serde_json::json!({});
     if let Some(ids) = body.ids {
         params["ids"] = serde_json::json!(ids);
@@ -578,7 +582,17 @@ pub async fn notifications_clear(
         params["readOnly"] = serde_json::json!(read_only);
     }
     match bridge_request(&state, "action", "notifications", "clear", params).await {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(data) => {
+            let cleared = data.get("cleared").and_then(|v| v.as_u64()).unwrap_or(0);
+            tracing::info!(
+                cleared,
+                ids_count = ?ids_count,
+                before = ?before,
+                read_only,
+                "notifications.clear (REST)"
+            );
+            (StatusCode::OK, Json(data))
+        }
         Err(e) => e,
     }
 }
