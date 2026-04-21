@@ -1005,6 +1005,24 @@ export function TerminalView({
       }
     });
 
+    // Issue #230: drag ending outside the terminal. xterm.js relies on
+    // document-level mouseup to finalize a selection, but that signal can
+    // be missed when the pointer leaves the viewport entirely (release
+    // outside the browser window, or a neighbouring pane swallows the
+    // event). We pair pointerdown on the terminal with a one-shot
+    // pointerup listener on window so that every drag — wherever it
+    // ends — gets a final chance to flush the selection to the clipboard.
+    // `runTerminalCopy` still gates on `hasSelection()`, so click-without-
+    // drag is a no-op.
+    const handlePointerDown = () => {
+      const onWindowPointerUp = () => {
+        if (!useSettingsStore.getState().convenience.copyOnSelect) return;
+        runTerminalCopy(terminal);
+      };
+      window.addEventListener("pointerup", onWindowPointerUp, { once: true });
+    };
+    outerEl?.addEventListener("pointerdown", handlePointerDown);
+
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
       trace("terminal-onData", {
@@ -1362,6 +1380,7 @@ export function TerminalView({
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      outerEl?.removeEventListener("pointerdown", handlePointerDown);
       compositionController.dispose();
       wrapperRef.current?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
