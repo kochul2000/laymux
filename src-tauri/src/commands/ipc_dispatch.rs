@@ -144,6 +144,26 @@ pub fn do_sync_cwd(
         ))));
     }
 
+    // Issue #215: Skip propagation when the source terminal is running an
+    // interactive TUI app (Codex, Claude Code, vim, ...). OSC 7 emitted in
+    // that state (e.g. by PowerShell's prompt function re-rendering) does
+    // not represent a user-intended `cd`, so we must not push it to peers
+    // or mark the local session.cwd.
+    {
+        let buffers = state.output_buffers.lock_or_err()?;
+        if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
+            tracing::debug!(
+                terminal_id,
+                path,
+                "sync-cwd suppressed: source terminal has non-shell activity"
+            );
+            return Ok(LxResponse::ok(Some(format!(
+                "sync-cwd {} suppressed (source activity != shell)",
+                path
+            ))));
+        }
+    }
+
     let normalized_path = path_utils::normalize_wsl_path(path);
 
     // NOTE: We intentionally do NOT skip when the source terminal's CWD
@@ -526,6 +546,41 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
 }
 
 // --- Propagation guard helpers ---
+
+/// Decide whether the source terminal's current state permits sync-cwd propagation.
+///
+/// Background (issue #215): some shells re-emit OSC 7 on every prompt render
+/// (e.g. PowerShell's `prompt` function). If an interactive TUI app is active
+/// in that terminal (Codex, Claude Code, vim, ...), the emitted CWD does not
+/// reflect a user-intended `cd` and must not be pushed to sync-group peers.
+///
+/// Policy:
+/// - `Shell` / `Running` (no interactive app) → propagation allowed.
+/// - `InteractiveApp { .. }` → propagation blocked.
+/// - Unknown / no buffer → permissive (true), to preserve existing behavior for
+///   freshly created terminals.
+///
+/// Uses `detect_terminal_state` (not just `detect_terminal_activity`) so the
+/// guard triggers even when the last title has drifted away from the literal
+/// pattern: Codex switches its title to a braille spinner, Claude Code switches
+/// to task descriptions, etc. Persistent tracking via `known_claude_terminals`
+/// and `known_codex_terminals` keeps those sessions marked as interactive.
+/// Inserts into those HashSets are idempotent and already happen on every
+/// PTY output chunk, so acquiring them here has no behavioural side-effect.
+///
+/// Lock order: caller must hold `output_buffers` (2); this function acquires
+/// `known_claude_terminals` (3) and `known_codex_terminals` (4) per `state.rs`.
+fn is_source_sync_allowed(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
+) -> bool {
+    let info = activity::detect_terminal_state(state, terminal_id, buffer);
+    !matches!(
+        info.activity,
+        crate::terminal::TerminalActivity::InteractiveApp { .. }
+    )
+}
 
 /// Check if a terminal is within the propagation suppression window.
 /// Unlike the old consume_propagation, this does NOT remove the entry —
@@ -2401,6 +2456,160 @@ mod tests {
         assert_eq!(
             path_utils::resolve_path_for_windows("/home/user", Some("Ubuntu-22.04")),
             "\\\\wsl.localhost\\Ubuntu-22.04\\home\\user"
+        );
+    }
+
+    // ── Issue #215: CWD propagation must be gated on source activity ──
+    //
+    // PowerShell re-emits OSC 7 every prompt render, including transitions
+    // triggered by an interactive TUI app (OpenAI Codex, vim, etc). When the
+    // source terminal is not sitting at a shell prompt, the current OSC 7
+    // payload does not reflect a user-intended `cd`, so it must NOT be
+    // propagated to the rest of the sync group.
+
+    #[test]
+    fn is_source_sync_allowed_for_shell_activity() {
+        // At-prompt shell: OSC 7 is a legitimate CWD change → allow propagation.
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
+        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_allowed_for_running_command() {
+        // `Running` (shell command mid-execution) is still considered shell
+        // context — the user issued a shell command that may itself `cd`.
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
+        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_allowed_no_buffer() {
+        // Unknown/no buffer → assume shell (permissive default).
+        let state = AppState::new();
+        assert!(is_source_sync_allowed(&state, "t1", None));
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_interactive_codex_title() {
+        // PowerShell + codex bug scenario: OSC 7 fires while Codex is the
+        // active interactive app → propagation must be blocked.
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]133;D;0\x07PS C:\\> \x1b]0;OpenAI Codex\x07");
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_claude_code_title() {
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_vim_title() {
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]2;vim - main.rs\x07");
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_codex_spinner_title_after_detection() {
+        // Issue #215 reviewer scenario: once Codex is running, its title
+        // changes from "OpenAI Codex" to a braille spinner like "⠋ working".
+        // That spinner no longer matches INTERACTIVE_APP_PATTERNS directly,
+        // so we must rely on persistent tracking (`known_codex_terminals`) +
+        // Codex spinner heuristic — otherwise OSC 7 leaks through.
+        let state = AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // Buffer holds ONLY the braille spinner title + OSC 7 — the literal
+        // "OpenAI Codex" string has already scrolled out of the scan window.
+        // Detection must rely solely on persistent `known_codex_terminals`
+        // combined with the braille spinner heuristic.
+        buf.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        assert!(
+            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            "Codex spinner title with persistent tracking must still block propagation"
+        );
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_claude_task_title_after_detection() {
+        // Reviewer scenario: Claude Code initially sets "✳ Claude Code" then
+        // switches to per-task titles (e.g. "✻ Exploring code"). Title-only
+        // matching misses those; persistent tracking must carry the state.
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // Only a task title in buffer — no literal "Claude Code" anywhere.
+        buf.push(b"\x1b]0;\xe2\x9c\xb6 Exploring code\x07\x1b]7;file://localhost/C:/tmp\x07");
+        assert!(
+            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            "Claude task title with persistent tracking must still block propagation"
+        );
+    }
+
+    #[test]
+    fn osc_sync_cwd_from_codex_does_not_write_to_targets() {
+        // End-to-end regression for issue #215:
+        // Source terminal is running Codex. A subsequent OSC 7 arrives (from
+        // PowerShell's prompt emission). The shared filter used by do_sync_cwd
+        // must return an empty target list so no `cd` is written to peers.
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut source = TerminalSession::new("source".into(), TerminalConfig::default());
+            source.config.sync_group = "g1".into();
+            terminals.insert("source".into(), source);
+
+            let mut target = TerminalSession::new("target".into(), TerminalConfig::default());
+            target.config.sync_group = "g1".into();
+            terminals.insert("target".into(), target);
+        }
+        {
+            let mut groups = state.sync_groups.lock().unwrap();
+            let mut g = crate::terminal::SyncGroup::new("g1".into());
+            g.add_terminal("source".into());
+            g.add_terminal("target".into());
+            groups.insert("g1".into(), g);
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // Source is Codex — title set, then PowerShell prompt re-render emits OSC 7.
+            let mut buf_src = crate::output_buffer::TerminalOutputBuffer::default();
+            buf_src.push(b"\x1b]0;OpenAI Codex\x07\x1b]7;file://localhost/C:/tmp\x07");
+            buffers.insert("source".into(), buf_src);
+
+            // Target is an idle shell.
+            let mut buf_tgt = crate::output_buffer::TerminalOutputBuffer::default();
+            buf_tgt.push(b"\x1b]133;D;0\x07PS C:\\> ");
+            buffers.insert("target".into(), buf_tgt);
+        }
+
+        // Guard check — when the source is an interactive app, we must not
+        // propagate regardless of what happens downstream in do_sync_cwd.
+        let src_buf_allowed = {
+            let buffers = state.output_buffers.lock().unwrap();
+            is_source_sync_allowed(&state, "source", buffers.get("source"))
+        };
+        assert!(
+            !src_buf_allowed,
+            "Codex-active source must not trigger sync-cwd propagation"
         );
     }
 }
