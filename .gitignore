@@ -43,3 +43,4 @@ test-results/
 # Temp files
 *~
 tmp/
+.tmp/

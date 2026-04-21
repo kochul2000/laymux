@@ -24,6 +24,7 @@ uuid = { version = "1", features = ["v4"] }
 png = "0.17"
 font-kit = "0.14"
 rmcp = { version = "1.4", features = ["server", "transport-streamable-http-server"] }
+rfd = { version = "0.15", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

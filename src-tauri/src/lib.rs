@@ -7,6 +7,7 @@ pub mod cli;
 pub mod clipboard;
 pub mod commands;
 pub mod constants;
+pub mod crash_reporter;
 pub mod error;
 pub mod git_watcher;
 pub mod ipc_server;
@@ -28,6 +29,10 @@ use tauri::image::Image;
 use tauri::Manager;
 
 pub fn run() {
+    // 가장 먼저 패닉 훅을 설치한다. 이후 초기화 중 패닉이 나도
+    // `last-crash.json` / `crash.log`로 캡처되어 다음 실행 때 다이얼로그로 표시된다.
+    crash_reporter::install(settings::dirs_config_path());
+
     // Initialize structured logging
     tracing_subscriber::fmt()
         .with_env_filter(
