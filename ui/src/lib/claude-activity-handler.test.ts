@@ -81,6 +81,58 @@ describe("ClaudeActivityHandler", () => {
         color: "var(--text-secondary)",
       });
     });
+
+    // ── Claude "working" title detection (issue #225) ──
+    // Claude Code's local agent / spinning task titles use Braille spinners
+    // (U+2800..U+28FF) or star spinners (✶ ✻ ✽ ✢), NOT the ✳ (U+2733) idle
+    // prefix. Previously these fell through to ShellActivityHandler, which
+    // returned a stale ✓ from the last synthetic exitCode=0. That made the
+    // workspace icon show ✓ while Claude was actively working.
+    //
+    // Fix: treat a working-spinner title as "⏳ running" regardless of
+    // outputActive/exitCode, mirroring the Rust `is_claude_working_title`
+    // contract in `src-tauri/src/claude_activity.rs`.
+
+    it("returns ⏳ for Braille spinner title (Claude local agent working)", () => {
+      // Real example observed in production:
+      //   title: "⠂ Remove unnecessary round from laymux outer edges"
+      //   outputActive: false, lastExitCode: 0
+      // Before the fix this showed ✓ because of the stale exitCode.
+      expect(
+        handler.computeStatus(
+          raw({
+            title: "\u2802 Remove unnecessary round from laymux outer edges",
+            exitCode: 0,
+            outputActive: false,
+          }),
+        ),
+      ).toEqual({ icon: "⏳", color: "var(--yellow)" });
+    });
+
+    it("returns ⏳ for star spinner title (Claude working)", () => {
+      expect(
+        handler.computeStatus(raw({ title: "\u2736 Working on task", exitCode: 0 })).icon,
+      ).toBe("⏳");
+      expect(handler.computeStatus(raw({ title: "\u273B Analyzing code", exitCode: 0 })).icon).toBe(
+        "⏳",
+      );
+      expect(handler.computeStatus(raw({ title: "\u273D Building", exitCode: 0 })).icon).toBe("⏳");
+      expect(handler.computeStatus(raw({ title: "\u2722 Running tests", exitCode: 0 })).icon).toBe(
+        "⏳",
+      );
+    });
+
+    it("returns ⏳ for Braille spinner even when previous exitCode was non-zero", () => {
+      // Make sure the working-title rule overrides a ✗ too, not just ✓.
+      expect(handler.computeStatus(raw({ title: "\u280B Analyzing", exitCode: 1 })).icon).toBe(
+        "⏳",
+      );
+    });
+
+    it("does NOT treat ✳ idle as a working spinner", () => {
+      // Regression guard: ✳ is the idle prefix and must keep returning ✓.
+      expect(handler.computeStatus(raw({ title: "\u2733 Claude Code" })).icon).toBe("✓");
+    });
   });
 
   describe("computeStatusMessage", () => {
