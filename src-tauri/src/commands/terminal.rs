@@ -272,11 +272,18 @@ pub fn create_terminal_session(
             // Handles entry/exit detection, working→idle task completion,
             // and known_claude_terminals tracking for OSC 0/2 title changes.
             //
-            // Lock strategy: the terminals lock is acquired once per OSC 0/2 event
-            // to read was_working and write back exited/working/idle state. This
-            // avoids repeated lock acquisitions for what is logically one operation.
-            // known_claude_terminals (lock #3) is acquired separately to maintain
-            // lock ordering (terminals=#1 < known_claude_terminals=#3).
+            // Lock strategy: each mutex is acquired and RELEASED before the next
+            // is taken — no overlapping holds, so the #1 → #3 numerical ordering
+            // rule (which prevents deadlock between concurrent threads holding
+            // multiple locks) does not apply. In order:
+            // 1. `resolve_claude_detected` briefly takes `known_claude_terminals`
+            //    (#3) to check the command-detection fallback; released on return.
+            // 2. `terminals` (#1) is taken to read was_working/prev_working_title.
+            // 3. Terminals lock is re-acquired later to write back state via
+            //    `apply_claude_title_state`.
+            // 4. On `cr.entered` or `cr.exited`, `known_claude_terminals` (#3) is
+            //    taken again to insert/remove the terminal ID.
+            // This layout keeps non-Claude terminals off the #1 lock when possible.
             if event.code == 0 || event.code == 2 {
                 let was_detected = resolve_claude_detected(
                     &pty_cb_state.claude_detected,

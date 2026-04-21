@@ -78,9 +78,12 @@ pub struct ClaudeTitleResult {
     pub now_working: bool,
     /// Whether the terminal is now in idle state (for tracking).
     pub now_idle: bool,
-    /// True when the terminal is in an active Claude session (detected before
-    /// this call, or just entered) AND the incoming title still belongs to
-    /// Claude. The caller must refresh persistent state (`claude_was_working`,
+    /// True when the input `was_detected` was `true` (Claude was already
+    /// detected before this call) OR `entered` fired this call, AND the
+    /// incoming title still belongs to Claude (the exit path returns early
+    /// and leaves this field at its default `false`).
+    ///
+    /// The caller must refresh persistent state (`claude_was_working`,
     /// `claude_last_working_title`) whenever this is true, even if neither
     /// `now_working` nor `now_idle` is set — e.g. plain "Claude Code" titles
     /// that appear between spinner and idle transitions. Without that refresh
