@@ -58,6 +58,58 @@ fn resolve_claude_detected(
     in_known
 }
 
+/// Apply a `ClaudeTitleResult` to a terminal session's Claude-related
+/// fields. Pure mutation over `&mut TerminalSession` — no locks, no IPC.
+/// The caller emits `EVENT_CLAUDE_MESSAGE_CHANGED` when the return value
+/// is `true`.
+///
+/// Extracted from the PTY OSC 0/2 handler so the three cases
+/// (exit / in-session working / in-session non-working) can be unit-tested
+/// directly against `TerminalSession` without spinning up a PTY. The
+/// function is a no-op for results that represent neither an exit nor an
+/// active Claude session, mirroring the caller's outer guard — this
+/// duplication is intentional defense-in-depth so a future caller that
+/// forgets the guard cannot silently corrupt state.
+///
+/// `title` is the raw OSC 0/2 payload (including any spinner prefix) and
+/// is stored in `claude_last_working_title` only when `cr.now_working` is
+/// true. Any other non-exit title invalidates the remembered working
+/// title so a later ✳ idle cannot reach into a stale value from before a
+/// working→plain transition.
+fn apply_claude_title_state(
+    session: &mut TerminalSession,
+    cr: &claude_activity::ClaudeTitleResult,
+    title: &str,
+    new_message: Option<&str>,
+) -> bool {
+    if !cr.exited && !cr.in_claude_session {
+        return false;
+    }
+    let mut message_changed = false;
+    if cr.exited {
+        session.claude_was_working = false;
+        session.claude_last_working_title = None;
+        if session.claude_message.is_some() {
+            session.claude_message = None;
+            message_changed = true;
+        }
+    } else {
+        session.claude_was_working = cr.now_working;
+        session.claude_last_working_title = if cr.now_working {
+            Some(title.to_string())
+        } else {
+            None
+        };
+        if let Some(msg) = new_message {
+            if session.claude_message.as_deref() != Some(msg) {
+                session.claude_message = Some(msg.to_string());
+                message_changed = true;
+            }
+        }
+    }
+    message_changed
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_terminal_session(
@@ -286,43 +338,19 @@ pub fn create_terminal_session(
                     None
                 };
 
-                // Single terminals lock for exited/in-session state updates.
-                // The guard must trigger for every Claude-relevant title, not
-                // just working/idle ones: a plain "Claude Code" title between
-                // a spinner and ✳ idle would otherwise leave claude_was_working
-                // stuck at true and make the next idle fire a spurious
-                // "task completed" notification.
+                // Outer guard keeps non-Claude terminals out of the terminals
+                // lock entirely. `apply_claude_title_state` is also guarded
+                // internally (defense in depth — see its doc comment).
                 let mut message_changed = false;
                 if cr.exited || cr.in_claude_session {
                     if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                         if let Some(session) = terms.get_mut(&terminal_id) {
-                            if cr.exited {
-                                session.claude_was_working = false;
-                                session.claude_last_working_title = None;
-                                if session.claude_message.is_some() {
-                                    session.claude_message = None;
-                                    message_changed = true;
-                                }
-                            } else {
-                                session.claude_was_working = cr.now_working;
-                                // Only a working title has a usable task text. Any
-                                // non-working title (idle, plain "Claude Code", …)
-                                // invalidates the remembered working title — without
-                                // this, a subsequent ✳ idle could reach into a stale
-                                // prev_working_title from before a working→plain
-                                // transition.
-                                session.claude_last_working_title = if cr.now_working {
-                                    Some(event.data.clone())
-                                } else {
-                                    None
-                                };
-                                if let Some(ref msg) = new_message {
-                                    if session.claude_message.as_deref() != Some(msg) {
-                                        session.claude_message = Some(msg.clone());
-                                        message_changed = true;
-                                    }
-                                }
-                            }
+                            message_changed = apply_claude_title_state(
+                                session,
+                                &cr,
+                                &event.data,
+                                new_message.as_deref(),
+                            );
                         }
                     }
                 }
@@ -906,6 +934,13 @@ fn dispatch_osc_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude_activity::ClaudeTitleResult;
+
+    fn test_session() -> TerminalSession {
+        TerminalSession::new("t1".into(), TerminalConfig::default())
+    }
+
+    // ── resolve_claude_detected ──
 
     #[test]
     fn resolve_returns_true_when_atomic_set() {
@@ -951,5 +986,246 @@ mod tests {
         let known = Mutex::new(set);
         assert!(!resolve_claude_detected(&atomic, &known, "t1"));
         assert!(!atomic.load(Ordering::Relaxed));
+    }
+
+    // ── apply_claude_title_state ──
+
+    #[test]
+    fn apply_exit_clears_all_claude_state_and_reports_message_change() {
+        let mut session = test_session();
+        session.claude_was_working = true;
+        session.claude_last_working_title = Some("\u{2736} Task".into());
+        session.claude_message = Some("Task".into());
+
+        let cr = ClaudeTitleResult {
+            exited: true,
+            ..Default::default()
+        };
+        let changed = apply_claude_title_state(&mut session, &cr, "bash", None);
+
+        assert!(!session.claude_was_working);
+        assert!(session.claude_last_working_title.is_none());
+        assert!(session.claude_message.is_none());
+        assert!(changed, "message was Some → caller must emit change event");
+    }
+
+    #[test]
+    fn apply_exit_with_no_prior_message_returns_false() {
+        let mut session = test_session();
+        session.claude_was_working = true;
+        session.claude_last_working_title = Some("\u{2736} Task".into());
+        // claude_message already None
+
+        let cr = ClaudeTitleResult {
+            exited: true,
+            ..Default::default()
+        };
+        let changed = apply_claude_title_state(&mut session, &cr, "bash", None);
+
+        assert!(!session.claude_was_working);
+        assert!(session.claude_last_working_title.is_none());
+        assert!(
+            !changed,
+            "no prior message → no EVENT_CLAUDE_MESSAGE_CHANGED needed"
+        );
+    }
+
+    #[test]
+    fn apply_working_sets_state_and_remembers_full_title() {
+        let mut session = test_session();
+        let cr = ClaudeTitleResult {
+            in_claude_session: true,
+            now_working: true,
+            ..Default::default()
+        };
+        let changed =
+            apply_claude_title_state(&mut session, &cr, "\u{2736} Fix bug", Some("Fix bug"));
+
+        assert!(session.claude_was_working);
+        assert_eq!(
+            session.claude_last_working_title.as_deref(),
+            Some("\u{2736} Fix bug"),
+            "full title (spinner prefix included) is stored so a later idle \
+             transition can strip the prefix for the completion notification"
+        );
+        assert_eq!(session.claude_message.as_deref(), Some("Fix bug"));
+        assert!(changed);
+    }
+
+    #[test]
+    fn apply_idle_resets_working_and_clears_remembered_title() {
+        let mut session = test_session();
+        session.claude_was_working = true;
+        session.claude_last_working_title = Some("\u{2736} Old".into());
+
+        let cr = ClaudeTitleResult {
+            in_claude_session: true,
+            now_idle: true,
+            ..Default::default()
+        };
+        apply_claude_title_state(&mut session, &cr, "\u{2733} Claude Code", None);
+
+        assert!(!session.claude_was_working);
+        assert!(session.claude_last_working_title.is_none());
+    }
+
+    #[test]
+    fn apply_plain_title_resets_working_bug1_regression_guard() {
+        // Bug #1 regression guard at the session-mutation layer: a plain
+        // "Claude Code" title (no spinner, no ✳) between spinner and idle
+        // MUST reset was_working=false and clear the remembered title. If
+        // this regresses, the next ✳ idle will fire a spurious
+        // "task completed" notification based on stale state.
+        let mut session = test_session();
+        session.claude_was_working = true;
+        session.claude_last_working_title = Some("\u{2736} Working on task".into());
+
+        let cr = ClaudeTitleResult {
+            in_claude_session: true,
+            now_working: false,
+            now_idle: false,
+            ..Default::default()
+        };
+        apply_claude_title_state(&mut session, &cr, "Claude Code", None);
+
+        assert!(
+            !session.claude_was_working,
+            "plain title must reset was_working"
+        );
+        assert!(
+            session.claude_last_working_title.is_none(),
+            "plain title must invalidate the remembered working title"
+        );
+    }
+
+    #[test]
+    fn apply_message_update_only_when_different() {
+        let mut session = test_session();
+        session.claude_message = Some("Task".into());
+
+        let cr = ClaudeTitleResult {
+            in_claude_session: true,
+            now_working: true,
+            ..Default::default()
+        };
+        let changed = apply_claude_title_state(&mut session, &cr, "\u{2736} Task", Some("Task"));
+
+        assert_eq!(session.claude_message.as_deref(), Some("Task"));
+        assert!(
+            !changed,
+            "identical message must not emit spurious change event"
+        );
+    }
+
+    #[test]
+    fn apply_no_op_when_not_in_session_and_not_exited() {
+        // Defense in depth: a result with both `exited=false` and
+        // `in_claude_session=false` must not mutate session state even if
+        // a future caller forgets the outer `cr.exited || cr.in_claude_session`
+        // guard.
+        let mut session = test_session();
+        session.claude_was_working = true;
+        session.claude_last_working_title = Some("\u{2736} Keep me".into());
+        session.claude_message = Some("Keep me".into());
+
+        let cr = ClaudeTitleResult::default(); // all flags false
+        let changed = apply_claude_title_state(&mut session, &cr, "bash", None);
+
+        assert!(session.claude_was_working, "state must be preserved");
+        assert_eq!(
+            session.claude_last_working_title.as_deref(),
+            Some("\u{2736} Keep me")
+        );
+        assert_eq!(session.claude_message.as_deref(), Some("Keep me"));
+        assert!(!changed);
+    }
+
+    #[test]
+    fn apply_working_plain_idle_chain_session_end_state_is_clean() {
+        // Chain the three session mutations in order (mirrors the PTY
+        // callback's per-title loop). After step 2 (plain title), session
+        // state must be clean so step 3 (idle) cannot consume a stale
+        // working title.
+        let mut session = test_session();
+
+        // Step 1: working
+        apply_claude_title_state(
+            &mut session,
+            &ClaudeTitleResult {
+                in_claude_session: true,
+                now_working: true,
+                ..Default::default()
+            },
+            "\u{2736} Fix bug",
+            Some("Fix bug"),
+        );
+        assert!(session.claude_was_working);
+        assert_eq!(
+            session.claude_last_working_title.as_deref(),
+            Some("\u{2736} Fix bug")
+        );
+
+        // Step 2: plain "Claude Code"
+        apply_claude_title_state(
+            &mut session,
+            &ClaudeTitleResult {
+                in_claude_session: true,
+                ..Default::default()
+            },
+            "Claude Code",
+            None,
+        );
+        assert!(!session.claude_was_working);
+        assert!(session.claude_last_working_title.is_none());
+
+        // Step 3: idle ✳. new_message=None because process_claude_title
+        // would see was_working=false from step 2 and not emit
+        // task_completed.
+        apply_claude_title_state(
+            &mut session,
+            &ClaudeTitleResult {
+                in_claude_session: true,
+                now_idle: true,
+                ..Default::default()
+            },
+            "\u{2733} Claude Code",
+            None,
+        );
+        assert!(!session.claude_was_working);
+        assert!(session.claude_last_working_title.is_none());
+    }
+
+    #[test]
+    fn apply_overwrites_remembered_title_on_each_working_event() {
+        // Two successive working titles: the second must overwrite, not
+        // append. Guards against accidental accumulation if the
+        // `Some(...)` branch is ever restructured.
+        let mut session = test_session();
+
+        apply_claude_title_state(
+            &mut session,
+            &ClaudeTitleResult {
+                in_claude_session: true,
+                now_working: true,
+                ..Default::default()
+            },
+            "\u{2736} First",
+            None,
+        );
+        apply_claude_title_state(
+            &mut session,
+            &ClaudeTitleResult {
+                in_claude_session: true,
+                now_working: true,
+                ..Default::default()
+            },
+            "\u{2736} Second",
+            None,
+        );
+
+        assert_eq!(
+            session.claude_last_working_title.as_deref(),
+            Some("\u{2736} Second")
+        );
     }
 }
