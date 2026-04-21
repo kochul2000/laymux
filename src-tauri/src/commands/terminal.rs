@@ -1,5 +1,7 @@
 use serde::Deserialize;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::activity;
@@ -15,6 +17,46 @@ use crate::pty;
 use crate::pty_trace;
 use crate::state::AppState;
 use crate::terminal::{TerminalConfig, TerminalSession};
+
+/// Resolve whether Claude Code is currently detected for `terminal_id`,
+/// combining the per-terminal `claude_detected` atomic with the shared
+/// `known_claude_terminals` set.
+///
+/// Two detection sources populate Claude state but do not share a single
+/// sink:
+/// - The PTY callback's title state machine (this file) sets the atomic AND
+///   inserts into the set when it sees a "Claude Code" title.
+/// - The `mark_claude_terminal` command (called by the frontend when it
+///   recognizes a `claude` command from OSC 133;E) inserts into the set
+///   only — the atomic stays false because it lives on per-terminal PTY
+///   callback state that the command handler cannot reach.
+///
+/// Without this fallback, a command-detected session whose first title is a
+/// spinner-only title (e.g. "✶ Task", "⠋ Working") would be invisible to
+/// `process_claude_title`: `was_detected=false` means the working/idle
+/// block is skipped, `claude_was_working` never becomes true, and the
+/// eventual ✳ idle transition produces no completion notification.
+///
+/// When the atomic is false but the set contains the ID, the atomic is
+/// synced so subsequent OSC 0/2 events on the same terminal take the fast
+/// path without re-locking the set.
+fn resolve_claude_detected(
+    atomic: &AtomicBool,
+    known: &Mutex<HashSet<String>>,
+    terminal_id: &str,
+) -> bool {
+    if atomic.load(Ordering::Relaxed) {
+        return true;
+    }
+    let in_known = known
+        .lock_or_err()
+        .map(|set| set.contains(terminal_id))
+        .unwrap_or(false);
+    if in_known {
+        atomic.store(true, Ordering::Relaxed);
+    }
+    in_known
+}
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -184,9 +226,11 @@ pub fn create_terminal_session(
             // known_claude_terminals (lock #3) is acquired separately to maintain
             // lock ordering (terminals=#1 < known_claude_terminals=#3).
             if event.code == 0 || event.code == 2 {
-                let was_detected = pty_cb_state
-                    .claude_detected
-                    .load(std::sync::atomic::Ordering::Relaxed);
+                let was_detected = resolve_claude_detected(
+                    &pty_cb_state.claude_detected,
+                    &state_for_pty.known_claude_terminals,
+                    &terminal_id,
+                );
                 let (was_working, prev_working_title) = if was_detected {
                     if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
                         match terms.get(&terminal_id) {
@@ -242,9 +286,14 @@ pub fn create_terminal_session(
                     None
                 };
 
-                // Single terminals lock for exited/working/idle state updates
+                // Single terminals lock for exited/in-session state updates.
+                // The guard must trigger for every Claude-relevant title, not
+                // just working/idle ones: a plain "Claude Code" title between
+                // a spinner and ✳ idle would otherwise leave claude_was_working
+                // stuck at true and make the next idle fire a spurious
+                // "task completed" notification.
                 let mut message_changed = false;
-                if cr.exited || cr.now_working || cr.now_idle {
+                if cr.exited || cr.in_claude_session {
                     if let Ok(mut terms) = state_for_pty.terminals.lock_or_err() {
                         if let Some(session) = terms.get_mut(&terminal_id) {
                             if cr.exited {
@@ -256,15 +305,17 @@ pub fn create_terminal_session(
                                 }
                             } else {
                                 session.claude_was_working = cr.now_working;
-                                if cr.now_working {
-                                    // Remember the current working title so that when the
-                                    // working→idle transition fires with a generic idle title,
-                                    // process_claude_title has a task description to fall back
-                                    // to.
-                                    session.claude_last_working_title = Some(event.data.clone());
-                                } else if cr.now_idle {
-                                    session.claude_last_working_title = None;
-                                }
+                                // Only a working title has a usable task text. Any
+                                // non-working title (idle, plain "Claude Code", …)
+                                // invalidates the remembered working title — without
+                                // this, a subsequent ✳ idle could reach into a stale
+                                // prev_working_title from before a working→plain
+                                // transition.
+                                session.claude_last_working_title = if cr.now_working {
+                                    Some(event.data.clone())
+                                } else {
+                                    None
+                                };
                                 if let Some(ref msg) = new_message {
                                     if session.claude_message.as_deref() != Some(msg) {
                                         session.claude_message = Some(msg.clone());
@@ -849,5 +900,56 @@ fn dispatch_osc_action(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_returns_true_when_atomic_set() {
+        let atomic = AtomicBool::new(true);
+        let known = Mutex::new(HashSet::new());
+        assert!(resolve_claude_detected(&atomic, &known, "t1"));
+    }
+
+    #[test]
+    fn resolve_falls_back_to_known_set_and_syncs_atomic() {
+        // Command-detection path: atomic was never set because
+        // `mark_claude_terminal` only touches `known_claude_terminals`.
+        // The resolver must still report detected=true and lift the
+        // atomic so subsequent title changes skip the locked lookup.
+        let atomic = AtomicBool::new(false);
+        let mut set = HashSet::new();
+        set.insert("t1".to_string());
+        let known = Mutex::new(set);
+
+        assert!(resolve_claude_detected(&atomic, &known, "t1"));
+        assert!(
+            atomic.load(Ordering::Relaxed),
+            "atomic must be synced so the next call takes the fast path"
+        );
+    }
+
+    #[test]
+    fn resolve_returns_false_when_neither_source_has_id() {
+        let atomic = AtomicBool::new(false);
+        let known = Mutex::new(HashSet::new());
+        assert!(!resolve_claude_detected(&atomic, &known, "t1"));
+        assert!(
+            !atomic.load(Ordering::Relaxed),
+            "a non-Claude terminal must not be promoted to detected"
+        );
+    }
+
+    #[test]
+    fn resolve_ignores_other_ids_in_known_set() {
+        let atomic = AtomicBool::new(false);
+        let mut set = HashSet::new();
+        set.insert("someone-else".to_string());
+        let known = Mutex::new(set);
+        assert!(!resolve_claude_detected(&atomic, &known, "t1"));
+        assert!(!atomic.load(Ordering::Relaxed));
     }
 }

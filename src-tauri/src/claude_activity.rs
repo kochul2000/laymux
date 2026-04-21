@@ -78,6 +78,15 @@ pub struct ClaudeTitleResult {
     pub now_working: bool,
     /// Whether the terminal is now in idle state (for tracking).
     pub now_idle: bool,
+    /// True when the terminal is in an active Claude session (detected before
+    /// this call, or just entered) AND the incoming title still belongs to
+    /// Claude. The caller must refresh persistent state (`claude_was_working`,
+    /// `claude_last_working_title`) whenever this is true, even if neither
+    /// `now_working` nor `now_idle` is set — e.g. plain "Claude Code" titles
+    /// that appear between spinner and idle transitions. Without that refresh
+    /// a stale `claude_was_working = true` leaks into the next ✳ title and
+    /// fires a spurious "task completed" notification.
+    pub in_claude_session: bool,
 }
 
 /// Process an OSC 0/2 title change for Claude Code state tracking.
@@ -117,6 +126,7 @@ pub fn process_claude_title(
     // Working/idle state tracking (only when Claude is active)
     let detected = was_detected || result.entered;
     if detected {
+        result.in_claude_session = true;
         result.now_idle = is_claude_idle_title(title);
         result.now_working = is_claude_working_title(title);
 
@@ -377,5 +387,77 @@ mod tests {
     #[test]
     fn strip_empty_after_spinner() {
         assert_eq!(strip_claude_spinner_prefix("\u{2736}"), "");
+    }
+
+    // ── in_claude_session (regression guard) ──
+    // Without in_claude_session, the PTY callback skips state updates for
+    // plain "Claude Code" titles (neither spinner nor ✳ prefix) because the
+    // original guard was `exited || now_working || now_idle`. The result was
+    // a stuck `claude_was_working = true`, which then made the next ✳ idle
+    // title emit a spurious "task completed" notification.
+
+    #[test]
+    fn process_plain_claude_title_marks_in_claude_session() {
+        let r = process_claude_title("Claude Code", true, true, Some("\u{2736} Old task"));
+        assert!(!r.exited);
+        assert!(!r.now_working);
+        assert!(!r.now_idle);
+        assert!(
+            r.in_claude_session,
+            "plain Claude Code title must signal caller to refresh state"
+        );
+        assert!(r.task_completed.is_none());
+    }
+
+    #[test]
+    fn process_working_title_sets_in_claude_session() {
+        let r = process_claude_title("\u{2736} Fix bug", true, false, None);
+        assert!(r.in_claude_session);
+        assert!(r.now_working);
+    }
+
+    #[test]
+    fn process_idle_title_sets_in_claude_session() {
+        let r = process_claude_title("\u{2733} Claude Code", true, false, None);
+        assert!(r.in_claude_session);
+        assert!(r.now_idle);
+    }
+
+    #[test]
+    fn process_entry_sets_in_claude_session() {
+        let r = process_claude_title("Claude Code", false, false, None);
+        assert!(r.entered);
+        assert!(r.in_claude_session);
+    }
+
+    #[test]
+    fn process_exit_clears_in_claude_session() {
+        let r = process_claude_title("bash", true, true, None);
+        assert!(r.exited);
+        assert!(
+            !r.in_claude_session,
+            "exit must clear in_claude_session so caller runs exit branch"
+        );
+    }
+
+    #[test]
+    fn process_non_claude_without_prior_detection_is_not_in_session() {
+        let r = process_claude_title("vim main.rs", false, false, None);
+        assert!(!r.in_claude_session);
+        assert!(!r.entered);
+        assert!(!r.exited);
+    }
+
+    #[test]
+    fn process_spinner_only_title_without_prior_detection_is_not_in_session() {
+        // Spinner-only titles (e.g. "✶ Task") without prior detection do not
+        // enter the state machine. Command-text detection via
+        // `mark_claude_terminal` is the path that surfaces this case in
+        // production; see the PTY-callback-side `resolve_claude_detected`
+        // helper for the fallback that rescues it.
+        let r = process_claude_title("\u{2736} Task", false, false, None);
+        assert!(!r.in_claude_session);
+        assert!(!r.entered);
+        assert!(!r.exited);
     }
 }
