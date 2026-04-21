@@ -151,7 +151,7 @@ pub fn do_sync_cwd(
     // or mark the local session.cwd.
     {
         let buffers = state.output_buffers.lock_or_err()?;
-        if !is_source_sync_allowed(buffers.get(terminal_id)) {
+        if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
             tracing::debug!(
                 terminal_id,
                 path,
@@ -560,13 +560,24 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
 /// - Unknown / no buffer → permissive (true), to preserve existing behavior for
 ///   freshly created terminals.
 ///
-/// This uses only the output-buffer-derived activity check (no AppState
-/// dependency) so that `known_claude_terminals` mutation does not leak into
-/// propagation gating. Title-based detection covers Codex, Claude Code, vim,
-/// nvim, etc. via `detect_terminal_activity`.
-fn is_source_sync_allowed(buffer: Option<&crate::output_buffer::TerminalOutputBuffer>) -> bool {
+/// Uses `detect_terminal_state` (not just `detect_terminal_activity`) so the
+/// guard triggers even when the last title has drifted away from the literal
+/// pattern: Codex switches its title to a braille spinner, Claude Code switches
+/// to task descriptions, etc. Persistent tracking via `known_claude_terminals`
+/// and `known_codex_terminals` keeps those sessions marked as interactive.
+/// Inserts into those HashSets are idempotent and already happen on every
+/// PTY output chunk, so acquiring them here has no behavioural side-effect.
+///
+/// Lock order: caller must hold `output_buffers` (2); this function acquires
+/// `known_claude_terminals` (3) and `known_codex_terminals` (4) per `state.rs`.
+fn is_source_sync_allowed(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
+) -> bool {
+    let info = activity::detect_terminal_state(state, terminal_id, buffer);
     !matches!(
-        activity::detect_terminal_activity(buffer),
+        info.activity,
         crate::terminal::TerminalActivity::InteractiveApp { .. }
     )
 }
@@ -2459,47 +2470,98 @@ mod tests {
     #[test]
     fn is_source_sync_allowed_for_shell_activity() {
         // At-prompt shell: OSC 7 is a legitimate CWD change → allow propagation.
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
-        assert!(is_source_sync_allowed(Some(&buf)));
+        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_source_sync_allowed_for_running_command() {
         // `Running` (shell command mid-execution) is still considered shell
         // context — the user issued a shell command that may itself `cd`.
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
-        assert!(is_source_sync_allowed(Some(&buf)));
+        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_source_sync_allowed_no_buffer() {
         // Unknown/no buffer → assume shell (permissive default).
-        assert!(is_source_sync_allowed(None));
+        let state = AppState::new();
+        assert!(is_source_sync_allowed(&state, "t1", None));
     }
 
     #[test]
     fn is_source_sync_blocked_for_interactive_codex_title() {
         // PowerShell + codex bug scenario: OSC 7 fires while Codex is the
         // active interactive app → propagation must be blocked.
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07PS C:\\> \x1b]0;OpenAI Codex\x07");
-        assert!(!is_source_sync_allowed(Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_source_sync_blocked_for_claude_code_title() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(!is_source_sync_allowed(Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
     }
 
     #[test]
     fn is_source_sync_blocked_for_vim_title() {
+        let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]2;vim - main.rs\x07");
-        assert!(!is_source_sync_allowed(Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_codex_spinner_title_after_detection() {
+        // Issue #215 reviewer scenario: once Codex is running, its title
+        // changes from "OpenAI Codex" to a braille spinner like "⠋ working".
+        // That spinner no longer matches INTERACTIVE_APP_PATTERNS directly,
+        // so we must rely on persistent tracking (`known_codex_terminals`) +
+        // Codex spinner heuristic — otherwise OSC 7 leaks through.
+        let state = AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // Buffer holds ONLY the braille spinner title + OSC 7 — the literal
+        // "OpenAI Codex" string has already scrolled out of the scan window.
+        // Detection must rely solely on persistent `known_codex_terminals`
+        // combined with the braille spinner heuristic.
+        buf.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        assert!(
+            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            "Codex spinner title with persistent tracking must still block propagation"
+        );
+    }
+
+    #[test]
+    fn is_source_sync_blocked_for_claude_task_title_after_detection() {
+        // Reviewer scenario: Claude Code initially sets "✳ Claude Code" then
+        // switches to per-task titles (e.g. "✻ Exploring code"). Title-only
+        // matching misses those; persistent tracking must carry the state.
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".to_string());
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        // Only a task title in buffer — no literal "Claude Code" anywhere.
+        buf.push(b"\x1b]0;\xe2\x9c\xb6 Exploring code\x07\x1b]7;file://localhost/C:/tmp\x07");
+        assert!(
+            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            "Claude task title with persistent tracking must still block propagation"
+        );
     }
 
     #[test]
@@ -2543,7 +2605,7 @@ mod tests {
         // propagate regardless of what happens downstream in do_sync_cwd.
         let src_buf_allowed = {
             let buffers = state.output_buffers.lock().unwrap();
-            is_source_sync_allowed(buffers.get("source"))
+            is_source_sync_allowed(&state, "source", buffers.get("source"))
         };
         assert!(
             !src_buf_allowed,
