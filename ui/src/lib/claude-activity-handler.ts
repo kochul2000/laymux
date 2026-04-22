@@ -55,6 +55,31 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
     return true;
   }
 
+  /**
+   * Keep the `interactiveApp: Claude` activity even when the incoming
+   * `terminal-title-changed` event carries `interactiveApp: null`.
+   *
+   * Claude Code emits OSC 0/2 title sequences that the Rust side cannot
+   * always resolve back to "Claude":
+   *   - Path-like titles (e.g. `~/project`, `C:\\Users\\...`) — Rust's
+   *     `detect_interactive_app_from_title` rejects anything containing
+   *     `/` or `\` outright.
+   *   - Braille-only spinner titles emitted before the buffer has logged
+   *     a `"Claude Code"` substring that `any_terminal_title_contains`
+   *     can match and insert into `known_claude_terminals`.
+   *   - PowerShell's `prompt` function rewriting the window title on
+   *     every keystroke while Claude is running.
+   *
+   * Without this override, `useSyncEvents` would overwrite the live
+   * Claude activity with `{ type: "shell" }`, so the top-left workspace
+   * icon flips back to "shell" even though Claude Code is still alive.
+   * Mirrors `CodexActivityHandler.shouldPreserveActivityOnTitleReset`.
+   * See issue #234.
+   */
+  shouldPreserveActivityOnTitleReset(): boolean {
+    return true;
+  }
+
   computeStatus(raw: RawTerminalState): StatusResult {
     if (raw.outputActive) return { icon: "⏳", color: "var(--yellow)" };
 

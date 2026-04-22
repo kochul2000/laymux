@@ -524,6 +524,45 @@ describe("useSyncEvents", () => {
     expect(instance?.outputActive).toBe(true);
   });
 
+  // ── Regression guard for issue #234 ──
+  // Claude Code can emit OSC 0/2 title changes that Rust cannot resolve back
+  // to "Claude" (e.g. a path-like title "~/project", a PowerShell prompt
+  // rewrite, or a Braille spinner before `known_claude_terminals` has been
+  // populated). In those cases the event carries `interactiveApp: null`.
+  // Before the fix, `useSyncEvents` would overwrite the live Claude activity
+  // with `{ type: "shell" }`, so the workspace icon in the top-left flipped
+  // to "shell" while Claude was still running.
+  it("preserves Claude activity when title no longer resolves to Claude (issue #234)", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    // A path-like title that Rust's `detect_interactive_app_from_title`
+    // rejects outright (contains `/` or `\`), producing `interactiveApp: null`.
+    callback({
+      terminalId: "t1",
+      title: "~/project",
+      interactiveApp: null,
+      notifyGateArmed: false,
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    // Activity MUST remain interactiveApp/Claude — NOT shell.
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    // Title itself is still recorded so ClaudeActivityHandler.computeStatus
+    // can reason about working/idle spinners later.
+    expect(instance?.title).toBe("~/project");
+  });
+
   it("stores Codex spinner title text as activityMessage", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",
