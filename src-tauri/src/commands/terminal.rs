@@ -367,6 +367,10 @@ pub fn create_terminal_session(
                     if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                         known.remove(&terminal_id);
                     }
+                    // Also drop the grace-window entry so the shell fallback
+                    // kicks in immediately instead of pinning "Claude" for
+                    // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit (#237).
+                    activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
                 }
 
                 if message_changed {
@@ -422,7 +426,13 @@ pub fn create_terminal_session(
                 }
             }
 
-            // Emit structured title change event (OSC 0/2) for frontend activity detection
+            // Emit structured title change event (OSC 0/2) for frontend activity detection.
+            //
+            // `detect_interactive_app_from_live_title` already walks every
+            // fallback layer: direct title match → known_claude_terminals
+            // fast path → Codex spinner+banner → grace window (#237). The
+            // callback therefore only needs to call it once and emit the
+            // result.
             if event.code == 0 || event.code == 2 {
                 let interactive_app =
                     if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
@@ -439,17 +449,7 @@ pub fn create_terminal_session(
                             &event.data,
                             None,
                         )
-                    }
-                    .or_else(|| {
-                        // Title may not contain "Claude Code" (e.g. spinner "✢ Working"),
-                        // but if the terminal is in known_claude_terminals, preserve detection.
-                        if let Ok(known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                            if known.contains(&terminal_id) {
-                                return Some("Claude".to_string());
-                            }
-                        }
-                        None
-                    });
+                    };
                 let notify_gate_armed = if let Ok(terms) = state_for_pty.terminals.lock_or_err() {
                     terms.get(&terminal_id).is_some_and(|s| s.notify_gate_armed)
                 } else {
@@ -703,6 +703,10 @@ pub fn close_terminal_session(
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
         known.remove(&id);
     }
+
+    // Clean up interactive-app grace window (#237) so a new terminal that
+    // happens to reuse this ID does not inherit stale detection.
+    activity::clear_interactive_app_grace_window(&state, &id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
