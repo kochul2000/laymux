@@ -1557,6 +1557,128 @@ describe("TerminalView", () => {
     }
   });
 
+  // -- Regression: issue #232 — workspace return leaves glyphs garbled --
+  //
+  // WorkspaceArea / PaneGrid hide inactive workspaces and panes via
+  // `display: none`, which fires a 0×0 ResizeObserver entry without
+  // unmounting TerminalView. While hidden, the WebGL texture atlas can
+  // drift out of sync (e.g. a devicePixelRatio change fires on a 0-size
+  // terminal and cannot rebuild anything, or the atlas was already sized
+  // for the pre-hide cell geometry). On the return trip from hidden
+  // (non-zero size again) the renderer must force a full atlas rebuild;
+  // otherwise every row renders with stale, scrambled glyphs over the
+  // otherwise-correct background cell colors.
+  it("clears texture atlas when the container returns from hidden (issue #232)", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        // Match the global polyfill: fire a non-zero contentRect immediately
+        // so terminal.open() runs. sessionCreated flips to true here.
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-atlas-hide" profile="PowerShell" syncGroup="" />);
+
+      // Wait for session to finish creation (first ResizeObserver entry).
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+      mockFit.mockClear();
+
+      // Find the observer that belongs to the TerminalView container (the
+      // first — there is only one resizeObserver in that useEffect).
+      const obs = observers[0];
+      expect(obs).toBeDefined();
+      const target = obs.target as Element;
+
+      // Workspace switched away: pane container gets display:none, which
+      // fires a 0×0 contentRect. This path should NOT clear the atlas.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+
+      // Workspace switched back: container regains real dimensions. On this
+      // transition the fix must re-fit AND rebuild the atlas, otherwise
+      // every glyph renders from stale atlas coordinates (issue #232).
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 800, height: 600 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalled();
+        expect(mockClearTextureAtlas).toHaveBeenCalled();
+        expect(mockRefresh).toHaveBeenCalled();
+      });
+
+      // Subsequent resizes while still visible must NOT keep clearing the
+      // atlas — that would be wasteful. Reset counters and fire another
+      // (non-hidden → non-hidden) resize.
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+      mockFit.mockClear();
+
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 900, height: 700 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalled();
+      });
+      expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   // -- Scrollbar style --
 
   it("applies scrollbar-overlay class by default", () => {

@@ -1259,9 +1259,17 @@ export function TerminalView({
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
     let sessionCreated = false;
+    // Tracks whether the previous ResizeObserver entry reported a zero-size
+    // container. WorkspaceArea / PaneGrid hide inactive workspaces and panes
+    // via `display: none`, which collapses the box and fires a 0×0 resize.
+    // On the return trip to non-zero dimensions we must force the WebGL
+    // texture atlas to rebuild — otherwise glyphs rasterised at the pre-hide
+    // cell size / DPR stay cached and render completely garbled (issue #232).
+    let prevWasHidden = false;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
+      const isNowHidden = width === 0 || height === 0;
       if (width > 0 && height > 0 && !sessionCreated) {
         sessionCreated = true;
         // Open terminal now that container has real dimensions
@@ -1362,10 +1370,24 @@ export function TerminalView({
             });
         }
       } else if (sessionCreated && width > 0 && height > 0) {
+        const recoveringFromHidden = prevWasHidden;
         fitAddon.fit();
+        if (recoveringFromHidden) {
+          // See `prevWasHidden` definition: the WebGL atlas can go stale
+          // while the container is display:none (a DPR change that fires on
+          // a 0-size terminal cannot rebuild anything), so re-rasterise on
+          // the hide → show transition. Safe no-op without WebGL renderer.
+          try {
+            (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+          } catch {
+            /* older xterm builds / mocks may lack this method */
+          }
+          terminal.refresh(0, terminal.rows - 1);
+        }
         bindHelperTextareaEvents();
         scheduleOverlayCaretUpdate();
       }
+      prevWasHidden = isNowHidden;
     });
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
