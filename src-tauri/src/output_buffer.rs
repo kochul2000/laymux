@@ -236,8 +236,8 @@ mod tests {
         buf.push(b"12345"); // seq=5, len=5
         let seq = buf.write_seq();
         buf.push(b"67890abcde"); // seq=15, len=10, buffer="0abcde" wait...
-        // 15 bytes total pushed into 10 cap buffer
-        // new_bytes = 15 - 5 = 10, but buffer only holds 10
+                                 // 15 bytes total pushed into 10 cap buffer
+                                 // new_bytes = 15 - 5 = 10, but buffer only holds 10
         let new = buf.bytes_since(seq);
         // Should get min(10, 10) = 10 bytes (everything in buffer)
         assert_eq!(new.len(), 10);
