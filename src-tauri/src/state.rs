@@ -17,10 +17,11 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 2. `output_buffers`
 /// 3. `known_claude_terminals`
 /// 4. `known_codex_terminals`
-/// 4. `notifications`
-/// 5. `sync_groups`
-/// 6. `propagated_terminals`
-/// 7. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 5. `last_detected_interactive_app`
+/// 6. `notifications`
+/// 7. `sync_groups`
+/// 8. `propagated_terminals`
+/// 9. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -46,6 +47,15 @@ pub struct AppState {
     /// Populated proactively by the PTY output callback and frontend command detection.
     /// Removed when the terminal session closes.
     pub known_codex_terminals: Arc<Mutex<HashSet<String>>>,
+    /// Per-terminal grace-window cache of the last successfully detected
+    /// interactive app name and the `Instant` of that detection.
+    ///
+    /// Used by `activity::detect_interactive_app_from_live_title` to preserve
+    /// the previous detection across title events that evaluate to `None`
+    /// (path-like titles, early-splash spinner frames, PowerShell `prompt`
+    /// rewrites). Entries older than `INTERACTIVE_APP_GRACE_WINDOW` are
+    /// ignored. See issue #237.
+    pub last_detected_interactive_app: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     /// Single source of truth for terminal notifications.
     /// Stored in backend so `get_terminal_summaries` can return unread counts.
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
@@ -66,6 +76,7 @@ impl AppState {
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),
+            last_detected_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
         }

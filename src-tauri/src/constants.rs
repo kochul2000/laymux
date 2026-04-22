@@ -101,6 +101,32 @@ pub const EVENT_TERMINALS_LIST_CHANGED: &str = "terminals-list-changed";
 /// notifications are enabled even without observing a user command.
 pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
 
+/// Grace window for preserving a previously detected interactive app when the
+/// current title evaluation returns `None` (issue #237).
+///
+/// TUI apps (Claude Code, Codex, etc.) periodically emit OSC 0/2 title updates
+/// that do not carry the app name:
+///   - Path-like titles (`~/project`, `C:\Users\...`, `//wsl.localhost/...`)
+///     are rejected outright by `detect_interactive_app_from_title`.
+///   - Braille / star spinner titles appear before the output buffer has
+///     accumulated the "Claude Code" / "OpenAI Codex" banner string that
+///     `known_*_terminals` relies on.
+///   - PowerShell's `prompt` function rewrites the window title on every
+///     keystroke while Claude is running.
+///
+/// Within this window after the last successful detection, the live-title
+/// detector keeps returning the previously detected app instead of `None`,
+/// so the frontend never briefly sees `interactiveApp: null` and flips the
+/// workspace icon back to "shell". New detections (including transitions
+/// to a different app) refresh the timestamp immediately.
+///
+/// 5 seconds is long enough to absorb the Claude splash / Codex banner
+/// initialization gap observed in practice while staying short enough that
+/// a process that actually exited becomes visible quickly. Process-exit
+/// integration (child exit signals / OSC 133;D fallback) is tracked as a
+/// follow-up to issue #237.
+pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
+
 #[cfg(test)]
 mod tests {
     use super::*;
