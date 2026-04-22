@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, type ReactNode } from "react";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
@@ -402,9 +402,7 @@ export function PaneControlBar({
   // Local fallback for components rendered without a paneId (tests, previews) —
   // keeps toggling functional but doesn't persist anywhere.
   const [localMode, setLocalMode] = useState<ControlBarMode | undefined>(undefined);
-  const mode: ControlBarMode = paneId
-    ? (persistedMode ?? defaultMode)
-    : (localMode ?? defaultMode);
+  const mode: ControlBarMode = paneId ? (persistedMode ?? defaultMode) : (localMode ?? defaultMode);
   const setMode = useCallback(
     (m: ControlBarMode) => {
       if (paneId) setPaneOverride(paneId, { controlBarMode: m });
@@ -413,6 +411,7 @@ export function PaneControlBar({
     [paneId, setPaneOverride],
   );
   const [hasViewHeader, setHasViewHeader] = useState(false);
+  const [leftBarContent, setLeftBarContentState] = useState<ReactNode>(null);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
 
@@ -426,6 +425,9 @@ export function PaneControlBar({
         : "pane-control-hover";
 
   const hasBarLabel = currentView.type !== "TerminalView" && currentView.type !== "EmptyView";
+  // 자식(TerminalView 등)이 주입한 좌측 콘텐츠가 있으면 기본 BarLabel 대신 사용.
+  // 둘 다 없으면 flex-1 스페이서만 렌더하여 pane 컨트롤이 오른쪽 끝에 정렬되도록 한다.
+  const hasLeftContent = hasBarLabel || leftBarContent != null;
 
   const paneControls = useMemo(
     () => (
@@ -436,6 +438,9 @@ export function PaneControlBar({
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
   const unregisterHeader = useCallback(() => setHasViewHeader(false), []);
+  const setLeftBarContent = useCallback((node: ReactNode) => {
+    setLeftBarContentState(node ?? null);
+  }, []);
 
   const ctxValue = useMemo(
     () => ({
@@ -445,8 +450,19 @@ export function PaneControlBar({
       onSetMode: setMode,
       registerHeader,
       unregisterHeader,
+      leftBarContent,
+      setLeftBarContent,
     }),
-    [paneControls, mode, hovered, setMode, registerHeader, unregisterHeader],
+    [
+      paneControls,
+      mode,
+      hovered,
+      setMode,
+      registerHeader,
+      unregisterHeader,
+      leftBarContent,
+      setLeftBarContent,
+    ],
   );
 
   return (
@@ -462,7 +478,15 @@ export function PaneControlBar({
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
-            <BarLabel viewType={currentView.type} />
+            {hasBarLabel ? (
+              <BarLabel viewType={currentView.type} />
+            ) : leftBarContent ? (
+              <div data-testid="pane-control-bar-left" className="flex min-w-0 flex-1 items-center">
+                {leftBarContent}
+              </div>
+            ) : (
+              <div className="flex-1" />
+            )}
             <BarContent
               currentView={currentView}
               actions={actions}
@@ -481,18 +505,27 @@ export function PaneControlBar({
             <div
               data-testid="pane-control-bar"
               className={`absolute top-0 z-20 flex items-center pr-1 ${
-                hasBarLabel ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
+                hasLeftContent ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
               }`}
               style={{
                 height: BAR_H,
                 background: barBgHover,
                 backdropFilter: "blur(8px)",
                 borderBottom: `1px solid ${sepClr}`,
-                ...(!hasBarLabel ? { borderLeft: `1px solid ${sepClr}` } : {}),
+                ...(!hasLeftContent ? { borderLeft: `1px solid ${sepClr}` } : {}),
                 borderRadius: 0,
               }}
             >
-              {hasBarLabel && <BarLabel viewType={currentView.type} />}
+              {hasBarLabel ? (
+                <BarLabel viewType={currentView.type} />
+              ) : leftBarContent ? (
+                <div
+                  data-testid="pane-control-bar-left"
+                  className="flex min-w-0 flex-1 items-center"
+                >
+                  {leftBarContent}
+                </div>
+              ) : null}
               <BarContent
                 currentView={currentView}
                 actions={actions}

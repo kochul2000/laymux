@@ -2183,6 +2183,104 @@ describe("TerminalView", () => {
       vi.useRealTimers();
     });
 
+    it("injects pinned bar left content with title/cwd/branch when pinned (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "pinned" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-info" profile="WSL" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-info", {
+          title: "zsh — /home/user/proj",
+          cwd: "/home/user/proj",
+          branch: "main",
+        });
+      });
+
+      // 마지막 주입된 node 가 title/cwd/branch 를 모두 포함해야 한다.
+      expect(setLeftBarContent).toHaveBeenCalled();
+      const lastCall = setLeftBarContent.mock.calls.at(-1);
+      const node = lastCall?.[0];
+      expect(node).not.toBeNull();
+      // 렌더해서 내용 확인
+      const { container } = render(<>{node}</>);
+      expect(container.textContent).toContain("zsh — /home/user/proj");
+      // abbreviatePath(/home/user/proj) → "~/proj"
+      expect(container.textContent).toContain("~/proj");
+      expect(container.textContent).toContain("main");
+    });
+
+    it("injects null when control bar mode is not pinned (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "hover" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-hover" profile="PowerShell" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-hover", {
+          title: "pwsh",
+          cwd: "C:\\Users\\me\\proj",
+        });
+      });
+      // 모든 주입 호출은 null 이어야 한다.
+      for (const call of setLeftBarContent.mock.calls) {
+        expect(call[0]).toBeNull();
+      }
+    });
+
+    it("converts /mnt paths to Windows form when pinned on a Windows profile (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "pinned" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-mnt" profile="PowerShell" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-mnt", {
+          cwd: "/mnt/d/projects/laymux",
+        });
+      });
+      const node = setLeftBarContent.mock.calls.at(-1)?.[0];
+      const { container } = render(<>{node}</>);
+      expect(container.textContent).toMatch(/D:\\projects\\laymux/);
+    });
+
     it("cleans up WebGL timer on unmount before it fires", async () => {
       vi.useFakeTimers();
       _resetWebglStagger();
