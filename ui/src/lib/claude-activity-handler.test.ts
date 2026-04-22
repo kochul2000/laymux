@@ -23,6 +23,23 @@ describe("ClaudeActivityHandler", () => {
     expect(handler.shouldPreserveActivityOnExitCode(raw({ exitCode: 0 }))).toBe(true);
   });
 
+  // ── Regression guard for issue #234 ──
+  // When Claude Code is running, its title can flip to:
+  //   - a path-like string (e.g. "~/project" or PowerShell's prompt rewrite)
+  //   - a Braille-only spinner title whose buffer hasn't yet logged
+  //     "Claude Code" in a form `any_terminal_title_contains` can match
+  // In those cases Rust's `detect_interactive_app_from_live_title` returns
+  // `None`, so the `terminal-title-changed` event carries
+  // `interactiveApp: null`. Without `shouldPreserveActivityOnTitleReset`,
+  // useSyncEvents would overwrite the current `interactiveApp: Claude`
+  // activity with `shell`, causing the workspace icon in the top-left to
+  // flip back to "shell" even though Claude Code is still alive in the
+  // terminal. Codex already preserves on title reset — this test locks in
+  // the same behaviour for Claude.
+  it("preserves activity on title reset (issue #234)", () => {
+    expect(handler.shouldPreserveActivityOnTitleReset?.(raw({ title: "~/project" }))).toBe(true);
+  });
+
   describe("computeStatus", () => {
     it("returns pending while output is active", () => {
       expect(handler.computeStatus(raw({ outputActive: true }))).toEqual({
