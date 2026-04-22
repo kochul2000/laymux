@@ -64,7 +64,6 @@ import {
   unregisterTerminalSerializer,
 } from "@/lib/terminal-serialize-registry";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
-import { abbreviatePath, isWindowsProfile, mntPathToWindows } from "@/lib/workspace-summary";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -275,66 +274,31 @@ export function TerminalView({
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
-  // Issue #209: pinned 컨트롤 바 좌측에 title/cwd/branch 를 주입한다.
-  // 새 헤더 바를 추가하지 않고 이미 존재하는 pinned 바의 빈 좌측 공간을 재활용한다.
-  // hover 모드에서도 같은 정보가 표시되면 노이즈가 되므로 pinned 모드로 제한한다.
+  // Issue #209: pinned 컨트롤 바 좌측에 쉘/TUI 가 설정한 title 을 주입한다.
+  // 별도의 헤더 바를 만들지 않고 이미 존재하는 pinned 바의 빈 좌측 공간을 재활용한다.
   const paneCtx = usePaneControl();
   const setLeftBarContent = paneCtx?.setLeftBarContent;
   const controlBarMode = paneCtx?.mode;
-  const instanceForBar = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId));
-  const rawTitle = instanceForBar?.title?.trim() ?? "";
-  const rawBranch = instanceForBar?.branch?.trim() ?? "";
-  const rawCwd = instanceForBar?.cwd?.trim() ?? "";
+  const rawTitle = useTerminalStore(
+    (s) => s.instances.find((i) => i.id === instanceId)?.title?.trim() ?? "",
+  );
   useEffect(() => {
     if (!setLeftBarContent) return;
-    if (controlBarMode !== "pinned") {
-      setLeftBarContent(null);
-      return () => setLeftBarContent(null);
-    }
-    const displayCwd = rawCwd
-      ? abbreviatePath(isWindowsProfile(profile) ? mntPathToWindows(rawCwd) : rawCwd)
-      : "";
-    // title/branch/cwd 가 모두 비어 있으면 좌측 공간을 비워 기본 스페이서로 둔다.
-    if (!rawTitle && !rawBranch && !displayCwd) {
+    if (controlBarMode !== "pinned" || !rawTitle) {
       setLeftBarContent(null);
       return () => setLeftBarContent(null);
     }
     setLeftBarContent(
-      <div
-        data-testid={`terminal-pinned-info-${instanceId}`}
-        className="flex min-w-0 flex-1 items-center gap-2 truncate text-[11px]"
+      <span
+        data-testid={`terminal-pinned-info-title-${instanceId}`}
+        className="min-w-0 flex-1 truncate text-[11px] font-medium"
+        style={{ color: "var(--text-primary)" }}
       >
-        {rawTitle && (
-          <span
-            data-testid={`terminal-pinned-info-title-${instanceId}`}
-            className="min-w-0 truncate font-medium"
-            style={{ color: "var(--text-primary)" }}
-          >
-            {rawTitle}
-          </span>
-        )}
-        {rawBranch && (
-          <span
-            data-testid={`terminal-pinned-info-branch-${instanceId}`}
-            className="shrink-0"
-            style={{ color: "var(--green)" }}
-          >
-            {rawBranch}
-          </span>
-        )}
-        {displayCwd && (
-          <span
-            data-testid={`terminal-pinned-info-cwd-${instanceId}`}
-            className="min-w-0 truncate"
-            style={{ color: "var(--text-secondary)", opacity: 0.8 }}
-          >
-            {displayCwd}
-          </span>
-        )}
-      </div>,
+        {rawTitle}
+      </span>,
     );
     return () => setLeftBarContent(null);
-  }, [setLeftBarContent, controlBarMode, instanceId, profile, rawTitle, rawBranch, rawCwd]);
+  }, [setLeftBarContent, controlBarMode, instanceId, rawTitle]);
   const syncOutputActiveRef = useRef(false);
   const compositionPreviewRef = useRef<CompositionPreviewState>({
     active: false,
