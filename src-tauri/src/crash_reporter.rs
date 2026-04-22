@@ -10,13 +10,10 @@
 //! 여러 스레드가 동시에 패닉해도 다이얼로그는 최초 1회만 표시한다
 //! (이후 스레드는 `crash.log` append만 한다).
 
-use std::backtrace::Backtrace;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::panic::{self, PanicHookInfo};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -116,30 +113,46 @@ impl CrashReport {
 ///
 /// `dir`이 `Some`이면 패닉 시 `dir/crash.log`에 append한다.
 /// `None`이면 파일 기록을 건너뛴다(테스트/임베디드 용도).
+///
+/// 주의: 테스트 빌드(`cfg(test)`)에서는 훅을 설치하지 않는다. 의도적으로 panic을
+/// 일으키는 테스트(예: mutex poison 검증)가 있을 때 매번 네이티브 크래시
+/// 다이얼로그가 뜨는 것을 막기 위함이다.
 pub fn install(dir: Option<PathBuf>) {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let default_hook = panic::take_hook();
-        panic::set_hook(Box::new(move |info| {
-            let backtrace = Backtrace::force_capture().to_string();
-            let report = CrashReport::from_panic(info, backtrace);
+    #[cfg(test)]
+    {
+        let _ = dir;
+    }
 
-            if let Some(dir) = dir.as_ref() {
-                if let Err(e) = append_log(dir, &report) {
-                    // 훅 안에서 또 패닉하면 안 되므로 tracing도 피하고 stderr로만 남긴다.
-                    eprintln!("[crash_reporter] failed to append crash.log: {e}");
+    #[cfg(not(test))]
+    {
+        use std::backtrace::Backtrace;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Once;
+
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            let default_hook = panic::take_hook();
+            panic::set_hook(Box::new(move |info| {
+                let backtrace = Backtrace::force_capture().to_string();
+                let report = CrashReport::from_panic(info, backtrace);
+
+                if let Some(dir) = dir.as_ref() {
+                    if let Err(e) = append_log(dir, &report) {
+                        // 훅 안에서 또 패닉하면 안 되므로 tracing도 피하고 stderr로만 남긴다.
+                        eprintln!("[crash_reporter] failed to append crash.log: {e}");
+                    }
                 }
-            }
 
-            // 여러 스레드가 동시 패닉해도 다이얼로그는 1회만 띄운다.
-            static DIALOG_SHOWN: AtomicBool = AtomicBool::new(false);
-            if !DIALOG_SHOWN.swap(true, Ordering::SeqCst) {
-                show_crash_dialog(&report);
-            }
+                // 여러 스레드가 동시 패닉해도 다이얼로그는 1회만 띄운다.
+                static DIALOG_SHOWN: AtomicBool = AtomicBool::new(false);
+                if !DIALOG_SHOWN.swap(true, Ordering::SeqCst) {
+                    show_crash_dialog(&report);
+                }
 
-            default_hook(info);
-        }));
-    });
+                default_hook(info);
+            }));
+        });
+    }
 }
 
 fn append_log(dir: &Path, report: &CrashReport) -> Result<(), AppError> {
@@ -201,6 +214,7 @@ fn dialog_body(report: &CrashReport, log_path: Option<&Path>) -> String {
     body
 }
 
+#[cfg(not(test))]
 fn show_crash_dialog(report: &CrashReport) {
     let log_path = crate::settings::dirs_config_path().map(|d| d.join(CRASH_LOG_FILENAME));
     let body = dialog_body(report, log_path.as_deref());
@@ -388,5 +402,62 @@ mod tests {
     fn install_is_idempotent_without_dir() {
         install(None);
         install(None);
+    }
+
+    /// 테스트 빌드에서 `install()`은 반드시 no-op 이어야 한다.
+    /// 그렇지 않으면 의도적으로 panic을 일으키는 테스트(예: `lock_ext::tests::
+    /// lock_or_err_returns_app_error_on_poison`)가 실행될 때마다 네이티브
+    /// 크래시 다이얼로그가 떠서 CI/개발 워크플로를 망가뜨린다.
+    ///
+    /// sentinel 훅을 설치한 뒤 `install()`을 호출하고, 이후 probe panic 시
+    /// sentinel이 호출되는지로 훅 교체 여부를 검증한다. panic hook은 프로세스
+    /// 전역이라 병렬 실행되는 다른 테스트의 panic도 sentinel을 트리거하므로,
+    /// probe 메시지로 필터링해 우리 panic 만 카운트한다.
+    #[test]
+    #[serial_test::serial]
+    fn install_does_not_replace_panic_hook_in_test_mode() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tempfile::tempdir;
+
+        const PROBE_TAG: &str = "crash_reporter::install sentinel probe";
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sentinel = counter.clone();
+
+        let prev = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            let msg = info
+                .payload()
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("");
+            if msg.contains(PROBE_TAG) {
+                sentinel.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+
+        let dir = tempdir().unwrap();
+        install(None);
+        install(Some(dir.path().to_path_buf()));
+
+        let _ = panic::catch_unwind(|| {
+            panic!("{PROBE_TAG} 1");
+        });
+        let _ = panic::catch_unwind(|| {
+            panic!("{PROBE_TAG} 2");
+        });
+
+        panic::set_hook(prev);
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            2,
+            "install() 이 테스트 빌드에서 panic 훅을 교체했다 — 의도적 panic 테스트에서 크래시 다이얼로그가 발생한다"
+        );
+        assert!(
+            !dir.path().join(CRASH_LOG_FILENAME).exists(),
+            "install() 이 테스트 빌드에서 crash.log 를 기록했다"
+        );
     }
 }
