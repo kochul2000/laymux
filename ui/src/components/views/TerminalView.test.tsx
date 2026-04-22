@@ -2183,6 +2183,104 @@ describe("TerminalView", () => {
       vi.useRealTimers();
     });
 
+    it("injects pinned bar left content with title when pinned (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "pinned" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-info" profile="WSL" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-info", {
+          title: "zsh — /home/user/proj",
+          cwd: "/home/user/proj",
+          branch: "main",
+        });
+      });
+
+      expect(setLeftBarContent).toHaveBeenCalled();
+      const lastCall = setLeftBarContent.mock.calls.at(-1);
+      const node = lastCall?.[0];
+      expect(node).not.toBeNull();
+      const { container } = render(<>{node}</>);
+      expect(container.textContent).toContain("zsh — /home/user/proj");
+      // title 만 표시: cwd/branch 는 렌더되지 않는다.
+      expect(container.textContent).not.toContain("~/proj");
+      expect(container.textContent).not.toContain("main");
+    });
+
+    it("injects null when pinned but title is empty (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "pinned" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-empty" profile="WSL" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-empty", {
+          title: "",
+          cwd: "/home/user/proj",
+          branch: "main",
+        });
+      });
+      for (const call of setLeftBarContent.mock.calls) {
+        expect(call[0]).toBeNull();
+      }
+    });
+
+    it("injects null when control bar mode is not pinned (issue #209)", async () => {
+      const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
+      const setLeftBarContent = vi.fn();
+      const ctxValue = {
+        paneControls: <div />,
+        mode: "hover" as const,
+        hovered: false,
+        onSetMode: vi.fn(),
+        registerHeader: vi.fn(),
+        unregisterHeader: vi.fn(),
+        leftBarContent: null,
+        setLeftBarContent,
+      };
+      render(
+        <PaneControlContext.Provider value={ctxValue}>
+          <TerminalView instanceId="t-pin-hover" profile="PowerShell" syncGroup="g" />
+        </PaneControlContext.Provider>,
+      );
+      await act(async () => {
+        useTerminalStore.getState().updateInstanceInfo("t-pin-hover", {
+          title: "pwsh",
+          cwd: "C:\\Users\\me\\proj",
+        });
+      });
+      // 모든 주입 호출은 null 이어야 한다.
+      for (const call of setLeftBarContent.mock.calls) {
+        expect(call[0]).toBeNull();
+      }
+    });
+
     it("cleans up WebGL timer on unmount before it fires", async () => {
       vi.useFakeTimers();
       _resetWebglStagger();

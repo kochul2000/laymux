@@ -15,7 +15,9 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { useContext, useEffect, type ReactNode } from "react";
 import { PaneControlBar } from "./PaneControlBar";
+import { PaneControlContext } from "./PaneControlContext";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 
@@ -252,9 +254,7 @@ describe("PaneControlBar", () => {
     await user.click(screen.getByTestId("pane-control-pin"));
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
     // Mode should be stored in overrides-store as a pane instance override
-    expect(useOverridesStore.getState().getPaneOverride("pane-abc")?.controlBarMode).toBe(
-      "pinned",
-    );
+    expect(useOverridesStore.getState().getPaneOverride("pane-abc")?.controlBarMode).toBe("pinned");
     unmount();
 
     // Re-render — mode should be restored from store
@@ -307,5 +307,65 @@ describe("PaneControlBar", () => {
     );
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+  });
+
+  // -- Left bar content injection (issue #209) --
+
+  function LeftContentInjector({ node }: { node: ReactNode }) {
+    const ctx = useContext(PaneControlContext);
+    useEffect(() => {
+      ctx?.setLeftBarContent(node);
+      return () => ctx?.setLeftBarContent(null);
+    }, [ctx, node]);
+    return null;
+  }
+
+  it("renders a child-injected left bar node on the pinned bar", () => {
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+    }));
+    render(
+      <PaneControlBar
+        paneId="pane-inject"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+      >
+        <LeftContentInjector node={<span data-testid="injected-left">LEFT_INFO</span>} />
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("injected-left")).toHaveTextContent("LEFT_INFO");
+  });
+
+  it("does not render the pinned bar just because left content is injected (mode still decides)", () => {
+    // hover 모드에서 hovered=false면 bar 자체가 표시되지 않아야 한다.
+    render(
+      <PaneControlBar
+        paneId="pane-hov"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={false}
+      >
+        <LeftContentInjector node={<span data-testid="injected-left">INFO</span>} />
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("injected-left")).not.toBeInTheDocument();
+  });
+
+  it("renders injected left content on the hover bar when hovered", () => {
+    render(
+      <PaneControlBar
+        paneId="pane-hov2"
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={true}
+      >
+        <LeftContentInjector node={<span data-testid="injected-left">HOVER_INFO</span>} />
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("injected-left")).toHaveTextContent("HOVER_INFO");
   });
 });

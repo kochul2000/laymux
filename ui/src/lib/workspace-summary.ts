@@ -221,6 +221,16 @@ export function computeWorkspaceSummaryFromBackend(
   };
 }
 
+/**
+ * Check if a profile is a Windows-native shell (PowerShell, CMD) that uses
+ * Windows-style paths. Used to decide whether `/mnt/x/...` CWDs should be
+ * converted to `X:\...` for display.
+ */
+export function isWindowsProfile(profile: string): boolean {
+  const lower = profile.toLowerCase();
+  return lower.includes("powershell") || lower === "cmd" || lower === "command prompt";
+}
+
 /** Abbreviate a profile name for compact display (3 chars). */
 function abbreviateProfile(profile: string): string {
   const lower = profile.toLowerCase();

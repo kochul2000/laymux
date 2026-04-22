@@ -63,6 +63,7 @@ import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
 } from "@/lib/terminal-serialize-registry";
+import { usePaneControl } from "@/components/layout/PaneControlContext";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -272,6 +273,32 @@ export function TerminalView({
   cwdReceiveRef.current = cwdReceive;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
+
+  // Issue #209: pinned 컨트롤 바 좌측에 쉘/TUI 가 설정한 title 을 주입한다.
+  // 별도의 헤더 바를 만들지 않고 이미 존재하는 pinned 바의 빈 좌측 공간을 재활용한다.
+  const paneCtx = usePaneControl();
+  const setLeftBarContent = paneCtx?.setLeftBarContent;
+  const controlBarMode = paneCtx?.mode;
+  const rawTitle = useTerminalStore(
+    (s) => s.instances.find((i) => i.id === instanceId)?.title?.trim() ?? "",
+  );
+  useEffect(() => {
+    if (!setLeftBarContent) return;
+    if (controlBarMode !== "pinned" || !rawTitle) {
+      setLeftBarContent(null);
+      return () => setLeftBarContent(null);
+    }
+    setLeftBarContent(
+      <span
+        data-testid={`terminal-pinned-info-title-${instanceId}`}
+        className="min-w-0 flex-1 truncate text-[11px] font-medium"
+        style={{ color: "var(--text-primary)" }}
+      >
+        {rawTitle}
+      </span>,
+    );
+    return () => setLeftBarContent(null);
+  }, [setLeftBarContent, controlBarMode, instanceId, rawTitle]);
   const syncOutputActiveRef = useRef(false);
   const compositionPreviewRef = useRef<CompositionPreviewState>({
     active: false,
