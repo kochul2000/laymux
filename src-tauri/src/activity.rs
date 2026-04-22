@@ -867,14 +867,14 @@ mod tests {
         );
 
         // Manually age the entry beyond the grace window.
+        // (The direct-title match path at step 1 does not touch
+        // `known_claude_terminals`, so no fast-path eviction is needed here —
+        // the grace entry is the sole mechanism keeping detection alive.)
         {
             let mut guard = state.last_detected_interactive_app.lock().unwrap();
             let entry = guard.get_mut(tid).expect("entry must exist");
             entry.1 = Instant::now() - INTERACTIVE_APP_GRACE_WINDOW - Duration::from_millis(10);
         }
-
-        // Remove the known-Claude fast path so only the grace window can save it.
-        state.known_claude_terminals.lock().unwrap().remove(tid);
 
         assert_eq!(
             detect_interactive_app_from_live_title(&state, tid, "C:\\Users\\dev\\project", None,),
