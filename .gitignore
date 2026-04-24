@@ -39,6 +39,7 @@ test-results/
 # Claude Code
 .claude/worktrees/
 .claude/*.local.*
+.claude/scheduled_tasks.lock
 
 # Temp files
 *~
