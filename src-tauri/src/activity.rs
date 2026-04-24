@@ -267,12 +267,20 @@ pub fn detect_interactive_app_from_live_title(
                 known.insert(terminal_id.to_string());
             }
         }
+        if name == "Claude" {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+        }
         record_interactive_app_detection(state, terminal_id, &name);
         return Some(name);
     }
 
-    // 2) Known-Claude fast path (buffer scan populates this set on the first
-    //    "Claude Code" title seen). Also refreshes the grace window.
+    // 2) Known-Claude fast path. The PTY callback, frontend
+    //    (`mark_claude_terminal`), or a prior buffer scan may have registered
+    //    this terminal even if the current title has drifted (task description
+    //    like "✻ Exploring code", spinner frame, etc.). Also refreshes the
+    //    grace window.
     if let Ok(known) = state.known_claude_terminals.lock_or_err() {
         if known.contains(terminal_id) {
             drop(known);
@@ -281,13 +289,23 @@ pub fn detect_interactive_app_from_live_title(
         }
     }
 
-    // 3) Codex spinner + buffer banner fallback. Same grace-window refresh.
+    // 3) Full-buffer Claude title scan (prong 2 of
+    //    `is_claude_terminal_from_buffer`): catches the case where the
+    //    "Claude Code" title appeared earlier but has since scrolled past the
+    //    live-title position. Also populates `known_claude_terminals` so
+    //    subsequent lookups stay O(1). Refreshes the grace window.
+    if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Claude");
+        return Some("Claude".to_string());
+    }
+
+    // 4) Codex spinner + buffer banner fallback. Same grace-window refresh.
     if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
         record_interactive_app_detection(state, terminal_id, "Codex");
         return Some("Codex".to_string());
     }
 
-    // 4) Grace window fallback (issue #237). When every other signal returns
+    // 5) Grace window fallback (issue #237). When every other signal returns
     //    None — e.g. a Braille-only spinner frame before the buffer has
     //    accumulated the "Claude Code" banner, a path-like title during
     //    Claude's splash, or PowerShell rewriting the title on every
@@ -347,6 +365,16 @@ pub fn detect_terminal_state(
                 activity: TerminalActivity::InteractiveApp { name },
             };
         }
+    } else if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
+        // No OSC 0/2 title in the live window, but persistent tracking or
+        // a full-buffer scan still identifies this terminal as Claude.
+        // Without this branch, issue #239 leaks: cd propagation reaches a
+        // Claude target whose title has scrolled out of view.
+        return TerminalStateInfo {
+            activity: TerminalActivity::InteractiveApp {
+                name: "Claude".to_string(),
+            },
+        };
     }
 
     TerminalStateInfo { activity }
@@ -866,15 +894,17 @@ mod tests {
             Some("Claude".to_string())
         );
 
-        // Manually age the entry beyond the grace window.
-        // (The direct-title match path at step 1 does not touch
-        // `known_claude_terminals`, so no fast-path eviction is needed here —
-        // the grace entry is the sole mechanism keeping detection alive.)
+        // Manually age the entry beyond the grace window. After #239 the
+        // direct-title match path at step 1 also populates
+        // `known_claude_terminals`, so simulate a real Claude exit by
+        // clearing that set too — otherwise step 2 (fast path) would still
+        // report "Claude" regardless of the grace window.
         {
             let mut guard = state.last_detected_interactive_app.lock().unwrap();
             let entry = guard.get_mut(tid).expect("entry must exist");
             entry.1 = Instant::now() - INTERACTIVE_APP_GRACE_WINDOW - Duration::from_millis(10);
         }
+        state.known_claude_terminals.lock().unwrap().remove(tid);
 
         assert_eq!(
             detect_interactive_app_from_live_title(&state, tid, "C:\\Users\\dev\\project", None,),
