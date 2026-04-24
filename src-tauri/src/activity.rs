@@ -7,7 +7,7 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use crate::constants::ACTIVITY_SCAN_BYTES;
+use crate::constants::{ACTIVITY_SCAN_BYTES, INTERACTIVE_APP_GRACE_WINDOW};
 use crate::lock_ext::MutexExt;
 use crate::osc;
 use crate::output_buffer::TerminalOutputBuffer;
@@ -211,12 +211,56 @@ pub fn is_codex_terminal_from_buffer(
     detected
 }
 
+/// Remember that `app_name` was successfully detected on `terminal_id` at
+/// `Instant::now()`. Used to seed the grace window (§14.4 / issue #237) so a
+/// subsequent title event that resolves to `None` can still report the
+/// previously known app for a short while.
+fn record_interactive_app_detection(state: &AppState, terminal_id: &str, app_name: &str) {
+    if let Ok(mut guard) = state.last_detected_interactive_app.lock_or_err() {
+        guard.insert(
+            terminal_id.to_string(),
+            (app_name.to_string(), Instant::now()),
+        );
+    }
+}
+
+/// Grace-window fallback: if `terminal_id` had a successful detection within
+/// `INTERACTIVE_APP_GRACE_WINDOW`, return that app name. Expired entries are
+/// evicted so the map does not grow without bound on long-lived terminals.
+fn lookup_interactive_app_within_grace_window(
+    state: &AppState,
+    terminal_id: &str,
+) -> Option<String> {
+    let mut guard = state.last_detected_interactive_app.lock_or_err().ok()?;
+    let Some((name, ts)) = guard.get(terminal_id) else {
+        return None;
+    };
+    if ts.elapsed() <= INTERACTIVE_APP_GRACE_WINDOW {
+        return Some(name.clone());
+    }
+    // Expired — evict so the shell fallback path is stable.
+    guard.remove(terminal_id);
+    None
+}
+
+/// Forget the grace-window entry for `terminal_id`. Called when the terminal
+/// session closes so stale timestamps cannot leak into a new PTY sharing the
+/// same ID.
+pub fn clear_interactive_app_grace_window(state: &AppState, terminal_id: &str) {
+    if let Ok(mut guard) = state.last_detected_interactive_app.lock_or_err() {
+        guard.remove(terminal_id);
+    }
+}
+
 pub fn detect_interactive_app_from_live_title(
     state: &AppState,
     terminal_id: &str,
     title: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> Option<String> {
+    // 1) Direct title match — authoritative. Refresh the grace window so
+    //    subsequent None-returning titles (path-like, spinner, PowerShell
+    //    prompt rewrites) keep reporting the same app.
     if let Some(name) = detect_interactive_app_from_title(title) {
         if name == "Codex" {
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
@@ -228,31 +272,51 @@ pub fn detect_interactive_app_from_live_title(
                 known.insert(terminal_id.to_string());
             }
         }
+        record_interactive_app_detection(state, terminal_id, &name);
         return Some(name);
     }
 
-    // Persistent tracking: the PTY callback or frontend (`mark_claude_terminal`)
-    // may have registered this terminal earlier even if the current title has
-    // since drifted to a task description (e.g. "✻ Exploring code").
+    // 2) Known-Claude fast path. The PTY callback, frontend
+    //    (`mark_claude_terminal`), or a prior buffer scan may have registered
+    //    this terminal even if the current title has drifted (task description
+    //    like "✻ Exploring code", spinner frame, etc.). Also refreshes the
+    //    grace window.
     if let Ok(known) = state.known_claude_terminals.lock_or_err() {
         if known.contains(terminal_id) {
+            drop(known);
+            record_interactive_app_detection(state, terminal_id, "Claude");
             return Some("Claude".to_string());
         }
     }
 
-    // Full-buffer title scan (prong 2 of `is_claude_terminal_from_buffer`):
-    // catches the case where "Claude Code" title appeared earlier in the
-    // buffer but has since scrolled past the live-title position. Also
-    // populates `known_claude_terminals` so subsequent lookups stay O(1).
+    // 3) Full-buffer Claude title scan (prong 2 of
+    //    `is_claude_terminal_from_buffer`): catches the case where the
+    //    "Claude Code" title appeared earlier but has since scrolled past the
+    //    live-title position. Also populates `known_claude_terminals` so
+    //    subsequent lookups stay O(1). Refreshes the grace window.
     if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Claude");
         return Some("Claude".to_string());
     }
 
+    // 4) Codex spinner + buffer banner fallback. Same grace-window refresh.
     if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Codex");
         return Some("Codex".to_string());
     }
 
-    None
+    // 5) Grace window fallback (issue #237). When every other signal returns
+    //    None — e.g. a Braille-only spinner frame before the buffer has
+    //    accumulated the "Claude Code" banner, a path-like title during
+    //    Claude's splash, or PowerShell rewriting the title on every
+    //    keystroke — keep reporting the last detected app for a short window.
+    //
+    //    Caveat (scope of #237): if the underlying process actually exited
+    //    (`/exit` inside Claude/Codex, external `kill`) the grace window will
+    //    still preserve the stale name for up to `INTERACTIVE_APP_GRACE_WINDOW`
+    //    before clearing itself. Binding the grace entry to child-process
+    //    exit signals / OSC 133;D is tracked as a follow-up.
+    lookup_interactive_app_within_grace_window(state, terminal_id)
 }
 
 /// Detect the activity state of a terminal from its output buffer.
@@ -569,6 +633,7 @@ impl PtyCallbackState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn detect_activity_empty_buffer() {
@@ -750,6 +815,181 @@ mod tests {
         assert_eq!(
             detect_interactive_app_from_title("vi"),
             Some("vim".to_string())
+        );
+    }
+
+    // ── Grace window (#237) ──
+
+    #[test]
+    fn grace_window_preserves_claude_on_path_like_title() {
+        // Regression for #237: Rust currently drops `interactiveApp` to `None`
+        // whenever the live title is path-like (`C:\...`, `~/project`, etc.),
+        // even though the terminal is still running Claude. The grace window
+        // should keep the previously detected app alive across that brief
+        // None gap.
+        let state = AppState::new();
+        let tid = "t-grace-claude";
+
+        // 1) A real Claude detection primes the grace window.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "Claude Code", None),
+            Some("Claude".to_string())
+        );
+
+        // 2) Claude rewrites the title to a path-like value (PowerShell `prompt`
+        //    or the repo path breadcrumb). Rust should still report "Claude".
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "C:\\Users\\dev\\project", None,),
+            Some("Claude".to_string())
+        );
+
+        // 3) Braille-only spinner before `known_claude_terminals` would have
+        //    been populated from a buffer banner — still preserved.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "\u{280b} Task", None),
+            Some("Claude".to_string())
+        );
+    }
+
+    #[test]
+    fn grace_window_preserves_codex_without_banner_in_buffer() {
+        // Codex's spinner-title fallback requires "OpenAI Codex" in the buffer.
+        // Before the banner is flushed — or after it rotates out of the 16KB
+        // window — the fallback fails and the frontend sees `None`. The grace
+        // window must bridge that gap once Codex has been detected at least
+        // once.
+        let state = AppState::new();
+        let tid = "t-grace-codex";
+
+        // Prime: real banner + explicit title.
+        let mut explicit = TerminalOutputBuffer::default();
+        explicit.push(b"\x1b]0;OpenAI Codex\x07");
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "OpenAI Codex", Some(&explicit),),
+            Some("Codex".to_string())
+        );
+
+        // Simulate that the banner has rotated out and the current title is a
+        // Braille spinner: without grace window this returns None because the
+        // empty buffer has no "OpenAI Codex" for the fallback to anchor on.
+        let empty = TerminalOutputBuffer::default();
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "\u{280b} laymux", Some(&empty),),
+            Some("Codex".to_string())
+        );
+    }
+
+    #[test]
+    fn grace_window_expires_after_configured_duration() {
+        // When the grace timestamp is older than the configured window, the
+        // detector must return None again so a truly dead app stops showing up.
+        use crate::constants::INTERACTIVE_APP_GRACE_WINDOW;
+
+        let state = AppState::new();
+        let tid = "t-grace-expire";
+
+        // Prime a detection.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "Claude Code", None),
+            Some("Claude".to_string())
+        );
+
+        // Manually age the entry beyond the grace window. After #239 the
+        // direct-title match path at step 1 also populates
+        // `known_claude_terminals`, so simulate a real Claude exit by
+        // clearing that set too — otherwise step 2 (fast path) would still
+        // report "Claude" regardless of the grace window.
+        {
+            let mut guard = state.last_detected_interactive_app.lock().unwrap();
+            let entry = guard.get_mut(tid).expect("entry must exist");
+            entry.1 = Instant::now() - INTERACTIVE_APP_GRACE_WINDOW - Duration::from_millis(10);
+        }
+        state.known_claude_terminals.lock().unwrap().remove(tid);
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "C:\\Users\\dev\\project", None,),
+            None,
+        );
+    }
+
+    #[test]
+    fn grace_window_refreshes_on_successful_detection() {
+        // A fresh successful detection must refresh the timestamp so the
+        // window slides forward.
+        let state = AppState::new();
+        let tid = "t-grace-refresh";
+
+        // Prime an entry.
+        detect_interactive_app_from_live_title(&state, tid, "Claude Code", None);
+
+        // Age it manually to just under the limit.
+        let aged = {
+            let mut guard = state.last_detected_interactive_app.lock().unwrap();
+            let entry = guard.get_mut(tid).unwrap();
+            entry.1 = Instant::now() - Duration::from_secs(4);
+            entry.1
+        };
+
+        // A brand-new successful detection should overwrite the timestamp
+        // (and the app name, in case it changed).
+        detect_interactive_app_from_live_title(&state, tid, "Claude Code", None);
+        let refreshed = state
+            .last_detected_interactive_app
+            .lock()
+            .unwrap()
+            .get(tid)
+            .map(|(_, t)| *t)
+            .unwrap();
+        assert!(refreshed > aged, "timestamp must be refreshed");
+    }
+
+    #[test]
+    fn grace_window_replaced_when_different_app_detected() {
+        // Transitioning to a different interactive app must update both the
+        // name and timestamp — no stale sticky state.
+        let state = AppState::new();
+        let tid = "t-grace-switch";
+
+        detect_interactive_app_from_live_title(&state, tid, "Claude Code", None);
+        assert_eq!(
+            state
+                .last_detected_interactive_app
+                .lock()
+                .unwrap()
+                .get(tid)
+                .map(|(n, _)| n.clone()),
+            Some("Claude".to_string())
+        );
+
+        // Switch to vim.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "vim", None),
+            Some("vim".to_string())
+        );
+        assert_eq!(
+            state
+                .last_detected_interactive_app
+                .lock()
+                .unwrap()
+                .get(tid)
+                .map(|(n, _)| n.clone()),
+            Some("vim".to_string())
+        );
+    }
+
+    #[test]
+    fn grace_window_ignored_when_never_detected() {
+        // Terminals that never had a successful detection must remain None
+        // — the grace window cannot fabricate one.
+        let state = AppState::new();
+        assert_eq!(
+            detect_interactive_app_from_live_title(
+                &state,
+                "t-fresh",
+                "C:\\Users\\dev\\project",
+                None,
+            ),
+            None,
         );
     }
 
