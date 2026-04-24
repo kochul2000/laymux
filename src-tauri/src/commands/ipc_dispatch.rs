@@ -608,20 +608,28 @@ fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<Strin
     }
 }
 
-/// Filter out terminals that have a command running.
-/// Checks the terminal output buffer for the last OSC 133 marker:
-/// - OSC 133;C (preexec) = command is running → exclude
-/// - OSC 133;D (exit code) = at shell prompt → include
+/// Filter target terminals based on their detected activity.
 ///
-/// This is more reliable than the async `command_running` flag because it
-/// reads from the actual terminal output (ground truth), avoiding race conditions.
+/// Uses the full `detect_terminal_state` pipeline (buffer scan + persistent
+/// tracking via `known_claude_terminals` / `known_codex_terminals` + braille
+/// spinner heuristic + title pattern matching) so the decision is consistent
+/// with every other activity-gated feature (see ARCHITECTURE.md §10).
 ///
-/// Claude Code terminals are partitioned out and handled separately based on
-/// the `claude.syncCwd` setting (skip or command mode).
+/// Policy per target:
+/// - `InteractiveApp { name: "Claude" }` → governed by `claude_mode`:
+///   - `Skip` → exclude.
+///   - `Command` → include only when Claude is at its idle prompt
+///     (✳ prefix); mark the id in `claude_ids` so the caller writes
+///     `! cd '/path'` instead of the normal propagated command.
+/// - `InteractiveApp { name: other }` (vim, codex, nvim, ...) → exclude.
+///   Injecting `LX_PROPAGATED=1 cd ...` into a TUI app would type the
+///   literal command into its input buffer (issue #239).
+/// - `Running` → exclude (a shell command is mid-execution).
+/// - `Shell` → include.
 ///
-/// Returns `(idle_targets, claude_ids)` — the caller passes `claude_ids` to
-/// `write_cd_to_group_terminals` so it can format the command differently
-/// without re-scanning the output buffers.
+/// Returns `(idle_targets, claude_ids)`. `claude_ids` is a subset of the
+/// returned targets — callers pass it to `write_cd_to_group_terminals` so it
+/// can format the command differently without re-scanning buffers.
 fn filter_targets_not_busy(
     state: &AppState,
     targets: &[String],
@@ -629,12 +637,17 @@ fn filter_targets_not_busy(
 ) -> (Vec<String>, std::collections::HashSet<String>) {
     let mut claude_ids = std::collections::HashSet::new();
 
-    if let Ok(buffers) = state.output_buffers.lock_or_err() {
-        let mut result = Vec::new();
-        for id in targets {
-            let buf = buffers.get(id.as_str());
-            if activity::is_claude_terminal_from_buffer(state, id, buf) {
-                // Handle Claude Code terminal based on settings
+    let Ok(buffers) = state.output_buffers.lock_or_err() else {
+        return (targets.to_vec(), claude_ids);
+    };
+
+    let mut result = Vec::new();
+    for id in targets {
+        let buf = buffers.get(id.as_str());
+        let info = activity::detect_terminal_state(state, id, buf);
+
+        match &info.activity {
+            crate::terminal::TerminalActivity::InteractiveApp { name } if name == "Claude" => {
                 match claude_mode {
                     crate::settings::ClaudeSyncCwdMode::Skip => {
                         // Don't propagate cd to Claude terminals
@@ -648,14 +661,23 @@ fn filter_targets_not_busy(
                         }
                     }
                 }
-            } else if activity::is_terminal_at_prompt_from_buffer(buf) {
+            }
+            crate::terminal::TerminalActivity::InteractiveApp { .. } => {
+                // Any other TUI app (vim, codex, nvim, ...) — cd injection
+                // would be typed literally into the app's input buffer.
+                continue;
+            }
+            crate::terminal::TerminalActivity::Running => {
+                // A shell command is mid-execution; defer cd to avoid racing
+                // with the current command's output.
+                continue;
+            }
+            crate::terminal::TerminalActivity::Shell => {
                 result.push(id.clone());
             }
         }
-        (result, claude_ids)
-    } else {
-        (targets.to_vec(), claude_ids)
     }
+    (result, claude_ids)
 }
 
 /// Filter target terminals to only those whose CWD differs from the sync path.
@@ -2611,5 +2633,230 @@ mod tests {
             !src_buf_allowed,
             "Codex-active source must not trigger sync-cwd propagation"
         );
+    }
+
+    // ── Issue #239: filter_targets_not_busy must use activity detection ──
+    //
+    // The previous implementation relied on `is_claude_terminal_from_buffer`
+    // (title/buffer scan + `known_claude_terminals` HashSet) to detect Claude
+    // targets, and `is_terminal_at_prompt_from_buffer` (OSC 133;D vs ;C) for
+    // everything else. That combination misses Claude when:
+    //   - the "Claude Code" title has scrolled out of the scan window, AND
+    //   - the PTY callback never inserted the terminal into
+    //     `known_claude_terminals` (e.g. Claude was spawned via `claude` command
+    //     detected only on the frontend, or the title arrived before the
+    //     terminal was registered).
+    // In that state, the target is classified as a normal shell sitting at the
+    // last OSC 133;D marker, and `LX_PROPAGATED=1 cd ...` gets injected into
+    // Claude's input box.
+    //
+    // Fix: use `detect_terminal_state` so the full activity pipeline (including
+    // `known_claude_terminals`, braille-spinner heuristic, vim/codex title
+    // patterns) governs target filtering. Any `InteractiveApp { .. }` target —
+    // not just Claude — is now excluded.
+
+    #[test]
+    fn filter_targets_not_busy_skips_claude_when_activity_is_claude_but_title_absent() {
+        // Claude Code was detected earlier (persistent tracking), but the last
+        // buffer window only contains a path-like title and a stale OSC 133;D
+        // from before Claude started. `is_terminal_at_prompt_from_buffer` would
+        // naively report "at prompt", but the activity pipeline correctly
+        // reports `InteractiveApp { name: "Claude" }`.
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t-claude".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            // Stale prompt marker + later title that does NOT match
+            // INTERACTIVE_APP_PATTERNS directly (path-like titles are skipped
+            // by detect_interactive_app_from_title). Without activity
+            // detection, this buffer would pass `is_terminal_at_prompt_from_buffer`.
+            buf.push(b"\x1b]133;D;0\x07stale prompt$ \x1b]0;/home/user/project\x07");
+            buffers.insert("t-claude".into(), buf);
+        }
+
+        let targets = vec!["t-claude".into()];
+        let (filtered, _claude_ids) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(
+            filtered.is_empty(),
+            "Claude target must be skipped based on activity, not buffer-title scan"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_interactive_app_when_stale_prompt_marker_present() {
+        // Issue #239 exact reproduction: a target running Claude (detected
+        // via the title pattern, NOT via known_claude_terminals) still has
+        // a stale OSC 133;D from the pre-Claude shell prompt. With the old
+        // codepath, `is_claude_terminal_from_buffer` returns true via title
+        // scan and the Skip-mode branch excludes it — but if the Claude title
+        // has scrolled out of the scan window AND the terminal was never
+        // registered in known_claude_terminals, the fallback branch relies
+        // on `is_terminal_at_prompt_from_buffer` which only sees the stale
+        // ;D marker and erroneously keeps the target.
+        //
+        // Activity-based filtering must exclude any InteractiveApp target
+        // regardless of which detection path succeeded.
+        let state = AppState::new();
+        // NOTE: known_claude_terminals is intentionally NOT populated here —
+        // we rely on the title-pattern match in `detect_interactive_app_from_title`.
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            // Stale shell prompt marker followed by Claude Code title.
+            buf.push(b"\x1b]133;D;0\x07user@host:~$ claude\r\n\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            buffers.insert("t-claude".into(), buf);
+        }
+
+        let targets = vec!["t-claude".into()];
+        let (filtered_skip, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(
+            filtered_skip.is_empty(),
+            "Claude target must not receive cd propagation just because a stale ;D marker remains"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_vim_interactive_app() {
+        // Issue #239: any interactive TUI app target must be skipped,
+        // not just Claude. vim does not have a persistent-tracking table
+        // analogous to known_claude_terminals, so detection relies entirely
+        // on `detect_terminal_activity` via title pattern.
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]133;D;0\x07$ \x1b]2;vim - main.rs\x07");
+            buffers.insert("t-vim".into(), buf);
+        }
+
+        let targets = vec!["t-vim".into()];
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(
+            filtered.is_empty(),
+            "vim target must be skipped — cd injection would be typed into vim buffer"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_codex_interactive_app() {
+        // Codex, like Claude, sets a specific title first and later drifts
+        // to a braille spinner. `detect_terminal_state` combines persistent
+        // tracking + spinner heuristic to keep the session classified as
+        // InteractiveApp.
+        let state = AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("t-codex".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            // Stale prompt + spinner-only title (no literal "OpenAI Codex").
+            buf.push(b"\x1b]133;D;0\x07stale$ \x1b]0;\xe2\xa0\x8b working\x07");
+            buffers.insert("t-codex".into(), buf);
+        }
+
+        let targets = vec!["t-codex".into()];
+        let (filtered, _) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(
+            filtered.is_empty(),
+            "Codex target must be skipped via activity detection"
+        );
+    }
+
+    #[test]
+    fn filter_targets_not_busy_skips_claude_idle_heuristic_mismatch() {
+        // Reviewer scenario: `is_claude_idle_from_buffer` uses the literal
+        // ✳ (U+2733) prefix check on the LAST title. When Claude's title is
+        // a task-description (e.g. "✻ Exploring code"), the idle check
+        // returns false, but the terminal is still running Claude. In Skip
+        // mode, cd propagation must never happen; in Command mode, Claude
+        // must be skipped when not in the idle state (existing behavior).
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t-claude".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xbb Exploring code\x07");
+            buffers.insert("t-claude".into(), buf);
+        }
+
+        let targets = vec!["t-claude".into()];
+        let (filtered_skip, claude_ids_skip) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert!(filtered_skip.is_empty());
+        assert!(claude_ids_skip.is_empty());
+
+        let (filtered_cmd, claude_ids_cmd) = filter_targets_not_busy(
+            &state,
+            &targets,
+            &crate::settings::ClaudeSyncCwdMode::Command,
+        );
+        assert!(
+            filtered_cmd.is_empty(),
+            "Claude in Command mode must still be skipped when not idle"
+        );
+        assert!(claude_ids_cmd.is_empty());
+    }
+
+    #[test]
+    fn filter_targets_not_busy_allows_claude_idle_in_command_mode() {
+        // Regression guard for existing behavior: when Claude is at its idle
+        // prompt (✳ prefix) and the mode is Command, the target should be
+        // included AND marked as a claude_id so the caller writes `! cd '...'`.
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t-claude".to_string());
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
+            buffers.insert("t-claude".into(), buf);
+        }
+
+        let targets = vec!["t-claude".into()];
+        let (filtered, claude_ids) = filter_targets_not_busy(
+            &state,
+            &targets,
+            &crate::settings::ClaudeSyncCwdMode::Command,
+        );
+        assert_eq!(filtered, vec!["t-claude".to_string()]);
+        assert!(claude_ids.contains("t-claude"));
+    }
+
+    #[test]
+    fn filter_targets_not_busy_allows_shell_target() {
+        // Regression guard: a plain shell target at its prompt must still
+        // receive the cd propagation.
+        let state = AppState::new();
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]133;D;0\x07$ ");
+            buffers.insert("t-shell".into(), buf);
+        }
+
+        let targets = vec!["t-shell".into()];
+        let (filtered, claude_ids) =
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+        assert_eq!(filtered, vec!["t-shell".to_string()]);
+        assert!(claude_ids.is_empty());
     }
 }

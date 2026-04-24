@@ -223,13 +223,29 @@ pub fn detect_interactive_app_from_live_title(
                 known.insert(terminal_id.to_string());
             }
         }
+        if name == "Claude" {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+        }
         return Some(name);
     }
 
+    // Persistent tracking: the PTY callback or frontend (`mark_claude_terminal`)
+    // may have registered this terminal earlier even if the current title has
+    // since drifted to a task description (e.g. "✻ Exploring code").
     if let Ok(known) = state.known_claude_terminals.lock_or_err() {
         if known.contains(terminal_id) {
             return Some("Claude".to_string());
         }
+    }
+
+    // Full-buffer title scan (prong 2 of `is_claude_terminal_from_buffer`):
+    // catches the case where "Claude Code" title appeared earlier in the
+    // buffer but has since scrolled past the live-title position. Also
+    // populates `known_claude_terminals` so subsequent lookups stay O(1).
+    if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
+        return Some("Claude".to_string());
     }
 
     if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
@@ -285,6 +301,16 @@ pub fn detect_terminal_state(
                 activity: TerminalActivity::InteractiveApp { name },
             };
         }
+    } else if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
+        // No OSC 0/2 title in the live window, but persistent tracking or
+        // a full-buffer scan still identifies this terminal as Claude.
+        // Without this branch, issue #239 leaks: cd propagation reaches a
+        // Claude target whose title has scrolled out of view.
+        return TerminalStateInfo {
+            activity: TerminalActivity::InteractiveApp {
+                name: "Claude".to_string(),
+            },
+        };
     }
 
     TerminalStateInfo { activity }
