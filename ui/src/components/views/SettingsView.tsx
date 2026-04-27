@@ -2389,7 +2389,7 @@ function MemoSection() {
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              더블클릭 시 해당 단락 전체를 선택
+              트리플클릭 시 해당 단락 전체를 선택
             </p>
           </div>
           <div className="min-w-0 flex-1">

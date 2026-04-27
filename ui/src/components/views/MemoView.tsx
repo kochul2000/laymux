@@ -178,11 +178,13 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     };
   }, [flushPendingCopy]);
 
-  // Triple-click to select paragraph (changed from double-click)
+  // Triple-click to select the containing paragraph, even when only one paragraph exists.
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
       if (e.detail !== 3) return; // Only handle triple-click
-      if (!showParagraphOverlay || !memo.dblClickParagraphSelect) return;
+      if (!memo.paragraphCopy.enabled || !memo.dblClickParagraphSelect || paragraphs.length === 0) {
+        return;
+      }
       const textarea = textareaRef.current;
       if (!textarea) return;
 
@@ -223,7 +225,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
       textarea.setSelectionRange(startOffset, endOffset);
       // selectionchange handles pending — no direct setting needed
     },
-    [showParagraphOverlay, memo.dblClickParagraphSelect, text, paragraphs],
+    [memo.paragraphCopy.enabled, memo.dblClickParagraphSelect, text, paragraphs],
   );
 
   const indent = " ".repeat(memo.indentSize || 2);
@@ -264,7 +266,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           let startLine = 0;
           let endLine = 0;
           for (let i = 0; i < lines.length; i++) {
-            if (charCount + lines[i].length >= selectionStart && startLine === 0 && charCount <= selectionStart) {
+            if (
+              charCount + lines[i].length >= selectionStart &&
+              startLine === 0 &&
+              charCount <= selectionStart
+            ) {
               startLine = i;
             }
             if (charCount + lines[i].length >= selectionEnd - 1 || i === lines.length - 1) {
@@ -330,7 +336,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
           let startLine = 0;
           let endLine = 0;
           for (let i = 0; i < lines.length; i++) {
-            if (charCount + lines[i].length >= selectionStart && startLine === 0 && charCount <= selectionStart) {
+            if (
+              charCount + lines[i].length >= selectionStart &&
+              startLine === 0 &&
+              charCount <= selectionStart
+            ) {
               startLine = i;
             }
             if (charCount + lines[i].length >= selectionEnd - 1 || i === lines.length - 1) {
