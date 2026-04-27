@@ -258,14 +258,22 @@ export function TerminalView({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
-  // terminalKey identifies the underlying xterm — changes whenever the main
-  // effect rebuilds it (instanceId or profile). Pairing it with readyKey lets
-  // us derive isReady at render time, so profile switches reset the overlay
-  // before the next paint instead of waiting for useEffect to run.
-  const terminalKey = `${instanceId}:${profile}`;
-  const [readyKey, setReadyKey] = useState<string | null>(null);
-  const readyKeyRef = useRef<string | null>(null);
-  const isReady = readyKey === terminalKey;
+  // Each xterm rebuild gets a fresh generation, bumped at render time when
+  // (instanceId, profile) changes. A monotonic counter is required because the
+  // same (instanceId, profile) pair can be revisited (e.g. PS → WSL → PS quick
+  // toggle) and a string key would let the second PS terminal inherit the first
+  // one's ready state before its first paint.
+  const terminalDepsKey = `${instanceId}:${profile}`;
+  const lastTerminalDepsRef = useRef<string | null>(null);
+  const terminalGenerationRef = useRef(0);
+  if (lastTerminalDepsRef.current !== terminalDepsKey) {
+    lastTerminalDepsRef.current = terminalDepsKey;
+    terminalGenerationRef.current += 1;
+  }
+  const terminalGeneration = terminalGenerationRef.current;
+  const [readyGeneration, setReadyGeneration] = useState(-1);
+  const readyGenerationRef = useRef(-1);
+  const isReady = readyGeneration === terminalGeneration;
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
   const stabilizeInteractiveCursorRef = useRef(true);
@@ -938,9 +946,9 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
-      if (readyKeyRef.current !== terminalKey) {
-        readyKeyRef.current = terminalKey;
-        setReadyKey(terminalKey);
+      if (readyGenerationRef.current !== terminalGeneration) {
+        readyGenerationRef.current = terminalGeneration;
+        setReadyGeneration(terminalGeneration);
       }
       scheduleOverlayCaretUpdate();
     });
