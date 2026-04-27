@@ -2657,17 +2657,29 @@ mod tests {
 
     #[test]
     fn filter_targets_not_busy_skips_claude_when_activity_is_claude_but_title_absent() {
-        // Claude Code was detected earlier (persistent tracking), but the last
-        // buffer window only contains a path-like title and a stale OSC 133;D
-        // from before Claude started. `is_terminal_at_prompt_from_buffer` would
-        // naively report "at prompt", but the activity pipeline correctly
-        // reports `InteractiveApp { name: "Claude" }`.
+        // Claude Code was detected earlier (persistent tracking + grace
+        // window seeded by either the PTY callback's cr.entered or by
+        // `mark_claude_terminal` from frontend command-text detection),
+        // but the last buffer window only contains a path-like title and
+        // a stale OSC 133;D from before Claude started.
+        // `is_terminal_at_prompt_from_buffer` would naively report
+        // "at prompt", but the activity pipeline must keep the target
+        // classified as `InteractiveApp { name: "Claude" }` so cd-sync
+        // does not inject into Claude's input.
+        //
+        // Post-PR-242-review: the cache is a hint, not a verdict. The
+        // strict-signal helper rejects a path-like title as non-Claude
+        // (cache + path-like is not enough), so the grace-window seed
+        // is what carries the classification through this gap.
         let state = AppState::new();
         state
             .known_claude_terminals
             .lock()
             .unwrap()
             .insert("t-claude".to_string());
+        // Grace-window seed — what `mark_claude_terminal` and the PTY
+        // entry path do in production.
+        crate::activity::record_interactive_app_detection(&state, "t-claude", "Claude");
         {
             let mut buffers = state.output_buffers.lock().unwrap();
             let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
