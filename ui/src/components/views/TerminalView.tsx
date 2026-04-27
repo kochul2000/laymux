@@ -258,8 +258,14 @@ export function TerminalView({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
-  const [isReady, setIsReady] = useState(false);
-  const isReadyRef = useRef(false);
+  // terminalKey identifies the underlying xterm — changes whenever the main
+  // effect rebuilds it (instanceId or profile). Pairing it with readyKey lets
+  // us derive isReady at render time, so profile switches reset the overlay
+  // before the next paint instead of waiting for useEffect to run.
+  const terminalKey = `${instanceId}:${profile}`;
+  const [readyKey, setReadyKey] = useState<string | null>(null);
+  const readyKeyRef = useRef<string | null>(null);
+  const isReady = readyKey === terminalKey;
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
   const stabilizeInteractiveCursorRef = useRef(true);
@@ -325,13 +331,6 @@ export function TerminalView({
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
-    // Reset loading state on every (re)creation of the underlying xterm. profile
-    // changes rerun this effect to dispose+rebuild the terminal; without this
-    // reset isReady would carry over and the new instance would render without
-    // the overlay until its first paint, reproducing the original flash.
-    isReadyRef.current = false;
-    setIsReady(false);
-
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
 
     // Diagnostic shadow-cursor tracer. Bound once per effect mount because
@@ -939,9 +938,9 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
-      if (!isReadyRef.current) {
-        isReadyRef.current = true;
-        setIsReady(true);
+      if (readyKeyRef.current !== terminalKey) {
+        readyKeyRef.current = terminalKey;
+        setReadyKey(terminalKey);
       }
       scheduleOverlayCaretUpdate();
     });
