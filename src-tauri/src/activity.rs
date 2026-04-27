@@ -211,8 +211,10 @@ pub fn is_codex_terminal_from_buffer(
 /// Without this, a pane that previously ran Claude keeps its
 /// `known_claude_terminals` membership forever — and the live-title detector's
 /// Claude fast path then masks any later Codex transition (the inverse holds
-/// too). Called whenever a direct title match confirms which app is running.
-fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
+/// too). Called whenever a direct title match confirms which app is running,
+/// and whenever the PTY callback observes a Codex/Claude entry transition
+/// or the frontend command-text detector marks a terminal.
+pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
     match app_name {
         "Codex" => {
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
@@ -296,13 +298,23 @@ pub fn detect_interactive_app_from_live_title(
     //    Symmetric on purpose: callers may pass an empty title (e.g.
     //    `detect_terminal_state` when the recent window has no OSC 0/2) and
     //    still recover the right app.
-    if is_codex_terminal_from_buffer(state, terminal_id, buffer) {
-        record_interactive_app_detection(state, terminal_id, "Codex");
-        return Some("Codex".to_string());
-    }
+    //
+    //    Order matters: Claude is checked first. `sync_known_caches` and
+    //    the Codex PTY exit path (`codex_activity::process_codex_title`
+    //    -> exited) keep the two `known_*_terminals` sets mutually
+    //    exclusive in steady state, but a brief overlap can occur when
+    //    frontend command-text detection (`mark_claude_terminal`)
+    //    populates Claude before the next OSC 0/2 title arrives to drive
+    //    Codex cleanup. In that window Claude is the right answer —
+    //    Codex-first ordering misclassified Claude sessions for spinner/
+    //    path-like/empty titles (PR 242 P1 #2 regression).
     if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
         record_interactive_app_detection(state, terminal_id, "Claude");
         return Some("Claude".to_string());
+    }
+    if is_codex_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Codex");
+        return Some("Codex".to_string());
     }
 
     // 3) Grace window fallback (issue #237). When every other signal returns
@@ -586,6 +598,12 @@ impl<const N: usize> MarkerTailScanner<N> {
 /// Groups individual `Arc<Atomic*>` fields into a single `Arc<PtyCallbackState>`.
 pub struct PtyCallbackState {
     pub claude_detected: AtomicBool,
+    /// Mirrors `claude_detected` for Codex (OpenAI Codex CLI). Tracks whether
+    /// the most recent OSC 0/2 title sequence on this terminal indicated
+    /// Codex was running. Without this companion flag the entry-detection
+    /// path in `codex_activity::process_codex_title` cannot fire — there
+    /// is no other persistent signal in the PTY callback closure.
+    pub codex_detected: AtomicBool,
     pub burst_detector: BurstDetector,
     /// Boundary-aware DEC 2026 marker scanner. Mutex because `scan` mutates
     /// the internal tail, while the enclosing `PtyCallbackState` is shared
@@ -597,6 +615,7 @@ impl PtyCallbackState {
     pub fn new(burst_window_ms: u64, burst_threshold: u64, throttle_ms: u64) -> Self {
         Self {
             claude_detected: AtomicBool::new(false),
+            codex_detected: AtomicBool::new(false),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
             dec_sync_scanner: std::sync::Mutex::new(MarkerTailScanner::new(
                 crate::constants::DEC_SYNC_OUTPUT_SET,
@@ -1049,6 +1068,100 @@ mod tests {
             TerminalActivity::InteractiveApp {
                 name: "Codex".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn sync_known_caches_clears_codex_when_claude_marked() {
+        // Mirrors what `mark_claude_terminal` now does after frontend
+        // command-text detection: a pane that previously hosted Codex
+        // loses its `known_codex_terminals` membership the moment the
+        // frontend reports Claude. Without this the next persistent-
+        // signal lookup would race between two populated caches.
+        let state = AppState::new();
+        let tid = "t-codex-then-marked-claude";
+
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        sync_known_caches(&state, tid, "Claude");
+
+        assert!(state.known_claude_terminals.lock().unwrap().contains(tid));
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "marking a terminal as Claude must drop any stale Codex cache entry"
+        );
+    }
+
+    #[test]
+    fn claude_wins_when_both_caches_contain_id() {
+        // Regression for the Codex→Claude pane-reuse window:
+        // a pane that previously ran Codex still has its ID in
+        // `known_codex_terminals` (Codex now has its own exit path that
+        // normally clears it, but the cache can transiently hold both
+        // entries when frontend command-text detection populates
+        // `known_claude_terminals` before the next OSC 0/2 title arrives
+        // to drive the Codex exit cleanup). In that window the persistent-
+        // signal layer must still report Claude — Codex-first ordering
+        // misclassified Claude sessions for spinner/path-like/empty titles.
+        let state = AppState::new();
+        let tid = "t-codex-then-claude";
+
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        // Buffer holds neither "OpenAI Codex" nor "Claude Code" — only a
+        // path-like title that no INTERACTIVE_APP_PATTERN can match
+        // (path-like titles short-circuit `detect_interactive_app_from_title`).
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;~/projects/laymux\x07");
+
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&buf)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Claude".to_string()
+            },
+            "Claude must win the cache-collision window; Codex-first ordering is a regression"
+        );
+    }
+
+    #[test]
+    fn codex_classification_recovers_after_cache_cleanup_when_banner_gone() {
+        // Effect-level companion to the `process_codex_title` -> exited
+        // unit test in `codex_activity::tests`. Once the PTY callback's
+        // exit path has run (cache removed + grace window cleared) AND
+        // the "OpenAI Codex" banner has scrolled out of the
+        // ACTIVITY_SCAN_BYTES window, classification must fall back to
+        // Shell/Running. Pre-fix the cache survived indefinitely, so this
+        // recovery never happened — sync-cwd stayed blocked forever.
+        let state = AppState::new();
+        let tid = "t-codex-stale-cleared";
+
+        // Simulate the post-cleanup invariant directly: cache is empty,
+        // grace window is empty, and the buffer carries no Codex banner.
+        // (Live PTY exit-path coverage is unit-tested in codex_activity.)
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS> dir\r\n\x1b]133;D\x07");
+
+        let activity = detect_terminal_state(&state, tid, Some(&buf)).activity;
+        assert!(
+            matches!(
+                activity,
+                TerminalActivity::Shell | TerminalActivity::Running
+            ),
+            "post-cleanup classification must recover, got {:?}",
+            activity
         );
     }
 

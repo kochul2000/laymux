@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::activity;
 use crate::claude_activity;
 use crate::claude_bullet;
+use crate::codex_activity;
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::osc;
@@ -426,6 +427,47 @@ pub fn create_terminal_session(
                 }
             }
 
+            // ── Codex (OpenAI Codex CLI) title state machine ──
+            // Mirror of the Claude block above but simpler: no working/idle
+            // tracking, only entry + exit. Without this branch Codex sessions
+            // had no way to clear `known_codex_terminals` once they ended,
+            // so a pane that previously ran Codex stayed pinned as
+            // InteractiveApp{Codex} forever (PR 242 follow-up).
+            //
+            // Lock note: `sync_known_caches` and `known_codex_terminals.lock`
+            // each acquire and release the relevant mutex independently —
+            // no overlap with the Claude-block locks above.
+            if event.code == 0 || event.code == 2 {
+                let was_detected = pty_cb_state.codex_detected.load(Ordering::Relaxed)
+                    || state_for_pty
+                        .known_codex_terminals
+                        .lock_or_err()
+                        .map(|known| known.contains(&terminal_id))
+                        .unwrap_or(false);
+
+                let cr_codex = codex_activity::process_codex_title(&event.data, was_detected);
+
+                if cr_codex.entered {
+                    pty_cb_state.codex_detected.store(true, Ordering::Relaxed);
+                    // Mutually-exclusive: also clears any stale Claude
+                    // membership left over from a previous session in this
+                    // pane (and inserts into known_codex_terminals).
+                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Codex");
+                }
+
+                if cr_codex.exited {
+                    pty_cb_state.codex_detected.store(false, Ordering::Relaxed);
+                    if let Ok(mut known) = state_for_pty.known_codex_terminals.lock_or_err() {
+                        known.remove(&terminal_id);
+                    }
+                    // Drop the grace-window entry so the shell fallback
+                    // engages immediately instead of pinning "Codex" for
+                    // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit
+                    // (#237 mirror for Codex).
+                    activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
+                }
+            }
+
             // Emit structured title change event (OSC 0/2) for frontend activity detection.
             //
             // `detect_interactive_app_from_live_title` already walks every
@@ -770,10 +812,21 @@ pub fn log_terminal_trace_batch(
 /// Called by the frontend when it detects Claude from command text (OSC 133 E).
 /// The PTY callback also populates this from title detection, but the frontend
 /// may detect earlier via command text (e.g., user typed "claude").
+///
+/// Mutual exclusion: also clears any stale `known_codex_terminals` entry
+/// for this ID via `sync_known_caches`. Without that, a pane that
+/// previously ran Codex would have both caches populated until the next
+/// OSC 0/2 title drove the Codex exit path, and Codex-first ordering
+/// (or any future cache-collision codepath) would misclassify the new
+/// Claude session for spinner/path-like/empty titles.
 #[tauri::command]
 pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
-    let mut known = state.known_claude_terminals.lock_or_err()?;
-    Ok(known.insert(id))
+    let inserted = {
+        let mut known = state.known_claude_terminals.lock_or_err()?;
+        known.insert(id.clone())
+    };
+    activity::sync_known_caches(&state, &id, "Claude");
+    Ok(inserted)
 }
 
 /// Check if a terminal is registered as running Claude Code.

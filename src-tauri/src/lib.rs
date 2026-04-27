@@ -5,6 +5,7 @@ pub mod claude_activity;
 pub mod claude_bullet;
 pub mod cli;
 pub mod clipboard;
+pub mod codex_activity;
 pub mod commands;
 pub mod constants;
 pub mod crash_reporter;
