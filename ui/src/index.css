@@ -220,3 +220,36 @@
   will-change: transform;
   z-index: 2;
 }
+
+/* Covers the xterm container while the renderer initialises.
+   Delay + fade keeps fast mounts from flashing a spinner. */
+.terminal-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--terminal-background-color, #0c0c0c);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  z-index: 4;
+}
+.terminal-loading-overlay.visible {
+  opacity: 1;
+  transition-delay: 60ms;
+}
+.terminal-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--terminal-foreground-color, #f0f0f0);
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: 0.55;
+  animation: terminal-loading-spin 0.8s linear infinite;
+}
+@keyframes terminal-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

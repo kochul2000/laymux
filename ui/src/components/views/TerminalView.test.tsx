@@ -223,6 +223,100 @@ describe("TerminalView", () => {
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
   });
 
+  it("shows a loading overlay until the first render event arrives", async () => {
+    render(<TerminalView instanceId="t-loading" profile="PowerShell" syncGroup="" />);
+
+    // Wait for ResizeObserver → terminal.open() → onRender subscription.
+    await vi.waitFor(() => {
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    const overlay = screen.getByTestId("terminal-loading-t-loading");
+    expect(overlay).toHaveClass("visible");
+
+    const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      renderHandler?.();
+    });
+
+    expect(overlay).not.toHaveClass("visible");
+  });
+
+  it("keeps the loading overlay visible when toggling back to a previously ready profile", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-toggle" profile="PowerShell" syncGroup="" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    // First PowerShell terminal becomes ready.
+    const firstHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      firstHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-toggle")).not.toHaveClass("visible");
+
+    // Switch to WSL — overlay reappears for the new terminal.
+    await act(async () => {
+      rerender(<TerminalView instanceId="t-toggle" profile="WSL" syncGroup="" />);
+    });
+    expect(screen.getByTestId("terminal-loading-t-toggle")).toHaveClass("visible");
+
+    // Switch back to PowerShell BEFORE WSL ever fires onRender. The new PS
+    // xterm has not painted yet, so the overlay must remain visible —
+    // a string-key cache would incorrectly mark it ready here.
+    const callsBeforeFinalSwitch = mockOnRender.mock.calls.length;
+    await act(async () => {
+      rerender(<TerminalView instanceId="t-toggle" profile="PowerShell" syncGroup="" />);
+    });
+    expect(screen.getByTestId("terminal-loading-t-toggle")).toHaveClass("visible");
+
+    // The newly recreated PS terminal eventually fires its own onRender.
+    await vi.waitFor(() => {
+      expect(mockOnRender.mock.calls.length).toBeGreaterThan(callsBeforeFinalSwitch);
+    });
+    const newHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      newHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-toggle")).not.toHaveClass("visible");
+  });
+
+  it("re-shows the loading overlay when the underlying terminal is recreated", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-recreate" profile="PowerShell" syncGroup="" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    const firstHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      firstHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-recreate")).not.toHaveClass("visible");
+
+    // Profile change rebuilds xterm. Overlay must reappear before the next paint.
+    const callsBeforeRebuild = mockOnRender.mock.calls.length;
+    await act(async () => {
+      rerender(<TerminalView instanceId="t-recreate" profile="WSL" syncGroup="" />);
+    });
+
+    expect(screen.getByTestId("terminal-loading-t-recreate")).toHaveClass("visible");
+
+    await vi.waitFor(() => {
+      expect(mockOnRender.mock.calls.length).toBeGreaterThan(callsBeforeRebuild);
+    });
+    const secondHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      secondHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-recreate")).not.toHaveClass("visible");
+  });
+
   it("applies cursor shape and blink from profile settings", () => {
     useSettingsStore.getState().updateProfile(0, {
       cursorShape: "underscore",

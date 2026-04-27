@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -258,6 +258,22 @@ export function TerminalView({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
+  // Each xterm rebuild gets a fresh generation, bumped at render time when
+  // (instanceId, profile) changes. A monotonic counter is required because the
+  // same (instanceId, profile) pair can be revisited (e.g. PS → WSL → PS quick
+  // toggle) and a string key would let the second PS terminal inherit the first
+  // one's ready state before its first paint.
+  const terminalDepsKey = `${instanceId}:${profile}`;
+  const lastTerminalDepsRef = useRef<string | null>(null);
+  const terminalGenerationRef = useRef(0);
+  if (lastTerminalDepsRef.current !== terminalDepsKey) {
+    lastTerminalDepsRef.current = terminalDepsKey;
+    terminalGenerationRef.current += 1;
+  }
+  const terminalGeneration = terminalGenerationRef.current;
+  const [readyGeneration, setReadyGeneration] = useState(-1);
+  const readyGenerationRef = useRef(-1);
+  const isReady = readyGeneration === terminalGeneration;
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
   const stabilizeInteractiveCursorRef = useRef(true);
@@ -930,6 +946,10 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
+      if (readyGenerationRef.current !== terminalGeneration) {
+        readyGenerationRef.current = terminalGeneration;
+        setReadyGeneration(terminalGeneration);
+      }
       scheduleOverlayCaretUpdate();
     });
     const bindHelperTextareaEvents = () => {
@@ -1742,6 +1762,13 @@ export function TerminalView({
         className="terminal-overlay-caret pointer-events-none absolute"
         style={{ opacity: 0 }}
       />
+      <div
+        data-testid={`terminal-loading-${instanceId}`}
+        className={`terminal-loading-overlay ${isReady ? "" : "visible"}`}
+        aria-hidden={isReady}
+      >
+        <div className="terminal-loading-spinner" />
+      </div>
     </div>
   );
 }
