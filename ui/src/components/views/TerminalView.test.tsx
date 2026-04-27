@@ -223,6 +223,25 @@ describe("TerminalView", () => {
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
   });
 
+  it("shows a loading overlay until the first render event arrives", async () => {
+    render(<TerminalView instanceId="t-loading" profile="PowerShell" syncGroup="" />);
+
+    // Wait for ResizeObserver → terminal.open() → onRender subscription.
+    await vi.waitFor(() => {
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    const overlay = screen.getByTestId("terminal-loading-t-loading");
+    expect(overlay).toHaveClass("visible");
+
+    const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      renderHandler?.();
+    });
+
+    expect(overlay).not.toHaveClass("visible");
+  });
+
   it("applies cursor shape and blink from profile settings", () => {
     useSettingsStore.getState().updateProfile(0, {
       cursorShape: "underscore",

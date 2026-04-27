@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -258,6 +258,8 @@ export function TerminalView({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
+  const [isReady, setIsReady] = useState(false);
+  const isReadyRef = useRef(false);
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
   const stabilizeInteractiveCursorRef = useRef(true);
@@ -930,6 +932,10 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
+      if (!isReadyRef.current) {
+        isReadyRef.current = true;
+        setIsReady(true);
+      }
       scheduleOverlayCaretUpdate();
     });
     const bindHelperTextareaEvents = () => {
@@ -1742,6 +1748,13 @@ export function TerminalView({
         className="terminal-overlay-caret pointer-events-none absolute"
         style={{ opacity: 0 }}
       />
+      <div
+        data-testid={`terminal-loading-${instanceId}`}
+        className={`terminal-loading-overlay ${isReady ? "" : "visible"}`}
+        aria-hidden={isReady}
+      >
+        <div className="terminal-loading-spinner" />
+      </div>
     </div>
   );
 }
