@@ -172,11 +172,6 @@ fn is_word_match(text: &str, pattern: &str) -> bool {
     false
 }
 
-pub(crate) fn is_codex_spinner_title(title: &str) -> bool {
-    let first = title.chars().next().unwrap_or_default() as u32;
-    (0x2800..=0x28ff).contains(&first)
-}
-
 fn recent_buffer_contains(recent: &[u8], needle: &str) -> bool {
     let needle = needle.as_bytes();
     !needle.is_empty() && recent.windows(needle.len()).any(|window| window == needle)
@@ -209,6 +204,34 @@ pub fn is_codex_terminal_from_buffer(
         }
     }
     detected
+}
+
+/// Sync the per-app `known_*_terminals` sets so they stay mutually exclusive.
+///
+/// Without this, a pane that previously ran Claude keeps its
+/// `known_claude_terminals` membership forever — and the live-title detector's
+/// Claude fast path then masks any later Codex transition (the inverse holds
+/// too). Called whenever a direct title match confirms which app is running.
+fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
+    match app_name {
+        "Codex" => {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        "Claude" => {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Remember that `app_name` was successfully detected on `terminal_id` at
@@ -258,54 +281,31 @@ pub fn detect_interactive_app_from_live_title(
     title: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> Option<String> {
-    // 1) Direct title match — authoritative. Refresh the grace window so
-    //    subsequent None-returning titles (path-like, spinner, PowerShell
-    //    prompt rewrites) keep reporting the same app.
+    // 1) Direct title match — authoritative. `sync_known_caches` keeps the
+    //    per-app sets mutually exclusive so a Claude→Codex (or reverse)
+    //    handover never leaves a stale fast-path entry behind.
     if let Some(name) = detect_interactive_app_from_title(title) {
-        if name == "Codex" {
-            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-                known.insert(terminal_id.to_string());
-            }
-        }
-        if name == "Claude" {
-            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-                known.insert(terminal_id.to_string());
-            }
-        }
+        sync_known_caches(state, terminal_id, &name);
         record_interactive_app_detection(state, terminal_id, &name);
         return Some(name);
     }
 
-    // 2) Known-Claude fast path. The PTY callback, frontend
-    //    (`mark_claude_terminal`), or a prior buffer scan may have registered
-    //    this terminal even if the current title has drifted (task description
-    //    like "✻ Exploring code", spinner frame, etc.). Also refreshes the
-    //    grace window.
-    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
-        if known.contains(terminal_id) {
-            drop(known);
-            record_interactive_app_detection(state, terminal_id, "Claude");
-            return Some("Claude".to_string());
-        }
+    // 2) Persistent signals. Both helpers cover the cache fast-path AND a
+    //    full-buffer banner scan, so this single layer subsumes the previous
+    //    Claude-fast-path / Claude-buffer-scan / Codex-spinner-fallback split.
+    //    Symmetric on purpose: callers may pass an empty title (e.g.
+    //    `detect_terminal_state` when the recent window has no OSC 0/2) and
+    //    still recover the right app.
+    if is_codex_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Codex");
+        return Some("Codex".to_string());
     }
-
-    // 3) Full-buffer Claude title scan (prong 2 of
-    //    `is_claude_terminal_from_buffer`): catches the case where the
-    //    "Claude Code" title appeared earlier but has since scrolled past the
-    //    live-title position. Also populates `known_claude_terminals` so
-    //    subsequent lookups stay O(1). Refreshes the grace window.
     if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
         record_interactive_app_detection(state, terminal_id, "Claude");
         return Some("Claude".to_string());
     }
 
-    // 4) Codex spinner + buffer banner fallback. Same grace-window refresh.
-    if is_codex_spinner_title(title) && is_codex_terminal_from_buffer(state, terminal_id, buffer) {
-        record_interactive_app_detection(state, terminal_id, "Codex");
-        return Some("Codex".to_string());
-    }
-
-    // 5) Grace window fallback (issue #237). When every other signal returns
+    // 3) Grace window fallback (issue #237). When every other signal returns
     //    None — e.g. a Braille-only spinner frame before the buffer has
     //    accumulated the "Claude Code" banner, a path-like title during
     //    Claude's splash, or PowerShell rewriting the title on every
@@ -357,23 +357,16 @@ pub fn detect_terminal_state(
         return TerminalStateInfo { activity };
     }
 
-    if let Some(title) = osc::extract_last_terminal_title(&recent) {
-        if let Some(name) =
-            detect_interactive_app_from_live_title(state, terminal_id, &title, buffer)
-        {
-            return TerminalStateInfo {
-                activity: TerminalActivity::InteractiveApp { name },
-            };
-        }
-    } else if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
-        // No OSC 0/2 title in the live window, but persistent tracking or
-        // a full-buffer scan still identifies this terminal as Claude.
-        // Without this branch, issue #239 leaks: cd propagation reaches a
-        // Claude target whose title has scrolled out of view.
+    // Run the same persistent-signal pipeline regardless of whether the
+    // recent window currently carries an OSC 0/2 title. Passing an empty
+    // string when no title is available lets the symmetric Codex/Claude
+    // recovery in `detect_interactive_app_from_live_title` cover both #239
+    // (Claude title scrolled out) and its Codex mirror — without it Codex
+    // panes were misclassified as Shell, leaking cd-sync into them.
+    let title = osc::extract_last_terminal_title(&recent).unwrap_or_default();
+    if let Some(name) = detect_interactive_app_from_live_title(state, terminal_id, &title, buffer) {
         return TerminalStateInfo {
-            activity: TerminalActivity::InteractiveApp {
-                name: "Claude".to_string(),
-            },
+            activity: TerminalActivity::InteractiveApp { name },
         };
     }
 
@@ -990,6 +983,72 @@ mod tests {
                 None,
             ),
             None,
+        );
+    }
+
+    // ── Cache symmetry between Claude and Codex (P2 / P1) ──
+
+    #[test]
+    fn claude_cache_cleared_when_codex_title_takes_over() {
+        // P2: a pane that previously ran Claude is reused for Codex. The
+        // direct OpenAI Codex title hit must remove the stale
+        // known_claude_terminals entry, otherwise a subsequent None-
+        // returning title (path-like, spinner, brief gap) would fall back
+        // through the Claude fast path and report Claude forever.
+        let state = AppState::new();
+        let tid = "t-claude-then-codex";
+
+        let mut buf_claude = TerminalOutputBuffer::default();
+        buf_claude.push(b"\x1b]0;Claude Code\x07");
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&buf_claude)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Claude".to_string()
+            }
+        );
+        assert!(state.known_claude_terminals.lock().unwrap().contains(tid));
+
+        let mut buf_codex = TerminalOutputBuffer::default();
+        buf_codex.push(b"\x1b]0;OpenAI Codex\x07");
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&buf_codex)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "stale Claude cache must be cleared once Codex is confirmed"
+        );
+        assert!(state.known_codex_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn known_codex_preserved_when_title_scrolls_off_buffer() {
+        // P1: detect_terminal_state used to fall back only to
+        // is_claude_terminal_from_buffer when the recent window had no OSC
+        // title, so a Codex pane whose "OpenAI Codex" title had scrolled
+        // past was reclassified as Shell — letting cd-sync inject into the
+        // active Codex (the same class of bug as #239 but mirrored).
+        let state = AppState::new();
+        let tid = "t-codex-title-scrolled";
+
+        let mut explicit = TerminalOutputBuffer::default();
+        explicit.push(b"\x1b]0;OpenAI Codex\x07");
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&explicit)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
+        );
+
+        let mut no_title = TerminalOutputBuffer::default();
+        no_title.push(b"plain output without an OSC title\r\n\x1b]133;D\x07");
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&no_title)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Codex".to_string()
+            }
         );
     }
 
