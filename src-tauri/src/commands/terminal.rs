@@ -813,12 +813,19 @@ pub fn log_terminal_trace_batch(
 /// The PTY callback also populates this from title detection, but the frontend
 /// may detect earlier via command text (e.g., user typed "claude").
 ///
-/// Mutual exclusion: also clears any stale `known_codex_terminals` entry
-/// for this ID via `sync_known_caches`. Without that, a pane that
-/// previously ran Codex would have both caches populated until the next
-/// OSC 0/2 title drove the Codex exit path, and Codex-first ordering
-/// (or any future cache-collision codepath) would misclassify the new
-/// Claude session for spinner/path-like/empty titles.
+/// Three-step seeding so the strict-signal helpers (which reject cache-
+/// only hits — see `is_claude_terminal_from_buffer` doc) still classify
+/// the pane correctly during the multi-second Claude startup window
+/// before the first "Claude Code" title arrives:
+///
+/// 1. Insert into `known_claude_terminals` (consumed by the cache + live
+///    Claude-title disambiguator once spinner frames start).
+/// 2. `sync_known_caches` mutual-excludes any stale `known_codex_terminals`
+///    entry left over from a previous Codex session in this pane (PTY
+///    Codex exit path may not have fired).
+/// 3. Seed the grace window so the helpers' "no live signal" verdict
+///    falls through to step 3 of `detect_interactive_app_from_live_title`,
+///    which still reports Claude until the window expires.
 #[tauri::command]
 pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
     let inserted = {
@@ -826,6 +833,7 @@ pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<b
         known.insert(id.clone())
     };
     activity::sync_known_caches(&state, &id, "Claude");
+    activity::record_interactive_app_detection(&state, &id, "Claude");
     Ok(inserted)
 }
 

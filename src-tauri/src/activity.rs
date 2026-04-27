@@ -7,6 +7,7 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use crate::claude_activity;
 use crate::constants::{ACTIVITY_SCAN_BYTES, INTERACTIVE_APP_GRACE_WINDOW};
 use crate::lock_ext::MutexExt;
 use crate::osc;
@@ -36,38 +37,79 @@ pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
 ];
 
 /// Check if a terminal is running Claude Code.
-/// Uses two-pronged detection:
-/// 1. Persistent tracking (`known_claude_terminals`) — instant O(1) check
-/// 2. Full buffer title scan — checks ALL OSC 0/2 titles, not just the last one
+///
+/// **Cache is a hint, not a verdict.** The persistent tracker
+/// (`known_claude_terminals`) is consulted only as a tie-breaker for
+/// signals that are themselves ambiguous — never as a stand-alone
+/// authority. Without that constraint a pane that ever ran Claude
+/// stayed pinned as InteractiveApp{Claude} forever (PR 242 review P1 #1
+/// regression: cached IDs were treated as authoritative after every
+/// observable signal had vanished).
+///
+/// Returns `true` when:
+/// 1. Any OSC 0/2 title in the recent window literally contains
+///    "Claude Code" (strong signal — refreshes the cache), OR
+/// 2. The cache already has this ID AND the live OSC 0/2 title still
+///    looks like a Claude title (`claude_activity::is_claude_title` —
+///    star/Braille spinner, idle ✳, etc.). The live-title check is
+///    what disambiguates Claude's spinner from Codex's identical
+///    Braille range (#239 use case).
+///
+/// Otherwise returns `false` AND lazy-invalidates a stale cache entry,
+/// so subsequent calls converge to the correct classification even if
+/// the PTY exit path never fired (SIGKILL, callback dropped, OSC chunk
+/// boundary loss, etc.).
 pub fn is_claude_terminal_from_buffer(
     state: &AppState,
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
-    // Prong 1: Check persistent tracking
-    if let Ok(known) = state.known_claude_terminals.lock_or_err() {
-        if known.contains(terminal_id) {
-            return true;
-        }
-    }
-
-    // Prong 2: Scan ALL titles in buffer for "Claude Code"
     let Some(buf) = buffer else {
         return false;
     };
     let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
+        // No live signal to corroborate; if the cache still has us,
+        // treat as stale — the grace window owns the early-startup
+        // window via `mark_claude_terminal` seeding.
+        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
         return false;
     }
 
+    // Strong signal: literal "Claude Code" anywhere in the recent OSC
+    // 0/2 titles. Refresh the cache so subsequent disambiguations work.
     if osc::any_terminal_title_contains(&recent, "Claude Code") {
-        // Mark persistently for future calls
         if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
             known.insert(terminal_id.to_string());
         }
         return true;
     }
 
+    // Disambiguator: cache + live Claude-shaped title (idle ✳, star
+    // spinner, Braille spinner, task title like "✻ Exploring code"
+    // which `is_claude_title` recognizes via the spinner-prefix path).
+    let cache_hit = state
+        .known_claude_terminals
+        .lock_or_err()
+        .map(|known| known.contains(terminal_id))
+        .unwrap_or(false);
+    let live_title_is_claude = osc::extract_last_terminal_title(&recent)
+        .as_deref()
+        .map(claude_activity::is_claude_title)
+        .unwrap_or(false);
+
+    if cache_hit && live_title_is_claude {
+        return true;
+    }
+
+    // No live signal; drop the stale entry so the next call converges.
+    if cache_hit {
+        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+    }
     false
 }
 
@@ -177,33 +219,74 @@ fn recent_buffer_contains(recent: &[u8], needle: &str) -> bool {
     !needle.is_empty() && recent.windows(needle.len()).any(|window| window == needle)
 }
 
+/// Check if a terminal is running Codex (OpenAI Codex CLI).
+///
+/// Mirror of `is_claude_terminal_from_buffer` with the same cache-as-
+/// hint rule. The Braille spinner that Codex uses for its working
+/// frame overlaps with Claude's range, so the cache *is* required to
+/// disambiguate — but only in combination with a live spinner title,
+/// never as a stand-alone authority.
+///
+/// Returns `true` when:
+/// 1. Either an OSC 0/2 title or the buffer body in the recent window
+///    contains the literal "OpenAI Codex" banner (strong signal —
+///    refreshes the cache), OR
+/// 2. The cache already has this ID AND the live OSC 0/2 title is a
+///    Braille spinner frame (Codex's working state, #239 mirror).
+///
+/// Otherwise returns `false` AND lazy-invalidates the stale cache
+/// entry. Critical for P1 #1 (PR 242 review): without this, a pane
+/// that ever ran Codex stayed pinned as InteractiveApp{Codex} forever
+/// because the PTY exit path is not guaranteed to fire (no OSC 0/2
+/// emitted on process exit, callback dropped, etc.).
 pub fn is_codex_terminal_from_buffer(
     state: &AppState,
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
-    if let Ok(known) = state.known_codex_terminals.lock_or_err() {
-        if known.contains(terminal_id) {
-            return true;
-        }
-    }
-
     let Some(buf) = buffer else {
         return false;
     };
     let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
     if recent.is_empty() {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
         return false;
     }
 
-    let detected = osc::any_terminal_title_contains(&recent, "OpenAI Codex")
+    let banner_in_buffer = osc::any_terminal_title_contains(&recent, "OpenAI Codex")
         || recent_buffer_contains(&recent, "OpenAI Codex");
-    if detected {
+    if banner_in_buffer {
         if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
             known.insert(terminal_id.to_string());
         }
+        return true;
     }
-    detected
+
+    let cache_hit = state
+        .known_codex_terminals
+        .lock_or_err()
+        .map(|known| known.contains(terminal_id))
+        .unwrap_or(false);
+    let live_title_is_braille_spinner = osc::extract_last_terminal_title(&recent)
+        .map(|t| {
+            t.chars()
+                .next()
+                .is_some_and(|c| ('\u{2800}'..='\u{28FF}').contains(&c))
+        })
+        .unwrap_or(false);
+
+    if cache_hit && live_title_is_braille_spinner {
+        return true;
+    }
+
+    if cache_hit {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+    }
+    false
 }
 
 /// Sync the per-app `known_*_terminals` sets so they stay mutually exclusive.
@@ -240,7 +323,14 @@ pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
 /// `Instant::now()`. Used to seed the grace window (§14.4 / issue #237) so a
 /// subsequent title event that resolves to `None` can still report the
 /// previously known app for a short while.
-fn record_interactive_app_detection(state: &AppState, terminal_id: &str, app_name: &str) {
+///
+/// Also called externally by `mark_claude_terminal` so frontend command-text
+/// detection (OSC 133;E) keeps the pane classified as Claude until the first
+/// "Claude Code" title arrives to drive the steady-state pipeline. Without
+/// that seed, the strict-signal helpers below would reject a cache-only
+/// hit and the multi-second Claude startup window would misclassify the
+/// pane as Shell.
+pub fn record_interactive_app_detection(state: &AppState, terminal_id: &str, app_name: &str) {
     if let Ok(mut guard) = state.last_detected_interactive_app.lock_or_err() {
         guard.insert(
             terminal_id.to_string(),
@@ -1043,14 +1133,16 @@ mod tests {
     }
 
     #[test]
-    fn known_codex_preserved_when_title_scrolls_off_buffer() {
-        // P1: detect_terminal_state used to fall back only to
-        // is_claude_terminal_from_buffer when the recent window had no OSC
-        // title, so a Codex pane whose "OpenAI Codex" title had scrolled
-        // past was reclassified as Shell — letting cd-sync inject into the
-        // active Codex (the same class of bug as #239 but mirrored).
+    fn known_codex_preserved_via_live_spinner_when_banner_scrolled_off() {
+        // #239 mirror — fixed reading after the P1 #1 review.
+        // Codex is still working: its banner has rotated out of the
+        // ACTIVITY_SCAN_BYTES window, but the live OSC 0/2 title is a
+        // Braille spinner frame. The cache was populated when the banner
+        // was first observed, and the helper must keep the classification
+        // alive via (cache_hit + live spinner) — NOT via cache alone, so
+        // a pane with no live signal still falls back to Shell (P1 #1).
         let state = AppState::new();
-        let tid = "t-codex-title-scrolled";
+        let tid = "t-codex-spinner-only";
 
         let mut explicit = TerminalOutputBuffer::default();
         explicit.push(b"\x1b]0;OpenAI Codex\x07");
@@ -1061,13 +1153,89 @@ mod tests {
             }
         );
 
-        let mut no_title = TerminalOutputBuffer::default();
-        no_title.push(b"plain output without an OSC title\r\n\x1b]133;D\x07");
+        // Banner has scrolled off; live title is a Braille spinner — Codex's
+        // working frame. Cache + spinner must keep the classification.
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push("\x1b]0;\u{280B} working\x07".as_bytes());
         assert_eq!(
-            detect_terminal_state(&state, tid, Some(&no_title)).activity,
+            detect_terminal_state(&state, tid, Some(&spinner)).activity,
             TerminalActivity::InteractiveApp {
                 name: "Codex".to_string()
             }
+        );
+    }
+
+    // ── P1 #1 stale-cache regressions (review follow-up) ──
+
+    #[test]
+    fn stale_codex_cache_yields_shell_without_live_signal() {
+        // P1 #1: a pane previously ran Codex so its ID sits in
+        // `known_codex_terminals`. The PTY exit path may not have fired
+        // (callback dropped, no OSC 0/2 emitted on exit, exit detected by
+        // a non-title channel, etc.), so the cache alone cannot be
+        // authoritative. Pre-fix the helper returned true on cache hit
+        // alone and pinned the pane as InteractiveApp{Codex} forever,
+        // blocking sync-cwd. Post-fix: no live signal -> Shell, AND the
+        // stale cache entry is dropped so subsequent calls don't recurse.
+        let state = AppState::new();
+        let tid = "t-codex-stale-no-signal";
+
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        // No "OpenAI Codex" anywhere; latest title is a normal shell prompt
+        // (not a Braille spinner). No live Codex signal at all.
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS C:\\Users\\me> dir\r\n");
+
+        let activity = detect_terminal_state(&state, tid, Some(&buf)).activity;
+        assert!(
+            matches!(
+                activity,
+                TerminalActivity::Shell | TerminalActivity::Running
+            ),
+            "stale Codex cache without live signal must yield Shell, got {:?}",
+            activity
+        );
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "lazy invalidation must drop the stale cache entry"
+        );
+    }
+
+    #[test]
+    fn stale_claude_cache_yields_shell_without_live_signal() {
+        // Mirror of stale_codex_cache_yields_shell. Claude has an exit
+        // path (cr.exited), but the same hazard exists if the title
+        // sequence never fires (SIGKILL, callback drop, PTY chunk
+        // boundary loss). Cache alone must not pin classification.
+        let state = AppState::new();
+        let tid = "t-claude-stale-no-signal";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS C:\\Users\\me> dir\r\n");
+
+        let activity = detect_terminal_state(&state, tid, Some(&buf)).activity;
+        assert!(
+            matches!(
+                activity,
+                TerminalActivity::Shell | TerminalActivity::Running
+            ),
+            "stale Claude cache without live signal must yield Shell, got {:?}",
+            activity
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "lazy invalidation must drop the stale Claude cache entry"
         );
     }
 
@@ -1097,33 +1265,45 @@ mod tests {
     }
 
     #[test]
-    fn claude_wins_when_both_caches_contain_id() {
-        // Regression for the Codex→Claude pane-reuse window:
-        // a pane that previously ran Codex still has its ID in
-        // `known_codex_terminals` (Codex now has its own exit path that
-        // normally clears it, but the cache can transiently hold both
-        // entries when frontend command-text detection populates
-        // `known_claude_terminals` before the next OSC 0/2 title arrives
-        // to drive the Codex exit cleanup). In that window the persistent-
-        // signal layer must still report Claude — Codex-first ordering
-        // misclassified Claude sessions for spinner/path-like/empty titles.
+    fn command_detected_claude_wins_via_grace_window_when_codex_cache_stale() {
+        // P1 #2 (review follow-up): a pane that previously ran Codex
+        // still carries its stale entry in `known_codex_terminals`
+        // because the PTY exit path didn't fire. The frontend then
+        // detects `claude` from OSC 133;E and calls
+        // `mark_claude_terminal`, which:
+        //   (a) inserts into `known_claude_terminals`,
+        //   (b) `sync_known_caches` mutual-excludes the stale Codex,
+        //   (c) seeds the grace window so the brief startup gap (before
+        //       the first "Claude Code" title arrives) still classifies
+        //       as Claude.
+        // Pre-fix (cache-only fast-path with Codex first), the stale
+        // Codex cache hit and reported Codex even after `sync_known_caches`
+        // — because mark_claude_terminal called sync AFTER inserting
+        // into known_claude. Post-fix the strict-signal helpers reject
+        // both caches (no live banner, no live spinner) and the grace
+        // window seeded by mark_claude_terminal yields Claude.
         let state = AppState::new();
         let tid = "t-codex-then-claude";
 
+        // Stale Codex cache (PTY exit path didn't fire).
         state
             .known_codex_terminals
             .lock()
             .unwrap()
             .insert(tid.to_string());
+
+        // Simulate `mark_claude_terminal`: it inserts known_claude, syncs
+        // (clearing known_codex), and seeds the grace window.
         state
             .known_claude_terminals
             .lock()
             .unwrap()
             .insert(tid.to_string());
+        sync_known_caches(&state, tid, "Claude");
+        record_interactive_app_detection(&state, tid, "Claude");
 
-        // Buffer holds neither "OpenAI Codex" nor "Claude Code" — only a
-        // path-like title that no INTERACTIVE_APP_PATTERN can match
-        // (path-like titles short-circuit `detect_interactive_app_from_title`).
+        // Buffer carries no banner — Claude splash hasn't reached its
+        // "Claude Code" title yet, just a path-like prompt.
         let mut buf = TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;~/projects/laymux\x07");
 
@@ -1132,7 +1312,11 @@ mod tests {
             TerminalActivity::InteractiveApp {
                 name: "Claude".to_string()
             },
-            "Claude must win the cache-collision window; Codex-first ordering is a regression"
+            "command-detected Claude must win via grace window; cache-only Codex hit is a regression"
+        );
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "the strict-signal helper must lazy-invalidate the stale Codex cache during this lookup"
         );
     }
 
@@ -1166,21 +1350,58 @@ mod tests {
     }
 
     #[test]
-    fn claude_removed_from_known_returns_false() {
+    fn claude_helper_is_false_without_a_live_signal() {
+        // After the P1 #1 review the cache is no longer authoritative on
+        // its own. Buffer=None means the helper has no live signal to
+        // corroborate against, so it returns false even when the cache
+        // contains the ID. The grace window owns early-startup retention
+        // (see `mark_claude_terminal`), not the helper.
+        //
+        // Note: buffer=None is the "caller could not fetch a buffer"
+        // case — the helper conservatively returns false but does NOT
+        // touch the cache (no observable signal to invalidate against).
+        // Lazy invalidation is reserved for the buffer-present-but-no-
+        // live-signal case, where the absence of a Claude title in the
+        // recent window IS evidence.
         let state = AppState::new();
         let tid = "terminal-test";
 
-        // Insert into known_claude_terminals
         state
             .known_claude_terminals
             .lock()
             .unwrap()
             .insert(tid.to_string());
-        assert!(is_claude_terminal_from_buffer(&state, tid, None));
-
-        // Remove (simulates Claude exit detection)
-        state.known_claude_terminals.lock().unwrap().remove(tid);
         assert!(!is_claude_terminal_from_buffer(&state, tid, None));
+        assert!(
+            state.known_claude_terminals.lock().unwrap().contains(tid),
+            "buffer=None must not lazy-invalidate the cache"
+        );
+
+        // With a live "Claude Code" title in the buffer the helper does
+        // return true and refreshes the cache.
+        let mut claude_buf = TerminalOutputBuffer::default();
+        claude_buf.push(b"\x1b]0;Claude Code\x07");
+        assert!(is_claude_terminal_from_buffer(
+            &state,
+            tid,
+            Some(&claude_buf)
+        ));
+        assert!(state.known_claude_terminals.lock().unwrap().contains(tid));
+
+        // A buffer carrying a normal shell title (no Claude signal at
+        // all) IS evidence of absence — lazy-invalidate so the next
+        // call converges to false.
+        let mut shell_buf = TerminalOutputBuffer::default();
+        shell_buf.push(b"\x1b]0;PS C:\\Users\\me\x07$ ");
+        assert!(!is_claude_terminal_from_buffer(
+            &state,
+            tid,
+            Some(&shell_buf)
+        ));
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "absence of a Claude signal in a live buffer must drop the stale cache"
+        );
     }
 
     // ── BurstDetector tests ──
