@@ -325,6 +325,13 @@ export function TerminalView({
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
+    // Reset loading state on every (re)creation of the underlying xterm. profile
+    // changes rerun this effect to dispose+rebuild the terminal; without this
+    // reset isReady would carry over and the new instance would render without
+    // the overlay until its first paint, reproducing the original flash.
+    isReadyRef.current = false;
+    setIsReady(false);
+
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
 
     // Diagnostic shadow-cursor tracer. Bound once per effect mount because

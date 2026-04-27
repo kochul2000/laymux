@@ -242,6 +242,39 @@ describe("TerminalView", () => {
     expect(overlay).not.toHaveClass("visible");
   });
 
+  it("re-shows the loading overlay when the underlying terminal is recreated", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-recreate" profile="PowerShell" syncGroup="" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    const firstHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      firstHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-recreate")).not.toHaveClass("visible");
+
+    // Profile change rebuilds xterm. Overlay must reappear before the next paint.
+    const callsBeforeRebuild = mockOnRender.mock.calls.length;
+    await act(async () => {
+      rerender(<TerminalView instanceId="t-recreate" profile="WSL" syncGroup="" />);
+    });
+
+    expect(screen.getByTestId("terminal-loading-t-recreate")).toHaveClass("visible");
+
+    await vi.waitFor(() => {
+      expect(mockOnRender.mock.calls.length).toBeGreaterThan(callsBeforeRebuild);
+    });
+    const secondHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      secondHandler?.();
+    });
+    expect(screen.getByTestId("terminal-loading-t-recreate")).not.toHaveClass("visible");
+  });
+
   it("applies cursor shape and blink from profile settings", () => {
     useSettingsStore.getState().updateProfile(0, {
       cursorShape: "underscore",
