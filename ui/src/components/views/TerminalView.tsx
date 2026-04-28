@@ -1588,7 +1588,7 @@ export function TerminalView({
         /* older xterm builds / mocks may lack this method */
       }
       term.refresh(0, term.rows - 1);
-      scheduleOverlayCaretUpdate();
+      overlayCaretUpdaterRef.current?.();
     };
 
     if (!options?.defer) {
