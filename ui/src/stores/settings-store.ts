@@ -368,7 +368,7 @@ const DEFAULT_MEMO: MemoSettings = {
   paddingLeft: 8,
   paragraphCopy: { enabled: true, minBlankLines: 2 },
   copyOnSelect: false,
-  dblClickParagraphSelect: true,
+  tripleClickParagraphSelect: true,
   indentSize: 2,
   fontFamily: "",
   fontSize: 13,
@@ -1045,7 +1045,15 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // Ensure memo settings have all fields (backwards compat)
     const memo = data.memo
-      ? { ...DEFAULT_MEMO, ...(data.memo as Partial<MemoSettings>) }
+      ? {
+          ...DEFAULT_MEMO,
+          ...((data.memo as Partial<MemoSettings> & { dblClickParagraphSelect?: boolean }) ?? {}),
+          tripleClickParagraphSelect:
+            (data.memo as Partial<MemoSettings> & { dblClickParagraphSelect?: boolean })
+              .tripleClickParagraphSelect ??
+            (data.memo as { dblClickParagraphSelect?: boolean }).dblClickParagraphSelect ??
+            DEFAULT_MEMO.tripleClickParagraphSelect,
+        }
       : undefined;
     // Ensure fileExplorer settings have all fields (backwards compat)
     const fileExplorer = data.fileExplorer

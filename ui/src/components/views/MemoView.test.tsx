@@ -215,7 +215,7 @@ describe("MemoView", () => {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
-          dblClickParagraphSelect: true,
+          tripleClickParagraphSelect: true,
         },
       });
       // "abc" = line 0, "" = line 1, "" = line 2, "def\nggg" = lines 3-4
@@ -243,7 +243,7 @@ describe("MemoView", () => {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
-          dblClickParagraphSelect: true,
+          tripleClickParagraphSelect: true,
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("single paragraph only");
@@ -269,7 +269,7 @@ describe("MemoView", () => {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
-          dblClickParagraphSelect: true,
+          tripleClickParagraphSelect: true,
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");

@@ -182,7 +182,11 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
       if (e.detail !== 3) return; // Only handle triple-click
-      if (!memo.paragraphCopy.enabled || !memo.dblClickParagraphSelect || paragraphs.length === 0) {
+      if (
+        !memo.paragraphCopy.enabled ||
+        !memo.tripleClickParagraphSelect ||
+        paragraphs.length === 0
+      ) {
         return;
       }
       const textarea = textareaRef.current;
@@ -225,7 +229,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
       textarea.setSelectionRange(startOffset, endOffset);
       // selectionchange handles pending — no direct setting needed
     },
-    [memo.paragraphCopy.enabled, memo.dblClickParagraphSelect, text, paragraphs],
+    [memo.paragraphCopy.enabled, memo.tripleClickParagraphSelect, text, paragraphs],
   );
 
   const indent = " ".repeat(memo.indentSize || 2);
