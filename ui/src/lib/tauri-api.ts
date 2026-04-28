@@ -190,8 +190,8 @@ export interface MemoSettings {
   paragraphCopy: MemoParagraphCopySettings;
   /** Automatically copy selected text to clipboard (like terminal copyOnSelect). */
   copyOnSelect: boolean;
-  /** Double-click to select entire paragraph (requires paragraphCopy enabled). */
-  dblClickParagraphSelect: boolean;
+  /** Triple-click to select entire paragraph (requires paragraphCopy enabled). */
+  tripleClickParagraphSelect: boolean;
   /** Tab indent size (number of spaces). */
   indentSize: number;
   fontFamily: string;

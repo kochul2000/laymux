@@ -661,9 +661,9 @@ pub struct MemoSettings {
     /// Automatically copy selected text to clipboard (like terminal copyOnSelect).
     #[serde(default)]
     pub copy_on_select: bool,
-    /// Double-click to select entire paragraph (requires paragraph_copy enabled).
-    #[serde(default = "default_true")]
-    pub dbl_click_paragraph_select: bool,
+    /// Triple-click to select entire paragraph (requires paragraph_copy enabled).
+    #[serde(default = "default_true", alias = "dblClickParagraphSelect")]
+    pub triple_click_paragraph_select: bool,
     /// Tab indent size (number of spaces). Default: 2.
     #[serde(default = "default_indent_size")]
     pub indent_size: u32,
@@ -691,7 +691,7 @@ impl Default for MemoSettings {
             padding_left: 8,
             paragraph_copy: MemoParagraphCopySettings::default(),
             copy_on_select: false,
-            dbl_click_paragraph_select: true,
+            triple_click_paragraph_select: true,
             indent_size: 2,
             font_family: String::new(),
             font_size: 13,

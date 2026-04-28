@@ -215,7 +215,7 @@ describe("MemoView", () => {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
-          dblClickParagraphSelect: true,
+          tripleClickParagraphSelect: true,
         },
       });
       // "abc" = line 0, "" = line 1, "" = line 2, "def\nggg" = lines 3-4
@@ -236,6 +236,32 @@ describe("MemoView", () => {
       expect(textarea.selectionEnd).toBe(13);
     });
 
+    it("selects the only paragraph on triple-click when no overlay is shown", async () => {
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: {
+          ...useSettingsStore.getState().memo,
+          paragraphCopy: { enabled: true, minBlankLines: 2 },
+          copyOnSelect: false,
+          tripleClickParagraphSelect: true,
+        },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("single paragraph only");
+      render(<MemoView memoKey="pane-tpl-single" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(screen.queryByTestId("paragraph-overlay")).not.toBeInTheDocument();
+
+      textarea.setSelectionRange(7, 7);
+      fireEvent.click(textarea, { detail: 3 });
+
+      expect(textarea.selectionStart).toBe(0);
+      expect(textarea.selectionEnd).toBe("single paragraph only".length);
+    });
+
     it("does not select paragraph on double-click (detail=2)", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
@@ -243,7 +269,7 @@ describe("MemoView", () => {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
           copyOnSelect: false,
-          dblClickParagraphSelect: true,
+          tripleClickParagraphSelect: true,
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef\nggg");
