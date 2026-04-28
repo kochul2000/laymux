@@ -43,7 +43,7 @@ export function ViewHeader({
   return (
     <div
       data-testid={testId}
-      className={`ui-toolbar shrink-0 pl-2 pr-1 ${className ?? ""}`.trim()}
+      className={`ui-toolbar relative shrink-0 pl-2 pr-1 ${className ?? ""}`.trim()}
       style={{
         background: "var(--bg-surface)",
         ...(borderBottom ? { borderBottom: "1px solid var(--border)" } : {}),
@@ -70,6 +70,7 @@ export function ViewHeader({
           onClick={(e) => {
             e.stopPropagation();
             ctx.onSetMode("hover");
+            ctx.openControls?.();
           }}
           className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded"
           style={{
