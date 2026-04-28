@@ -256,6 +256,7 @@ export function TerminalView({
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const terminalReflowFrameRef = useRef<number | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
   // Each xterm rebuild gets a fresh generation, bumped at render time when
@@ -1443,6 +1444,10 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      if (terminalReflowFrameRef.current !== null) {
+        cancelAnimationFrame(terminalReflowFrameRef.current);
+        terminalReflowFrameRef.current = null;
+      }
       clearTimeout(notifyGateTimer);
       idleDetector.dispose();
       resizeObserver.disconnect();
@@ -1569,6 +1574,36 @@ export function TerminalView({
   const effectiveCursorBlink = cursorBlink;
   const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
+  const runTerminalRendererReflow = (
+    term: Terminal,
+    options?: {
+      defer?: boolean;
+    },
+  ) => {
+    const perform = () => {
+      fitAddonRef.current?.fit();
+      try {
+        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+      } catch {
+        /* older xterm builds / mocks may lack this method */
+      }
+      term.refresh(0, term.rows - 1);
+      scheduleOverlayCaretUpdate();
+    };
+
+    if (!options?.defer) {
+      perform();
+      return;
+    }
+
+    if (terminalReflowFrameRef.current !== null) {
+      cancelAnimationFrame(terminalReflowFrameRef.current);
+    }
+    terminalReflowFrameRef.current = requestAnimationFrame(() => {
+      terminalReflowFrameRef.current = null;
+      perform();
+    });
+  };
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
@@ -1624,19 +1659,12 @@ export function TerminalView({
           delete (term.options as { cursorWidth?: number }).cursorWidth;
         }
       }
-      fitAddonRef.current?.fit();
-      // xterm's WebGL renderer caches glyphs in a texture atlas keyed on the
-      // previous cell dimensions. When fontSize / fontFamily change, fit()
-      // re-measures the cells but the atlas still holds stale glyphs, which
-      // manifests as text clustering to the left of each row (issue #224).
-      // Clearing the atlas after fit() forces a full re-rasterise at the new
-      // cell size. Safe no-op if the WebGL renderer is not active.
-      try {
-        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-      } catch {
-        /* older xterm builds / mocks may lack this method */
-      }
-      term.refresh(0, term.rows - 1);
+      // Font updates land on the host element immediately, but xterm's final
+      // measured cell geometry can settle on the next frame. Reflow once now
+      // and once after layout so FitAddon and the WebGL atlas agree on the
+      // final glyph metrics (issue #224).
+      runTerminalRendererReflow(term);
+      runTerminalRendererReflow(term, { defer: true });
     } catch {
       /* xterm mock may not support options setter */
     }
@@ -1665,9 +1693,8 @@ export function TerminalView({
       const term = terminalRef.current;
       if (!term) return;
       try {
-        fitAddonRef.current?.fit();
-        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-        term.refresh(0, term.rows - 1);
+        runTerminalRendererReflow(term);
+        runTerminalRendererReflow(term, { defer: true });
       } catch {
         /* addon/renderer may not be active yet */
       }
