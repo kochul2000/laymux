@@ -1561,7 +1561,7 @@ describe("TerminalView", () => {
   // afterwards use stale cell widths and glyphs visibly collapse to the
   // left. The fix: call `term.clearTextureAtlas()` whenever fontSize or
   // fontFamily changes, *after* `fit()` so the renderer re-measures first.
-  it("clears texture atlas when fontSize changes (issue #224)", async () => {
+  it("reflows twice and clears texture atlas when fontSize changes (issue #224)", async () => {
     render(
       <TerminalView
         instanceId="t-atlas-fontsize"
@@ -1581,10 +1581,11 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      // fit() must run so xterm re-measures cell geometry, then the atlas
-      // must be cleared so the new glyph sizes are re-rasterised.
+      // Font metrics can settle one frame after the option write, so the fix
+      // must both invalidate the current atlas and schedule a deferred reflow.
       expect(mockFit).toHaveBeenCalled();
       expect(mockClearTextureAtlas).toHaveBeenCalled();
+      expect(mockRequestAnimationFrame).toHaveBeenCalled();
     });
   });
 
