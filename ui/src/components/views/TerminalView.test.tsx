@@ -6,6 +6,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
+import { publishRendererRefresh, _resetRendererBus } from "@/lib/terminal-renderer-bus";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -143,11 +144,15 @@ vi.mock("@/lib/indented-link-provider", () => ({
 }));
 
 vi.mock("@xterm/addon-webgl", () => {
-  const WebglAddon = vi.fn().mockImplementation(() => ({
-    dispose: vi.fn(),
-    onContextLoss: vi.fn(),
-  }));
-  return { WebglAddon: WebglAddon };
+  // Use a regular function so `new WebglAddon(...)` works as a constructor
+  // call. Arrow functions can't be invoked with `new`, which previously made
+  // every WebGL init silently fail in tests.
+  const WebglAddon = vi.fn(function (this: Record<string, unknown>) {
+    this.dispose = vi.fn();
+    this.onContextLoss = vi.fn();
+    this.clearTextureAtlas = vi.fn();
+  });
+  return { WebglAddon };
 });
 
 const mockSerialize = vi.fn().mockReturnValue("serialized-data");
@@ -2414,5 +2419,136 @@ describe("TerminalView", () => {
 describe("shouldEnableTerminalWebgl", () => {
   it("keeps WebGL enabled", () => {
     expect(shouldEnableTerminalWebgl()).toBe(true);
+  });
+});
+
+describe("renderer refresh bus", () => {
+  beforeEach(() => {
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    _resetWebglStagger();
+    _resetRendererBus();
+    vi.clearAllMocks();
+  });
+
+  type WebglMockInstance = {
+    onContextLoss: ReturnType<typeof vi.fn>;
+    clearTextureAtlas: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  };
+  const getWebglInstance = (idx: number): WebglMockInstance =>
+    (
+      WebglAddon as unknown as {
+        mock: { results: Array<{ value: WebglMockInstance }> };
+      }
+    ).mock.results[idx].value;
+
+  async function flushTimers() {
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+  }
+
+  it("refreshes a peer terminal when another instance leaves an interactiveApp activity", async () => {
+    vi.useFakeTimers();
+
+    render(<TerminalView instanceId="t-peer-A" profile="PowerShell" syncGroup="g" />);
+    render(<TerminalView instanceId="t-peer-B" profile="PowerShell" syncGroup="g" />);
+
+    await flushTimers();
+    expect(WebglAddon).toHaveBeenCalledTimes(2);
+
+    const refreshCallsBefore = mockRefresh.mock.calls.length;
+
+    await act(async () => {
+      useTerminalStore.getState().updateInstanceInfo("t-peer-A", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    await act(async () => {
+      useTerminalStore.getState().updateInstanceInfo("t-peer-A", {
+        activity: { type: "shell" },
+      });
+    });
+
+    // Peer B's xterm refresh should be called at least once after the
+    // interactiveApp → shell transition on peer A.
+    expect(mockRefresh.mock.calls.length).toBeGreaterThan(refreshCallsBefore);
+
+    vi.useRealTimers();
+  });
+
+  it("clears the atlas for peer signals but skips self-signals", async () => {
+    vi.useFakeTimers();
+
+    render(<TerminalView instanceId="t-self" profile="PowerShell" syncGroup="g" />);
+    await flushTimers();
+
+    const atlasCallsBefore = mockClearTextureAtlas.mock.calls.length;
+
+    // Self-signal: instanceId match → must NOT clear our atlas.
+    await act(async () => {
+      publishRendererRefresh({ reason: "peer-tui-exit", sourceId: "t-self" });
+    });
+    expect(mockClearTextureAtlas.mock.calls.length).toBe(atlasCallsBefore);
+
+    // Peer signal: different sourceId → must clear our atlas.
+    await act(async () => {
+      publishRendererRefresh({ reason: "peer-tui-exit", sourceId: "t-other" });
+    });
+    expect(mockClearTextureAtlas.mock.calls.length).toBeGreaterThan(atlasCallsBefore);
+
+    vi.useRealTimers();
+  });
+
+  it("recreates the WebglAddon after a context loss", async () => {
+    vi.useFakeTimers();
+
+    render(<TerminalView instanceId="t-ctxloss" profile="PowerShell" syncGroup="g" />);
+    await flushTimers();
+
+    expect(WebglAddon).toHaveBeenCalledTimes(1);
+    const firstInstance = getWebglInstance(0);
+    const lossCb = firstInstance.onContextLoss.mock.calls[0]?.[0] as (() => void) | undefined;
+    expect(typeof lossCb).toBe("function");
+
+    await act(async () => {
+      lossCb!();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Stagger delay elapsed — addon should have been recreated.
+    expect(WebglAddon).toHaveBeenCalledTimes(2);
+    expect(firstInstance.dispose).toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it("notifies peers on unmount so they can rebuild stale atlases", async () => {
+    vi.useFakeTimers();
+
+    const { unmount: unmountA } = render(
+      <TerminalView instanceId="t-um-A" profile="PowerShell" syncGroup="g" />,
+    );
+    render(<TerminalView instanceId="t-um-B" profile="PowerShell" syncGroup="g" />);
+    await flushTimers();
+
+    const refreshCallsBefore = mockRefresh.mock.calls.length;
+
+    unmountA();
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    // Peer B should have received the unmount-driven refresh signal and
+    // called terminal.refresh on its xterm instance.
+    expect(mockRefresh.mock.calls.length).toBeGreaterThan(refreshCallsBefore);
+
+    vi.useRealTimers();
   });
 });

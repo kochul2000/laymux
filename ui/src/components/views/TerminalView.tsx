@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { publishRendererRefresh, subscribeRendererRefresh } from "@/lib/terminal-renderer-bus";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -256,6 +257,10 @@ export function TerminalView({
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  // Live WebglAddon. Tracked so we can rebuild it on context loss and force
+  // an atlas refresh from the renderer-refresh bus when a peer terminal
+  // exits a TUI app (Codex etc.) and risks leaving our atlas stale.
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const terminalReflowFrameRef = useRef<number | null>(null);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
@@ -1315,6 +1320,40 @@ export function TerminalView({
     // cell size / DPR stay cached and render completely garbled (issue #232).
     let prevWasHidden = false;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
+    // Build a fresh WebglAddon, attach it to `terminal`, and wire up
+    // context-loss recovery. Returns the addon (or null on failure) and is
+    // shared between first init and post-context-loss recreate so the two
+    // paths stay in sync. The previous code only disposed on context loss
+    // and never recreated, leaving the terminal silently unrendered.
+    const createAndAttachWebgl = (): WebglAddon | null => {
+      if (cancelled) return null;
+      try {
+        const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
+        terminal.loadAddon(webgl);
+        webgl.onContextLoss(() => {
+          // Dispose the dead context, then ask peers to refresh their atlas
+          // (they share the WebView2 GPU process and may have collateral
+          // damage), and finally try to bring our renderer back on the next
+          // stagger tick.
+          try {
+            webgl.dispose();
+          } catch {
+            /* already torn down */
+          }
+          if (webglAddonRef.current === webgl) webglAddonRef.current = null;
+          publishRendererRefresh({ reason: "peer-context-loss", sourceId: instanceId });
+          if (cancelled) return;
+          if (webglTimer !== undefined) clearTimeout(webglTimer);
+          webglTimer = setTimeout(() => {
+            webglAddonRef.current = createAndAttachWebgl();
+          }, WEBGL_STAGGER_MS);
+        });
+        return webgl;
+      } catch (err) {
+        console.warn("[TerminalView] WebGL init failed, falling back:", err);
+        return null;
+      }
+    };
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
@@ -1332,14 +1371,7 @@ export function TerminalView({
           const delay = webglInitCount * WEBGL_STAGGER_MS;
           webglInitCount++;
           webglTimer = setTimeout(() => {
-            if (cancelled) return;
-            try {
-              const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
-              terminal.loadAddon(webgl);
-              webgl.onContextLoss(() => webgl.dispose());
-            } catch {
-              // WebGL not available — fall back to default renderer
-            }
+            webglAddonRef.current = createAndAttachWebgl();
           }, delay);
         }
         // Load SerializeAddon for session persistence
@@ -1444,6 +1476,21 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      // Tear the WebGL renderer down explicitly before terminal.dispose() so
+      // any GPU resources are released in a known order. terminal.dispose()
+      // would otherwise dispose the addon while we still hold a ref; the
+      // explicit dispose also lets a sibling pane's atlas refresh listener
+      // pick up `peer-tui-exit` even if that listener races terminal teardown.
+      try {
+        webglAddonRef.current?.dispose();
+      } catch {
+        /* already torn down */
+      }
+      webglAddonRef.current = null;
+      // Tell every peer that this pane is going away. A pane teardown can
+      // ripple GPU-process state (texture pages freed, context destroyed)
+      // and corrupt sibling atlases the same way a Codex exit does.
+      publishRendererRefresh({ reason: "peer-tui-exit", sourceId: instanceId });
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
@@ -1515,6 +1562,34 @@ export function TerminalView({
     }
   }, [isFocused]);
 
+  // Listen for peer renderer-refresh signals — when another pane in the
+  // window exits a TUI app or loses its WebGL context, our atlas may have
+  // been left in a corrupt state by the shared WebView2 GPU process. Drop
+  // the atlas and force a full redraw to recover. clearTextureAtlas is a
+  // no-op when WebGL is off; refresh is safe in any renderer.
+  useEffect(() => {
+    return subscribeRendererRefresh((signal) => {
+      if (signal.sourceId === instanceId) return;
+      const t = terminalRef.current;
+      if (!t) return;
+      try {
+        webglAddonRef.current?.clearTextureAtlas();
+      } catch {
+        /* atlas missing — fall through to terminal-level path */
+      }
+      try {
+        (t as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+      } catch {
+        /* older xterm builds / mocks may lack this method */
+      }
+      try {
+        t.refresh(0, t.rows - 1);
+      } catch {
+        /* terminal already torn down */
+      }
+    });
+  }, [instanceId]);
+
   // Reactively update terminal theme when profile colorScheme or font changes
   const currentSchemeName = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
@@ -1546,6 +1621,20 @@ export function TerminalView({
       );
     }
     prevActivityIsTuiRef.current = isTui;
+  }
+  // Tracks any interactiveApp transition (Codex, vim, neovim, …) so we can
+  // notify peer terminals that a TUI process exited. The exit flushes
+  // alt-screen restore + scrollback redraw + cursor reset in a tight burst,
+  // which can corrupt sibling WebGL atlases sharing the WebView2 GPU
+  // process. Peers respond by clearing their atlas — see the subscribe
+  // hook below.
+  const prevActivityIsInteractiveRef = useRef<boolean>(false);
+  {
+    const isInteractive = activity?.type === "interactiveApp";
+    if (prevActivityIsInteractiveRef.current && !isInteractive) {
+      publishRendererRefresh({ reason: "peer-tui-exit", sourceId: instanceId });
+    }
+    prevActivityIsInteractiveRef.current = isInteractive;
   }
   activityRef.current = activity;
   const cursorShape = useSettingsStore((s) => {
