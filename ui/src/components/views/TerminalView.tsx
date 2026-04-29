@@ -22,6 +22,7 @@ import {
   updateTerminalSyncGroup,
   openExternal,
   markClaudeTerminal,
+  markCodexTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
@@ -72,6 +73,14 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 const LARGE_PASTE_THRESHOLD = 5120;
 
 const textEncoder = new TextEncoder();
+
+function markBackendInteractiveTerminal(instanceId: string, activity: TerminalActivityInfo): void {
+  if (activity.name === "Claude") {
+    markClaudeTerminal(instanceId).catch(() => {});
+  } else if (activity.name === "Codex") {
+    markCodexTerminal(instanceId).catch(() => {});
+  }
+}
 
 /**
  * Plain browser-clipboard paste. Shared by two spots in `runTerminalPaste`:
@@ -1248,9 +1257,7 @@ export function TerminalView({
         const cmdActivity = cmdMatch ? detectActivityFromCommand(cmdMatch[1]) : undefined;
         if (cmdActivity) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: cmdActivity });
-          if (cmdActivity.name === "Claude") {
-            markClaudeTerminal(instanceId).catch(() => {});
-          }
+          markBackendInteractiveTerminal(instanceId, cmdActivity);
         } else {
           const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
           if (inst?.activity?.type === "interactiveApp" && inst.activity.name !== "app") {
@@ -1260,8 +1267,8 @@ export function TerminalView({
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
               activity: detected ?? { type: "interactiveApp", name: "app" },
             });
-            if (detected?.name === "Claude") {
-              markClaudeTerminal(instanceId).catch(() => {});
+            if (detected) {
+              markBackendInteractiveTerminal(instanceId, detected);
             }
           }
         }

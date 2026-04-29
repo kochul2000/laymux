@@ -158,6 +158,10 @@ describe("detectActivityFromCommand", () => {
       type: "interactiveApp",
       name: "Codex",
     });
+    expect(detectActivityFromCommand("codex resume 129381204f-81293801")).toEqual({
+      type: "interactiveApp",
+      name: "Codex",
+    });
   });
 
   it("returns undefined for empty command", () => {

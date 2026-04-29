@@ -180,6 +180,8 @@ const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdSend = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
+const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
+const mockMarkCodexTerminal = vi.fn().mockResolvedValue(true);
 const mockLoadTerminalOutputCache = vi
   .fn()
   .mockRejectedValue(new Error("Cache not found: /fake/path.dat"));
@@ -197,7 +199,8 @@ vi.mock("@/lib/tauri-api", () => ({
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
-  markClaudeTerminal: vi.fn().mockResolvedValue(true),
+  markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
+  markCodexTerminal: (...args: unknown[]) => mockMarkCodexTerminal(...args),
 }));
 
 describe("TerminalView", () => {
@@ -742,6 +745,31 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex");
       expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    });
+  });
+
+  it("seeds backend Codex tracking when codex resume is detected from command text", async () => {
+    render(<TerminalView instanceId="t-codex-resume" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode("\x1b]133;E;codex resume 129381204f-81293801\x07\x1b[?1049h"),
+      );
+    });
+
+    await vi.waitFor(() => {
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-codex-resume");
+      expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+      expect(mockMarkCodexTerminal).toHaveBeenCalledWith("t-codex-resume");
     });
   });
 

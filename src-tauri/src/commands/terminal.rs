@@ -826,14 +826,45 @@ pub fn log_terminal_trace_batch(
 /// 3. Seed the grace window so the helpers' "no live signal" verdict
 ///    falls through to step 3 of `detect_interactive_app_from_live_title`,
 ///    which still reports Claude until the window expires.
-#[tauri::command]
-pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+pub fn mark_claude_terminal_inner(
+    state: &AppState,
+    id: &str,
+) -> Result<bool, crate::error::AppError> {
     let inserted = {
         let mut known = state.known_claude_terminals.lock_or_err()?;
-        known.insert(id.clone())
+        known.insert(id.to_string())
     };
-    activity::sync_known_caches(&state, &id, "Claude");
-    activity::record_interactive_app_detection(&state, &id, "Claude");
+    activity::sync_known_caches(state, id, "Claude");
+    activity::record_interactive_app_detection(state, id, "Claude");
+    Ok(inserted)
+}
+
+#[tauri::command]
+pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    mark_claude_terminal_inner(&state, &id).map_err(|e| e.to_string())
+}
+
+/// Register a terminal as running Codex (OpenAI Codex CLI).
+///
+/// Mirrors `mark_claude_terminal` for command-text detection. Codex resume can
+/// enter directly into a restored TUI without first emitting an `OpenAI Codex`
+/// title/banner in the recent scan window, so the frontend seeds the backend
+/// tracker when OSC 133;E identifies a `codex ...` command.
+#[tauri::command]
+pub fn mark_codex_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    mark_codex_terminal_inner(&state, &id).map_err(|e| e.to_string())
+}
+
+pub fn mark_codex_terminal_inner(
+    state: &AppState,
+    id: &str,
+) -> Result<bool, crate::error::AppError> {
+    let inserted = {
+        let mut known = state.known_codex_terminals.lock_or_err()?;
+        known.insert(id.to_string())
+    };
+    activity::sync_known_caches(state, id, "Codex");
+    activity::record_interactive_app_detection(state, id, "Codex");
     Ok(inserted)
 }
 
@@ -841,6 +872,13 @@ pub fn mark_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<b
 #[tauri::command]
 pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
     let known = state.known_claude_terminals.lock_or_err()?;
+    Ok(known.contains(&id))
+}
+
+/// Check if a terminal is registered as running Codex.
+#[tauri::command]
+pub fn is_codex_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let known = state.known_codex_terminals.lock_or_err()?;
     Ok(known.contains(&id))
 }
 
@@ -1055,6 +1093,48 @@ mod tests {
         let known = Mutex::new(set);
         assert!(!resolve_claude_detected(&atomic, &known, "t1"));
         assert!(!atomic.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn mark_codex_terminal_seeds_backend_detection_for_resume_command() {
+        let state = AppState::new();
+        let tid = "t-codex-resume";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        assert!(
+            mark_codex_terminal_inner(&state, tid).unwrap(),
+            "first Codex mark should report a new insert"
+        );
+        assert!(
+            state.known_codex_terminals.lock().unwrap().contains(tid),
+            "command-detected Codex must seed the persistent Codex tracker"
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "Codex mark must clear stale Claude membership for the same pane"
+        );
+        assert_eq!(
+            activity::detect_interactive_app_from_live_title(&state, tid, "", None),
+            Some("Codex".to_string()),
+            "grace window must classify Codex before a title/banner arrives"
+        );
+    }
+
+    #[test]
+    fn mark_codex_terminal_returns_false_on_duplicate_mark() {
+        let state = AppState::new();
+        let tid = "t-codex-duplicate";
+
+        assert!(mark_codex_terminal_inner(&state, tid).unwrap());
+        assert!(
+            !mark_codex_terminal_inner(&state, tid).unwrap(),
+            "second Codex mark should not report a new insert"
+        );
     }
 
     // ── apply_claude_title_state ──
