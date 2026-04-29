@@ -185,6 +185,50 @@ describe("smartRemoveLineBreak", () => {
     const input = "https://example.com/very-long-\npath?query=value";
     expect(smartRemoveLineBreak(input)).toBe("https://example.com/very-long-path?query=value");
   });
+
+  it("URL이 한 줄이지만 중간에 공백이 끼어 있어도 모두 제거한다", () => {
+    // 외부 앱에서 newline만 strip하고 paste한 URL: 중간에 4-space gap이 존재
+    const input =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61    b-44d9-88ed-5944d1962f5e&response_type=code";
+    const expected =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code";
+    expect(smartRemoveLineBreak(input)).toBe(expected);
+  });
+
+  it("URL 한 줄 + 탭 문자 혼합 공백도 제거한다", () => {
+    const input = "https://example.com/path?foo=bar&\t baz=qux";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com/path?foo=bar&baz=qux");
+  });
+
+  it("URL이 아닌 단일 줄 텍스트는 공백을 제거하지 않는다", () => {
+    const input = "hello world how are you";
+    expect(smartRemoveLineBreak(input)).toBe("hello world how are you");
+  });
+
+  it("URL + 단일 스페이스로 구분된 prose는 보존한다 (자연어 보호)", () => {
+    // 외부 앱이 newline을 strip하면 터미널 패딩은 multi-space gap으로 남지만,
+    // 자연어에서 URL과 단어 사이는 single space. 이 둘을 구분해서
+    // single-space 케이스는 collapse 하지 않아야 한다.
+    const input = "https://example.com hello world";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com hello world");
+  });
+
+  it("URL 뒤 single-space-separated 문장이 와도 합치지 않는다", () => {
+    const input = "https://example.com is a great site";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com is a great site");
+  });
+
+  it("멀티라인이라도 URL 다음 줄이 single-space prose면 보존한다", () => {
+    // PR #252 리뷰에서 지적된 회귀 케이스: \n + "hello world"
+    // joined으로는 URL처럼 보여도 single-space로 구분된 prose가 끼어 있으면 자연어다.
+    const input = "https://example.com\nhello world";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com\nhello world");
+  });
+
+  it("멀티라인 URL + 다음 줄에 single-space-separated 문장도 보존한다", () => {
+    const input = "https://example.com\nis a great site";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com\nis a great site");
+  });
 });
 
 // ============================================================
@@ -247,6 +291,23 @@ describe("applySmartTextTransforms", () => {
     const input = "https://example.com/pa\r\nth";
     expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
       "https://example.com/path",
+    );
+  });
+
+  it("paste 시 URL + single-space prose 단일 라인은 보존된다 (false-positive 가드)", () => {
+    // newline이 없고 단일 스페이스로 prose가 이어지는 자연어 입력은
+    // smartRemoveLineBreak이 켜져 있어도 합쳐지면 안 된다.
+    const input = "https://example.com hello world";
+    expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
+      "https://example.com hello world",
+    );
+  });
+
+  it("paste 시 URL\\n + single-space prose 멀티라인도 보존된다 (false-positive 가드)", () => {
+    // \n이 끼어 있어도 다음 줄이 single-space로 구분된 자연어면 합치지 않는다.
+    const input = "https://example.com\nhello world";
+    expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
+      "https://example.com\nhello world",
     );
   });
 });
@@ -314,6 +375,11 @@ describe("transformPasteContent", () => {
   it("returns content unchanged for non-text paste type", () => {
     const input = "  some image data";
     expect(transformPasteContent(input, "image", opts)).toBe("  some image data");
+  });
+
+  it("text paste 시 URL + single-space prose는 그대로 유지 (false-positive 가드)", () => {
+    const input = "https://example.com is a great site";
+    expect(transformPasteContent(input, "text", opts)).toBe("https://example.com is a great site");
   });
 });
 
@@ -414,6 +480,40 @@ describe("prepareSelectionForCopy", () => {
     const raw = "  hello   \r\n  world   \r\n";
     const result = prepareSelectionForCopy(raw, { smartRemoveIndent: true });
     expect(result).toBe("hello\r\nworld");
+  });
+
+  it("smartRemoveLineBreak 활성 시 멀티라인 URL이 한 줄로 합쳐지고 공백이 제거된다", () => {
+    // 터미널에서 인덴트된 멀티라인 URL을 복사할 때 외부 앱(브라우저 URL bar 등)에
+    // 그대로 붙여넣어도 깨지지 않도록 copy 시점에 정리한다.
+    const raw =
+      "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61   \n" +
+      "  b-44d9-88ed-5944d1962f5e&response_type=code                                \n" +
+      "                                                                            \n";
+    const expected =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: true,
+    });
+    expect(result).toBe(expected);
+  });
+
+  it("smartRemoveLineBreak 비활성 시 멀티라인 URL이 그대로 유지된다", () => {
+    const raw = "  https://example.com/pa   \n  th?q=1   \n";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: false,
+    });
+    expect(result).toBe("https://example.com/pa\nth?q=1");
+  });
+
+  it("URL이 아닌 멀티라인 텍스트는 smartRemoveLineBreak가 켜져 있어도 줄바꿈을 유지한다", () => {
+    const raw = "  hello   \n  world   \n";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: true,
+    });
+    expect(result).toBe("hello\nworld");
   });
 });
 
