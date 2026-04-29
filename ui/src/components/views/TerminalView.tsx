@@ -1314,12 +1314,21 @@ export function TerminalView({
     // texture atlas to rebuild — otherwise glyphs rasterised at the pre-hide
     // cell size / DPR stay cached and render completely garbled (issue #232).
     let prevWasHidden = false;
+    // Last visible integer dimensions we acted on. ResizeObserver fires a
+    // fresh entry every time `contentBoxSize` shifts by sub-pixel amounts
+    // (DPR rounding, scrollbar layout, hover bars), so without this guard
+    // we would call fit() — and through it `terminal.onResize` → PTY
+    // resize round-trips — for changes the user never perceives.
+    let prevW = 0;
+    let prevH = 0;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
       if (width > 0 && height > 0 && !sessionCreated) {
         sessionCreated = true;
+        prevW = Math.round(width);
+        prevH = Math.round(height);
         // Open terminal now that container has real dimensions
         if (containerRef.current) {
           terminal.open(containerRef.current);
@@ -1419,6 +1428,17 @@ export function TerminalView({
         }
       } else if (sessionCreated && width > 0 && height > 0) {
         const recoveringFromHidden = prevWasHidden;
+        const w = Math.round(width);
+        const h = Math.round(height);
+        // Skip identical-size callbacks unless we are returning from a
+        // display:none hide (those still need an atlas rebuild even if
+        // dimensions match the pre-hide values).
+        if (!recoveringFromHidden && w === prevW && h === prevH) {
+          prevWasHidden = isNowHidden;
+          return;
+        }
+        prevW = w;
+        prevH = h;
         fitAddon.fit();
         if (recoveringFromHidden) {
           // See `prevWasHidden` definition: the WebGL atlas can go stale
@@ -1574,13 +1594,17 @@ export function TerminalView({
   const effectiveCursorBlink = cursorBlink;
   const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
-  const runTerminalRendererReflow = (
-    term: Terminal,
-    options?: {
-      defer?: boolean;
-    },
-  ) => {
-    const perform = () => {
+  // Coalesce all reflow requests into a single rAF. Calling fit() +
+  // clearTextureAtlas() + refresh() multiple times per tick (or even twice
+  // back-to-back) compounds with TUI exit bursts (e.g. Codex's `ESC[?1049l`,
+  // scrollback re-emit) and is what makes the WebGL atlas race manifest as
+  // glyph corruption in adjacent panes.
+  const runTerminalRendererReflow = (term: Terminal) => {
+    if (terminalReflowFrameRef.current !== null) {
+      cancelAnimationFrame(terminalReflowFrameRef.current);
+    }
+    terminalReflowFrameRef.current = requestAnimationFrame(() => {
+      terminalReflowFrameRef.current = null;
       fitAddonRef.current?.fit();
       try {
         (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
@@ -1589,24 +1613,17 @@ export function TerminalView({
       }
       term.refresh(0, term.rows - 1);
       overlayCaretUpdaterRef.current?.();
-    };
-
-    if (!options?.defer) {
-      perform();
-      return;
-    }
-
-    if (terminalReflowFrameRef.current !== null) {
-      cancelAnimationFrame(terminalReflowFrameRef.current);
-    }
-    terminalReflowFrameRef.current = requestAnimationFrame(() => {
-      terminalReflowFrameRef.current = null;
-      perform();
     });
   };
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
+  // Option-only updates: theme, font (just the values), and cursor settings.
+  // This effect must NOT call fit()/clearTextureAtlas()/refresh() directly —
+  // cursor and theme changes do not move cell geometry, and triggering an
+  // atlas rebuild on every activity transition (e.g. Codex start/exit) makes
+  // the WebGL renderer race with TUI exit bursts. Cell-geometry reflow lives
+  // in the dedicated effect below.
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;
@@ -1659,12 +1676,6 @@ export function TerminalView({
           delete (term.options as { cursorWidth?: number }).cursorWidth;
         }
       }
-      // Font updates land on the host element immediately, but xterm's final
-      // measured cell geometry can settle on the next frame. Reflow once now
-      // and once after layout so FitAddon and the WebGL atlas agree on the
-      // final glyph metrics (issue #224).
-      runTerminalRendererReflow(term);
-      runTerminalRendererReflow(term, { defer: true });
     } catch {
       /* xterm mock may not support options setter */
     }
@@ -1677,6 +1688,18 @@ export function TerminalView({
     nativeCursorHidden,
     stabilizeInteractiveCursor,
   ]);
+
+  // Cell-geometry reflow: only fontSize/fontFamily changes move xterm's
+  // measured cell width/height, so the texture atlas only needs invalidation
+  // on those transitions (issue #224). Cursor mode / activity changes must
+  // not enter this path — they would trigger a fit + atlas rebuild during
+  // TUI exit bursts and surface as glyph corruption (issue surfaced after
+  // #224 fix).
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term?.options) return;
+    runTerminalRendererReflow(term);
+  }, [font]);
 
   // Browser zoom / monitor DPR changes invalidate the WebGL texture atlas:
   // the renderer rasterises glyphs at a resolution tied to the current
@@ -1694,7 +1717,6 @@ export function TerminalView({
       if (!term) return;
       try {
         runTerminalRendererReflow(term);
-        runTerminalRendererReflow(term, { defer: true });
       } catch {
         /* addon/renderer may not be active yet */
       }

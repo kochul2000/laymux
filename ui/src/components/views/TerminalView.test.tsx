@@ -347,8 +347,20 @@ describe("TerminalView", () => {
     });
   });
 
-  it("refreshes and refits existing terminal when settings change", async () => {
+  it("updates terminal options on cursor settings change without re-fitting", async () => {
+    // xterm applies option changes (cursor style/blink) on the next paint
+    // automatically — there is no need to call fit() or refresh(). Coupling
+    // those calls to cursor-setting changes turned activity transitions
+    // (Codex start/exit) into atlas-rebuild bursts that race with TUI exit
+    // sequences.
     render(<TerminalView instanceId="t-settings-refresh" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockFit.mockClear();
+    mockRefresh.mockClear();
 
     act(() => {
       useSettingsStore.getState().updateProfile(0, {
@@ -358,9 +370,11 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mockFit).toHaveBeenCalled();
-      expect(mockRefresh).toHaveBeenCalledWith(0, 23);
+      expect(createdTerminals[0].options.cursorStyle).toBe("underline");
+      expect(createdTerminals[0].options.cursorBlink).toBe(false);
     });
+    expect(mockFit).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 
   it("updates an existing terminal when profile defaults change", async () => {
@@ -1561,7 +1575,7 @@ describe("TerminalView", () => {
   // afterwards use stale cell widths and glyphs visibly collapse to the
   // left. The fix: call `term.clearTextureAtlas()` whenever fontSize or
   // fontFamily changes, *after* `fit()` so the renderer re-measures first.
-  it("reflows twice and clears texture atlas when fontSize changes (issue #224)", async () => {
+  it("schedules a single deferred reflow and clears texture atlas when fontSize changes (issue #224)", async () => {
     render(
       <TerminalView
         instanceId="t-atlas-fontsize"
@@ -1575,18 +1589,92 @@ describe("TerminalView", () => {
     // font-change-triggered invocation.
     mockClearTextureAtlas.mockClear();
     mockFit.mockClear();
+    mockRequestAnimationFrame.mockClear();
 
     act(() => {
       useOverridesStore.getState().setViewOverride("pane-atlas-fontsize", { fontSize: 20 });
     });
 
     await vi.waitFor(() => {
-      // Font metrics can settle one frame after the option write, so the fix
-      // must both invalidate the current atlas and schedule a deferred reflow.
+      // Font metrics settle one frame after the option write, so the fix
+      // schedules the fit + atlas rebuild in a single rAF (avoiding the
+      // double-call burst that races with TUI exit sequences).
       expect(mockFit).toHaveBeenCalled();
       expect(mockClearTextureAtlas).toHaveBeenCalled();
       expect(mockRequestAnimationFrame).toHaveBeenCalled();
     });
+  });
+
+  // -- Regression: reflow must NOT fire on activity / cursor changes --
+  //
+  // The font/cursor option-update effect runs whenever Codex starts/exits
+  // (`nativeCursorHidden` toggles), focus moves, or cursor shape is edited.
+  // Coupling fit() + clearTextureAtlas() to that effect causes WebGL atlas
+  // rebuild bursts to overlap with TUI exit sequences (`ESC[?1049l`,
+  // scrollback re-emit), which is when glyph corruption surfaces in
+  // adjacent panes. Cell geometry only moves on font changes — so reflow
+  // must be gated to font.
+  it("does not reflow when Codex activity toggles native cursor hidden", async () => {
+    render(
+      <TerminalView
+        instanceId="t-no-reflow-activity"
+        paneId="pane-no-reflow-activity"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockClearTextureAtlas.mockClear();
+    mockFit.mockClear();
+
+    // Codex starts → nativeCursorHidden flips on.
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-no-reflow-activity", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    // Codex exits → nativeCursorHidden flips off (this is the burst window).
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-no-reflow-activity", {
+        activity: { type: "shell" },
+      });
+    });
+
+    expect(mockFit).not.toHaveBeenCalled();
+    expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+  });
+
+  it("does not reflow when cursor shape changes", async () => {
+    render(
+      <TerminalView
+        instanceId="t-no-reflow-cursor"
+        paneId="pane-no-reflow-cursor"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    mockClearTextureAtlas.mockClear();
+    mockFit.mockClear();
+
+    act(() => {
+      useSettingsStore.getState().updateProfile(0, { cursorShape: "underscore" });
+    });
+
+    // Options should still update, but no fit/atlas rebuild should fire.
+    await vi.waitFor(() => {
+      expect(createdTerminals[0].options.cursorStyle).toBe("underline");
+    });
+    expect(mockFit).not.toHaveBeenCalled();
+    expect(mockClearTextureAtlas).not.toHaveBeenCalled();
   });
 
   it("clears texture atlas when devicePixelRatio changes (issue #224)", async () => {
@@ -1769,6 +1857,104 @@ describe("TerminalView", () => {
         expect(mockFit).toHaveBeenCalled();
       });
       expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  // -- Regression: same-size ResizeObserver entries must not trigger fit() --
+  //
+  // ResizeObserver fires a fresh entry on sub-pixel layout shifts (DPR
+  // rounding, scrollbar shimmies, hover bars). Calling fit() — and through
+  // it `terminal.onResize` → PTY resize round-trips — for changes the user
+  // never perceives is wasteful and overlaps with TUI exit bursts.
+  it("ignores same-size ResizeObserver entries", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-dedup" profile="PowerShell" syncGroup="" />);
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      const obs = observers[0];
+      expect(obs).toBeDefined();
+      const target = obs.target as Element;
+
+      // Initial mount opens the terminal at 800×600. Now fire two more
+      // identical entries — the guard must short-circuit both.
+      mockFit.mockClear();
+
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 800, height: 600 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 800.4, height: 600.2 }, // sub-pixel jitter
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+
+      expect(mockFit).not.toHaveBeenCalled();
+
+      // A real change (different integer dimensions) must still fit.
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 900, height: 700 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalled();
+      });
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }
