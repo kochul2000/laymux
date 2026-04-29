@@ -3,6 +3,7 @@ import {
   detectActivityFromTitle,
   detectActivityFromCommand,
   detectActivityFromOutput,
+  detectNewCodexInputPendingPrompt,
   detectCodexConversationMessageFromOutput,
   detectCodexStatusMessageFromOutput,
 } from "./activity-detection";
@@ -68,6 +69,31 @@ describe("detectActivityFromTitle", () => {
     ).toBeUndefined();
     expect(detectActivityFromTitle("/home/user/vim-config")).toBeUndefined();
     expect(detectActivityFromTitle("C:\\Users\\name\\node_modules")).toBeUndefined();
+  });
+});
+
+describe("detectNewCodexInputPendingPrompt", () => {
+  it("detects a newly completed Codex approval prompt", () => {
+    expect(
+      detectNewCodexInputPendingPrompt(
+        "Would you like to run the fol",
+        "lowing command?\r\nReason: needs approval\r\n",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match broad non-prompt fragments", () => {
+    expect(
+      detectNewCodexInputPendingPrompt(
+        "",
+        "Reason: retry budget exceeded\r\nPress Ctrl+C to cancel the process\r\n",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not report a stale prompt as new", () => {
+    const prompt = "Would you like to run the following command?\r\n";
+    expect(detectNewCodexInputPendingPrompt(prompt, "later output\r\n")).toBe(false);
   });
 });
 

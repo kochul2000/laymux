@@ -49,6 +49,7 @@ import {
   CODEX_INPUT_PENDING_MARKER,
   detectCodexConversationMessageFromOutput,
   detectCodexInputPendingFromOutput,
+  detectNewCodexInputPendingPrompt,
   detectCodexStatusMessageFromOutput,
   isCodexFooterStatusLine,
   detectActivityFromTitle,
@@ -1157,6 +1158,7 @@ export function TerminalView({
         startSyncOutputMonitor();
       });
       const text = streamDecoder.decode(data, { stream: true });
+      const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
       recentOutputTail = combinedText;
 
@@ -1182,7 +1184,27 @@ export function TerminalView({
       }
 
       const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
-      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
+      const codexInputPending = detectCodexInputPendingFromOutput(combinedText);
+      const codexPromptBecamePending = detectNewCodexInputPendingPrompt(previousOutputTail, text);
+      if (
+        current?.activity?.type === "running" &&
+        codexPromptBecamePending &&
+        current.activityMessage !== CODEX_INPUT_PENDING_MARKER
+      ) {
+        useTerminalStore.getState().updateInstanceInfo(instanceId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+          activityMessage: CODEX_INPUT_PENDING_MARKER,
+        });
+        useNotificationStore.getState().addNotification({
+          terminalId: instanceId,
+          workspaceId: resolveWorkspaceId(instanceId),
+          message: "Codex is waiting for your input",
+          level: "info",
+        });
+      } else if (
+        current?.activity?.type === "interactiveApp" &&
+        current.activity.name === "Codex"
+      ) {
         const codexConversationMessage = detectCodexConversationMessageFromOutput(combinedText);
         const codexStatusMessage = detectCodexStatusMessageFromOutput(combinedText);
         const currentMessage = current.activityMessage;
@@ -1201,7 +1223,7 @@ export function TerminalView({
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: nextCodexMessage,
           });
-        } else if (detectCodexInputPendingFromOutput(combinedText)) {
+        } else if (codexInputPending) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: CODEX_INPUT_PENDING_MARKER,
           });

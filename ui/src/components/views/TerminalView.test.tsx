@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { useNotificationStore } from "@/stores/notification-store";
 import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
@@ -208,6 +209,7 @@ describe("TerminalView", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    useNotificationStore.setState({ notifications: [] });
     localStorage.clear();
     capturedKeyHandler = null;
     capturedLinkHandler = null;
@@ -807,6 +809,131 @@ describe("TerminalView", () => {
     expect(
       useTerminalStore.getState().instances.find((i) => i.id === "t-codex-prompt")?.activityMessage,
     ).toBe("continuing after approval");
+  });
+
+  it("turns a running Codex approval prompt into input pending and emits one notification", async () => {
+    render(<TerminalView instanceId="t-codex-running-prompt" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-codex-running-prompt", {
+      activity: { type: "running" },
+      lastCommand: "npm test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\n" +
+            "Reason: Vitest spawn EPERM\r\n" +
+            "$ npm test -- src/lib/activity-detection.test.ts\r\n" +
+            "1. Yes, proceed (y)\r\n" +
+            "3. No, and tell Codex what to do differently (esc)\r\n",
+        ),
+      );
+    });
+
+    const instance = useTerminalStore
+      .getState()
+      .instances.find((i) => i.id === "t-codex-running-prompt");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+    expect(instance?.activityMessage).toBe(CODEX_INPUT_PENDING_MARKER);
+
+    const notifications = useNotificationStore.getState().notifications;
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      terminalId: "t-codex-running-prompt",
+      message: "Codex is waiting for your input",
+      level: "info",
+    });
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("Would you like to run the following command?\r\n"));
+    });
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("does not turn ordinary running output into Codex input pending", async () => {
+    render(<TerminalView instanceId="t-ordinary-output" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-ordinary-output", {
+      activity: { type: "running" },
+      lastCommand: "npm test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Reason: retry budget exceeded\r\nPress Ctrl+C to cancel the process\r\n",
+        ),
+      );
+    });
+
+    const instance = useTerminalStore
+      .getState()
+      .instances.find((i) => i.id === "t-ordinary-output");
+    expect(instance?.activity).toEqual({ type: "running" });
+    expect(instance?.activityMessage).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
+  it("does not re-notify from a stale Codex prompt in the rolling output tail", async () => {
+    render(<TerminalView instanceId="t-stale-codex-prompt" profile="PowerShell" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-stale-codex-prompt", {
+      activity: { type: "running" },
+      lastCommand: "npm test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Would you like to run the following command?\r\n" +
+            "Reason: Vitest spawn EPERM\r\n" +
+            "1. Yes, proceed (y)\r\n",
+        ),
+      );
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+
+    useTerminalStore.getState().updateInstanceInfo("t-stale-codex-prompt", {
+      activity: { type: "running" },
+      activityMessage: undefined,
+    });
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("later output after the prompt was answered\r\n"));
+    });
+
+    const instance = useTerminalStore
+      .getState()
+      .instances.find((i) => i.id === "t-stale-codex-prompt");
+    expect(instance?.activity).toEqual({ type: "running" });
+    expect(instance?.activityMessage).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
   });
 
   it("detects Codex approval prompts split across output chunks", async () => {
