@@ -217,6 +217,18 @@ describe("smartRemoveLineBreak", () => {
     const input = "https://example.com is a great site";
     expect(smartRemoveLineBreak(input)).toBe("https://example.com is a great site");
   });
+
+  it("멀티라인이라도 URL 다음 줄이 single-space prose면 보존한다", () => {
+    // PR #252 리뷰에서 지적된 회귀 케이스: \n + "hello world"
+    // joined으로는 URL처럼 보여도 single-space로 구분된 prose가 끼어 있으면 자연어다.
+    const input = "https://example.com\nhello world";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com\nhello world");
+  });
+
+  it("멀티라인 URL + 다음 줄에 single-space-separated 문장도 보존한다", () => {
+    const input = "https://example.com\nis a great site";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com\nis a great site");
+  });
 });
 
 // ============================================================
@@ -288,6 +300,14 @@ describe("applySmartTextTransforms", () => {
     const input = "https://example.com hello world";
     expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
       "https://example.com hello world",
+    );
+  });
+
+  it("paste 시 URL\\n + single-space prose 멀티라인도 보존된다 (false-positive 가드)", () => {
+    // \n이 끼어 있어도 다음 줄이 single-space로 구분된 자연어면 합치지 않는다.
+    const input = "https://example.com\nhello world";
+    expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
+      "https://example.com\nhello world",
     );
   });
 });

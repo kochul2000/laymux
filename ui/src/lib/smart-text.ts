@@ -7,9 +7,10 @@
  *
  * Paste transforms:
  * 1. smartRemoveIndent — strip common leading whitespace from all lines
- * 2. smartRemoveLineBreak — rejoin URLs that were split across lines
- *    (strips all internal whitespace, including spaces left over after an
- *    external paste already removed the newlines)
+ * 2. smartRemoveLineBreak — rejoin a URL that was broken by terminal padding
+ *    or upstream newline-strip (collapses padding-like whitespace runs only;
+ *    natural-language single ASCII spaces between tokens are preserved on
+ *    both copy and paste paths).
  *
  * The correct order is: indent first, then linebreak.
  * If linebreak ran on indented text, the indent spaces would corrupt URLs.
@@ -102,21 +103,29 @@ export function smartRemoveIndent(text: string): string {
 }
 
 /**
- * Detect if the entire text (when all whitespace is removed) forms a single URL.
- * If so, return the whitespace-stripped form. Otherwise return the input unchanged.
+ * Detect if the entire text (when all whitespace is removed) forms a single URL,
+ * AND every internal whitespace run looks like terminal padding / wrap leftover
+ * rather than natural-language word separation. If both hold, return the
+ * whitespace-stripped form. Otherwise return the input unchanged.
  *
- * Handles three shapes that all collapse to the same clean URL:
- *   1. Multi-line URL with newlines only — split by terminal hard-wrap.
- *   2. Multi-line URL with newlines + indent + buffer-pad spaces.
- *   3. Single-line URL where an upstream paste target stripped newlines but
- *      left leading-indent + trailing-pad as internal gaps (≥2-char run or tab).
+ * "Padding-like" run = contains a newline / CR / tab, or is ≥2 ASCII spaces.
+ * A lone ASCII space between tokens is treated as prose and preserved, so
+ * inputs like
  *
- * URLs forbid raw spaces, so stripping all whitespace is safe when the content
- * is recognisably a URL. For single-line input we additionally require every
- * internal whitespace run to be ≥2 chars or contain a tab/CR — that is the
- * signature of terminal padding/indent leftover, while a single ASCII space
- * is the signature of natural-language prose ("https://x.com hello world")
- * which must NOT be collapsed.
+ *     "https://x.com hello world"            (single-line URL + prose)
+ *     "https://x.com\nhello world"           (URL on line 1, prose on line 2)
+ *
+ * survive intact on both copy and paste paths. The shapes that DO collapse:
+ *
+ *     1. Multi-line URL split by terminal hard-wrap (the newline run is the
+ *        only whitespace, possibly fused with indent/pad spaces around it).
+ *     2. Multi-line URL with leading indent + trailing buffer-pad on each line.
+ *     3. Single-line URL where an upstream paste target stripped newlines but
+ *        left leading-indent + trailing-pad as ≥2-char internal gaps, or
+ *        tabs.
+ *
+ * URLs forbid raw whitespace, so collapsing is safe once we have decided the
+ * input is URL-shaped and the gaps look like artefacts.
  *
  * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
  * validate URL structure — in a clipboard context, false positives
@@ -128,15 +137,13 @@ export function smartRemoveLineBreak(text: string): string {
   const joined = text.replace(/\s+/g, "");
   if (!/^https?:\/\/\S+$/.test(joined)) return text;
 
-  // Multi-line input: terminal hard-wrap / buffer padding scenario — always collapse.
-  if (text.includes("\n")) return joined;
-
-  // Single-line input: only collapse if every internal whitespace run looks like
-  // terminal padding (≥2 chars, or contains tab/CR). A lone ASCII space between
-  // tokens is treated as prose and preserved.
+  // Only collapse when every internal whitespace run looks like terminal
+  // padding / wrap leftover. A lone ASCII space is the prose signature.
   const trimmed = text.replace(/^\s+/, "").replace(/\s+$/, "");
   const internalRuns = trimmed.match(/\s+/g) ?? [];
-  const allRunsLookLikePadding = internalRuns.every((run) => run.length >= 2 || /[\t\r]/.test(run));
+  const allRunsLookLikePadding = internalRuns.every(
+    (run) => run.length >= 2 || /[\t\r\n]/.test(run),
+  );
   if (!allRunsLookLikePadding) return text;
 
   return joined;
