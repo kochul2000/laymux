@@ -53,6 +53,43 @@ describe("useContainerSize", () => {
     expect(result.current).toEqual({ w: 800, h: 600 });
   });
 
+  it("preserves the previous reference on identical integer sizes", () => {
+    // ResizeObserver fires on every sub-pixel layout shift. Without a guard,
+    // each tick produces a fresh `{w, h}` object that re-renders consumers
+    // (e.g. PaneControlBar) and re-runs their measurement loops — which is
+    // the burst that compounds with WebGL atlas rebuilds in adjacent panes.
+    const ref = { current: document.createElement("div") };
+    const { result } = renderHook(() => useContainerSize(ref));
+
+    act(() => {
+      observerCallback(
+        [{ contentRect: { width: 800, height: 600 } } as unknown as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+    const first = result.current;
+
+    // Sub-pixel jitter — same integer size after rounding.
+    act(() => {
+      observerCallback(
+        [{ contentRect: { width: 800.4, height: 599.7 } } as unknown as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+
+    // Reference identity preserved → consumers do not re-render.
+    expect(result.current).toBe(first);
+
+    // A real integer-level change must still update.
+    act(() => {
+      observerCallback(
+        [{ contentRect: { width: 900, height: 700 } } as unknown as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+    expect(result.current).toEqual({ w: 900, h: 700 });
+  });
+
   it("disconnects on unmount", () => {
     const ref = { current: document.createElement("div") };
     const { unmount } = renderHook(() => useContainerSize(ref));
