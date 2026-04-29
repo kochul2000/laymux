@@ -817,6 +817,34 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
   });
 
+  // -- Terminal WebGL toggle (experimental) --
+
+  it("renders the terminal WebGL toggle, defaulting to disabled", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("terminal-webgl-toggle") as HTMLInputElement;
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.checked).toBe(false);
+    expect(useSettingsStore.getState().convenience.terminalWebgl).toBe(false);
+  });
+
+  it("toggling terminal WebGL writes through to the store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const toggle = screen.getByTestId("terminal-webgl-toggle");
+    await user.click(toggle);
+    // Draft only — store unchanged until Save.
+    expect(useSettingsStore.getState().convenience.terminalWebgl).toBe(false);
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+    expect(useSettingsStore.getState().convenience.terminalWebgl).toBe(true);
+  });
+
   // -- Claude Code section --
 
   it("shows Claude Code nav button", () => {

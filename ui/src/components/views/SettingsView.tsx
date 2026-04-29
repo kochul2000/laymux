@@ -1491,6 +1491,36 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Terminal WebGL renderer toggle (experimental) */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Terminal WebGL (실험적)
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              xterm WebGL 렌더러 사용. 박스 드로잉이 더 또렷하고 빠르지만, 여러 pane을 동시에 띄우면
+              GPU process를 공유해 TUI 종료 시 옆 pane 글자가 깨질 수 있습니다. 변경 사항은 새로
+              생성되는 터미널부터 적용됩니다.
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="terminal-webgl-toggle"
+                type="checkbox"
+                checked={convenience.terminalWebgl}
+                onChange={(e) => updateConvenience({ terminalWebgl: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.terminalWebgl ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* Dock Persist State toggle */}
         <div className="mt-3 flex items-start gap-3 py-1">
           <div className="w-36 shrink-0 pt-1">

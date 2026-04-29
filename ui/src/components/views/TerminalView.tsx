@@ -178,8 +178,13 @@ function hasDecModeParam(params: readonly (number | number[])[], mode: number): 
   return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
 }
 
+/**
+ * @deprecated The WebGL renderer is now opt-in via
+ * `Settings → Convenience → terminalWebgl`. This helper is kept for the
+ * existing test suite and always returns the convenience-store flag.
+ */
 export function shouldEnableTerminalWebgl(): boolean {
-  return true;
+  return useSettingsStore.getState().convenience.terminalWebgl === true;
 }
 
 function getBufferCursorAbsY(terminal: Terminal): number {

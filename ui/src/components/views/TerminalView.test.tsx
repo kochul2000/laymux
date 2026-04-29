@@ -2253,8 +2253,28 @@ describe("TerminalView", () => {
   });
 
   describe("WebGL stagger", () => {
-    it("delays WebGL addon creation based on init counter", async () => {
+    it("does not create WebglAddon when settings.terminalWebgl is disabled (default)", async () => {
       vi.useFakeTimers();
+
+      render(<TerminalView instanceId="t-wgl-off" profile="PowerShell" syncGroup="g" />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(WebglAddon).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("delays WebGL addon creation based on init counter when enabled", async () => {
+      vi.useFakeTimers();
+      useSettingsStore.setState((state) => ({
+        ...state,
+        convenience: { ...state.convenience, terminalWebgl: true },
+      }));
 
       render(<TerminalView instanceId="t-wgl1" profile="PowerShell" syncGroup="g" />);
       render(<TerminalView instanceId="t-wgl2" profile="PowerShell" syncGroup="g" />);
@@ -2379,6 +2399,10 @@ describe("TerminalView", () => {
     it("cleans up WebGL timer on unmount before it fires", async () => {
       vi.useFakeTimers();
       _resetWebglStagger();
+      useSettingsStore.setState((state) => ({
+        ...state,
+        convenience: { ...state.convenience, terminalWebgl: true },
+      }));
 
       // First terminal gets delay=0, second gets delay=150
       render(<TerminalView instanceId="t-bump" profile="PowerShell" syncGroup="g" />);
@@ -2412,7 +2436,19 @@ describe("TerminalView", () => {
 });
 
 describe("shouldEnableTerminalWebgl", () => {
-  it("keeps WebGL enabled", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  it("returns false by default (WebGL is opt-in)", () => {
+    expect(shouldEnableTerminalWebgl()).toBe(false);
+  });
+
+  it("returns true when convenience.terminalWebgl is enabled", () => {
+    useSettingsStore.setState((state) => ({
+      ...state,
+      convenience: { ...state.convenience, terminalWebgl: true },
+    }));
     expect(shouldEnableTerminalWebgl()).toBe(true);
   });
 });

@@ -92,6 +92,19 @@ export interface ConvenienceSettings {
   smartLinkJoin: boolean;
   /** Show a confirmation dialog when pasting large text. */
   largePasteWarning: boolean;
+  /**
+   * Enable the xterm WebGL renderer for terminals. Defaults to false.
+   *
+   * When enabled, xterm renders glyphs through WebGL — sharper box-drawing
+   * characters and better performance, but in WebView2 (the Tauri webview)
+   * every WebGL context shares one GPU process. With multiple panes alive
+   * the texture atlases of sibling panes can corrupt one another whenever
+   * a TUI app exits and dumps a burst of escape sequences (Codex restoring
+   * its main screen is the canonical trigger), producing scattered glyph
+   * fragments. The default xterm canvas renderer has neither customGlyphs
+   * nor that cross-contamination problem, so this stays opt-in.
+   */
+  terminalWebgl: boolean;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -775,6 +788,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     smartRemoveLineBreak: true,
     smartLinkJoin: true,
     largePasteWarning: true,
+    terminalWebgl: false,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: {
@@ -1003,6 +1017,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           smartRemoveLineBreak: true,
           smartLinkJoin: true,
           largePasteWarning: true,
+          terminalWebgl: false,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
       : undefined;
