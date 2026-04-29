@@ -204,6 +204,19 @@ describe("smartRemoveLineBreak", () => {
     const input = "hello world how are you";
     expect(smartRemoveLineBreak(input)).toBe("hello world how are you");
   });
+
+  it("URL + 단일 스페이스로 구분된 prose는 보존한다 (자연어 보호)", () => {
+    // 외부 앱이 newline을 strip하면 터미널 패딩은 multi-space gap으로 남지만,
+    // 자연어에서 URL과 단어 사이는 single space. 이 둘을 구분해서
+    // single-space 케이스는 collapse 하지 않아야 한다.
+    const input = "https://example.com hello world";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com hello world");
+  });
+
+  it("URL 뒤 single-space-separated 문장이 와도 합치지 않는다", () => {
+    const input = "https://example.com is a great site";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com is a great site");
+  });
 });
 
 // ============================================================
@@ -266,6 +279,15 @@ describe("applySmartTextTransforms", () => {
     const input = "https://example.com/pa\r\nth";
     expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
       "https://example.com/path",
+    );
+  });
+
+  it("paste 시 URL + single-space prose 단일 라인은 보존된다 (false-positive 가드)", () => {
+    // newline이 없고 단일 스페이스로 prose가 이어지는 자연어 입력은
+    // smartRemoveLineBreak이 켜져 있어도 합쳐지면 안 된다.
+    const input = "https://example.com hello world";
+    expect(applySmartTextTransforms(input, { removeIndent: false, removeLineBreak: true })).toBe(
+      "https://example.com hello world",
     );
   });
 });
@@ -333,6 +355,11 @@ describe("transformPasteContent", () => {
   it("returns content unchanged for non-text paste type", () => {
     const input = "  some image data";
     expect(transformPasteContent(input, "image", opts)).toBe("  some image data");
+  });
+
+  it("text paste 시 URL + single-space prose는 그대로 유지 (false-positive 가드)", () => {
+    const input = "https://example.com is a great site";
+    expect(transformPasteContent(input, "text", opts)).toBe("https://example.com is a great site");
   });
 });
 

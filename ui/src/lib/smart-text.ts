@@ -109,10 +109,14 @@ export function smartRemoveIndent(text: string): string {
  *   1. Multi-line URL with newlines only — split by terminal hard-wrap.
  *   2. Multi-line URL with newlines + indent + buffer-pad spaces.
  *   3. Single-line URL where an upstream paste target stripped newlines but
- *      left leading-indent + trailing-pad as internal gaps.
+ *      left leading-indent + trailing-pad as internal gaps (≥2-char run or tab).
  *
  * URLs forbid raw spaces, so stripping all whitespace is safe when the content
- * is recognisably a URL.
+ * is recognisably a URL. For single-line input we additionally require every
+ * internal whitespace run to be ≥2 chars or contain a tab/CR — that is the
+ * signature of terminal padding/indent leftover, while a single ASCII space
+ * is the signature of natural-language prose ("https://x.com hello world")
+ * which must NOT be collapsed.
  *
  * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
  * validate URL structure — in a clipboard context, false positives
@@ -122,12 +126,20 @@ export function smartRemoveLineBreak(text: string): string {
   if (!text) return text;
 
   const joined = text.replace(/\s+/g, "");
+  if (!/^https?:\/\/\S+$/.test(joined)) return text;
 
-  if (/^https?:\/\/\S+$/.test(joined)) {
-    return joined;
-  }
+  // Multi-line input: terminal hard-wrap / buffer padding scenario — always collapse.
+  if (text.includes("\n")) return joined;
 
-  return text;
+  // Single-line input: only collapse if every internal whitespace run looks like
+  // terminal padding (≥2 chars, or contains tab/CR). A lone ASCII space between
+  // tokens is treated as prose and preserved.
+  const trimmed = text.replace(/^\s+/, "").replace(/\s+$/, "");
+  const internalRuns = trimmed.match(/\s+/g) ?? [];
+  const allRunsLookLikePadding = internalRuns.every((run) => run.length >= 2 || /[\t\r]/.test(run));
+  if (!allRunsLookLikePadding) return text;
+
+  return joined;
 }
 
 export interface SmartTextOptions {
