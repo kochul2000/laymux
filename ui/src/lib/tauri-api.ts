@@ -630,9 +630,20 @@ export async function markClaudeTerminal(id: string): Promise<boolean> {
   return invoke("mark_claude_terminal", { id });
 }
 
+/** Register a terminal as running Codex in the backend.
+ *  Called when the frontend detects Codex from command text (OSC 133 E). */
+export async function markCodexTerminal(id: string): Promise<boolean> {
+  return invoke("mark_codex_terminal", { id });
+}
+
 /** Check if a terminal is registered as Claude Code in the backend. */
 export async function isClaudeTerminal(id: string): Promise<boolean> {
   return invoke("is_claude_terminal", { id });
+}
+
+/** Check if a terminal is registered as Codex in the backend. */
+export async function isCodexTerminal(id: string): Promise<boolean> {
+  return invoke("is_codex_terminal", { id });
 }
 
 /** Resolve Claude Code session IDs for all known Claude terminals.

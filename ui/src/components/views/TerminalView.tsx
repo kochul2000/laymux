@@ -22,6 +22,7 @@ import {
   updateTerminalSyncGroup,
   openExternal,
   markClaudeTerminal,
+  markCodexTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
@@ -48,6 +49,7 @@ import {
   CODEX_INPUT_PENDING_MARKER,
   detectCodexConversationMessageFromOutput,
   detectCodexInputPendingFromOutput,
+  detectNewCodexInputPendingPrompt,
   detectCodexStatusMessageFromOutput,
   isCodexFooterStatusLine,
   detectActivityFromTitle,
@@ -72,6 +74,14 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 const LARGE_PASTE_THRESHOLD = 5120;
 
 const textEncoder = new TextEncoder();
+
+function markBackendInteractiveTerminal(instanceId: string, activity: TerminalActivityInfo): void {
+  if (activity.name === "Claude") {
+    markClaudeTerminal(instanceId).catch(() => {});
+  } else if (activity.name === "Codex") {
+    markCodexTerminal(instanceId).catch(() => {});
+  }
+}
 
 /**
  * Plain browser-clipboard paste. Shared by two spots in `runTerminalPaste`:
@@ -1148,6 +1158,7 @@ export function TerminalView({
         startSyncOutputMonitor();
       });
       const text = streamDecoder.decode(data, { stream: true });
+      const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
       recentOutputTail = combinedText;
 
@@ -1173,7 +1184,27 @@ export function TerminalView({
       }
 
       const current = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
-      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Codex") {
+      const codexInputPending = detectCodexInputPendingFromOutput(combinedText);
+      const codexPromptBecamePending = detectNewCodexInputPendingPrompt(previousOutputTail, text);
+      if (
+        current?.activity?.type === "running" &&
+        codexPromptBecamePending &&
+        current.activityMessage !== CODEX_INPUT_PENDING_MARKER
+      ) {
+        useTerminalStore.getState().updateInstanceInfo(instanceId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+          activityMessage: CODEX_INPUT_PENDING_MARKER,
+        });
+        useNotificationStore.getState().addNotification({
+          terminalId: instanceId,
+          workspaceId: resolveWorkspaceId(instanceId),
+          message: "Codex is waiting for your input",
+          level: "info",
+        });
+      } else if (
+        current?.activity?.type === "interactiveApp" &&
+        current.activity.name === "Codex"
+      ) {
         const codexConversationMessage = detectCodexConversationMessageFromOutput(combinedText);
         const codexStatusMessage = detectCodexStatusMessageFromOutput(combinedText);
         const currentMessage = current.activityMessage;
@@ -1192,7 +1223,7 @@ export function TerminalView({
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: nextCodexMessage,
           });
-        } else if (detectCodexInputPendingFromOutput(combinedText)) {
+        } else if (codexInputPending) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: CODEX_INPUT_PENDING_MARKER,
           });
@@ -1248,9 +1279,7 @@ export function TerminalView({
         const cmdActivity = cmdMatch ? detectActivityFromCommand(cmdMatch[1]) : undefined;
         if (cmdActivity) {
           useTerminalStore.getState().updateInstanceInfo(instanceId, { activity: cmdActivity });
-          if (cmdActivity.name === "Claude") {
-            markClaudeTerminal(instanceId).catch(() => {});
-          }
+          markBackendInteractiveTerminal(instanceId, cmdActivity);
         } else {
           const inst = useTerminalStore.getState().instances.find((i) => i.id === instanceId);
           if (inst?.activity?.type === "interactiveApp" && inst.activity.name !== "app") {
@@ -1260,8 +1289,8 @@ export function TerminalView({
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
               activity: detected ?? { type: "interactiveApp", name: "app" },
             });
-            if (detected?.name === "Claude") {
-              markClaudeTerminal(instanceId).catch(() => {});
+            if (detected) {
+              markBackendInteractiveTerminal(instanceId, detected);
             }
           }
         }

@@ -113,6 +113,13 @@ export function detectCodexInputPendingFromOutput(text: string): boolean {
   );
 }
 
+export function detectNewCodexInputPendingPrompt(previousText: string, nextText: string): boolean {
+  const combinedText = `${previousText}${nextText}`.slice(-1024);
+  const strictPromptPattern =
+    /(?:Would you like to run the following command\?|Press enter to confirm or esc to cancel)/;
+  return strictPromptPattern.test(combinedText) && !strictPromptPattern.test(previousText);
+}
+
 export function detectCodexConversationMessageFromOutput(text: string): string | undefined {
   const lines = normalizeOutputLines(text);
   for (let i = lines.length - 1; i >= 0; i -= 1) {
