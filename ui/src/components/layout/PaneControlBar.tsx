@@ -438,7 +438,6 @@ function NarrowControlMenu({
         mode={mode}
         onSetMode={onSetMode}
         vertical
-        showPin={false}
         showMinimize={false}
       />
     </div>
