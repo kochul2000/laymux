@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
+import { useContainerSize } from "@/hooks/useContainerSize";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
@@ -89,13 +90,19 @@ function Sep() {
   return <div className="ui-sep" />;
 }
 
+function VerticalSep() {
+  return <div className="my-1 h-px w-4 shrink-0" style={{ background: sepClr }} />;
+}
+
 // ─── View selector ──────────────────────────────────────
 function ViewSelect({
   currentView,
   onChange,
+  compact = false,
 }: {
   currentView: ViewInstanceConfig;
   onChange: (config: ViewInstanceConfig) => void;
+  compact?: boolean;
 }) {
   const profiles = useSettingsStore((s) => s.profiles);
   const visibleProfiles = profiles.filter((p) => !p.hidden);
@@ -124,13 +131,14 @@ function ViewSelect({
       className="cursor-pointer rounded text-[11px] font-medium"
       style={{
         height: BTN_H,
-        padding: "0 6px",
+        width: compact ? BTN_MIN_W : undefined,
+        padding: compact ? "0 2px" : "0 6px",
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
         border: `1px solid ${sepClr}`,
         borderRadius: "var(--radius-sm)",
         outline: "none",
-        maxWidth: 110,
+        maxWidth: compact ? BTN_MIN_W : 110,
         colorScheme: "dark",
       }}
     >
@@ -152,184 +160,357 @@ function BarContent({
   actions,
   mode,
   onSetMode,
+  expanded = true,
+  wrapped = false,
+  vertical = false,
+  showPin = true,
+  showMinimize = true,
 }: {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   mode: ControlBarMode;
   onSetMode: (m: ControlBarMode) => void;
+  expanded?: boolean;
+  wrapped?: boolean;
+  vertical?: boolean;
+  showPin?: boolean;
+  showMinimize?: boolean;
 }) {
+  const Separator = vertical ? VerticalSep : Sep;
+
   return (
     <div
-      className="flex shrink-0 items-center justify-end gap-0.5"
+      className={
+        vertical
+          ? "flex shrink-0 flex-col items-center justify-start gap-0.5"
+          : `flex shrink-0 items-center justify-end gap-0.5 ${wrapped ? "max-w-[124px] flex-wrap" : ""}`
+      }
       onClick={(e) => e.stopPropagation()}
     >
-      {actions.onChangeView && (
-        <ViewSelect currentView={currentView} onChange={actions.onChangeView} />
-      )}
+      {expanded && (
+        <>
+          {actions.onChangeView && (
+            <ViewSelect
+              currentView={currentView}
+              onChange={actions.onChangeView}
+              compact={vertical}
+            />
+          )}
 
-      {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
-        actions.onToggleCwdSend &&
-        (() => {
-          const isOn = (currentView.cwdSend ?? true) as boolean;
-          return (
-            <>
-              <Sep />
-              <BarBtn
-                testId="pane-control-cwd-send"
-                onClick={actions.onToggleCwdSend}
-                title={isOn ? "CWD Send (on)" : "CWD Send (off)"}
-                active={isOn}
-                style={isOn ? undefined : { opacity: 0.4 }}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M4 5l3-3 3 3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                    fill={isOn ? "currentColor" : "none"}
-                  />
-                  <path d="M7 5v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                  <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                </svg>
-              </BarBtn>
-            </>
-          );
-        })()}
-      {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
-        actions.onToggleCwdReceive &&
-        (() => {
-          const isOn = (currentView.cwdReceive ?? true) as boolean;
-          return (
+          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+            actions.onToggleCwdSend &&
+            (() => {
+              const isOn = (currentView.cwdSend ?? true) as boolean;
+              return (
+                <>
+                  <Separator />
+                  <BarBtn
+                    testId="pane-control-cwd-send"
+                    onClick={actions.onToggleCwdSend}
+                    title={isOn ? "CWD Send (on)" : "CWD Send (off)"}
+                    active={isOn}
+                    style={isOn ? undefined : { opacity: 0.4 }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path
+                        d="M4 5l3-3 3 3Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinejoin="round"
+                        fill={isOn ? "currentColor" : "none"}
+                      />
+                      <path
+                        d="M7 5v5"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M3 12h8"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </BarBtn>
+                </>
+              );
+            })()}
+          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+            actions.onToggleCwdReceive &&
+            (() => {
+              const isOn = (currentView.cwdReceive ?? true) as boolean;
+              return (
+                <BarBtn
+                  testId="pane-control-cwd-receive"
+                  onClick={actions.onToggleCwdReceive}
+                  title={isOn ? "CWD Receive (on)" : "CWD Receive (off)"}
+                  active={isOn}
+                  style={isOn ? undefined : { opacity: 0.4 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path
+                      d="M4 7l3 3 3-3Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                      fill={isOn ? "currentColor" : "none"}
+                    />
+                    <path
+                      d="M7 2v5"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M3 12h8"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </BarBtn>
+              );
+            })()}
+
+          {actions.onSplitH && (
             <BarBtn
-              testId="pane-control-cwd-receive"
-              onClick={actions.onToggleCwdReceive}
-              title={isOn ? "CWD Receive (on)" : "CWD Receive (off)"}
-              active={isOn}
-              style={isOn ? undefined : { opacity: 0.4 }}
+              testId="pane-control-split-h"
+              onClick={actions.onSplitH}
+              title="Split horizontal"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect
+                  x="1"
+                  y="1"
+                  width="12"
+                  height="5"
+                  rx="1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <rect
+                  x="1"
+                  y="8"
+                  width="12"
+                  height="5"
+                  rx="1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+              </svg>
+            </BarBtn>
+          )}
+          {actions.onSplitV && (
+            <BarBtn testId="pane-control-split-v" onClick={actions.onSplitV} title="Split vertical">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect
+                  x="1"
+                  y="1"
+                  width="5"
+                  height="12"
+                  rx="1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <rect
+                  x="8"
+                  y="1"
+                  width="5"
+                  height="12"
+                  rx="1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+              </svg>
+            </BarBtn>
+          )}
+          {actions.onClear && (
+            <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                 <path
-                  d="M4 7l3 3 3-3Z"
+                  d="M5 3l5 5-3 3-5-5z"
                   stroke="currentColor"
                   strokeWidth="1.2"
                   strokeLinejoin="round"
-                  fill={isOn ? "currentColor" : "none"}
                 />
-                <path d="M7 2v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                <path d="M3 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                <path d="M2 11h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                <path
+                  d="M5 3l2.5-1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
               </svg>
             </BarBtn>
-          );
-        })()}
+          )}
+          {actions.onDelete && (
+            <BarBtn
+              testId="pane-control-delete"
+              onClick={actions.onDelete}
+              title="Delete pane"
+              danger
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path
+                  d="M3 3l6 6M9 3l-6 6"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </BarBtn>
+          )}
 
-      {actions.onSplitH && (
-        <BarBtn testId="pane-control-split-h" onClick={actions.onSplitH} title="Split horizontal">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect
-              x="1"
-              y="1"
-              width="12"
-              height="5"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-            <rect
-              x="1"
-              y="8"
-              width="12"
-              height="5"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-          </svg>
-        </BarBtn>
+          <Separator />
+        </>
       )}
-      {actions.onSplitV && (
-        <BarBtn testId="pane-control-split-v" onClick={actions.onSplitV} title="Split vertical">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect
-              x="1"
-              y="1"
-              width="5"
-              height="12"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-            <rect
-              x="8"
-              y="1"
-              width="5"
-              height="12"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-          </svg>
-        </BarBtn>
-      )}
-      {actions.onClear && (
-        <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path
-              d="M5 3l5 5-3 3-5-5z"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinejoin="round"
-            />
-            <path d="M2 11h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-            <path d="M5 3l2.5-1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-        </BarBtn>
-      )}
-      {actions.onDelete && (
-        <BarBtn testId="pane-control-delete" onClick={actions.onDelete} title="Delete pane" danger>
+
+      {showPin && (
+        <BarBtn
+          testId="pane-control-pin"
+          onClick={() => onSetMode(mode === "pinned" ? "hover" : "pinned")}
+          title={mode === "pinned" ? "Unpin" : "Pin"}
+          active={mode === "pinned"}
+        >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path
-              d="M3 3l6 6M9 3l-6 6"
+              d="M4.5 3L5 5.5h2L7.5 3"
               stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
+              strokeWidth="1.1"
+              strokeLinejoin="round"
+              fill={mode === "pinned" ? "currentColor" : "none"}
             />
+            <path d="M6 1.5V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            <path d="M3.5 5.5h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            <path d="M6 5.5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
           </svg>
         </BarBtn>
       )}
+      {showMinimize && (
+        <BarBtn
+          testId="pane-control-minimize"
+          onClick={() => onSetMode("minimized")}
+          title="Minimize"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+            <circle cx="3" cy="6" r="1" />
+            <circle cx="6" cy="6" r="1" />
+            <circle cx="9" cy="6" r="1" />
+          </svg>
+        </BarBtn>
+      )}
+    </div>
+  );
+}
 
-      <Sep />
+function NarrowControlMenu({
+  currentView,
+  actions,
+  mode,
+  onSetMode,
+  position,
+}: {
+  currentView: ViewInstanceConfig;
+  actions: PaneControlBarActions;
+  mode: ControlBarMode;
+  onSetMode: (m: ControlBarMode) => void;
+  position: { top: number; right: number };
+}) {
+  return (
+    <div
+      data-testid="pane-control-floating-menu"
+      className="fixed z-50 p-1"
+      style={{
+        top: position.top,
+        right: position.right,
+        background: "var(--bar-bg-hover)",
+        border: `1px solid ${sepClr}`,
+        borderRadius: "var(--radius-sm)",
+        boxShadow: "0 8px 18px rgba(0, 0, 0, 0.35)",
+        backdropFilter: "blur(8px)",
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <BarContent
+        currentView={currentView}
+        actions={actions}
+        mode={mode}
+        onSetMode={onSetMode}
+        vertical
+        showMinimize={false}
+      />
+    </div>
+  );
+}
 
-      <BarBtn
-        testId="pane-control-pin"
-        onClick={() => onSetMode(mode === "pinned" ? "hover" : "pinned")}
-        title={mode === "pinned" ? "Unpin" : "Pin"}
-        active={mode === "pinned"}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path
-            d="M4.5 3L5 5.5h2L7.5 3"
-            stroke="currentColor"
-            strokeWidth="1.1"
-            strokeLinejoin="round"
-            fill={mode === "pinned" ? "currentColor" : "none"}
-          />
-          <path d="M6 1.5V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <path d="M3.5 5.5h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          <path d="M6 5.5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-        </svg>
-      </BarBtn>
-      <BarBtn
-        testId="pane-control-minimize"
-        onClick={() => onSetMode("minimized")}
-        title="Minimize"
+function NarrowControlAnchor({
+  currentView,
+  actions,
+  mode,
+  menuOpen,
+  onToggleMenu,
+  onSetMode,
+}: {
+  currentView: ViewInstanceConfig;
+  actions: PaneControlBarActions;
+  mode: ControlBarMode;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onSetMode: (m: ControlBarMode) => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const updateMenuPosition = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPosition({
+      top: rect.bottom + 2,
+      right: Math.max(0, window.innerWidth - rect.right),
+    });
+  }, []);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const frame = requestAnimationFrame(updateMenuPosition);
+    return () => cancelAnimationFrame(frame);
+  }, [menuOpen, updateMenuPosition]);
+
+  return (
+    <div className="flex shrink-0 justify-end" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={buttonRef}
+        data-testid="pane-control-menu-btn"
+        onClick={() => {
+          updateMenuPosition();
+          onToggleMenu();
+        }}
+        className="hover-bg-strong flex cursor-pointer items-center justify-center rounded"
+        style={{
+          width: BTN_MIN_W,
+          height: BTN_MIN_W,
+          background: "var(--backdrop-light)",
+          color: "var(--text-secondary)",
+          border: `1px solid ${borderClr}`,
+          borderRadius: "var(--radius-sm)",
+          transition: "background var(--transition-fast)",
+        }}
+        title="Pane controls"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
           <circle cx="3" cy="6" r="1" />
           <circle cx="6" cy="6" r="1" />
           <circle cx="9" cy="6" r="1" />
         </svg>
-      </BarBtn>
+      </button>
+      {menuOpen && (
+        <NarrowControlMenu
+          currentView={currentView}
+          actions={actions}
+          mode={mode}
+          onSetMode={onSetMode}
+          position={menuPosition}
+        />
+      )}
     </div>
   );
 }
@@ -394,6 +575,8 @@ export function PaneControlBar({
   hovered,
   children,
 }: PaneControlBarProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { w: paneWidth } = useContainerSize(rootRef);
   const persistedMode = useOverridesStore((s) =>
     paneId ? s.paneOverrides[paneId]?.controlBarMode : undefined,
   );
@@ -412,8 +595,10 @@ export function PaneControlBar({
   );
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const [leftBarContent, setLeftBarContentState] = useState<ReactNode>(null);
+  const [narrowMenuOpen, setNarrowMenuOpen] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
+  const narrowBar = paneWidth > 0 && paneWidth < 360;
 
   // 모든 모드에서 children을 동일한 DOM 위치에 유지하여
   // pin/unpin 전환 시 React가 children을 리마운트하지 않도록 한다.
@@ -430,10 +615,20 @@ export function PaneControlBar({
   const hasLeftContent = hasBarLabel || leftBarContent != null;
 
   const paneControls = useMemo(
-    () => (
-      <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
-    ),
-    [currentView, actions, mode, setMode],
+    () =>
+      narrowBar ? (
+        <NarrowControlAnchor
+          currentView={currentView}
+          actions={actions}
+          mode={mode}
+          menuOpen={narrowMenuOpen}
+          onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
+          onSetMode={setMode}
+        />
+      ) : (
+        <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
+      ),
+    [currentView, actions, mode, setMode, narrowBar, narrowMenuOpen],
   );
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
@@ -448,6 +643,7 @@ export function PaneControlBar({
       mode,
       hovered,
       onSetMode: setMode,
+      openControls: () => setNarrowMenuOpen(true),
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -458,6 +654,7 @@ export function PaneControlBar({
       mode,
       hovered,
       setMode,
+      setNarrowMenuOpen,
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -467,12 +664,12 @@ export function PaneControlBar({
 
   return (
     <PaneControlContext.Provider value={ctxValue}>
-      <div className="flex h-full w-full flex-col" data-testid={modeTestId}>
+      <div ref={rootRef} className="flex h-full w-full flex-col" data-testid={modeTestId}>
         {/* Pinned bar: ViewHeader가 없는 View만 자체 바 렌더 */}
         {isPinned && !hasViewHeader && (
           <div
             data-testid="pane-control-bar"
-            className="ui-toolbar shrink-0 pl-2 pr-1"
+            className="ui-toolbar relative shrink-0 pl-2 pr-1"
             style={{
               background: barBg,
               borderBottom: `1px solid ${borderClr}`,
@@ -487,12 +684,23 @@ export function PaneControlBar({
             ) : (
               <div className="flex-1" />
             )}
-            <BarContent
-              currentView={currentView}
-              actions={actions}
-              mode={mode}
-              onSetMode={setMode}
-            />
+            {narrowBar ? (
+              <NarrowControlAnchor
+                currentView={currentView}
+                actions={actions}
+                mode={mode}
+                menuOpen={narrowMenuOpen}
+                onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
+                onSetMode={setMode}
+              />
+            ) : (
+              <BarContent
+                currentView={currentView}
+                actions={actions}
+                mode={mode}
+                onSetMode={setMode}
+              />
+            )}
           </div>
         )}
 
@@ -505,14 +713,14 @@ export function PaneControlBar({
             <div
               data-testid="pane-control-bar"
               className={`absolute top-0 z-20 flex items-center pr-1 ${
-                hasLeftContent ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
+                hasLeftContent || narrowBar ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
               }`}
               style={{
-                height: BAR_H,
+                minHeight: BAR_H,
                 background: barBgHover,
                 backdropFilter: "blur(8px)",
                 borderBottom: `1px solid ${sepClr}`,
-                ...(!hasLeftContent ? { borderLeft: `1px solid ${sepClr}` } : {}),
+                ...(!hasLeftContent && !narrowBar ? { borderLeft: `1px solid ${sepClr}` } : {}),
                 borderRadius: 0,
               }}
             >
@@ -526,18 +734,34 @@ export function PaneControlBar({
                   {leftBarContent}
                 </div>
               ) : null}
-              <BarContent
-                currentView={currentView}
-                actions={actions}
-                mode={mode}
-                onSetMode={setMode}
-              />
+              {narrowBar ? (
+                <NarrowControlAnchor
+                  currentView={currentView}
+                  actions={actions}
+                  mode={mode}
+                  menuOpen={narrowMenuOpen}
+                  onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
+                  onSetMode={setMode}
+                />
+              ) : (
+                <BarContent
+                  currentView={currentView}
+                  actions={actions}
+                  mode={mode}
+                  onSetMode={setMode}
+                />
+              )}
             </div>
           )}
 
           {/* Minimized: ViewHeader가 없는 View만 3-dot 버튼 */}
           {mode === "minimized" && !hasViewHeader && hovered && (
-            <MinimizedButton onExpand={() => setMode("hover")} />
+            <MinimizedButton
+              onExpand={() => {
+                setMode("hover");
+                setNarrowMenuOpen(narrowBar);
+              }}
+            />
           )}
         </div>
       </div>

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -40,6 +40,40 @@ describe("PaneControlBar", () => {
     }));
     vi.clearAllMocks();
   });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubPaneWidth(width: number) {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class MockResizeObserver {
+        private callback: ResizeObserverCallback;
+
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          setTimeout(() => {
+            this.callback(
+              [
+                {
+                  target,
+                  contentRect: { width, height: 600 },
+                } as unknown as ResizeObserverEntry,
+              ],
+              this as unknown as ResizeObserver,
+            );
+          }, 0);
+        }
+
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  }
 
   // -- Hover mode (default) --
 
@@ -121,6 +155,47 @@ describe("PaneControlBar", () => {
     // Now in pinned mode — bar should persist even without hover
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+  });
+
+  it("keeps pin available in the narrow hover menu", async () => {
+    stubPaneWidth(320);
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+
+    const pinButton = screen.getByTestId("pane-control-pin");
+    expect(pinButton).toHaveAttribute("title", "Pin");
+
+    await user.click(pinButton);
+    expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
+  });
+
+  it("keeps unpin available in the narrow pinned menu", async () => {
+    stubPaneWidth(320);
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+    }));
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+
+    const unpinButton = screen.getByTestId("pane-control-pin");
+    expect(unpinButton).toHaveAttribute("title", "Unpin");
+
+    await user.click(unpinButton);
+    expect(screen.getByTestId("pane-control-hover")).toBeInTheDocument();
   });
 
   // -- Minimized mode --
