@@ -348,6 +348,45 @@ OSC 이스케이프 시퀀스는 **Rust PTY 콜백에서 단일 패스로 처리
 | `track-command-result` | OSC 133;D | 명령 종료 코드를 워크스페이스 요약에 기록 |
 | `track-command-start` | OSC 133;C | 명령 시작(preexec) 기록 |
 
+### 8.4 Terminal renderer reflow / WebGL atlas 원칙
+
+TerminalView의 xterm.js WebGL 렌더러는 **셀 geometry 변경**과 **옵션/상태 변경**을 엄격히 분리한다. WebGL texture atlas는 글리프를 현재 cell width/height 및 devicePixelRatio 기준으로 rasterize하므로, atlas invalidation은 실제 셀 geometry가 바뀌는 경우에만 수행한다.
+
+#### Reflow 허용 조건
+
+`fit()` + `clearTextureAtlas()` + `refresh()` 조합은 비용이 크고 WebGL renderer 내부 atlas를 재생성한다. 이 경로는 다음 경우에만 호출한다.
+
+- `fontSize` / `fontFamily` 변경: cell width/height가 바뀌므로 `fit()` 후 atlas를 재생성한다.
+- 브라우저 zoom 또는 monitor DPR 변경: glyph rasterization 해상도가 바뀌므로 atlas를 재생성한다.
+- 숨김(`display: none`, 0×0) 상태에서 실제 크기로 복귀: 숨겨진 동안 stale atlas가 남을 수 있으므로 복귀 시 한 번 재생성한다.
+- scrollbar mode처럼 terminal viewport geometry를 실제로 바꾸는 설정 변경.
+
+#### Reflow 금지 조건
+
+다음 변경은 xterm option 또는 overlay 상태만 바꾸며 cell geometry를 움직이지 않는다. 따라서 `fit()`, `clearTextureAtlas()`, `refresh()`를 직접 호출하지 않는다.
+
+- activity 변경(Codex/Claude 시작·종료, shell 복귀)
+- native cursor hidden 토글 및 overlay caret 활성화/비활성화
+- cursor shape / cursor blink / cursor color 변경
+- theme 색상 변경
+- focus 변경 및 단순 overlay caret 위치 갱신
+
+#### Burst collision 방지
+
+Codex/Claude 같은 TUI는 종료 시 `ESC[?1049l`, scrollback 재방출, footer repaint 등 많은 출력과 cursor/renderer 상태 전환을 짧은 시간에 발생시킨다. 이 시점에 activity 변경까지 겹쳐 `fit()` + `clearTextureAtlas()` + `refresh()`가 반복 호출되면 WebGL atlas rebuild가 TUI exit burst와 충돌하여 인접 pane의 glyph corruption으로 나타날 수 있다.
+
+따라서 reflow 요청은 반드시 `requestAnimationFrame` 단위로 coalesce하고, 같은 tick 안에서 여러 번 발생해도 마지막 요청만 실행한다. activity/cursor/theme 변경 effect는 terminal option만 갱신하고, 필요한 overlay caret 갱신은 별도 updater로 처리한다. 셀 geometry reflow는 font/DPR/실제 size transition을 담당하는 전용 effect에만 둔다.
+
+#### 테스트 요구사항
+
+TerminalView renderer 경로를 수정할 때는 다음 회귀 테스트를 유지하거나 추가한다.
+
+- font 변경은 한 프레임에 coalesce된 reflow를 예약하고 `clearTextureAtlas()`를 호출한다.
+- activity 토글(Codex 시작/종료)은 reflow를 호출하지 않는다.
+- cursor shape/blink 변경은 option만 갱신하고 reflow를 호출하지 않는다.
+- 같은 integer size의 ResizeObserver entry는 `fit()`을 호출하지 않는다.
+- 0×0 hidden 상태에서 실제 크기로 복귀할 때만 atlas를 재생성한다.
+
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)
