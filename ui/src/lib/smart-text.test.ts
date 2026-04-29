@@ -185,6 +185,25 @@ describe("smartRemoveLineBreak", () => {
     const input = "https://example.com/very-long-\npath?query=value";
     expect(smartRemoveLineBreak(input)).toBe("https://example.com/very-long-path?query=value");
   });
+
+  it("URL이 한 줄이지만 중간에 공백이 끼어 있어도 모두 제거한다", () => {
+    // 외부 앱에서 newline만 strip하고 paste한 URL: 중간에 4-space gap이 존재
+    const input =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61    b-44d9-88ed-5944d1962f5e&response_type=code";
+    const expected =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code";
+    expect(smartRemoveLineBreak(input)).toBe(expected);
+  });
+
+  it("URL 한 줄 + 탭 문자 혼합 공백도 제거한다", () => {
+    const input = "https://example.com/path?foo=bar&\t baz=qux";
+    expect(smartRemoveLineBreak(input)).toBe("https://example.com/path?foo=bar&baz=qux");
+  });
+
+  it("URL이 아닌 단일 줄 텍스트는 공백을 제거하지 않는다", () => {
+    const input = "hello world how are you";
+    expect(smartRemoveLineBreak(input)).toBe("hello world how are you");
+  });
 });
 
 // ============================================================
@@ -414,6 +433,40 @@ describe("prepareSelectionForCopy", () => {
     const raw = "  hello   \r\n  world   \r\n";
     const result = prepareSelectionForCopy(raw, { smartRemoveIndent: true });
     expect(result).toBe("hello\r\nworld");
+  });
+
+  it("smartRemoveLineBreak 활성 시 멀티라인 URL이 한 줄로 합쳐지고 공백이 제거된다", () => {
+    // 터미널에서 인덴트된 멀티라인 URL을 복사할 때 외부 앱(브라우저 URL bar 등)에
+    // 그대로 붙여넣어도 깨지지 않도록 copy 시점에 정리한다.
+    const raw =
+      "  https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61   \n" +
+      "  b-44d9-88ed-5944d1962f5e&response_type=code                                \n" +
+      "                                                                            \n";
+    const expected =
+      "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: true,
+    });
+    expect(result).toBe(expected);
+  });
+
+  it("smartRemoveLineBreak 비활성 시 멀티라인 URL이 그대로 유지된다", () => {
+    const raw = "  https://example.com/pa   \n  th?q=1   \n";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: false,
+    });
+    expect(result).toBe("https://example.com/pa\nth?q=1");
+  });
+
+  it("URL이 아닌 멀티라인 텍스트는 smartRemoveLineBreak가 켜져 있어도 줄바꿈을 유지한다", () => {
+    const raw = "  hello   \n  world   \n";
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: true,
+    });
+    expect(result).toBe("hello\nworld");
   });
 });
 

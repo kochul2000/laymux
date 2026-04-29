@@ -1152,16 +1152,17 @@ describe("TerminalView", () => {
     expect(mockClipboardWriteText).not.toHaveBeenCalled();
   });
 
-  it("terminal.copy with smartRemoveIndent off copies raw getSelection (no trim)", async () => {
+  it("terminal.copy with all smart-copy toggles off copies raw getSelection (no trim)", async () => {
     // Regression guard for PR review point #2: prepareSelectionForCopy always
-    // trims trailing whitespace regardless of smartRemoveIndent, so we must
-    // bypass it when the toggle is off to preserve the old native-Ctrl+C
-    // clipboard contents byte-for-byte.
+    // trims trailing whitespace regardless of which transforms are selected,
+    // so we must bypass it when *all* smart toggles are off to preserve the
+    // old native-Ctrl+C clipboard contents byte-for-byte.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
       convenience: {
         ...useSettingsStore.getState().convenience,
         smartRemoveIndent: false,
+        smartRemoveLineBreak: false,
       },
     });
     mockHasSelection.mockReturnValue(true);
@@ -1264,7 +1265,7 @@ describe("TerminalView", () => {
     });
   });
 
-  it("copy-on-select with smartRemoveIndent off writes raw selection (shared runTerminalCopy path)", async () => {
+  it("copy-on-select with all smart-copy toggles off writes raw selection (shared runTerminalCopy path)", async () => {
     // Proves the three copy sites (Ctrl+C, right-click, copy-on-select)
     // share runTerminalCopy — raw-when-off semantics apply uniformly.
     useSettingsStore.setState({
@@ -1273,6 +1274,7 @@ describe("TerminalView", () => {
         ...useSettingsStore.getState().convenience,
         copyOnSelect: true,
         smartRemoveIndent: false,
+        smartRemoveLineBreak: false,
       },
     });
     mockHasSelection.mockReturnValue(true);

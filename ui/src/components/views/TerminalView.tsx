@@ -94,7 +94,7 @@ function pasteFromBrowserClipboard(terminal: Terminal, logPrefix: string): void 
  * terminal.copy keybinding, right-click copy, and copy-on-select so all three
  * paths produce byte-identical clipboard contents.
  *
- * When `smartRemoveIndent` is disabled the raw `getSelection()` string is
+ * When all smart-copy toggles are disabled the raw `getSelection()` string is
  * written verbatim. `prepareSelectionForCopy` always strips trailing
  * whitespace/blank lines, which would otherwise silently modify clipboard
  * contents for users who have opted out of the "smart" transforms.
@@ -105,8 +105,12 @@ function pasteFromBrowserClipboard(terminal: Terminal, logPrefix: string): void 
 function runTerminalCopy(terminal: Terminal): void {
   if (!terminal.hasSelection()) return;
   const { convenience: conv } = useSettingsStore.getState();
-  const text = conv.smartRemoveIndent
-    ? prepareSelectionForCopy(terminal.getSelection(), { smartRemoveIndent: true })
+  const useSmart = conv.smartRemoveIndent || conv.smartRemoveLineBreak;
+  const text = useSmart
+    ? prepareSelectionForCopy(terminal.getSelection(), {
+        smartRemoveIndent: conv.smartRemoveIndent,
+        smartRemoveLineBreak: conv.smartRemoveLineBreak,
+      })
     : terminal.getSelection();
   clipboardWriteText(text).catch((err) => {
     console.warn("[TerminalView] copy to clipboard failed:", err);

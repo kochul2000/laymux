@@ -3,11 +3,13 @@
  *
  * Copy transforms:
  * - trimSelectionTrailingWhitespace — strip trailing whitespace from xterm.js selection
- * - prepareSelectionForCopy — trim + optional smartRemoveIndent (복사 시점에 인덴트 제거)
+ * - prepareSelectionForCopy — trim + optional smartRemoveIndent + optional smartRemoveLineBreak
  *
  * Paste transforms:
  * 1. smartRemoveIndent — strip common leading whitespace from all lines
  * 2. smartRemoveLineBreak — rejoin URLs that were split across lines
+ *    (strips all internal whitespace, including spaces left over after an
+ *    external paste already removed the newlines)
  *
  * The correct order is: indent first, then linebreak.
  * If linebreak ran on indented text, the indent spaces would corrupt URLs.
@@ -41,6 +43,13 @@ export function trimSelectionTrailingWhitespace(text: string): string {
 
 export interface CopyOptions {
   smartRemoveIndent: boolean;
+  /**
+   * Optional. When true, additionally rejoin a multi-line URL into a single
+   * line at copy time and strip any internal whitespace. Without this, an
+   * external app that strips newlines on paste (e.g. browser address bar)
+   * would still see the leading-indent + trailing-pad as gaps inside the URL.
+   */
+  smartRemoveLineBreak?: boolean;
 }
 
 /**
@@ -49,11 +58,16 @@ export interface CopyOptions {
  * Always applies trimSelectionTrailingWhitespace (remove trailing spaces/blank lines).
  * When smartRemoveIndent is enabled, also removes common leading whitespace so that
  * text copied from terminal doesn't carry unwanted indentation into external apps.
+ * When smartRemoveLineBreak is enabled, a multi-line URL selection is collapsed to a
+ * single clean URL so external paste targets don't end up with whitespace inside it.
  */
 export function prepareSelectionForCopy(text: string, options: CopyOptions): string {
   let result = trimSelectionTrailingWhitespace(text);
   if (options.smartRemoveIndent) {
     result = smartRemoveIndent(result);
+  }
+  if (options.smartRemoveLineBreak) {
+    result = smartRemoveLineBreak(result);
   }
   return result;
 }
@@ -88,26 +102,27 @@ export function smartRemoveIndent(text: string): string {
 }
 
 /**
- * Detect if the entire text (when all newlines are removed) forms a single URL.
- * If so, join lines by removing newlines. Trailing whitespace is trimmed from
- * each line before joining — terminal buffer lines are often padded to the
- * terminal width with spaces.
+ * Detect if the entire text (when all whitespace is removed) forms a single URL.
+ * If so, return the whitespace-stripped form. Otherwise return the input unchanged.
+ *
+ * Handles three shapes that all collapse to the same clean URL:
+ *   1. Multi-line URL with newlines only — split by terminal hard-wrap.
+ *   2. Multi-line URL with newlines + indent + buffer-pad spaces.
+ *   3. Single-line URL where an upstream paste target stripped newlines but
+ *      left leading-indent + trailing-pad as internal gaps.
+ *
+ * URLs forbid raw spaces, so stripping all whitespace is safe when the content
+ * is recognisably a URL.
  *
  * Scope: http:// and https:// only. The \S+ pattern intentionally doesn't
- * validate URL structure — in a clipboard-paste context, false positives
+ * validate URL structure — in a clipboard context, false positives
  * (non-standard chars in a URL-shaped string) are harmless.
  */
 export function smartRemoveLineBreak(text: string): string {
-  if (!text || !text.includes("\n")) return text;
+  if (!text) return text;
 
-  // Check if joining all lines (with trailing whitespace trimmed) produces a URL.
-  // Terminal selections may have trailing spaces from buffer padding.
-  const joined = text
-    .split("\n")
-    .map((line) => line.replace(/\s+$/, ""))
-    .join("");
+  const joined = text.replace(/\s+/g, "");
 
-  // Must start with http:// or https://
   if (/^https?:\/\/\S+$/.test(joined)) {
     return joined;
   }
