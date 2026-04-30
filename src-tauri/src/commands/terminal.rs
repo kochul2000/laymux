@@ -508,10 +508,30 @@ pub fn create_terminal_session(
                 );
             }
 
-            // Proactive CWD update (single source of truth in session.cwd)
-            // This must happen regardless of hook matching — the backend always
-            // tracks the latest CWD for each terminal.
+            // Proactive CWD update (single source of truth in session.cwd).
+            // Interactive apps can trigger shell prompt/title repaints that
+            // re-emit stale OSC 7/9;9 values, so apply the same source-activity
+            // gate before local state is mutated or events are emitted.
             if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
+                let accept_source_cwd =
+                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
+                        super::ipc_dispatch::should_accept_source_cwd_event(
+                            &state_for_pty,
+                            &terminal_id,
+                            buffers.get(&terminal_id),
+                        )
+                    } else {
+                        true
+                    };
+                if !accept_source_cwd {
+                    tracing::debug!(
+                        terminal_id,
+                        cwd = %event.data,
+                        "terminal cwd update suppressed: source terminal has non-shell activity"
+                    );
+                    continue;
+                }
+
                 // Both OSC 7 and OSC 9;9 provide CWD in event.data
                 // (OSC 9;9 "9;" prefix is already stripped by iter_osc_events)
                 let raw_cwd = &event.data;

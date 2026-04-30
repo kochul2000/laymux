@@ -570,7 +570,7 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
 ///
 /// Lock order: caller must hold `output_buffers` (2); this function acquires
 /// `known_claude_terminals` (3) and `known_codex_terminals` (4) per `state.rs`.
-fn is_source_sync_allowed(
+pub(crate) fn is_source_sync_allowed(
     state: &AppState,
     terminal_id: &str,
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
@@ -580,6 +580,21 @@ fn is_source_sync_allowed(
         info.activity,
         crate::terminal::TerminalActivity::InteractiveApp { .. }
     )
+}
+
+/// Decide whether an incoming OSC CWD event from the source terminal should
+/// update backend session state at all.
+///
+/// This is stricter than normal shell CWD tracking: when an interactive app is
+/// active, PowerShell can re-emit OSC 7 during prompt/title repaints. Updating
+/// `session.cwd` in that state leaks a stale source CWD into syncGroup consumers
+/// even if `do_sync_cwd` later suppresses propagation.
+pub(crate) fn should_accept_source_cwd_event(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
+) -> bool {
+    is_source_sync_allowed(state, terminal_id, buffer)
 }
 
 /// Check if a terminal is within the propagation suppression window.
@@ -2584,6 +2599,37 @@ mod tests {
             !is_source_sync_allowed(&state, "t1", Some(&buf)),
             "Claude task title with persistent tracking must still block propagation"
         );
+    }
+
+    #[test]
+    fn source_cwd_event_rejected_for_claude_activity_before_local_update() {
+        // Regression: the PTY callback used to update session.cwd and emit
+        // terminal-cwd-changed before do_sync_cwd applied the source activity
+        // guard. A Claude-active OSC 7 must be rejected before any local CWD
+        // state mutation can occur.
+        let state = AppState::new();
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("source".to_string());
+
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;\xe2\x9c\xb6 Editing files\x07\x1b]7;file://localhost/C:/leaked\x07");
+
+        assert!(
+            !should_accept_source_cwd_event(&state, "source", Some(&buf)),
+            "Claude-active OSC 7 must not update local session.cwd before propagation is gated"
+        );
+    }
+
+    #[test]
+    fn source_cwd_event_accepted_for_shell_activity() {
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]133;C\x07cd C:\\work\x1b]133;D;0\x07PS C:\\work> ");
+
+        assert!(should_accept_source_cwd_event(&state, "source", Some(&buf)));
     }
 
     #[test]
