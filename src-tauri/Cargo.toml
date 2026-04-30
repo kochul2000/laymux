@@ -1,6 +1,6 @@
 [package]
 name = "laymux"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 description = "A terminal-focused IDE built with Tauri"
 default-run = "laymux"
@@ -46,4 +46,3 @@ path = "src/main.rs"
 [[bin]]
 name = "lx"
 path = "src/bin/lx.rs"
-
