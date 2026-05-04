@@ -310,6 +310,21 @@ describe("applySmartTextTransforms", () => {
       "https://example.com\nhello world",
     );
   });
+
+  it("paste preserves prose documents with intentionally indented continuation lines", () => {
+    const input =
+      "1. Authority separation\n" +
+      "\n" +
+      " subject.dvs_group_through     applied DGT\n" +
+      "                               source of truth for subject context\n" +
+      " crf_schema.dvs_group_through  default for newly created subjects\n" +
+      "\n" +
+      "subject context code must not read crf_schema.dvs_group_through.";
+
+    expect(applySmartTextTransforms(input, { removeIndent: true, removeLineBreak: true })).toBe(
+      input,
+    );
+  });
 });
 
 // ============================================================
@@ -380,6 +395,15 @@ describe("transformPasteContent", () => {
   it("text paste 시 URL + single-space prose는 그대로 유지 (false-positive 가드)", () => {
     const input = "https://example.com is a great site";
     expect(transformPasteContent(input, "text", opts)).toBe("https://example.com is a great site");
+  });
+
+  it("text paste preserves common leading whitespace in structured prose", () => {
+    const input =
+      "  subject.dvs_group_through     applied DGT\n" +
+      "                                source of truth for subject context\n" +
+      "  crf_schema.dvs_group_through  default for newly created subjects";
+
+    expect(transformPasteContent(input, "text", opts)).toBe(input);
   });
 });
 

@@ -172,15 +172,25 @@ export function applySmartTextTransforms(text: string, options: SmartTextOptions
 }
 
 /**
- * Transform paste result content using smart text settings.
- * Centralises the "is it text? → apply transforms" logic shared by
- * Ctrl+V and right-click paste paths.
+ * Apply transforms to text that is being pasted into a terminal.
+ *
+ * Paste is not copy cleanup. External clipboard text may be a formatted review
+ * note, table, patch, or here-doc where leading whitespace is meaningful.
+ * Therefore paste only repairs URL wrapping; common-indent removal remains a
+ * copy-time transform via `prepareSelectionForCopy`.
  */
+export function applyPasteTextTransforms(text: string, options: SmartTextOptions): string {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!options.removeLineBreak) return normalized;
+  return smartRemoveLineBreak(normalized);
+}
+
+/** Transform paste result content shared by Ctrl+V and right-click paste. */
 export function transformPasteContent(
   content: string,
   pasteType: string,
   convenience: SmartTextOptions,
 ): string {
   if (pasteType !== "text") return content;
-  return applySmartTextTransforms(content, convenience);
+  return applyPasteTextTransforms(content, convenience);
 }

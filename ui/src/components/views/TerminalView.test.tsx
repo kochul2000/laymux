@@ -1226,6 +1226,28 @@ describe("TerminalView", () => {
     });
   });
 
+  it("preserves structured prose whitespace when smartPaste returns text type", async () => {
+    const pasted =
+      "  subject.dvs_group_through     applied DGT\n" +
+      "                                source of truth for subject context\n" +
+      "  crf_schema.dvs_group_through  default for newly created subjects";
+    mockSmartPaste.mockResolvedValue({ pasteType: "text", content: pasted });
+
+    render(<TerminalView instanceId="t-paste-structured" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
+
+    await vi.waitFor(() => {
+      expect(mockPaste).toHaveBeenCalledWith(pasted);
+    });
+  });
+
   it("skips the smart paste pipeline when smartPaste is disabled but still consumes the key", async () => {
     // Override bindings like Ctrl+Shift+V can't rely on the browser's native
     // paste event, so the keybinding handler must always consume the event.
