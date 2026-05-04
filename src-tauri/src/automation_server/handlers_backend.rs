@@ -6,7 +6,7 @@ use axum::Json;
 use crate::lock_ext::MutexExt;
 
 use super::helpers::{err_json, ok_json};
-use super::types::{HealthResponse, OutputQuery, WriteBody};
+use super::types::{HealthResponse, NativeInvokeBody, OutputQuery, WriteBody};
 use super::ServerState;
 
 // ---- API self-description ----
@@ -15,9 +15,9 @@ pub async fn api_docs() -> impl IntoResponse {
     Json(serde_json::json!({
         "name": "Laymux IDE Automation API",
         "version": "v1",
-        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 (WSL2 access). Access restricted to loopback, WSL2/Hyper-V bridge (172.16.0.0/12), and link-local.",
+        "description": "Programmatic control of Laymux IDE. Binds to 0.0.0.0 for local, WSL2/Hyper-V, link-local, and Tailscale access.",
         "base_url": format!("http://127.0.0.1:{}/api/v1", super::automation_port()),
-        "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), link-local (169.254.x, fe80::).",
+        "auth": "No authentication required. Access is restricted by IP allowlist: loopback (127.x, ::1), WSL2/Hyper-V (172.16.0.0/12), Tailscale CGNAT (100.64.0.0/10), and link-local (169.254.x, fe80::).",
         "discovery": format!("Fixed port: release={}, dev={}. Discovery file: %APPDATA%/laymux/automation.json (release) or %APPDATA%/laymux-dev/automation.json (dev) on Windows, ~/.config/laymux/ or ~/.config/laymux-dev/ on Linux. Contains port and pid. Also LX_AUTOMATION_PORT env var in spawned terminals.", super::RELEASE_PORT, super::DEV_PORT),
         "endpoints": [
             {
@@ -27,6 +27,11 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "GET", "path": "/api/v1/docs",
                 "description": "This endpoint. Returns full API documentation as JSON."
+            },
+            {
+                "method": "POST", "path": "/api/v1/native/invoke/{command}",
+                "description": "Browser/WebView transport for selected native commands that are normally called through Tauri invoke. Used by the mobile webview over Tailscale.",
+                "body": { "params": "object ??command parameters using the same camelCase names as tauri-api.ts" }
             },
             {
                 "method": "GET", "path": "/api/v1/workspaces",
@@ -267,6 +272,277 @@ pub async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoRespon
         version: env!("CARGO_PKG_VERSION").into(),
         port,
     })
+}
+
+fn param_string(params: &serde_json::Value, name: &str) -> Result<String, String> {
+    params
+        .get(name)
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Missing string parameter '{name}'"))
+}
+
+fn param_u16(params: &serde_json::Value, name: &str) -> Result<u16, String> {
+    let value = params
+        .get(name)
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| format!("Missing numeric parameter '{name}'"))?;
+    u16::try_from(value).map_err(|_| format!("Parameter '{name}' is out of range"))
+}
+
+fn param_bool_opt(params: &serde_json::Value, name: &str) -> Option<bool> {
+    params.get(name).and_then(|v| v.as_bool())
+}
+
+fn param_string_opt(params: &serde_json::Value, name: &str) -> Option<String> {
+    params
+        .get(name)
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
+}
+
+fn json_result<T: serde::Serialize>(
+    result: Result<T, String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match result {
+        Ok(value) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(value).unwrap_or(serde_json::Value::Null)),
+        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(err_json(&e))),
+    }
+}
+
+pub async fn native_invoke(
+    AxumState(state): AxumState<ServerState>,
+    Path(command): Path<String>,
+    Json(body): Json<NativeInvokeBody>,
+) -> impl IntoResponse {
+    let params = body.params;
+    match command.as_str() {
+        "create_terminal_session" => {
+            let result = (|| {
+                crate::commands::create_terminal_session_inner(
+                    param_string(&params, "id")?,
+                    param_string(&params, "profile")?,
+                    param_u16(&params, "cols")?,
+                    param_u16(&params, "rows")?,
+                    param_string(&params, "syncGroup")?,
+                    param_bool_opt(&params, "cwdSend"),
+                    param_bool_opt(&params, "cwdReceive"),
+                    param_string_opt(&params, "cwd"),
+                    param_string_opt(&params, "startupCommandOverride"),
+                    &state.app_state,
+                    &state.app_handle,
+                )
+            })();
+            json_result(result)
+        }
+        "write_to_terminal" => json_result((|| {
+            crate::commands::write_to_terminal_inner(
+                &param_string(&params, "id")?,
+                &param_string(&params, "data")?,
+                &state.app_state,
+            )
+        })()),
+        "resize_terminal" => json_result((|| {
+            crate::commands::resize_terminal_inner(
+                &param_string(&params, "id")?,
+                param_u16(&params, "cols")?,
+                param_u16(&params, "rows")?,
+                &state.app_state,
+            )
+        })()),
+        "close_terminal_session" => json_result((|| {
+            crate::commands::close_terminal_session_inner(
+                &param_string(&params, "id")?,
+                &state.app_state,
+                &state.app_handle,
+            )
+        })()),
+        "get_sync_group_terminals" => json_result((|| {
+            let group_name = param_string(&params, "groupName")?;
+            let groups = state.app_state.sync_groups.lock_or_err()?;
+            Ok(groups
+                .get(&group_name)
+                .map(|g| g.terminal_ids.clone())
+                .unwrap_or_default())
+        })()),
+        "handle_lx_message" => json_result(crate::commands::handle_lx_message_inner(
+            &param_string(&params, "messageJson").unwrap_or_default(),
+            &state.app_state,
+            &state.app_handle,
+        )),
+        "load_settings" => json_result(Ok(crate::settings::load_settings())),
+        "load_settings_validated" => json_result(Ok(crate::settings::load_settings_validated())),
+        "reset_settings" => {
+            let default_settings = crate::settings::Settings::default();
+            json_result(
+                crate::settings::save_settings(&default_settings).map(|()| default_settings),
+            )
+        }
+        "get_settings_path" => {
+            json_result(Ok(crate::settings::settings_path().display().to_string()))
+        }
+        "save_settings" => json_result((|| {
+            let settings: crate::settings::Settings = serde_json::from_value(
+                params
+                    .get("settings")
+                    .cloned()
+                    .ok_or_else(|| "Missing settings parameter".to_string())?,
+            )
+            .map_err(|e| format!("Invalid settings: {e}"))?;
+            crate::settings::save_settings(&settings)
+        })()),
+        "load_memo" => json_result(Ok(crate::settings::load_memo(
+            &param_string(&params, "key").unwrap_or_default(),
+        ))),
+        "save_memo" => json_result((|| {
+            crate::settings::save_memo(
+                &param_string(&params, "key")?,
+                &param_string(&params, "content")?,
+            )
+        })()),
+        "save_terminal_output_cache" => json_result(crate::commands::save_terminal_output_cache(
+            param_string(&params, "paneId").unwrap_or_default(),
+            param_string(&params, "data").unwrap_or_default(),
+        )),
+        "load_terminal_output_cache" => json_result(crate::commands::load_terminal_output_cache(
+            param_string(&params, "paneId").unwrap_or_default(),
+        )),
+        "clean_terminal_output_cache" => json_result((|| {
+            let active_pane_ids: Vec<String> = serde_json::from_value(
+                params
+                    .get("activePaneIds")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([])),
+            )
+            .map_err(|e| format!("Invalid activePaneIds: {e}"))?;
+            crate::commands::clean_terminal_output_cache(active_pane_ids)
+        })()),
+        "save_window_geometry" => json_result(crate::commands::save_window_geometry(
+            params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+            params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+            params.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            params.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            params
+                .get("maximized")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        )),
+        "load_window_geometry" => json_result(crate::commands::load_window_geometry()),
+        "smart_paste" => json_result(crate::commands::smart_paste(
+            param_string(&params, "imageDir").unwrap_or_default(),
+            param_string(&params, "profile").unwrap_or_default(),
+        )),
+        "clipboard_write_text" => json_result(crate::commands::clipboard_write_text(
+            param_string(&params, "text").unwrap_or_default(),
+        )),
+        "read_file_for_viewer" => json_result(crate::commands::read_file_for_viewer(
+            param_string(&params, "path").unwrap_or_default(),
+            params
+                .get("maxBytes")
+                .and_then(|v| v.as_u64())
+                .and_then(|v| usize::try_from(v).ok()),
+        )),
+        "list_directory" => json_result(crate::commands::list_directory(
+            param_string(&params, "path").unwrap_or_default(),
+            param_string_opt(&params, "wslDistro"),
+        )),
+        "get_listening_ports" => json_result(Ok(crate::port_detect::get_listening_ports())),
+        "get_git_branch" => json_result(Ok(crate::commands::get_git_branch(
+            param_string(&params, "workingDir").unwrap_or_default(),
+        ))),
+        "send_os_notification" => json_result(crate::commands::send_os_notification(
+            param_string(&params, "title").unwrap_or_default(),
+            param_string(&params, "body").unwrap_or_default(),
+        )),
+        "set_terminal_cwd_send" => json_result((|| {
+            let terminal_id = param_string(&params, "terminalId")?;
+            let send = params.get("send").and_then(|v| v.as_bool()).unwrap_or(true);
+            let mut terminals = state.app_state.terminals.lock_or_err()?;
+            if let Some(session) = terminals.get_mut(&terminal_id) {
+                session.cwd_send = send;
+            }
+            Ok(())
+        })()),
+        "set_terminal_cwd_receive" => json_result((|| {
+            let terminal_id = param_string(&params, "terminalId")?;
+            let receive = params
+                .get("receive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let mut terminals = state.app_state.terminals.lock_or_err()?;
+            if let Some(session) = terminals.get_mut(&terminal_id) {
+                session.cwd_receive = receive;
+            }
+            Ok(())
+        })()),
+        "update_terminal_sync_group" => json_result((|| {
+            let terminal_id = param_string(&params, "terminalId")?;
+            let new_group = param_string(&params, "newGroup")?;
+            crate::commands::update_terminal_sync_group_inner(
+                &terminal_id,
+                &new_group,
+                &state.app_state,
+            )
+        })()),
+        "get_terminal_cwds" => {
+            json_result(crate::commands::get_terminal_cwds_inner(&state.app_state))
+        }
+        "get_terminal_summaries" => json_result((|| {
+            let ids: Vec<String> = serde_json::from_value(
+                params
+                    .get("terminalIds")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([])),
+            )
+            .map_err(|e| format!("Invalid terminalIds: {e}"))?;
+            crate::commands::get_terminal_summaries_inner(&ids, &state.app_state)
+        })()),
+        "mark_notifications_read" => json_result(crate::commands::mark_notifications_read_inner(
+            serde_json::from_value(
+                params
+                    .get("terminalIds")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([])),
+            )
+            .map_err(|e| format!("Invalid terminalIds: {e}")),
+            &state.app_state,
+        )),
+        "mark_claude_terminal" => json_result(
+            crate::commands::mark_claude_terminal_inner(
+                &state.app_state,
+                &param_string(&params, "id").unwrap_or_default(),
+            )
+            .map_err(|e| e.to_string()),
+        ),
+        "mark_codex_terminal" => json_result(
+            crate::commands::mark_codex_terminal_inner(
+                &state.app_state,
+                &param_string(&params, "id").unwrap_or_default(),
+            )
+            .map_err(|e| e.to_string()),
+        ),
+        "is_claude_terminal" => json_result((|| {
+            let known = state.app_state.known_claude_terminals.lock_or_err()?;
+            Ok(known.contains(&param_string(&params, "id")?))
+        })()),
+        "is_codex_terminal" => json_result((|| {
+            let known = state.app_state.known_codex_terminals.lock_or_err()?;
+            Ok(known.contains(&param_string(&params, "id")?))
+        })()),
+        "get_claude_session_ids" => json_result(crate::commands::get_claude_session_ids_inner(
+            params.get("sessionMaxAgeHours").and_then(|v| v.as_u64()),
+            &state.app_state,
+        )),
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(err_json(&format!(
+                "Native invoke command '{command}' is not available over HTTP"
+            ))),
+        ),
+    }
 }
 
 pub async fn terminal_write(

@@ -18,6 +18,13 @@ pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
 ) -> Result<HashMap<String, String>, String> {
+    get_claude_session_ids_inner(session_max_age_hours, &state)
+}
+
+pub fn get_claude_session_ids_inner(
+    session_max_age_hours: Option<u64>,
+    state: &AppState,
+) -> Result<HashMap<String, String>, String> {
     let known: Vec<String> = {
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()

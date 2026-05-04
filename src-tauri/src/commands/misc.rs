@@ -426,6 +426,12 @@ pub fn get_terminal_states(
 pub fn get_terminal_cwds(
     state: State<Arc<AppState>>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
+    get_terminal_cwds_inner(&state)
+}
+
+pub fn get_terminal_cwds_inner(
+    state: &AppState,
+) -> Result<std::collections::HashMap<String, String>, String> {
     let terminals = state.terminals.lock_or_err()?;
     let mut result = std::collections::HashMap::new();
     for (id, session) in terminals.iter() {
@@ -530,6 +536,14 @@ pub fn mark_notifications_read(
     terminal_ids: Vec<String>,
     state: State<Arc<AppState>>,
 ) -> Result<u32, String> {
+    mark_notifications_read_inner(Ok(terminal_ids), &state)
+}
+
+pub fn mark_notifications_read_inner(
+    terminal_ids: Result<Vec<String>, String>,
+    state: &AppState,
+) -> Result<u32, String> {
+    let terminal_ids = terminal_ids?;
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

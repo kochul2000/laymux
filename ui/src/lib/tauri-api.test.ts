@@ -30,6 +30,8 @@ const mockListen = vi.mocked(listen);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete window.__LAYMUX_API_BASE__;
+  vi.unstubAllGlobals();
 });
 
 describe("tauri-api", () => {
@@ -81,6 +83,51 @@ describe("tauri-api", () => {
         cwd: null,
         startupCommandOverride: null,
       });
+    });
+
+    it("uses HTTP native invoke transport when an API base is configured", async () => {
+      window.__LAYMUX_API_BASE__ = "http://100.64.0.2:19281";
+      const mockResult = {
+        id: "t1",
+        title: "Terminal",
+        config: {
+          profile: "PowerShell",
+          cols: 80,
+          rows: 24,
+          sync_group: "default",
+          env: [],
+        },
+      };
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResult),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await createTerminalSession("t1", "PowerShell", 80, 24, "default");
+
+      expect(mockInvoke).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://100.64.0.2:19281/api/v1/native/invoke/create_terminal_session",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            params: {
+              id: "t1",
+              profile: "PowerShell",
+              cols: 80,
+              rows: 24,
+              syncGroup: "default",
+              cwdSend: true,
+              cwdReceive: true,
+              cwd: null,
+              startupCommandOverride: null,
+            },
+          }),
+        }),
+      );
+      expect(result).toEqual(mockResult);
     });
   });
 
