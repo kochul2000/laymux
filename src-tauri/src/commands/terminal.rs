@@ -126,6 +126,35 @@ pub fn create_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
+    create_terminal_session_inner(
+        id,
+        profile,
+        cols,
+        rows,
+        sync_group,
+        cwd_send,
+        cwd_receive,
+        cwd,
+        startup_command_override,
+        &state,
+        &app,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_terminal_session_inner(
+    id: String,
+    profile: String,
+    cols: u16,
+    rows: u16,
+    sync_group: String,
+    cwd_send: Option<bool>,
+    cwd_receive: Option<bool>,
+    cwd: Option<String>,
+    startup_command_override: Option<String>,
+    state: &Arc<AppState>,
+    app: &AppHandle,
+) -> Result<TerminalSession, String> {
     // Inject LX_SOCKET and LX_AUTOMATION_PORT env vars
     let mut env = Vec::new();
     if let Ok(path_lock) = state.ipc_socket_path.lock_or_err() {
@@ -199,7 +228,7 @@ pub fn create_terminal_session(
     // Spawn PTY with unified OSC processing in the output callback.
     let terminal_id = id.clone();
     let app_clone = app.clone();
-    let state_for_pty = Arc::clone(&*state);
+    let state_for_pty = Arc::clone(state);
     let burst = settings.terminal.output_activity_burst.sanitized();
     let pty_cb_state = Arc::new(activity::PtyCallbackState::new(
         burst.window_ms,
@@ -602,7 +631,7 @@ pub fn create_terminal_session(
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
     {
-        let state_for_timer = Arc::clone(&*state);
+        let state_for_timer = Arc::clone(state);
         let timer_terminal_id = id.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(NOTIFY_GATE_FALLBACK_MS));
@@ -668,11 +697,20 @@ pub fn resize_terminal(
     rows: u16,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    resize_terminal_inner(&id, cols, rows, &state)
+}
+
+pub fn resize_terminal_inner(
+    id: &str,
+    cols: u16,
+    rows: u16,
+    state: &AppState,
+) -> Result<(), String> {
     // Update config
     {
         let mut terminals = state.terminals.lock_or_err()?;
         let session = terminals
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or_else(|| format!("Session '{id}' not found"))?;
         session.config.cols = cols;
         session.config.rows = rows;
@@ -680,7 +718,7 @@ pub fn resize_terminal(
 
     // Resize PTY
     let ptys = state.pty_handles.lock_or_err()?;
-    if let Some(handle) = ptys.get(&id) {
+    if let Some(handle) = ptys.get(id) {
         handle.resize(cols, rows)?;
     }
 
@@ -693,6 +731,10 @@ pub fn write_to_terminal(
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    write_to_terminal_inner(&id, &data, &state)
+}
+
+pub fn write_to_terminal_inner(id: &str, data: &str, state: &AppState) -> Result<(), String> {
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
@@ -707,7 +749,7 @@ pub fn write_to_terminal(
     let ptys = state.pty_handles.lock_or_err()?;
 
     let handle = ptys
-        .get(&id)
+        .get(id)
         .ok_or_else(|| format!("Session '{id}' not found"))?;
 
     handle.write(data.as_bytes())
@@ -719,10 +761,18 @@ pub fn close_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
+    close_terminal_session_inner(&id, &state, &app)
+}
+
+pub fn close_terminal_session_inner(
+    id: &str,
+    state: &AppState,
+    app: &AppHandle,
+) -> Result<(), String> {
     // Remove PTY handle and terminate the child process tree before dropping it.
     {
         let mut ptys = state.pty_handles.lock_or_err()?;
-        if let Some(handle) = ptys.remove(&id) {
+        if let Some(handle) = ptys.remove(id) {
             handle.terminate()?;
         }
     }
@@ -730,20 +780,20 @@ pub fn close_terminal_session(
     // Remove output buffer
     {
         let mut buffers = state.output_buffers.lock_or_err()?;
-        buffers.remove(&id);
+        buffers.remove(id);
     }
 
     let mut terminals = state.terminals.lock_or_err()?;
 
     let session = terminals
-        .remove(&id)
+        .remove(id)
         .ok_or_else(|| format!("Session '{id}' not found"))?;
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
         if let Ok(mut groups) = state.sync_groups.lock_or_err() {
             if let Some(group) = groups.get_mut(&session.config.sync_group) {
-                group.remove_terminal(&id);
+                group.remove_terminal(id);
                 if group.terminal_ids.is_empty() {
                     groups.remove(&session.config.sync_group);
                 }
@@ -753,22 +803,22 @@ pub fn close_terminal_session(
 
     // Clean up propagation flag
     if let Ok(mut propagated) = state.propagated_terminals.lock_or_err() {
-        propagated.remove(&id);
+        propagated.remove(id);
     }
 
     // Clean up Claude terminal tracking
     if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up Codex terminal tracking
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-        known.remove(&id);
+        known.remove(id);
     }
 
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
-    activity::clear_interactive_app_grace_window(&state, &id);
+    activity::clear_interactive_app_grace_window(state, id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
@@ -934,13 +984,21 @@ pub fn update_terminal_sync_group(
     new_group: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    update_terminal_sync_group_inner(&terminal_id, &new_group, &state)
+}
+
+pub fn update_terminal_sync_group_inner(
+    terminal_id: &str,
+    new_group: &str,
+    state: &AppState,
+) -> Result<(), String> {
     let mut groups = state.sync_groups.lock_or_err()?;
 
     // Remove from all existing groups
     let empty_groups: Vec<String> = groups
         .iter_mut()
         .filter_map(|(name, group)| {
-            group.remove_terminal(&terminal_id);
+            group.remove_terminal(terminal_id);
             if group.terminal_ids.is_empty() {
                 Some(name.clone())
             } else {
@@ -955,9 +1013,9 @@ pub fn update_terminal_sync_group(
     // Add to new group (if non-empty)
     if !new_group.is_empty() {
         groups
-            .entry(new_group.clone())
-            .or_insert_with(|| crate::terminal::SyncGroup::new(new_group))
-            .add_terminal(terminal_id);
+            .entry(new_group.to_string())
+            .or_insert_with(|| crate::terminal::SyncGroup::new(new_group.to_string()))
+            .add_terminal(terminal_id.to_string());
     }
 
     Ok(())

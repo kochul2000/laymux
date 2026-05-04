@@ -132,6 +132,12 @@ pub struct FocusTerminalBody {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+pub struct NativeInvokeBody {
+    #[serde(default)]
+    pub params: serde_json::Value,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -144,6 +150,7 @@ pub struct HealthResponse {
 pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/docs"),
     ("GET", "/api/v1/health"),
+    ("POST", "/api/v1/native/invoke/{command}"),
     ("GET", "/api/v1/workspaces"),
     ("POST", "/api/v1/workspaces"),
     ("GET", "/api/v1/workspaces/active"),

@@ -133,7 +133,8 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
 }
 
 /// Check if an IP address is allowed to access the automation API.
-/// Allows only loopback, link-local, and Hyper-V/WSL2 bridge (172.16.0.0/12).
+/// Allows only loopback, link-local, Hyper-V/WSL2 bridge (172.16.0.0/12),
+/// and Tailscale CGNAT peers (100.64.0.0/10).
 /// Broader RFC 1918 ranges (10.0.0.0/8, 192.168.0.0/16) are excluded to prevent
 /// LAN/VPN peers from accessing the API without authentication.
 fn is_local_ip(ip: &IpAddr) -> bool {
@@ -141,6 +142,7 @@ fn is_local_ip(ip: &IpAddr) -> bool {
         IpAddr::V4(v4) => {
             v4.is_loopback()            // 127.0.0.0/8
                 || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1])) // 172.16.0.0/12 (WSL2/Hyper-V)
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1])) // 100.64.0.0/10 (Tailscale)
                 || (v4.octets()[0] == 169 && v4.octets()[1] == 254) // 169.254.0.0/16 link-local
         }
         IpAddr::V6(v6) => {
@@ -154,9 +156,8 @@ fn is_local_ip(ip: &IpAddr) -> bool {
     }
 }
 
-/// IP allowlist middleware — only permits requests from local/private networks.
-/// Replaces Bearer token auth: since this is localhost/WSL communication,
-/// IP restriction provides equivalent security without key management overhead.
+/// IP allowlist middleware: only permits requests from local, WSL/Hyper-V,
+/// link-local, and Tailscale peer addresses.
 async fn ip_allowlist_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
@@ -168,7 +169,7 @@ async fn ip_allowlist_middleware(
         (
             StatusCode::FORBIDDEN,
             Json(err_json(
-                "Access denied: only local/private network connections are allowed",
+                "Access denied: only local, WSL/Hyper-V, link-local, and Tailscale connections are allowed",
             )),
         )
             .into_response()
@@ -179,6 +180,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
     Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/native/invoke/{command}", post(native_invoke))
         .route("/api/v1/workspaces", get(workspaces_list))
         .route("/api/v1/workspaces", post(workspaces_create))
         .route("/api/v1/workspaces/active", get(workspaces_get_active))
@@ -272,9 +274,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::routing::get;
     use serial_test::serial;
-    use tower::ServiceExt;
 
     #[test]
     fn automation_port_returns_dev_in_debug() {
@@ -304,6 +304,14 @@ mod tests {
     }
 
     #[test]
+    fn is_local_ip_allows_tailscale_cgnat() {
+        // Tailscale assigns peers from 100.64.0.0/10 by default.
+        assert!(is_local_ip(&"100.64.0.1".parse().unwrap()));
+        assert!(is_local_ip(&"100.100.100.100".parse().unwrap()));
+        assert!(is_local_ip(&"100.127.255.255".parse().unwrap()));
+    }
+
+    #[test]
     fn is_local_ip_rejects_lan_and_vpn_ranges() {
         // 10.0.0.0/8 (corporate VPN)
         assert!(!is_local_ip(&"10.0.0.1".parse().unwrap()));
@@ -311,6 +319,9 @@ mod tests {
         // 192.168.0.0/16 (home LAN)
         assert!(!is_local_ip(&"192.168.1.1".parse().unwrap()));
         assert!(!is_local_ip(&"192.168.0.1".parse().unwrap()));
+        // Outside Tailscale's 100.64.0.0/10 CGNAT range
+        assert!(!is_local_ip(&"100.63.255.255".parse().unwrap()));
+        assert!(!is_local_ip(&"100.128.0.0".parse().unwrap()));
     }
 
     #[test]
@@ -327,6 +338,8 @@ mod tests {
         assert!(is_local_ip(&"::ffff:127.0.0.1".parse().unwrap()));
         // ::ffff:172.20.0.1 → WSL2 range
         assert!(is_local_ip(&"::ffff:172.20.0.1".parse().unwrap()));
+        // ::ffff:100.64.0.1 -> Tailscale range
+        assert!(is_local_ip(&"::ffff:100.64.0.1".parse().unwrap()));
         // ::ffff:192.168.1.1 → rejected (LAN)
         assert!(!is_local_ip(&"::ffff:192.168.1.1".parse().unwrap()));
         // ::ffff:8.8.8.8 → rejected (public)
