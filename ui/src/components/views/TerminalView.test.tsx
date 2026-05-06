@@ -622,6 +622,82 @@ describe("TerminalView", () => {
     });
   });
 
+  it("keeps the IME composition preview from covering text after a middle insert", async () => {
+    render(<TerminalView instanceId="t-ime-middle" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-middle", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-middle");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-middle");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-middle");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 9;
+    terminal.buffer.active.cursorY = 4;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    helper.value = "\uAC00 \uB098\uB2E4\uB9C8";
+    helper.selectionStart = 2;
+    helper.selectionEnd = 2;
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uAC00 \u3139\uB098\uB2E4\uB9C8";
+    helper.selectionStart = 3;
+    helper.selectionEnd = 3;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3139" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("\u3139");
+      expect(preview.style.transform).toBe("translate(30px, 80px)");
+      expect(preview.style.width).toBe("20px");
+      expect(overlay.style.transform).toBe("translate(50px, 80px)");
+    });
+  });
+
   it("hides the xterm cursor only during synchronized output frames", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 

@@ -159,7 +159,28 @@ describe("getCompositionPreviewLayout", () => {
       cursorAbsY: 10,
       renderedText: "hello",
       rowCount: 1,
-      maxRowCellWidth: 8,
+      maxRowCellWidth: 5,
+    });
+  });
+
+  it("sizes the preview to the active composition, not the prefix before it", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "\u3139",
+          anchorBufferX: 3,
+          anchorBufferAbsY: 10,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        20,
+      ),
+    ).toEqual({
+      cursorX: 5,
+      cursorAbsY: 10,
+      renderedText: "\u3139",
+      rowCount: 1,
+      maxRowCellWidth: 2,
     });
   });
 
@@ -180,7 +201,7 @@ describe("getCompositionPreviewLayout", () => {
       cursorAbsY: 11,
       renderedText: "ab\ncd",
       rowCount: 2,
-      maxRowCellWidth: 10,
+      maxRowCellWidth: 2,
     });
   });
 
@@ -201,7 +222,7 @@ describe("getCompositionPreviewLayout", () => {
       cursorAbsY: 5,
       renderedText: "가\n나",
       rowCount: 2,
-      maxRowCellWidth: 9,
+      maxRowCellWidth: 2,
     });
   });
 });

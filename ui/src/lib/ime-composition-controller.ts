@@ -136,10 +136,7 @@ export type ImeCompositionController = {
 };
 
 export function getCompositionPreviewCursor(
-  state: Pick<
-    CompositionPreviewState,
-    "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset"
-  >,
+  state: Pick<CompositionPreviewState, "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset">,
   cols: number,
 ): { cursorX: number; cursorAbsY: number } {
   const compositionAbsCell = state.anchorBufferX + state.caretCellOffset;
@@ -180,10 +177,10 @@ export function getCompositionPreviewLayout(
 
   const segments = splitCodePoints(state.text);
   let currentCol = state.anchorBufferX;
-  let maxRowCellWidth = Math.max(0, currentCol);
+  let maxRowCellWidth = 0;
   let rowCount = 1;
   let renderedText = "";
-  let currentRowWidth = currentCol;
+  let currentRowWidth = 0;
 
   for (const { segment, width } of segments) {
     if (width > 0 && currentCol + width > cols) {
