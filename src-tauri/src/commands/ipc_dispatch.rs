@@ -144,11 +144,12 @@ pub fn do_sync_cwd(
         ))));
     }
 
-    // Issue #215: Skip propagation when the source terminal is running an
-    // interactive TUI app (Codex, Claude Code, vim, ...). OSC 7 emitted in
-    // that state (e.g. by PowerShell's prompt function re-rendering) does
-    // not represent a user-intended `cd`, so we must not push it to peers
-    // or mark the local session.cwd.
+    // Issue #215: Skip propagation unless the source terminal is sitting at a
+    // clean shell prompt. OSC 7 emitted during an interactive TUI app (Codex,
+    // Claude Code, vim, ...) — e.g. by PowerShell's prompt function re-rendering —
+    // OR while a non-interactive command is mid-execution does not represent a
+    // user-intended `cd`, so we must not push it to peers or mark the local
+    // session.cwd.
     {
         let buffers = state.output_buffers.lock_or_err()?;
         if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
@@ -553,12 +554,16 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
 /// (e.g. PowerShell's `prompt` function). If an interactive TUI app is active
 /// in that terminal (Codex, Claude Code, vim, ...), the emitted CWD does not
 /// reflect a user-intended `cd` and must not be pushed to sync-group peers.
+/// The same reasoning applies to `Running` — any OSC 7 produced mid-command is
+/// noise from the running process, not a clean shell-level CWD change, and
+/// propagating it leaks the running command's PWD into peers.
 ///
-/// Policy:
-/// - `Shell` / `Running` (no interactive app) → propagation allowed.
+/// Policy: ONLY `Shell` (idle prompt) is treated as a trustworthy CWD source.
+/// - `Shell` → propagation allowed.
+/// - `Running` → propagation blocked (a command is mid-execution).
 /// - `InteractiveApp { .. }` → propagation blocked.
-/// - Unknown / no buffer → permissive (true), to preserve existing behavior for
-///   freshly created terminals.
+/// - Unknown / no buffer → `Shell` by default in `detect_terminal_activity`,
+///   which keeps freshly created terminals permissive.
 ///
 /// Uses `detect_terminal_state` (not just `detect_terminal_activity`) so the
 /// guard triggers even when the last title has drifted away from the literal
@@ -576,19 +581,17 @@ pub(crate) fn is_source_sync_allowed(
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
 ) -> bool {
     let info = activity::detect_terminal_state(state, terminal_id, buffer);
-    !matches!(
-        info.activity,
-        crate::terminal::TerminalActivity::InteractiveApp { .. }
-    )
+    matches!(info.activity, crate::terminal::TerminalActivity::Shell)
 }
 
 /// Decide whether an incoming OSC CWD event from the source terminal should
 /// update backend session state at all.
 ///
 /// This is stricter than normal shell CWD tracking: when an interactive app is
-/// active, PowerShell can re-emit OSC 7 during prompt/title repaints. Updating
-/// `session.cwd` in that state leaks a stale source CWD into syncGroup consumers
-/// even if `do_sync_cwd` later suppresses propagation.
+/// active OR a non-interactive command is running, the shell can re-emit OSC 7
+/// during prompt/title repaints or directly from the running command. Updating
+/// `session.cwd` in those states leaks a stale or in-flight CWD into syncGroup
+/// consumers even if `do_sync_cwd` later suppresses propagation.
 pub(crate) fn should_accept_source_cwd_event(
     state: &AppState,
     terminal_id: &str,
@@ -2514,13 +2517,30 @@ mod tests {
     }
 
     #[test]
-    fn is_source_sync_allowed_for_running_command() {
-        // `Running` (shell command mid-execution) is still considered shell
-        // context — the user issued a shell command that may itself `cd`.
+    fn is_source_sync_blocked_for_running_command() {
+        // `Running` (shell command mid-execution) must NOT propagate. Any OSC 7
+        // observed in this state was emitted by a running command, not by the
+        // user transitioning back to a clean shell prompt — we only trust CWD
+        // changes that arrive while activity is fully `Shell`.
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
-        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+    }
+
+    #[test]
+    fn source_cwd_event_rejected_for_running_activity() {
+        // Mirror of the Claude/Codex source-activity gate: when a non-interactive
+        // command is executing, accepting OSC 7 would leak the in-flight command's
+        // PWD into syncGroup peers as soon as do_sync_cwd later runs.
+        let state = AppState::new();
+        let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+        buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07\x1b]7;file://localhost/C:/leaked\x07");
+
+        assert!(
+            !should_accept_source_cwd_event(&state, "source", Some(&buf)),
+            "Running-state OSC 7 must not update local session.cwd before propagation is gated"
+        );
     }
 
     #[test]

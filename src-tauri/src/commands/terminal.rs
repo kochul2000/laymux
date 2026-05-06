@@ -510,8 +510,10 @@ pub fn create_terminal_session(
 
             // Proactive CWD update (single source of truth in session.cwd).
             // Interactive apps can trigger shell prompt/title repaints that
-            // re-emit stale OSC 7/9;9 values, so apply the same source-activity
-            // gate before local state is mutated or events are emitted.
+            // re-emit stale OSC 7/9;9 values, and a running command can emit
+            // OSC 7 of its own; both are noise that must not mutate the local
+            // CWD. Apply the same source-activity gate (Shell-only) before
+            // local state is mutated or events are emitted.
             if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
                 let accept_source_cwd =
                     if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
