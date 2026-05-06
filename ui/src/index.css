@@ -221,6 +221,30 @@
   z-index: 2;
 }
 
+.terminal-background-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--terminal-background-color, #0c0c0c);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.terminal-xterm-host {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  z-index: 1;
+}
+
+.terminal-xterm-host .xterm,
+.terminal-xterm-host .xterm-viewport,
+.terminal-xterm-host .xterm-screen {
+  background: transparent !important;
+}
+
 /* Covers the xterm container while the renderer initialises.
    Delay + fade keeps fast mounts from flashing a spinner. */
 .terminal-loading-overlay {

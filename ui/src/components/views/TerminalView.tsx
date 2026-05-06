@@ -1826,7 +1826,18 @@ export function TerminalView({
       className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
       style={wrapperStyle}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <div
+        data-testid={`terminal-background-${instanceId}`}
+        className="terminal-background-layer"
+        aria-hidden
+      >
+        <div className="terminal-loading-spinner" />
+      </div>
+      <div
+        ref={containerRef}
+        data-testid={`terminal-xterm-host-${instanceId}`}
+        className="terminal-xterm-host"
+      />
       <div
         ref={compositionPreviewRefEl}
         data-testid={`terminal-composition-preview-${instanceId}`}

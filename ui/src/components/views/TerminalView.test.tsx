@@ -247,6 +247,44 @@ describe("TerminalView", () => {
     expect(overlay).not.toHaveClass("visible");
   });
 
+  it("renders a persistent terminal background layer below the xterm host", () => {
+    render(<TerminalView instanceId="t-background-layer" profile="PowerShell" syncGroup="" />);
+
+    const background = screen.getByTestId("terminal-background-t-background-layer");
+    const host = screen.getByTestId("terminal-xterm-host-t-background-layer");
+    expect(background).toBeInTheDocument();
+    expect(background).toHaveClass("terminal-background-layer");
+    expect(host).toHaveClass("terminal-xterm-host");
+    expect(
+      background.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("keeps the top loading overlay hidden after output once xterm has rendered", async () => {
+    render(<TerminalView instanceId="t-output-paint" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith("t-output-paint", expect.any(Function));
+      expect(mockOnRender).toHaveBeenCalled();
+    });
+
+    const overlay = screen.getByTestId("terminal-loading-t-output-paint");
+    const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      renderHandler?.();
+    });
+    expect(overlay).not.toHaveClass("visible");
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    await act(async () => {
+      onOutput?.(new TextEncoder().encode("busy output"));
+    });
+
+    expect(overlay).not.toHaveClass("visible");
+  });
+
   it("keeps the loading overlay visible when toggling back to a previously ready profile", async () => {
     const { rerender } = render(
       <TerminalView instanceId="t-toggle" profile="PowerShell" syncGroup="" />,
