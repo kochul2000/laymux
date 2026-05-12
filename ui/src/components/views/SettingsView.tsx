@@ -1556,11 +1556,27 @@ function ConvenienceSection() {
 function WorkspacesSection() {
   const storeWsDisplay = useSettingsStore((s) => s.workspaceDisplay);
   const setWsDisplay = useSettingsStore((s) => s.setWorkspaceDisplay);
+  const storeSyncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
+  const setSyncCwdDefaults = useSettingsStore((s) => s.setSyncCwdDefaults);
   const [wsDisplay, setDraftWsDisplay] = useDraft("workspaceDisplay", storeWsDisplay, (v) =>
     setWsDisplay(v),
   );
+  const [syncCwdDefaults, setDraftSyncCwdDefaults] = useDraft(
+    "syncCwdDefaults",
+    storeSyncCwdDefaults,
+    (v) => setSyncCwdDefaults(v),
+  );
   const updateWsDisplay = (partial: Partial<typeof wsDisplay>) =>
     setDraftWsDisplay((prev) => ({ ...prev, ...partial }));
+  const updateSyncCwdDefault = (
+    location: "workspace" | "dock",
+    key: "send" | "receive",
+    value: boolean,
+  ) =>
+    setDraftSyncCwdDefaults((prev) => ({
+      ...prev,
+      [location]: { ...prev[location], [key]: value },
+    }));
 
   const displayItems: { key: keyof typeof wsDisplay; label: string; desc: string }[] = [
     { key: "minimap", label: "Minimap", desc: "Pane 위치를 나타내는 미니맵" },
@@ -1610,6 +1626,65 @@ function WorkspacesSection() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Default CWD propagation */}
+      <div style={cardStyle} className="mt-3 p-4">
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
+          CWD Propagation Defaults
+        </h3>
+        {(["workspace", "dock"] as const).map((location, i) => {
+          const label = location === "workspace" ? "Workspace" : "Dock";
+          const desc =
+            location === "workspace"
+              ? "Default for terminal panes inside workspaces"
+              : "Default for terminal panes inside dock areas";
+          const value = syncCwdDefaults[location];
+          return (
+            <div key={location} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
+              <div className="w-36 shrink-0 pt-1">
+                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                  {label}
+                </span>
+                <p
+                  className="mt-0.5 text-[11px] leading-tight"
+                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                >
+                  {desc}
+                </p>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap gap-x-5 gap-y-2">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      data-testid={`sync-cwd-${location}-send-toggle`}
+                      type="checkbox"
+                      checked={value.send}
+                      onChange={(e) => updateSyncCwdDefault(location, "send", e.target.checked)}
+                    />
+                    <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                      Send
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      data-testid={`sync-cwd-${location}-receive-toggle`}
+                      type="checkbox"
+                      checked={value.receive}
+                      onChange={(e) => updateSyncCwdDefault(location, "receive", e.target.checked)}
+                    />
+                    <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                      Receive
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

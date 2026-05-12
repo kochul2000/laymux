@@ -1491,5 +1491,66 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().workspaceDisplay.minimap).toBe(false);
       expect(useSettingsStore.getState().workspaceDisplay.environment).toBe(true);
     });
+
+    it("renders default CWD propagation toggles", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      expect(screen.getByTestId("sync-cwd-workspace-send-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("sync-cwd-workspace-receive-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("sync-cwd-dock-send-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("sync-cwd-dock-receive-toggle")).toBeInTheDocument();
+    });
+
+    it("default CWD propagation toggles use current defaults", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      expect(
+        (screen.getByTestId("sync-cwd-workspace-send-toggle") as HTMLInputElement).checked,
+      ).toBe(false);
+      expect(
+        (screen.getByTestId("sync-cwd-workspace-receive-toggle") as HTMLInputElement).checked,
+      ).toBe(false);
+      expect((screen.getByTestId("sync-cwd-dock-send-toggle") as HTMLInputElement).checked).toBe(
+        false,
+      );
+      expect((screen.getByTestId("sync-cwd-dock-receive-toggle") as HTMLInputElement).checked).toBe(
+        false,
+      );
+    });
+
+    it("does NOT update default CWD propagation in store until Save", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      await user.click(screen.getByTestId("sync-cwd-workspace-send-toggle"));
+      await user.click(screen.getByTestId("sync-cwd-dock-receive-toggle"));
+
+      expect(useSettingsStore.getState().syncCwdDefaults.workspace.send).toBe(false);
+      expect(useSettingsStore.getState().syncCwdDefaults.dock.receive).toBe(false);
+    });
+
+    it("saving default CWD propagation toggles updates store", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      await user.click(screen.getByTestId("sync-cwd-workspace-send-toggle"));
+      await user.click(screen.getByTestId("sync-cwd-dock-receive-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().syncCwdDefaults.workspace).toEqual({
+        send: true,
+        receive: false,
+      });
+      expect(useSettingsStore.getState().syncCwdDefaults.dock).toEqual({
+        send: false,
+        receive: true,
+      });
+    });
   });
 });
