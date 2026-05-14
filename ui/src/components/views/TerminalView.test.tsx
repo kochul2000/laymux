@@ -2155,6 +2155,347 @@ describe("TerminalView", () => {
     }
   });
 
+  // -- Regression: reflow triggers fired while inactive workspace is hidden --
+  //
+  // WorkspaceArea hides inactive workspaces via `display: none`. The font /
+  // DPR / scrollbar reflow effects run for every mounted TerminalView, so
+  // without a guard they call `fit()` on a 0×0 container — propagating
+  // cols/rows=0 through `terminal.onResize` to a PTY resize ioctl — and
+  // attempt an atlas rebuild against a canvas that is not painted. Both are
+  // wasted work; worse, the bogus PTY resize can leave inactive workspaces
+  // with glyphs collapsed to the left when they are next shown. Defer all
+  // three paths while hidden and rely on the existing hidden→visible
+  // transition (issue #232) to rebuild atlas once on return.
+  it("does not fit/clear atlas when fontSize changes while container is hidden", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-hidden-font"
+          paneId="pane-hidden-font"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Workspace becomes inactive → 0×0.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      mockFit.mockClear();
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+
+      // Font change while hidden — must NOT touch fit/atlas.
+      act(() => {
+        useOverridesStore.getState().setViewOverride("pane-hidden-font", { fontSize: 22 });
+      });
+
+      // Flush any pending rAF — runTerminalRendererReflow defers via rAF
+      // (stubbed to setTimeout(0)). Wait one tick plus a margin.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(mockFit).not.toHaveBeenCalled();
+      expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("does not fit/clear atlas when DPR changes while container is hidden", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    type DprMql = {
+      matches: boolean;
+      media: string;
+      listeners: Array<(e: MediaQueryListEvent) => void>;
+      addEventListener: (type: string, cb: (e: MediaQueryListEvent) => void) => void;
+      removeEventListener: (type: string, cb: (e: MediaQueryListEvent) => void) => void;
+      dispatchEvent: (e: Event) => boolean;
+      onchange: null;
+      addListener: () => void;
+      removeListener: () => void;
+    };
+    const mqls: DprMql[] = [];
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn((query: string) => {
+      const mql: DprMql = {
+        matches: true,
+        media: query,
+        listeners: [],
+        addEventListener: (type, cb) => {
+          if (type === "change") mql.listeners.push(cb);
+        },
+        removeEventListener: (type, cb) => {
+          if (type === "change") mql.listeners = mql.listeners.filter((l) => l !== cb);
+        },
+        dispatchEvent: () => true,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+      };
+      mqls.push(mql);
+      return mql as unknown as MediaQueryList;
+    }) as unknown as typeof window.matchMedia;
+
+    try {
+      render(<TerminalView instanceId="t-hidden-dpr" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Hide.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      mockFit.mockClear();
+      mockClearTextureAtlas.mockClear();
+
+      // Simulate DPR change while hidden.
+      const listeners = mqls.flatMap((mql) => mql.listeners);
+      expect(listeners.length).toBeGreaterThan(0);
+      act(() => {
+        for (const listener of listeners) {
+          listener(new Event("change") as MediaQueryListEvent);
+        }
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(mockFit).not.toHaveBeenCalled();
+      expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("does not fit when scrollbarStyle changes while container is hidden", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-hidden-sb" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Hide.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      mockFit.mockClear();
+
+      // Scrollbar style change while hidden.
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        convenience: {
+          ...useSettingsStore.getState().convenience,
+          scrollbarStyle: "separate" as const,
+        },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(mockFit).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("rebuilds atlas on hidden→visible transition after a deferred font change", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-deferred-font"
+          paneId="pane-deferred-font"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Hide.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // Font change while hidden — deferred.
+      act(() => {
+        useOverridesStore.getState().setViewOverride("pane-deferred-font", { fontSize: 22 });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockFit.mockClear();
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+
+      // Show again — must rebuild atlas (and only once).
+      act(() => {
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 800, height: 600 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalled();
+        expect(mockClearTextureAtlas).toHaveBeenCalled();
+        expect(mockRefresh).toHaveBeenCalled();
+      });
+      expect(mockClearTextureAtlas.mock.calls.length).toBe(1);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   // -- Regression: same-size ResizeObserver entries must not trigger fit() --
   //
   // ResizeObserver fires a fresh entry on sub-pixel layout shifts (DPR

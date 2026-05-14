@@ -271,6 +271,18 @@ export function TerminalView({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalReflowFrameRef = useRef<number | null>(null);
+  // Tracks whether the TerminalView's container is currently hidden
+  // (display:none → 0×0). WorkspaceArea hides inactive workspaces this way
+  // and the font/DPR/scrollbar reflow effects (defined below) consult this
+  // ref so they can defer fit()/atlas rebuild instead of running on a 0×0
+  // container — which would propagate cols/rows=0 through a PTY resize and
+  // leave inactive workspaces with garbled glyphs on next show.
+  const isContainerHiddenRef = useRef(false);
+  // Marks that a reflow trigger fired while the container was hidden. The
+  // ResizeObserver's hidden→visible branch consumes this in addition to
+  // `prevWasHidden` so the deferred fit() + atlas rebuild fires exactly
+  // once when the workspace becomes visible again.
+  const reflowDirtyRef = useRef(false);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
   // Each xterm rebuild gets a fresh generation, bumped at render time when
@@ -1461,34 +1473,40 @@ export function TerminalView({
         }
       } else if (sessionCreated && width > 0 && height > 0) {
         const recoveringFromHidden = prevWasHidden;
+        const consumeDirty = reflowDirtyRef.current;
         const w = Math.round(width);
         const h = Math.round(height);
         // Skip identical-size callbacks unless we are returning from a
-        // display:none hide (those still need an atlas rebuild even if
-        // dimensions match the pre-hide values).
-        if (!recoveringFromHidden && w === prevW && h === prevH) {
+        // display:none hide or a deferred reflow is pending (either still
+        // needs an atlas rebuild even if dimensions match the pre-hide
+        // values).
+        if (!recoveringFromHidden && !consumeDirty && w === prevW && h === prevH) {
           prevWasHidden = isNowHidden;
+          isContainerHiddenRef.current = isNowHidden;
           return;
         }
         prevW = w;
         prevH = h;
         fitAddon.fit();
-        if (recoveringFromHidden) {
-          // See `prevWasHidden` definition: the WebGL atlas can go stale
-          // while the container is display:none (a DPR change that fires on
-          // a 0-size terminal cannot rebuild anything), so re-rasterise on
-          // the hide → show transition. Safe no-op without WebGL renderer.
+        if (recoveringFromHidden || consumeDirty) {
+          // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
+          // atlas can go stale while the container is display:none (a DPR
+          // or font change that fires on a 0-size terminal cannot rebuild
+          // anything), so re-rasterise on the hide → show transition.
+          // Safe no-op without WebGL renderer.
           try {
             (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
           } catch {
             /* older xterm builds / mocks may lack this method */
           }
           terminal.refresh(0, terminal.rows - 1);
+          reflowDirtyRef.current = false;
         }
         bindHelperTextareaEvents();
         scheduleOverlayCaretUpdate();
       }
       prevWasHidden = isNowHidden;
+      isContainerHiddenRef.current = isNowHidden;
     });
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
@@ -1731,6 +1749,13 @@ export function TerminalView({
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;
+    // Inactive workspaces are display:none (0×0). Calling fit() here would
+    // propagate cols/rows=0 to the PTY and the atlas rebuild is a no-op on
+    // an unpainted canvas. Defer to the hidden→visible ResizeObserver path.
+    if (isContainerHiddenRef.current) {
+      reflowDirtyRef.current = true;
+      return;
+    }
     runTerminalRendererReflow(term);
   }, [font]);
 
@@ -1748,10 +1773,17 @@ export function TerminalView({
       if (cancelled) return;
       const term = terminalRef.current;
       if (!term) return;
-      try {
-        runTerminalRendererReflow(term);
-      } catch {
-        /* addon/renderer may not be active yet */
+      // Same rationale as the font effect: a DPR change that fires on a
+      // hidden (0×0) terminal cannot rebuild anything useful, and fit()
+      // would mis-resize the PTY. Defer to the hidden→visible transition.
+      if (isContainerHiddenRef.current) {
+        reflowDirtyRef.current = true;
+      } else {
+        try {
+          runTerminalRendererReflow(term);
+        } catch {
+          /* addon/renderer may not be active yet */
+        }
       }
       // Re-subscribe to the NEW ratio so the listener keeps firing on
       // subsequent zoom steps. matchMedia with a fixed resolution only
@@ -1782,7 +1814,13 @@ export function TerminalView({
     try {
       const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
       term.options.overviewRuler = { width: newWidth };
-      fitAddonRef.current?.fit();
+      // The overviewRuler option update is harmless while hidden, but
+      // fit() on a 0×0 container would PTY-resize to cols=0. Defer.
+      if (isContainerHiddenRef.current) {
+        reflowDirtyRef.current = true;
+      } else {
+        fitAddonRef.current?.fit();
+      }
     } catch {
       /* xterm mock may not support options setter */
     }
