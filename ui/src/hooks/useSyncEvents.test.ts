@@ -320,6 +320,36 @@ describe("useSyncEvents", () => {
     expect(instance?.activityMessage).toBe("모든 테스트 통과했습니다.");
   });
 
+  it("does NOT overwrite the input-pending marker on claude-message-changed", async () => {
+    // Rust emits `claude-message-changed` every time Claude's title changes
+    // — i.e. on every spinner-tick frame while a modal is on screen. The
+    // frontend's input-pending detector sets `activityMessage` to
+    // CLAUDE_INPUT_PENDING_MARKER to signal "user response needed". If the
+    // Rust message handler clobbered that marker with the title-derived
+    // task description, the status icon would flap back to ⏳ within
+    // milliseconds and the user would never see the ✓ "waiting for input"
+    // state. This guards that interaction: while the marker is set, the
+    // Rust message is ignored.
+    const { CLAUDE_INPUT_PENDING_MARKER } = await import("@/lib/activity-markers");
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+    });
+
+    renderHook(() => useSyncEvents());
+
+    const callback = mockOnClaudeMessageChanged.mock.calls[0][0];
+    callback({ terminalId: "t1", message: "Thinking with xhigh effort" });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activityMessage).toBe(CLAUDE_INPUT_PENDING_MARKER);
+  });
+
   it("calls markClaudeTerminal when command text detects Claude", () => {
     useTerminalStore.getState().registerInstance({
       id: "t1",

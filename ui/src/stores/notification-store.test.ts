@@ -383,6 +383,49 @@ describe("NotificationStore", () => {
       expect(notifs[0].readAt).not.toBeNull();
     });
 
+    it("does NOT auto-dismiss requiresAction alerts even on the active workspace", () => {
+      // A Claude permission modal needs an explicit user response.
+      // Without the requiresAction exemption, the alert would be marked
+      // read the instant it lands (because the user happens to be
+      // viewing that workspace) and the badge would never light up.
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: activeWsId,
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+
+      const notifs = useNotificationStore.getState().notifications;
+      expect(notifs[0].readAt).toBeNull();
+      expect(notifs[0].requiresAction).toBe(true);
+    });
+
+    it("markWorkspaceAsRead preserves requiresAction alerts", () => {
+      // Switching into the workspace shouldn't silently dismiss a
+      // still-active modal alert; only the user's explicit click or
+      // the originator clearing the underlying state should do that.
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: "ws-1",
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: "ws-1",
+        message: "Build done",
+      });
+
+      useNotificationStore.getState().markWorkspaceAsRead("ws-1");
+      const notifs = useNotificationStore.getState().notifications;
+      expect(
+        notifs.find((n) => n.message === "Claude is waiting for your input")?.readAt,
+      ).toBeNull();
+      expect(notifs.find((n) => n.message === "Build done")?.readAt).not.toBeNull();
+    });
+
     it("does NOT auto-dismiss in paneFocus mode when no pane is focused", () => {
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
       useSettingsStore.setState({

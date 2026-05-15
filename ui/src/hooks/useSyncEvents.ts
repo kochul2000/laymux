@@ -18,6 +18,7 @@ import {
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
 import {
+  CLAUDE_INPUT_PENDING_MARKER,
   CODEX_INPUT_PENDING_MARKER,
   detectActivityFromCommand,
   detectCodexConversationMessageFromOutput,
@@ -165,6 +166,21 @@ export function useSyncEvents() {
     trackListener(
       onClaudeMessageChanged((data) => {
         if (cancelled) return;
+        const instance = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === data.terminalId);
+        // The frontend's modal detector sets activityMessage to
+        // CLAUDE_INPUT_PENDING_MARKER when a permission/response prompt is on
+        // screen. Rust fires `claude-message-changed` on every title change
+        // (i.e. every spinner-tick frame while Claude is animating ✶/Braille
+        // behind the modal), so without this guard the marker would be
+        // clobbered within ~150 ms by the title-derived task description and
+        // the status icon would flap back to ⏳. The marker is cleared by
+        // the same detector when the modal scrolls out of the rolling
+        // buffer, at which point the next Rust message naturally applies.
+        if (instance?.activityMessage === CLAUDE_INPUT_PENDING_MARKER) {
+          return;
+        }
         useTerminalStore.getState().updateInstanceInfo(data.terminalId, {
           activityMessage: data.message,
         });

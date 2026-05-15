@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
+import { CLAUDE_INPUT_PENDING_MARKER } from "./activity-detection";
 import type { RawTerminalState } from "./activity-handler";
 
 const SEP = " \u00b7 ";
@@ -149,6 +150,66 @@ describe("ClaudeActivityHandler", () => {
     it("does NOT treat ✳ idle as a working spinner", () => {
       // Regression guard: ✳ is the idle prefix and must keep returning ✓.
       expect(handler.computeStatus(raw({ title: "\u2733 Claude Code" })).icon).toBe("✓");
+    });
+
+    // ── Input-pending overrides working state ──
+    // When Claude is parked on a permission modal mid-task, the working
+    // spinner title is still animating behind the modal and outputActive is
+    // typically true. Without an explicit input-pending branch the status
+    // pins on hourglass and the user never sees the notification badge. The
+    // marker is set by TerminalView when the modal is detected in the
+    // rolling output tail; the handler must trust it over every other
+    // signal.
+
+    it("returns success when input is pending even with outputActive true", () => {
+      expect(
+        handler.computeStatus(
+          raw({
+            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+            outputActive: true,
+            title: "✶ Working on task",
+          }),
+        ),
+      ).toEqual({ icon: "✓", color: "var(--green)" });
+    });
+
+    it("returns success when input is pending with a Braille working title", () => {
+      expect(
+        handler.computeStatus(
+          raw({
+            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+            title: "⠋ Analyzing",
+          }),
+        ).icon,
+      ).toBe("✓");
+    });
+  });
+
+  describe("computeStatusMessage when input pending", () => {
+    it("hides the internal marker and falls back to title-derived text", () => {
+      // The marker is a sentinel, never a user-facing message. When Claude
+      // is mid-task on a permission modal we still want the status line to
+      // show the surrounding context ("Editing main.rs") instead of the raw
+      // marker string.
+      expect(
+        handler.computeStatusMessage(
+          raw({
+            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+            title: "✶ Editing main.rs",
+          }),
+        ),
+      ).toBe("Editing main.rs");
+    });
+
+    it("returns undefined when input pending and no working title is available", () => {
+      expect(
+        handler.computeStatusMessage(
+          raw({
+            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+            title: "Claude Code",
+          }),
+        ),
+      ).toBeUndefined();
     });
   });
 

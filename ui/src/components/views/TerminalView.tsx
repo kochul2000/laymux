@@ -47,10 +47,12 @@ import {
 
 import {
   CODEX_INPUT_PENDING_MARKER,
+  CLAUDE_INPUT_PENDING_MARKER,
   detectCodexConversationMessageFromOutput,
   detectCodexInputPendingFromOutput,
   detectNewCodexInputPendingPrompt,
   detectCodexStatusMessageFromOutput,
+  detectNewClaudeInputPendingPrompt,
   isCodexFooterStatusLine,
   detectActivityFromTitle,
   detectActivityFromCommand,
@@ -1168,6 +1170,21 @@ export function TerminalView({
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
     let recentOutputTail = "";
+    // Separate, larger rolling buffer for Claude modal detection only.
+    // Claude redraws its modal every spinner tick in alt-screen mode, and
+    // one ANSI-heavy frame is ~4 KB. The 1 KB `recentOutputTail` above
+    // routinely drops the modal text within a few frames, leaving the
+    // permission/response detector blind. 16 KB comfortably keeps the
+    // modal visible until the user answers it.
+    let claudeDetectionBuffer = "";
+    // Smaller buffer for dismissal: when this window no longer contains
+    // a `❯` arrow we conclude the modal is truly gone. Sized to ~1-2
+    // spinner ticks of post-modal output (modal frames are ~4 KB so
+    // anything smaller would dismiss the marker mid-frame; anything
+    // larger would leave the marker pinned for several seconds after
+    // the user actually answered).
+    let claudeDismissalBuffer = "";
+    const CLAUDE_DISMISSAL_WINDOW = 4096;
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
       terminal.write(data, () => {
@@ -1177,6 +1194,9 @@ export function TerminalView({
       const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
       recentOutputTail = combinedText;
+      const previousClaudeBuffer = claudeDetectionBuffer;
+      claudeDetectionBuffer = (claudeDetectionBuffer + text).slice(-16384);
+      claudeDismissalBuffer = (claudeDismissalBuffer + text).slice(-CLAUDE_DISMISSAL_WINDOW);
 
       // OSC parsing and hook dispatch are now handled entirely in the Rust
       // PTY callback (iter_osc_events + match_hooks + dispatch_osc_action).
@@ -1247,6 +1267,70 @@ export function TerminalView({
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: nextCodexMessage,
           });
+        }
+      }
+
+      // Claude Code permission / response prompt — mirror of the Codex
+      // input-pending wiring above. Without this branch the WSL Claude path
+      // shows ⏳ indefinitely while Claude is parked on a y/N modal: the
+      // working spinner title is still animating behind the modal, so the
+      // working→idle title transition (which fires `task_completed` in
+      // `claude_activity.rs`) never runs and no notification is emitted.
+      // Detecting the modal directly from the rolling output tail closes
+      // that gap.
+      if (current?.activity?.type === "interactiveApp" && current.activity.name === "Claude") {
+        const claudePromptBecamePending = detectNewClaudeInputPendingPrompt(
+          previousClaudeBuffer,
+          text,
+        );
+        if (claudePromptBecamePending && current.activityMessage !== CLAUDE_INPUT_PENDING_MARKER) {
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: CLAUDE_INPUT_PENDING_MARKER,
+          });
+          useNotificationStore.getState().addNotification({
+            terminalId: instanceId,
+            workspaceId: resolveWorkspaceId(instanceId),
+            message: "Claude is waiting for your input",
+            level: "info",
+            // The modal needs an actual user response — keep the badge
+            // up even if this happens to be the active workspace, so
+            // the user can step away and still find the alert later.
+            requiresAction: true,
+          });
+        } else if (
+          current.activityMessage === CLAUDE_INPUT_PENDING_MARKER &&
+          text.trim() &&
+          !claudeDismissalBuffer.includes("❯")
+        ) {
+          // Modal truly gone: the ❯ arrow hasn't appeared anywhere in
+          // the last ~4 KB of output. WSL/ConPTY routinely splits a
+          // single modal frame across several small PTY chunks, so a
+          // chunk-local check (`text` alone) would mistake a frame
+          // continuation for a dismissal and clear the marker 60 ms
+          // after firing — that's exactly what made `notif-1` read
+          // itself within milliseconds and hid the badge from the
+          // user. A small rolling buffer keyed off the arrow
+          // character holds the marker steady through chunk splits
+          // and only releases once Claude has truly moved on.
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            activityMessage: undefined,
+          });
+          // The user has resolved the modal; clear the unread badge
+          // for the input-pending alert this terminal raised. The
+          // notification record is left in the panel as history but
+          // no longer counts as unread.
+          const notificationStore = useNotificationStore.getState();
+          const pendingIds = notificationStore.notifications
+            .filter((n) => n.terminalId === instanceId && n.requiresAction && n.readAt === null)
+            .map((n) => n.id);
+          if (pendingIds.length > 0) {
+            notificationStore.markNotificationsAsRead(pendingIds);
+          }
+          // Reset the detection buffer so the just-resolved modal's
+          // residue cannot re-trigger detection on the next chunk
+          // (the 16 KB window still holds the answered modal frame).
+          // The next genuine modal will refill the buffer naturally.
+          claudeDetectionBuffer = "";
         }
       }
 
