@@ -1191,6 +1191,53 @@ describe("TerminalView", () => {
     expect(pending.every((n) => n.readAt !== null)).toBe(true);
   });
 
+  it("clears Claude input-pending marker when Claude returns to the normal prompt", async () => {
+    render(<TerminalView instanceId="t-claude-normal-prompt" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-normal-prompt", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      workspaceId: "ws-test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to proceed?       │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. No                       │\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
+        ?.activityMessage,
+    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("╰─❯ "));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
+        ?.activityMessage,
+    ).toBeUndefined();
+
+    const pending = useNotificationStore
+      .getState()
+      .notifications.filter((n) => n.terminalId === "t-claude-normal-prompt" && n.requiresAction);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.every((n) => n.readAt !== null)).toBe(true);
+  });
+
   it("keeps the marker steady when a modal frame is split across PTY chunks (WSL/ConPTY)", async () => {
     // WSL via ConPTY routinely emits a single Claude modal redraw as
     // 3-10 small PTY chunks. The first chunk holds the arrow line and

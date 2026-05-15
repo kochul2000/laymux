@@ -8,6 +8,7 @@ import {
   detectCodexStatusMessageFromOutput,
   detectClaudeInputPendingFromOutput,
   detectNewClaudeInputPendingPrompt,
+  shouldDismissClaudeInputPendingFromOutput,
 } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
@@ -257,6 +258,20 @@ describe("detectNewClaudeInputPendingPrompt", () => {
       "│ ❯ 1. Yes                       │\r\n" + "│   2. No                        │\r\n";
     const secondModalChunk = "✶ Hashing…\r\n│ ❯ 1. Option A     │\r\n│   2. Option B     │\r\n";
     expect(detectNewClaudeInputPendingPrompt(firstModal, secondModalChunk)).toBe(true);
+  });
+});
+
+describe("shouldDismissClaudeInputPendingFromOutput", () => {
+  it("dismisses when Claude returns to its normal input prompt", () => {
+    expect(shouldDismissClaudeInputPendingFromOutput("╰─❯ ")).toBe(true);
+  });
+
+  it("does not mistake a visible modal selection arrow for dismissal", () => {
+    expect(
+      shouldDismissClaudeInputPendingFromOutput(
+        "│ ❯ 1. Yes                        │\r\n" + "│   2. No                         │\r\n",
+      ),
+    ).toBe(false);
   });
 });
 

@@ -57,6 +57,7 @@ import {
   detectActivityFromTitle,
   detectActivityFromCommand,
   detectActivityFromOutput,
+  shouldDismissClaudeInputPendingFromOutput,
 } from "@/lib/activity-detection";
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
@@ -1300,18 +1301,12 @@ export function TerminalView({
         } else if (
           current.activityMessage === CLAUDE_INPUT_PENDING_MARKER &&
           text.trim() &&
-          !claudeDismissalBuffer.includes("❯")
+          shouldDismissClaudeInputPendingFromOutput(claudeDismissalBuffer)
         ) {
-          // Modal truly gone: the ❯ arrow hasn't appeared anywhere in
-          // the last ~4 KB of output. WSL/ConPTY routinely splits a
-          // single modal frame across several small PTY chunks, so a
-          // chunk-local check (`text` alone) would mistake a frame
-          // continuation for a dismissal and clear the marker 60 ms
-          // after firing — that's exactly what made `notif-1` read
-          // itself within milliseconds and hid the badge from the
-          // user. A small rolling buffer keyed off the arrow
-          // character holds the marker steady through chunk splits
-          // and only releases once Claude has truly moved on.
+          // Modal truly gone: either the recent output has no modal arrow,
+          // or Claude has returned to the normal `╰─❯ ` input prompt. The
+          // latter also contains `❯`, so the dismissal check must distinguish
+          // it from an arrowed modal option.
           useTerminalStore.getState().updateInstanceInfo(instanceId, {
             activityMessage: undefined,
           });

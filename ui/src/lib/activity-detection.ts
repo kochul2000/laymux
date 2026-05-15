@@ -26,6 +26,8 @@ const CLAUDE_ARROWED_OPTION = /\u276f\s*\d+\.\s+\S/;
  * `\u2502` borders still match.
  */
 const CLAUDE_NUMBERED_OPTION = /(?:^|[\s\u2502|])\d+\.\s+\S/gm;
+const CLAUDE_NORMAL_INPUT_PROMPT = /\u2570\u2500\u276f(?:\s|$)/;
+const CLAUDE_SELECTION_ARROW = "\u276f";
 
 /**
  * Size of the rolling window used to scan for a Claude permission modal.
@@ -129,6 +131,16 @@ export function detectClaudeInputPendingFromOutput(text: string): boolean {
 export function detectNewClaudeInputPendingPrompt(previousText: string, nextText: string): boolean {
   const combinedText = `${previousText}${nextText}`.slice(-CLAUDE_DETECTION_WINDOW);
   return detectClaudeInputPendingFromOutput(combinedText);
+}
+
+/**
+ * Returns true when a previously visible Claude modal should be considered
+ * resolved. Claude's normal prompt also contains `❯` (`╰─❯ `), so dismissal
+ * cannot be keyed only on "no arrow in the recent output".
+ */
+export function shouldDismissClaudeInputPendingFromOutput(text: string): boolean {
+  const plain = stripAnsi(text);
+  return CLAUDE_NORMAL_INPUT_PROMPT.test(plain) || !plain.includes(CLAUDE_SELECTION_ARROW);
 }
 
 /** Known interactive apps without dedicated provider handlers. */
