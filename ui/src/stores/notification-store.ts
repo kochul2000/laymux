@@ -15,6 +15,15 @@ export interface Notification {
   level: NotificationLevel;
   createdAt: number;
   readAt: number | null;
+  /**
+   * When true, this notification represents a state that needs explicit
+   * user action (e.g. answering a TUI permission modal). Such alerts are
+   * exempt from the auto-dismiss / workspace-mark-read policy so the
+   * unread badge stays visible until the user has actually responded.
+   * Cleared via `markNotificationsAsRead` with an explicit id list (user
+   * click) or by the originator when the underlying state resolves.
+   */
+  requiresAction?: boolean;
 }
 
 let notifId = 0;
@@ -27,6 +36,7 @@ interface NotificationStoreState {
     workspaceId: string;
     message: string;
     level?: NotificationLevel;
+    requiresAction?: boolean;
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
@@ -46,12 +56,18 @@ interface NotificationStoreState {
 export const useNotificationStore = create<NotificationStoreState>()((set, get) => ({
   notifications: [],
 
-  addNotification: ({ terminalId, workspaceId, message, level }) => {
+  addNotification: ({ terminalId, workspaceId, message, level, requiresAction }) => {
     const now = Date.now();
     const dismissMode = useSettingsStore.getState().convenience.notificationDismiss;
     const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
 
+    // requiresAction alerts never auto-dismiss: they exist precisely to
+    // grab attention until the user has actually responded (e.g. a Claude
+    // permission modal). The default policy auto-clears alerts whose
+    // workspace happens to be active right now, which would hide the
+    // badge before the user could see it.
     const shouldAutoDismiss =
+      !requiresAction &&
       workspaceId === activeWsId &&
       (dismissMode === "workspace" ||
         (dismissMode === "paneFocus" && useGridStore.getState().focusedPaneIndex !== null));
@@ -64,6 +80,7 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       level: level ?? "info",
       createdAt: now,
       readAt: shouldAutoDismiss ? now : null,
+      ...(requiresAction ? { requiresAction: true } : {}),
     };
     set((state) => ({
       notifications: [...state.notifications, notification],
@@ -75,7 +92,13 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     const now = Date.now();
     set((state) => ({
       notifications: state.notifications.map((n) =>
-        n.workspaceId === workspaceId && n.readAt === null ? { ...n, readAt: now } : n,
+        // Skip requiresAction alerts — they only clear via explicit user
+        // click (markNotificationsAsRead) or when the originator resolves
+        // the underlying state. Otherwise opening the workspace would
+        // hide a still-active modal alert.
+        n.workspaceId === workspaceId && n.readAt === null && !n.requiresAction
+          ? { ...n, readAt: now }
+          : n,
       ),
     }));
   },

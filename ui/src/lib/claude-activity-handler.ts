@@ -1,5 +1,6 @@
-import { ShellActivityHandler } from "./shell-activity-handler";
 import type { RawTerminalState, StatusResult } from "./activity-handler";
+import { CLAUDE_INPUT_PENDING_MARKER } from "./activity-markers";
+import { ShellActivityHandler } from "./shell-activity-handler";
 
 /**
  * Star-based working spinner prefixes emitted by Claude Code while a task is
@@ -50,6 +51,10 @@ function extractTitleMessage(title: string | undefined): string | undefined {
   return stripped;
 }
 
+function isInputPending(activityMessage: string | undefined): boolean {
+  return activityMessage === CLAUDE_INPUT_PENDING_MARKER;
+}
+
 export class ClaudeActivityHandler extends ShellActivityHandler {
   shouldPreserveActivityOnExitCode(): boolean {
     return true;
@@ -81,6 +86,16 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
   }
 
   computeStatus(raw: RawTerminalState): StatusResult {
+    // Input-pending overrides every other signal: a permission / response
+    // modal in the buffer is the user-actionable state, not the underlying
+    // working spinner that may still be animating behind the modal. Without
+    // this branch, the WSL Claude path leaves the status pinned at ⏳ even
+    // though Claude is parked on a y/N prompt — the user only sees the
+    // hourglass and never the notification badge.
+    if (isInputPending(raw.activityMessage)) {
+      return { icon: "✓", color: "var(--green)" };
+    }
+
     if (raw.outputActive) return { icon: "⏳", color: "var(--yellow)" };
 
     // Working spinner title (star or Braille) means Claude is actively
@@ -107,6 +122,12 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
   }
 
   computeStatusMessage(raw: RawTerminalState): string | undefined {
+    // The marker is internal state, not a user-facing message. Hide it and
+    // fall back to the title-derived message so the status bar still shows
+    // useful context (e.g. "Editing main.rs") instead of the raw sentinel.
+    if (isInputPending(raw.activityMessage)) {
+      return extractTitleMessage(raw.title);
+    }
     const bullet = raw.activityMessage || undefined;
     const titleMsg = extractTitleMessage(raw.title);
     const mode = raw.statusMessageMode ?? "bullet-title";

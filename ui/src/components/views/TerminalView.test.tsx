@@ -6,7 +6,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
-import { CODEX_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
+import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -1074,6 +1074,317 @@ describe("TerminalView", () => {
     expect(
       useTerminalStore.getState().instances.find((i) => i.id === "t-codex-split")?.activityMessage,
     ).toBe(CODEX_INPUT_PENDING_MARKER);
+  });
+
+  it("marks Claude permission prompts as input pending and emits one notification", async () => {
+    // Regression guard for the WSL-Claude scenario: the working spinner title
+    // keeps animating behind the modal, so the existing working→idle
+    // notification path in `claude_activity.rs` never fires. Detecting the
+    // modal directly from the rolling output tail surfaces the "needs your
+    // input" badge that was previously missing.
+    render(<TerminalView instanceId="t-claude-prompt" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-prompt", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to make this edit to file.rs?  │\r\n" +
+            "│ ❯ 1. Yes                                    │\r\n" +
+            "│   2. Yes, and don't ask again this session  │\r\n" +
+            "│   3. No                                     │\r\n",
+        ),
+      );
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt");
+    expect(instance?.activityMessage).toBe(CLAUDE_INPUT_PENDING_MARKER);
+
+    const notifications = useNotificationStore.getState().notifications;
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      terminalId: "t-claude-prompt",
+      message: "Claude is waiting for your input",
+      level: "info",
+    });
+
+    // A second identical chunk must not re-notify — the prompt is the same
+    // modal sliding through the rolling tail, not a fresh user-actionable
+    // event.
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ ❯ 1. Yes                                    │\r\n" +
+            "│   2. Yes, and don't ask again this session  │\r\n" +
+            "│   3. No                                     │\r\n",
+        ),
+      );
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it("clears Claude input-pending marker after the modal is dismissed", async () => {
+    render(<TerminalView instanceId="t-claude-prompt-done" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-prompt-done", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to proceed?       │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. No                       │\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")
+        ?.activityMessage,
+    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+
+    // User answered — Claude writes enough non-modal content to push
+    // the ❯ arrow out of the 4 KB dismissal window. Marker must
+    // then clear so the next ⏳ working spinner can take over and
+    // the *next* modal can re-fire its notification. Keying
+    // dismissal off the larger 16 KB detection buffer (an earlier
+    // attempt) pinned the marker for ~30 seconds and suppressed the
+    // follow-up alert; trusting `text` alone (a later attempt)
+    // dismissed mid-frame on WSL where modals split across chunks.
+    // ~30 chars × 200 lines = ~6 KB clears the 4 KB window.
+    act(() => {
+      onOutput?.(new TextEncoder().encode("Continuing with the edit...\r\n".repeat(200)));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-prompt-done")
+        ?.activityMessage,
+    ).toBeUndefined();
+
+    // The unread badge for this terminal's requiresAction alert must
+    // also clear — otherwise the badge would hang around forever after
+    // the user has already resolved the modal.
+    const pending = useNotificationStore
+      .getState()
+      .notifications.filter((n) => n.terminalId === "t-claude-prompt-done" && n.requiresAction);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.every((n) => n.readAt !== null)).toBe(true);
+  });
+
+  it("clears Claude input-pending marker when Claude returns to the normal prompt", async () => {
+    render(<TerminalView instanceId="t-claude-normal-prompt" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-normal-prompt", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      workspaceId: "ws-test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to proceed?       │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. No                       │\r\n",
+        ),
+      );
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
+        ?.activityMessage,
+    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode("╰─❯ "));
+    });
+
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-normal-prompt")
+        ?.activityMessage,
+    ).toBeUndefined();
+
+    const pending = useNotificationStore
+      .getState()
+      .notifications.filter((n) => n.terminalId === "t-claude-normal-prompt" && n.requiresAction);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.every((n) => n.readAt !== null)).toBe(true);
+  });
+
+  it("keeps the marker steady when a modal frame is split across PTY chunks (WSL/ConPTY)", async () => {
+    // WSL via ConPTY routinely emits a single Claude modal redraw as
+    // 3-10 small PTY chunks. The first chunk holds the arrow line and
+    // satisfies detection, but the next chunk is a spinner footer
+    // continuation that contains no modal pattern at all. A naive
+    // dismissal that trusted `text` alone would clear the marker 60 ms
+    // after firing, and `notif-1.readAt - notif-1.createdAt = 60` in
+    // production confirmed exactly that race. This test locks in the
+    // fix: the marker survives the spinner-only continuation.
+    render(<TerminalView instanceId="t-claude-chunked" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-chunked", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      workspaceId: "ws-test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    // Chunk 1: full modal frame.
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to proceed?       │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. No                       │\r\n",
+        ),
+      );
+    });
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")
+        ?.activityMessage,
+    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+
+    // Chunk 2: spinner footer continuation (modal still on screen,
+    // but this chunk's text doesn't include the modal box). Marker
+    // must NOT flap to undefined.
+    act(() => {
+      onOutput?.(new TextEncoder().encode("✶ Hashing… (5s)\r\n"));
+    });
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-chunked")
+        ?.activityMessage,
+    ).toBe(CLAUDE_INPUT_PENDING_MARKER);
+  });
+
+  it("re-fires the input-pending notification when a fresh modal arrives after the previous one was dismissed", async () => {
+    // User answered modal #1, Claude started a new task, then asked
+    // for input again. The previous modal text may still sit in the
+    // rolling buffer but the marker has been cleared, so the new
+    // modal must trigger a fresh notification — without this the
+    // status icon stays on ⏳ silently and the user is never told
+    // Claude is parked on the second prompt.
+    render(<TerminalView instanceId="t-claude-second-modal" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-second-modal", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      workspaceId: "ws-test",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    const notifCountBefore = useNotificationStore
+      .getState()
+      .notifications.filter((n) => n.terminalId === "t-claude-second-modal").length;
+
+    // First modal arrives → notification fires.
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Do you want to proceed?       │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. No                       │\r\n",
+        ),
+      );
+    });
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.filter((n) => n.terminalId === "t-claude-second-modal").length,
+    ).toBe(notifCountBefore + 1);
+
+    // User answered — Claude writes enough non-modal content to push
+    // the ❯ arrow out of the 4 KB dismissal window.
+    act(() => {
+      onOutput?.(new TextEncoder().encode("Continuing with the edit...\r\n".repeat(200)));
+    });
+    expect(
+      useTerminalStore.getState().instances.find((i) => i.id === "t-claude-second-modal")
+        ?.activityMessage,
+    ).toBeUndefined();
+
+    // Second modal arrives → notification fires AGAIN.
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "│ Run this command?             │\r\n" +
+            "│ ❯ 1. Yes                      │\r\n" +
+            "│   2. Edit                     │\r\n" +
+            "│   3. No                       │\r\n",
+        ),
+      );
+    });
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.filter((n) => n.terminalId === "t-claude-second-modal").length,
+    ).toBe(notifCountBefore + 2);
+  });
+
+  it("does not fire Claude pending notification for an unrelated numbered list", async () => {
+    render(<TerminalView instanceId="t-claude-no-prompt" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-no-prompt", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(onOutput).toBeTypeOf("function");
+
+    act(() => {
+      onOutput?.(
+        new TextEncoder().encode(
+          "Steps to reproduce:\r\n 1. open file\r\n 2. press enter\r\n 3. observe\r\n",
+        ),
+      );
+    });
+
+    const instance = useTerminalStore
+      .getState()
+      .instances.find((i) => i.id === "t-claude-no-prompt");
+    expect(instance?.activityMessage).toBeUndefined();
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
   it("parses Codex footer status messages from output", async () => {
