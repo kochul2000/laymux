@@ -79,12 +79,31 @@ pub fn is_claude_terminal_from_buffer(
     }
 
     // Strong signal: literal "Claude Code" anywhere in the recent OSC
-    // 0/2 titles. Refresh the cache so subsequent disambiguations work.
+    // 0/2 titles. Refresh the cache so subsequent disambiguations work,
+    // AND mutual-exclude the Codex cache — a pane that previously hosted
+    // Codex must lose its `known_codex_terminals` entry the moment Claude
+    // is confirmed, otherwise `is_codex_terminal_from_buffer` could still
+    // pin it as Codex once the Claude banner scrolls past the recent
+    // window (cache + Braille spinner disambiguator).
     if osc::any_terminal_title_contains(&recent, "Claude Code") {
-        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
-            known.insert(terminal_id.to_string());
-        }
+        sync_known_caches(state, terminal_id, "Claude");
         return true;
+    }
+
+    // Cross-check: if a competing Codex banner is in the recent buffer,
+    // this pane is Codex regardless of our cache state. The Braille
+    // spinner range (U+2800..U+28FF) is shared between Claude and Codex
+    // working frames, so the (cache + Braille) disambiguator below
+    // cannot tell them apart on its own — when a literal Codex signal
+    // is present in the same window, trust it and lazy-invalidate our
+    // stale cache. Without this, a Claude→Codex handover keeps reporting
+    // Claude forever once the Codex banner has scrolled past
+    // `is_codex_terminal_from_buffer`'s caller-order check.
+    if codex_signal_in_buffer(&recent) {
+        if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+        return false;
     }
 
     // Disambiguator: cache + live Claude-shaped title (idle ✳, star
@@ -111,6 +130,22 @@ pub fn is_claude_terminal_from_buffer(
         }
     }
     false
+}
+
+/// True when the recent buffer carries an unambiguous Codex signal —
+/// the OSC 0/2 title or output body literally contains "OpenAI Codex".
+/// Used by `is_claude_terminal_from_buffer` to short-circuit its
+/// (cache + Braille) disambiguator when a competing banner is present.
+fn codex_signal_in_buffer(recent: &[u8]) -> bool {
+    osc::any_terminal_title_contains(recent, "OpenAI Codex")
+        || recent_buffer_contains(recent, "OpenAI Codex")
+}
+
+/// True when the recent buffer carries an unambiguous Claude signal —
+/// the OSC 0/2 title literally contains "Claude Code". Mirror of
+/// `codex_signal_in_buffer`, used by `is_codex_terminal_from_buffer`.
+fn claude_signal_in_buffer(recent: &[u8]) -> bool {
+    osc::any_terminal_title_contains(recent, "Claude Code")
 }
 
 /// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
@@ -255,13 +290,30 @@ pub fn is_codex_terminal_from_buffer(
         return false;
     }
 
-    let banner_in_buffer = osc::any_terminal_title_contains(&recent, "OpenAI Codex")
-        || recent_buffer_contains(&recent, "OpenAI Codex");
-    if banner_in_buffer {
-        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
-            known.insert(terminal_id.to_string());
-        }
+    // Strong signal: "OpenAI Codex" banner in the recent OSC 0/2 titles
+    // or the output body. Refresh the cache so subsequent disambiguations
+    // work, AND mutual-exclude the Claude cache so a Claude→Codex
+    // handover does not leave a stale `known_claude_terminals` entry
+    // behind — the symmetric trap that pinned the production WSL pane as
+    // Claude forever (PR review #258 follow-up).
+    if osc::any_terminal_title_contains(&recent, "OpenAI Codex")
+        || recent_buffer_contains(&recent, "OpenAI Codex")
+    {
+        sync_known_caches(state, terminal_id, "Codex");
         return true;
+    }
+
+    // Cross-check: a competing Claude banner in the recent window means
+    // this pane is Claude regardless of our cache state. Symmetric with
+    // `is_claude_terminal_from_buffer`'s cross-check — without it, a
+    // Codex→Claude handover keeps reporting Codex once the Claude banner
+    // has scrolled past Claude's caller-order check (because the Braille
+    // spinner range overlaps).
+    if claude_signal_in_buffer(&recent) {
+        if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+        return false;
     }
 
     let cache_hit = state
@@ -1096,6 +1148,142 @@ mod tests {
     }
 
     // ── Cache symmetry between Claude and Codex (P2 / P1) ──
+
+    #[test]
+    fn codex_banner_in_buffer_clears_stale_claude_cache() {
+        // The exact production bug: a pane previously ran Claude (so its ID
+        // sits in `known_claude_terminals`) and is now running Codex. The
+        // OSC 0/2 title is just the project name ("laymux") — no direct
+        // match for either app — but the OUTPUT BODY still carries the
+        // "OpenAI Codex" startup banner inside the recent window.
+        //
+        // Pre-fix: `is_codex_terminal_from_buffer` recognized the banner
+        // and inserted into `known_codex_terminals`, but did NOT touch
+        // `known_claude_terminals`. Caller ordering (Claude first) then
+        // saw the stale Claude cache + a Braille spinner title and pinned
+        // the pane as Claude forever. Post-fix: confirming Codex must
+        // mutual-exclude the Claude cache, exactly like a direct title
+        // match does via `sync_known_caches`.
+        let state = AppState::new();
+        let tid = "t-claude-then-codex-banner-body";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        // Title is just the project name (no direct match) but the body
+        // still carries the Codex startup banner inside the recent window.
+        buf.push(b"\x1b]0;laymux\x07\xE2\x94\x82 >_ OpenAI Codex (v0.42.0)\n");
+
+        assert!(is_codex_terminal_from_buffer(&state, tid, Some(&buf)));
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "the Codex banner detector must drop the stale Claude cache so the next caller-order pass picks Codex"
+        );
+        assert!(state.known_codex_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn claude_banner_in_buffer_clears_stale_codex_cache() {
+        // Mirror of the above: a pane previously ran Codex and is now
+        // running Claude. The "Claude Code" banner in the recent window
+        // must drop the stale `known_codex_terminals` entry so the next
+        // caller-order pass cannot misclassify via codex-cache + Braille.
+        let state = AppState::new();
+        let tid = "t-codex-then-claude-banner-body";
+
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07");
+
+        assert!(is_claude_terminal_from_buffer(&state, tid, Some(&buf)));
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "the Claude banner detector must drop the stale Codex cache so the next caller-order pass picks Claude"
+        );
+        assert!(state.known_claude_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn claude_cache_plus_braille_rejects_when_codex_banner_present() {
+        // The hairier case: BOTH caches are populated (legacy state from
+        // before this fix landed), Codex's banner is in the recent window,
+        // and the live title is a Braille spinner. Pre-fix
+        // `is_claude_terminal_from_buffer` returned true via (Claude cache
+        // hit + Braille-shaped title, which `is_claude_title` accepts)
+        // BEFORE the Codex banner detector got a chance to run, so the
+        // pane was reported as Claude despite a literal Codex banner
+        // sitting in the same buffer.
+        //
+        // The Braille spinner range (U+2800..U+28FF) is shared between
+        // Claude and Codex working frames — it cannot disambiguate by
+        // itself. When a competing banner sits in the buffer, the
+        // disambiguator must defer to it instead of trusting the cache.
+        let state = AppState::new();
+        let tid = "t-codex-banner-vs-claude-cache";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push("\u{2502} >_ OpenAI Codex (v0.42.0)\n\x1b]0;\u{280B} laymux\x07".as_bytes());
+
+        assert!(
+            !is_claude_terminal_from_buffer(&state, tid, Some(&buf)),
+            "competing Codex banner in the buffer must override the (Claude cache + Braille title) disambiguator"
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "the stale Claude cache must be lazy-invalidated when a competing banner is present"
+        );
+    }
+
+    #[test]
+    fn codex_cache_plus_braille_rejects_when_claude_banner_present() {
+        // Mirror: when Claude's banner is in the buffer, Codex's
+        // (cache + Braille) disambiguator must defer to it.
+        let state = AppState::new();
+        let tid = "t-claude-banner-vs-codex-cache";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push("\x1b]0;Claude Code\x07\x1b]0;\u{280B} task\x07".as_bytes());
+
+        assert!(
+            !is_codex_terminal_from_buffer(&state, tid, Some(&buf)),
+            "competing Claude banner in the buffer must override the (Codex cache + Braille title) disambiguator"
+        );
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "the stale Codex cache must be lazy-invalidated when a competing banner is present"
+        );
+    }
 
     #[test]
     fn claude_cache_cleared_when_codex_title_takes_over() {
