@@ -75,7 +75,11 @@ describe("CSS design tokens — font-size", () => {
 });
 
 describe("CSS design tokens — utility", () => {
-  const utilityTokens = ["--separator-bg", "--transition-fast"];
+  const utilityTokens = [
+    "--separator-bg",
+    "--transition-fast",
+    "--terminal-composition-underline-color",
+  ];
 
   it.each(utilityTokens)("defines %s in :root", (token) => {
     const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
@@ -112,6 +116,23 @@ describe("CSS utility classes — toolbar", () => {
 describe("CSS utility classes — focus", () => {
   it("defines .ui-focus-ring:focus-visible class", () => {
     expect(cssContent).toMatch(/\.ui-focus-ring:focus-visible\s*\{/);
+  });
+});
+
+describe("CSS utility classes — terminal IME composition", () => {
+  it("underlines the active composition preview", () => {
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview\s*\{[^}]*text-decoration-line:\s*underline;/s,
+    );
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview\s*\{[^}]*text-decoration-color:\s*var\(--terminal-composition-underline-color\);/s,
+    );
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview\s*\{[^}]*text-decoration-thickness:\s*1px;/s,
+    );
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview\s*\{[^}]*text-underline-offset:\s*2px;/s,
+    );
   });
 });
 
