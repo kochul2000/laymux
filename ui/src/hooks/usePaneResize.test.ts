@@ -53,6 +53,110 @@ describe("usePaneResize", () => {
       expect(boundaries.length).toBeGreaterThanOrEqual(2);
     });
 
+    it("merges adjacent vertical boundary segments so stacked panes resize together", () => {
+      const panes: WorkspacePane[] = [
+        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "right-bottom", x: 0.5, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+      ];
+
+      const boundaries = findPaneBoundaries(panes);
+      const vertical = boundaries.filter((bd) => bd.direction === "vertical");
+
+      expect(vertical).toHaveLength(1);
+      expect(vertical[0].position).toBeCloseTo(0.5);
+      expect(vertical[0].start).toBeCloseTo(0);
+      expect(vertical[0].end).toBeCloseTo(1);
+      expect(vertical[0].leftPaneIndices).toEqual([0]);
+      expect(vertical[0].rightPaneIndices.sort()).toEqual([1, 2]);
+    });
+
+    it("merges adjacent horizontal boundary segments so side-by-side panes resize together", () => {
+      const panes: WorkspacePane[] = [
+        { id: "top-left", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "top-right", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "bottom", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "EmptyView" } },
+      ];
+
+      const boundaries = findPaneBoundaries(panes);
+      const horizontal = boundaries.filter((bd) => bd.direction === "horizontal");
+
+      expect(horizontal).toHaveLength(1);
+      expect(horizontal[0].position).toBeCloseTo(0.5);
+      expect(horizontal[0].start).toBeCloseTo(0);
+      expect(horizontal[0].end).toBeCloseTo(1);
+      expect(horizontal[0].leftPaneIndices.sort()).toEqual([0, 1]);
+      expect(horizontal[0].rightPaneIndices).toEqual([2]);
+    });
+
+    it("merges three or more adjacent vertical segments into a single boundary", () => {
+      // Layout [2, [1, 1, 1]] — left full-height, right split into three stacked panes
+      const panes: WorkspacePane[] = [
+        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        { id: "r-top", x: 0.5, y: 0, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
+        { id: "r-mid", x: 0.5, y: 1 / 3, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
+        { id: "r-bot", x: 0.5, y: 2 / 3, w: 0.5, h: 1 / 3, view: { type: "EmptyView" } },
+      ];
+
+      const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
+
+      expect(vertical).toHaveLength(1);
+      expect(vertical[0].start).toBeCloseTo(0);
+      expect(vertical[0].end).toBeCloseTo(1);
+      expect(vertical[0].leftPaneIndices).toEqual([0]);
+      expect(vertical[0].rightPaneIndices.sort()).toEqual([1, 2, 3]);
+    });
+
+    it("merges segments even when sub-split sizes are uneven", () => {
+      // Right side split into uneven heights (e.g., user resized the inner boundary)
+      const panes: WorkspacePane[] = [
+        { id: "left", x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.7, view: { type: "EmptyView" } },
+        { id: "right-bottom", x: 0.5, y: 0.7, w: 0.5, h: 0.3, view: { type: "EmptyView" } },
+      ];
+
+      const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
+
+      expect(vertical).toHaveLength(1);
+      expect(vertical[0].start).toBeCloseTo(0);
+      expect(vertical[0].end).toBeCloseTo(1);
+      expect(vertical[0].leftPaneIndices).toEqual([0]);
+      expect(vertical[0].rightPaneIndices.sort()).toEqual([1, 2]);
+    });
+
+    it("merges 2x2 grid boundary so dragging moves all four panes together", () => {
+      const panes: WorkspacePane[] = [
+        { id: "tl", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "tr", x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "bl", x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+        { id: "br", x: 0.5, y: 0.5, w: 0.5, h: 0.5, view: { type: "EmptyView" } },
+      ];
+
+      const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
+
+      expect(vertical).toHaveLength(1);
+      expect(vertical[0].leftPaneIndices.sort()).toEqual([0, 2]);
+      expect(vertical[0].rightPaneIndices.sort()).toEqual([1, 3]);
+    });
+
+    it("keeps same-position boundary segments separate when their ranges are disconnected", () => {
+      const panes: WorkspacePane[] = [
+        { id: "left-top", x: 0, y: 0, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
+        { id: "right-top", x: 0.5, y: 0, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
+        { id: "middle", x: 0, y: 0.25, w: 1, h: 0.5, view: { type: "EmptyView" } },
+        { id: "left-bottom", x: 0, y: 0.75, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
+        { id: "right-bottom", x: 0.5, y: 0.75, w: 0.5, h: 0.25, view: { type: "EmptyView" } },
+      ];
+
+      const vertical = findPaneBoundaries(panes).filter((bd) => bd.direction === "vertical");
+
+      expect(vertical).toHaveLength(2);
+      expect(vertical.map((bd) => [bd.start, bd.end])).toEqual([
+        [0, 0.25],
+        [0.75, 1],
+      ]);
+    });
+
     it("returns empty for single pane", () => {
       const panes: WorkspacePane[] = [
         { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } },
