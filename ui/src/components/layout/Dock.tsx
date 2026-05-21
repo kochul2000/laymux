@@ -1,6 +1,6 @@
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { useSettingsStore, FALLBACK_PROFILE } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -53,6 +53,8 @@ export function Dock({
   });
 
   const singleHover = useHoverTimer(hoverIdleSeconds);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const resolveSyncCwdForProfile = useSettingsStore((s) => s.resolveSyncCwdForProfile);
 
   // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
@@ -72,6 +74,22 @@ export function Dock({
 
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
+  const singleView = panes[0]?.view;
+  const hasSingleCwdView =
+    singleView?.type === "TerminalView" || singleView?.type === "FileExplorerView";
+  const singleCwdDefaults = hasSingleCwdView
+    ? resolveSyncCwdForProfile(
+        (singleView?.profile as string) || defaultProfile || FALLBACK_PROFILE,
+        "dock",
+      )
+    : null;
+  const singleCwdSendOn = singleCwdDefaults
+    ? ((singleView?.cwdSend as boolean | undefined) ?? singleCwdDefaults.send)
+    : undefined;
+  const singleCwdReceiveOn = singleCwdDefaults
+    ? ((singleView?.cwdReceive as boolean | undefined) ?? singleCwdDefaults.receive)
+    : undefined;
+
   return (
     <div
       data-testid={`dock-${position}`}
@@ -111,6 +129,8 @@ export function Dock({
           paneId={singlePaneId}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHover.hoveredId !== null}
+          cwdSendOn={singleCwdSendOn}
+          cwdReceiveOn={singleCwdReceiveOn}
           actions={{
             onSplitH:
               onSplitPane && singlePaneId
@@ -127,24 +147,21 @@ export function Dock({
                     : undefined
                 : undefined,
             onToggleCwdSend:
-              singlePaneId &&
-              onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
-                ? () =>
-                    onSetPaneView(singlePaneId, {
-                      ...panes[0].view,
-                      cwdSend: !((panes[0].view.cwdSend as boolean) ?? true),
-                    })
+              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+                ? () => {
+                    const current =
+                      (panes[0].view.cwdSend as boolean | undefined) ?? singleCwdDefaults.send;
+                    onSetPaneView(singlePaneId, { ...panes[0].view, cwdSend: !current });
+                  }
                 : undefined,
             onToggleCwdReceive:
-              singlePaneId &&
-              onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
-                ? () =>
-                    onSetPaneView(singlePaneId, {
-                      ...panes[0].view,
-                      cwdReceive: !((panes[0].view.cwdReceive as boolean) ?? true),
-                    })
+              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+                ? () => {
+                    const current =
+                      (panes[0].view.cwdReceive as boolean | undefined) ??
+                      singleCwdDefaults.receive;
+                    onSetPaneView(singlePaneId, { ...panes[0].view, cwdReceive: !current });
+                  }
                 : undefined,
           }}
         >
@@ -193,6 +210,8 @@ function DockGrid({
 }) {
   const focusedDock = useDockStore((s) => s.focusedDock);
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const resolveSyncCwdForProfile = useSettingsStore((s) => s.resolveSyncCwdForProfile);
 
   return (
     <PaneGrid
@@ -209,7 +228,10 @@ function DockGrid({
       onSetPaneView={onSetPaneView}
       onSplitPane={onSplitPane}
       onRemovePane={onRemovePane}
-      getCwdDefaults={() => ({ send: true, receive: true })}
+      getCwdDefaults={(view: ViewInstanceConfig) => {
+        const profileName = (view.profile as string) || defaultProfile || FALLBACK_PROFILE;
+        return resolveSyncCwdForProfile(profileName, "dock");
+      }}
       workspaceId={activeWorkspaceId}
       workspaceName={activeWsName}
       emptyViewContext="dock"

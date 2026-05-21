@@ -87,14 +87,18 @@ function FileExplorerViewWithSyncCwd({
   workspaceId,
   paneId,
   isFocused,
+  location,
 }: {
   viewConfig?: ViewInstanceConfig;
   workspaceId?: string;
   paneId?: string;
   isFocused?: boolean;
+  location: TerminalLocation;
 }) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const fileExplorerSettings = useSettingsStore((s) => s.fileExplorer);
+  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
+  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const fallbackId = useId();
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
@@ -104,10 +108,18 @@ function FileExplorerViewWithSyncCwd({
 
   // Use file explorer's shellProfile setting, or fall back to defaultProfile
   const profileName = fileExplorerSettings.shellProfile || defaultProfile || FALLBACK_PROFILE;
-
-  // FileExplorerView is CWD-based: default to true unless explicitly disabled in viewConfig
-  const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? true;
-  const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? true;
+  const profileSyncCwd = useSettingsStore(
+    (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
+  );
+  const resolvedDefaults = resolveSyncCwd({
+    profileName,
+    location,
+    profileSyncCwd,
+    profileDefaultsSyncCwd,
+    syncCwdDefaults,
+  });
+  const cwdSend = (viewConfig?.cwdSend as boolean | undefined) ?? resolvedDefaults.send;
+  const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
 
   return (
     <FileExplorerView
@@ -211,6 +223,7 @@ export function ViewRenderer({
             workspaceId={workspaceId}
             paneId={paneId}
             isFocused={isFocused}
+            location={location}
           />
         </div>
       );

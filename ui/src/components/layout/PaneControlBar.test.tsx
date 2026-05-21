@@ -443,4 +443,131 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
     expect(screen.getByTestId("injected-left")).toHaveTextContent("HOVER_INFO");
   });
+
+  // -- CWD send/receive toggle indicators --
+  //
+  // 표시 상태는 호출자가 계산한 effective state(cwdSendOn / cwdReceiveOn)를 따른다.
+  // viewConfig.cwdSend / cwdReceive를 직접 보면 syncCwdDefaults(workspace=false, dock=false)
+  // 기본값이 적용되는 신규 페인에서 "꺼져 있는데 켜진 아이콘"이 표시된다 (issue: cwd-propagation-default-icon).
+
+  const terminalView = { type: "TerminalView" as const, profile: "PowerShell" };
+  const fileExplorerView = { type: "FileExplorerView" as const };
+
+  it("shows CWD send button ON when cwdSendOn=true (regardless of viewConfig)", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onToggleCwdSend: vi.fn() }}
+        cwdSendOn={true}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-send");
+    expect(btn.getAttribute("title")).toBe("CWD Send (on)");
+  });
+
+  it("shows CWD send button OFF when cwdSendOn=false (regardless of viewConfig)", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onToggleCwdSend: vi.fn() }}
+        cwdSendOn={false}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-send");
+    expect(btn.getAttribute("title")).toBe("CWD Send (off)");
+  });
+
+  it("shows CWD receive button ON when cwdReceiveOn=true", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onToggleCwdReceive: vi.fn() }}
+        cwdReceiveOn={true}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (on)",
+    );
+  });
+
+  it("shows CWD receive button OFF when cwdReceiveOn=false", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onToggleCwdReceive: vi.fn() }}
+        cwdReceiveOn={false}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("ignores viewConfig.cwdSend; effective state comes from cwdSendOn prop only", () => {
+    // viewConfig.cwdSend is undefined (no per-pane override). Caller passed cwdSendOn=false
+    // because syncCwdDefaults.workspace.send = false. The bar must show OFF, not ON.
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onToggleCwdSend: vi.fn() }}
+        cwdSendOn={false}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+  });
+
+  it("displays CWD toggles for FileExplorerView too", () => {
+    render(
+      <PaneControlBar
+        currentView={fileExplorerView}
+        actions={{
+          ...defaultActions,
+          onToggleCwdSend: vi.fn(),
+          onToggleCwdReceive: vi.fn(),
+        }}
+        cwdSendOn={false}
+        cwdReceiveOn={false}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("hides CWD send button when no onToggleCwdSend action provided", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={defaultActions}
+        cwdSendOn={false}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-cwd-send")).not.toBeInTheDocument();
+  });
 });

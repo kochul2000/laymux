@@ -35,6 +35,16 @@ interface PaneControlBarProps {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
+  /**
+   * Effective CWD send/receive state for indicator display.
+   *
+   * Computed by the caller from `viewConfig.cwdSend ?? resolveSyncCwd(...)` so the
+   * indicator stays in sync with what the backend actually applies. Do NOT fall back
+   * to `currentView.cwdSend ?? true` here — that ignores `syncCwdDefaults` (default off)
+   * and shows an "on" icon for a propagation that the backend treats as off.
+   */
+  cwdSendOn?: boolean;
+  cwdReceiveOn?: boolean;
   children: React.ReactNode;
 }
 
@@ -160,6 +170,8 @@ function BarContent({
   actions,
   mode,
   onSetMode,
+  cwdSendOn,
+  cwdReceiveOn,
   expanded = true,
   wrapped = false,
   vertical = false,
@@ -170,6 +182,8 @@ function BarContent({
   actions: PaneControlBarActions;
   mode: ControlBarMode;
   onSetMode: (m: ControlBarMode) => void;
+  cwdSendOn?: boolean;
+  cwdReceiveOn?: boolean;
   expanded?: boolean;
   wrapped?: boolean;
   vertical?: boolean;
@@ -200,7 +214,10 @@ function BarContent({
           {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
             actions.onToggleCwdSend &&
             (() => {
-              const isOn = (currentView.cwdSend ?? true) as boolean;
+              // Effective state must come from the caller (resolveSyncCwd + per-pane override).
+              // Falling back to `currentView.cwdSend ?? true` here lies about the actual
+              // propagation state when no per-pane override exists and the default is off.
+              const isOn = cwdSendOn ?? false;
               return (
                 <>
                   <Separator />
@@ -239,7 +256,7 @@ function BarContent({
           {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
             actions.onToggleCwdReceive &&
             (() => {
-              const isOn = (currentView.cwdReceive ?? true) as boolean;
+              const isOn = cwdReceiveOn ?? false;
               return (
                 <BarBtn
                   testId="pane-control-cwd-receive"
@@ -409,12 +426,16 @@ function NarrowControlMenu({
   actions,
   mode,
   onSetMode,
+  cwdSendOn,
+  cwdReceiveOn,
   position,
 }: {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   mode: ControlBarMode;
   onSetMode: (m: ControlBarMode) => void;
+  cwdSendOn?: boolean;
+  cwdReceiveOn?: boolean;
   position: { top: number; right: number };
 }) {
   return (
@@ -437,6 +458,8 @@ function NarrowControlMenu({
         actions={actions}
         mode={mode}
         onSetMode={onSetMode}
+        cwdSendOn={cwdSendOn}
+        cwdReceiveOn={cwdReceiveOn}
         vertical
         showMinimize={false}
       />
@@ -451,6 +474,8 @@ function NarrowControlAnchor({
   menuOpen,
   onToggleMenu,
   onSetMode,
+  cwdSendOn,
+  cwdReceiveOn,
 }: {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
@@ -458,6 +483,8 @@ function NarrowControlAnchor({
   menuOpen: boolean;
   onToggleMenu: () => void;
   onSetMode: (m: ControlBarMode) => void;
+  cwdSendOn?: boolean;
+  cwdReceiveOn?: boolean;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
@@ -508,6 +535,8 @@ function NarrowControlAnchor({
           actions={actions}
           mode={mode}
           onSetMode={onSetMode}
+          cwdSendOn={cwdSendOn}
+          cwdReceiveOn={cwdReceiveOn}
           position={menuPosition}
         />
       )}
@@ -573,6 +602,8 @@ export function PaneControlBar({
   currentView,
   actions,
   hovered,
+  cwdSendOn,
+  cwdReceiveOn,
   children,
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -624,11 +655,20 @@ export function PaneControlBar({
           menuOpen={narrowMenuOpen}
           onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
           onSetMode={setMode}
+          cwdSendOn={cwdSendOn}
+          cwdReceiveOn={cwdReceiveOn}
         />
       ) : (
-        <BarContent currentView={currentView} actions={actions} mode={mode} onSetMode={setMode} />
+        <BarContent
+          currentView={currentView}
+          actions={actions}
+          mode={mode}
+          onSetMode={setMode}
+          cwdSendOn={cwdSendOn}
+          cwdReceiveOn={cwdReceiveOn}
+        />
       ),
-    [currentView, actions, mode, setMode, narrowBar, narrowMenuOpen],
+    [currentView, actions, mode, setMode, narrowBar, narrowMenuOpen, cwdSendOn, cwdReceiveOn],
   );
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
@@ -692,6 +732,8 @@ export function PaneControlBar({
                 menuOpen={narrowMenuOpen}
                 onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
                 onSetMode={setMode}
+                cwdSendOn={cwdSendOn}
+                cwdReceiveOn={cwdReceiveOn}
               />
             ) : (
               <BarContent
@@ -699,6 +741,8 @@ export function PaneControlBar({
                 actions={actions}
                 mode={mode}
                 onSetMode={setMode}
+                cwdSendOn={cwdSendOn}
+                cwdReceiveOn={cwdReceiveOn}
               />
             )}
           </div>
@@ -742,6 +786,8 @@ export function PaneControlBar({
                   menuOpen={narrowMenuOpen}
                   onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
                   onSetMode={setMode}
+                  cwdSendOn={cwdSendOn}
+                  cwdReceiveOn={cwdReceiveOn}
                 />
               ) : (
                 <BarContent
@@ -749,6 +795,8 @@ export function PaneControlBar({
                   actions={actions}
                   mode={mode}
                   onSetMode={setMode}
+                  cwdSendOn={cwdSendOn}
+                  cwdReceiveOn={cwdReceiveOn}
                 />
               )}
             </div>
