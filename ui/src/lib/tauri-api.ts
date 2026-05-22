@@ -682,6 +682,16 @@ export interface TerminalTitleChangedData {
   title: string;
   interactiveApp: string | null;
   notifyGateArmed: boolean;
+  /**
+   * True when the backend's Claude/Codex title state machine just
+   * observed an explicit exit. Title handlers must drop the
+   * `InteractiveApp{Claude|Codex}` pin even if their
+   * `shouldPreserveActivityOnTitleReset` heuristic would normally hold
+   * it across a shell-prompt title (issue #234 was the reason that
+   * heuristic returns `true` unconditionally; this flag is the override
+   * that re-introduces a real exit signal).
+   */
+  interactiveAppExited?: boolean;
 }
 
 export function onTerminalTitleChanged(

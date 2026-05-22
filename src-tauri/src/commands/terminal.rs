@@ -266,6 +266,13 @@ pub fn create_terminal_session(
                 }
             }
 
+            // Propagated to the `terminal-title-changed` payload below so the
+            // frontend's title handler can distinguish "the OSC 0 title just
+            // happens to read like a shell prompt" (issue #234 — keep Claude
+            // pinned) from "the PTY callback's Claude/Codex state machine
+            // just confirmed exit" (must clear the interactive-app pin).
+            let mut interactive_app_exited = false;
+
             // ── Claude Code title state machine (single pass) ──
             // Handles entry/exit detection, working→idle task completion,
             // and known_claude_terminals tracking for OSC 0/2 title changes.
@@ -315,6 +322,11 @@ pub fn create_terminal_session(
                     if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
                         known.insert(terminal_id.clone());
                     }
+                    // A fresh entry invalidates any pending exit marker from
+                    // a previous session in the same pane — otherwise the
+                    // buffer-scan strong-signal suppression would mis-block
+                    // an immediate Claude relaunch.
+                    activity::clear_interactive_app_exit_marker(&state_for_pty, &terminal_id);
                     let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
                 }
 
@@ -372,6 +384,19 @@ pub fn create_terminal_session(
                     // kicks in immediately instead of pinning "Claude" for
                     // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit (#237).
                     activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
+                    // Record the exit so the next OSC 0/2 title (typically a
+                    // shell prompt) cannot re-pin the cache via the stale
+                    // `Claude Code` banner still resident in the 16KB recent
+                    // window. Without this marker `is_claude_terminal_from_buffer`
+                    // fires its strong-signal branch and the frontend keeps
+                    // showing InteractiveApp{Claude} until the banner scrolls
+                    // out — sometimes for many minutes on an idle shell.
+                    activity::record_interactive_app_exit(&state_for_pty, &terminal_id, "Claude");
+                    // Tell the frontend's title-changed handler to drop the
+                    // interactive-app pin even though
+                    // `ClaudeActivityHandler.shouldPreserveActivityOnTitleReset`
+                    // would otherwise hold it across title resets (issue #234).
+                    interactive_app_exited = true;
                 }
 
                 if message_changed {
@@ -451,7 +476,9 @@ pub fn create_terminal_session(
                     pty_cb_state.codex_detected.store(true, Ordering::Relaxed);
                     // Mutually-exclusive: also clears any stale Claude
                     // membership left over from a previous session in this
-                    // pane (and inserts into known_codex_terminals).
+                    // pane (and inserts into known_codex_terminals). It
+                    // also clears the recently-exited marker as part of
+                    // its confirmed-detection contract.
                     activity::sync_known_caches(&state_for_pty, &terminal_id, "Codex");
                 }
 
@@ -465,6 +492,16 @@ pub fn create_terminal_session(
                     // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit
                     // (#237 mirror for Codex).
                     activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
+                    // Mirror of the Claude exit-marker recording above: the
+                    // 16KB recent window still carries the `OpenAI Codex`
+                    // banner (in OSC titles AND in the body banner that
+                    // `recent_buffer_contains` scans), and without the
+                    // marker the next shell-prompt title re-pins Codex.
+                    activity::record_interactive_app_exit(&state_for_pty, &terminal_id, "Codex");
+                    // Mirror of the Claude exit flag: tell the frontend to
+                    // unpin the interactive-app activity even though Codex's
+                    // handler also preserves across title resets.
+                    interactive_app_exited = true;
                 }
             }
 
@@ -504,6 +541,14 @@ pub fn create_terminal_session(
                         "title": event.data,
                         "interactiveApp": interactive_app,
                         "notifyGateArmed": notify_gate_armed,
+                        // True iff the Claude/Codex title state machine just
+                        // observed an exit. Frontend uses this to override
+                        // its `shouldPreserveActivityOnTitleReset` guard
+                        // (which would otherwise keep the pane pinned as
+                        // InteractiveApp{Claude} after `/exit`, since the
+                        // following PowerShell-prompt title still passes
+                        // the heuristic guard from issue #234).
+                        "interactiveAppExited": interactive_app_exited,
                     }),
                 );
             }
@@ -771,6 +816,10 @@ pub fn close_terminal_session(
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
     activity::clear_interactive_app_grace_window(&state, &id);
+    // Mirror cleanup for the recently-exited marker so a fresh terminal
+    // reusing this ID does not start under a stale Claude/Codex exit
+    // suppression.
+    activity::clear_interactive_app_exit_marker(&state, &id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {

@@ -220,6 +220,14 @@ export function useSyncEvents() {
         const updates: Record<string, unknown> = { title: data.title };
         if (detectedActivity) {
           updates.activity = detectedActivity;
+        } else if (data.interactiveAppExited && currentActivity?.type === "interactiveApp") {
+          // Backend's title-state machine just confirmed Claude/Codex
+          // exit. Override the per-handler preservation guard (issue
+          // #234) so the user-visible activity reflects the exit
+          // immediately — otherwise the pane stays pinned as
+          // InteractiveApp{Claude} after `/exit` because the following
+          // shell-prompt title still passes the preservation heuristic.
+          updates.activity = { type: "shell" };
         } else if (
           currentActivity?.type === "interactiveApp" &&
           !handler.shouldPreserveActivityOnTitleReset?.(raw)

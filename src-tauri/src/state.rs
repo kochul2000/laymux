@@ -18,10 +18,11 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 3. `known_claude_terminals`
 /// 4. `known_codex_terminals`
 /// 5. `last_detected_interactive_app`
-/// 6. `notifications`
-/// 7. `sync_groups`
-/// 8. `propagated_terminals`
-/// 9. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 6. `recently_exited_interactive_app`
+/// 7. `notifications`
+/// 8. `sync_groups`
+/// 9. `propagated_terminals`
+/// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -56,6 +57,15 @@ pub struct AppState {
     /// rewrites). Entries older than `INTERACTIVE_APP_GRACE_WINDOW` are
     /// ignored. See issue #237.
     pub last_detected_interactive_app: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    /// Per-terminal negative cache: records the moment an interactive app
+    /// (Claude / Codex) was explicitly seen to exit via the PTY title
+    /// state machine. Used by `activity::is_claude_terminal_from_buffer`
+    /// and its Codex mirror to suppress the buffer-scan strong-signal
+    /// branch for the duration of `INTERACTIVE_APP_GRACE_WINDOW`,
+    /// preventing the still-resident `Claude Code` / `OpenAI Codex`
+    /// banners in the recent 16KB window from re-pinning the cache the
+    /// moment the user returns to the shell prompt.
+    pub recently_exited_interactive_app: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     /// Single source of truth for terminal notifications.
     /// Stored in backend so `get_terminal_summaries` can return unread counts.
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
@@ -77,6 +87,7 @@ impl AppState {
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),
             last_detected_interactive_app: Arc::new(Mutex::new(HashMap::new())),
+            recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
         }

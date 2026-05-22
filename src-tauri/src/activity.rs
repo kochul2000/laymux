@@ -85,7 +85,22 @@ pub fn is_claude_terminal_from_buffer(
     // is confirmed, otherwise `is_codex_terminal_from_buffer` could still
     // pin it as Codex once the Claude banner scrolls past the recent
     // window (cache + Braille spinner disambiguator).
+    //
+    // Suppression: if the PTY callback just observed an explicit Claude
+    // exit, the 16KB recent window almost certainly still carries the
+    // `\x1b]0;Claude Code\x07` banner from the just-finished session.
+    // Letting the strong-signal branch fire here re-pins the cache and
+    // the frontend keeps seeing InteractiveApp{Claude} until that
+    // banner scrolls out — the original user complaint. The marker
+    // expires after `INTERACTIVE_APP_GRACE_WINDOW`, after which the
+    // buffer has almost always rotated past the stale banner anyway.
     if osc::any_terminal_title_contains(&recent, "Claude Code") {
+        if is_recently_exited(state, terminal_id, "Claude") {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
         sync_known_caches(state, terminal_id, "Claude");
         return true;
     }
@@ -296,9 +311,23 @@ pub fn is_codex_terminal_from_buffer(
     // handover does not leave a stale `known_claude_terminals` entry
     // behind — the symmetric trap that pinned the production WSL pane as
     // Claude forever (PR review #258 follow-up).
+    //
+    // Suppression: mirrors the Claude path. If the PTY callback just
+    // observed an explicit Codex exit, the 16KB recent window still
+    // carries the `>_ OpenAI Codex (vX.Y.Z)` banner; the next shell-
+    // prompt title would otherwise re-pin Codex. The marker is cleared
+    // by a fresh confirmed entry, by `mark_codex_terminal_inner`, and on
+    // session close, so this only suppresses revival within the same
+    // exit→stale-banner window.
     if osc::any_terminal_title_contains(&recent, "OpenAI Codex")
         || recent_buffer_contains(&recent, "OpenAI Codex")
     {
+        if is_recently_exited(state, terminal_id, "Codex") {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
         sync_known_caches(state, terminal_id, "Codex");
         return true;
     }
@@ -367,8 +396,13 @@ pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
                 known.remove(terminal_id);
             }
         }
-        _ => {}
+        _ => return,
     }
+    // A confirmed direct-match detection (or a frontend `mark_*_terminal`
+    // re-seed) invalidates any pending exit marker for the same pane —
+    // either we are reclassifying this terminal as another app, or we are
+    // reaffirming the same app after a brief blip.
+    clear_interactive_app_exit_marker(state, terminal_id);
 }
 
 /// Remember that `app_name` was successfully detected on `terminal_id` at
@@ -419,6 +453,56 @@ pub fn clear_interactive_app_grace_window(state: &AppState, terminal_id: &str) {
     }
 }
 
+/// Record that `app_name` was explicitly seen to exit on `terminal_id` at
+/// `Instant::now()`. The PTY callback calls this in the `cr.exited` /
+/// `cr_codex.exited` branches.
+///
+/// The buffer-scan strong-signal branches in `is_claude_terminal_from_buffer`
+/// (and its Codex mirror) consult this marker before re-pinning the cache.
+/// The 16KB recent window typically still carries the `Claude Code` /
+/// `OpenAI Codex` banner long after the user returned to the shell — without
+/// this negative cache, the very next OSC 0/2 title (a shell prompt) would
+/// re-pin the cache and surface as `InteractiveApp{Claude}` in the frontend.
+pub fn record_interactive_app_exit(state: &AppState, terminal_id: &str, app_name: &str) {
+    if let Ok(mut guard) = state.recently_exited_interactive_app.lock_or_err() {
+        guard.insert(
+            terminal_id.to_string(),
+            (app_name.to_string(), Instant::now()),
+        );
+    }
+}
+
+/// Forget the recently-exited marker for `terminal_id`. Called when a fresh
+/// confirmed detection arrives (live "Claude Code" / "OpenAI Codex" title,
+/// `mark_*_terminal` re-seeding from frontend command-text detection) and when
+/// the terminal session closes.
+pub fn clear_interactive_app_exit_marker(state: &AppState, terminal_id: &str) {
+    if let Ok(mut guard) = state.recently_exited_interactive_app.lock_or_err() {
+        guard.remove(terminal_id);
+    }
+}
+
+/// True when `terminal_id` was seen to exit `app_name` within
+/// `INTERACTIVE_APP_GRACE_WINDOW`. Expired entries are evicted lazily so
+/// the negative cache cannot grow without bound on long-lived terminals.
+fn is_recently_exited(state: &AppState, terminal_id: &str, app_name: &str) -> bool {
+    let mut guard = match state.recently_exited_interactive_app.lock_or_err() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    let Some((name, ts)) = guard.get(terminal_id) else {
+        return false;
+    };
+    if name != app_name {
+        return false;
+    }
+    if ts.elapsed() <= INTERACTIVE_APP_GRACE_WINDOW {
+        return true;
+    }
+    guard.remove(terminal_id);
+    false
+}
+
 fn clear_known_interactive_app_state(state: &AppState, terminal_id: &str) {
     if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
         known.remove(terminal_id);
@@ -427,6 +511,15 @@ fn clear_known_interactive_app_state(state: &AppState, terminal_id: &str) {
         known.remove(terminal_id);
     }
     clear_interactive_app_grace_window(state, terminal_id);
+    // Do NOT clear the recently-exited marker here. This helper runs from
+    // the `is_explicit_empty_title_reset` branch in
+    // `detect_interactive_app_from_live_title`, which is reached on the
+    // SAME PTY callback where `cr.exited` just set the marker (WSL Claude
+    // emits empty title right after exit). Clearing it here re-opens the
+    // buffer-scan strong-signal branch on the very next OSC 0/2 title
+    // (typically the shell prompt path), undoing the fix.
+    // The marker is cleared only on confirmed re-entry (sync_known_caches,
+    // cr.entered, mark_*_terminal_inner) or on terminal session close.
 }
 
 fn has_known_interactive_app_state(state: &AppState, terminal_id: &str) -> bool {
@@ -1890,5 +1983,199 @@ mod tests {
         // Chunk 2 completes the split marker AND contains another full marker.
         // Caller calls `record_hit()` once — treat as single hit.
         assert!(state.scan_dec_sync_marker(b"2026h middle \x1b[?2026h"));
+    }
+
+    // ── Recently-exited negative cache (explicit exit -> stale buffer) ──
+    //
+    // After Claude (or Codex) exits, the PTY callback clears
+    // `known_claude_terminals` + the grace window, but the recent 16KB
+    // output buffer still carries the older `\x1b]0;Claude Code\x07`
+    // banner. The next OSC 0/2 title — usually a shell prompt — triggers
+    // `detect_interactive_app_from_live_title`, which calls
+    // `is_claude_terminal_from_buffer`. That helper's strong-signal
+    // branch only checks for the literal banner anywhere in the recent
+    // window, so it re-pins the cache and reports Claude even though
+    // the live title is a plain shell prompt. The frontend then keeps
+    // showing the pane as InteractiveApp{Claude} until the banner
+    // scrolls out of the 16KB window — which can take a long time
+    // when the user does nothing further.
+
+    #[test]
+    fn shell_title_after_explicit_claude_exit_does_not_revive_claude() {
+        // Reproduces the user-visible bug: PowerShell prints
+        // `PS C:\Users\...` as the OSC 0 title right after Claude
+        // returns to the prompt. The recent buffer still has the
+        // `\x1b]0;Claude Code\x07` from the just-finished session, so
+        // the buffer-scan strong signal fires and re-pins Claude.
+        let state = AppState::new();
+        let tid = "t-claude-exit-then-shell-prompt";
+
+        // Simulate the PTY callback's exit cleanup that has already run:
+        // cache cleared, grace window cleared, and the recently-exited
+        // marker recorded.
+        record_interactive_app_exit(&state, tid, "Claude");
+
+        let mut buf = TerminalOutputBuffer::default();
+        // Pre-exit Claude OSC + post-exit shell prompt OSC. The shell
+        // prompt is the live title; the Claude OSC is stale residue.
+        buf.push(b"\x1b]0;Claude Code\x07actual claude output here\r\n");
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS C:\\Users\\me> ");
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(
+                &state,
+                tid,
+                "PS C:\\Users\\me",
+                Some(&buf),
+            ),
+            None,
+            "shell prompt after explicit Claude exit must not be re-classified as Claude via stale buffer banner",
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "exit-trailing shell title must not re-register Claude in the cache",
+        );
+    }
+
+    #[test]
+    fn shell_title_after_explicit_codex_exit_does_not_revive_codex() {
+        // Mirror for Codex: the stale `OpenAI Codex` banner sits in
+        // both the OSC titles and the body banner output. Without the
+        // exit marker, the buffer-scan fast path re-pins Codex.
+        let state = AppState::new();
+        let tid = "t-codex-exit-then-shell-prompt";
+
+        record_interactive_app_exit(&state, tid, "Codex");
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b">_ OpenAI Codex (v0.42.0)\r\nresponse output\r\n");
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS C:\\Users\\me> ");
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(
+                &state,
+                tid,
+                "PS C:\\Users\\me",
+                Some(&buf),
+            ),
+            None,
+            "shell prompt after explicit Codex exit must not be re-classified as Codex via stale buffer banner",
+        );
+        assert!(
+            !state.known_codex_terminals.lock().unwrap().contains(tid),
+            "exit-trailing shell title must not re-register Codex in the cache",
+        );
+    }
+
+    #[test]
+    fn relaunched_claude_after_recent_exit_classifies_correctly() {
+        // The exit marker must not block a genuine fresh Claude session
+        // — if the user immediately relaunches `claude` and a new
+        // "Claude Code" title arrives, the live direct-title match must
+        // win and clear the marker so subsequent calls behave normally.
+        let state = AppState::new();
+        let tid = "t-claude-exit-then-relaunch";
+
+        record_interactive_app_exit(&state, tid, "Claude");
+
+        // Direct title match — the strongest signal, and the path
+        // `mark_claude_terminal` / PTY entry both rely on.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "Claude Code", None),
+            Some("Claude".to_string()),
+            "an explicit Claude title must override the recently-exited marker",
+        );
+        assert!(
+            state.known_claude_terminals.lock().unwrap().contains(tid),
+            "a fresh confirmed Claude must repopulate the cache",
+        );
+    }
+
+    #[test]
+    fn explicit_empty_title_reset_must_not_clear_fresh_exit_marker() {
+        // Regression guard for the live laymux-dev verification finding:
+        // WSL Claude / `/exit` emits an OSC 0 with an EMPTY title right
+        // after the PTY callback's `cr.exited` branch sets the exit
+        // marker. `detect_interactive_app_from_live_title` then enters
+        // its `is_explicit_empty_title_reset` branch and used to call
+        // `clear_known_interactive_app_state`, which also wiped the
+        // marker we just set — re-opening the buffer-scan strong-signal
+        // branch on the very next path-like shell-prompt title and
+        // re-pinning Claude. The helper must leave the marker alone so
+        // the next title sees it.
+        let state = AppState::new();
+        let tid = "t-empty-title-after-exit-keeps-marker";
+
+        // Simulate the PTY callback's `cr.exited` cleanup that ran on
+        // the same callback whose `event.data` is the empty title.
+        record_interactive_app_exit(&state, tid, "Claude");
+
+        // Buffer has the older Claude OSC + the empty title that just
+        // arrived (the same callback's event.data).
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07response\r\n");
+        buf.push(b"\x1b]0;\x07");
+
+        // This is the call `detect_interactive_app_from_live_title`
+        // makes from inside the same PTY callback as the exit. It
+        // returns None — the empty title is an explicit reset — but
+        // CRUCIALLY must not clear the exit marker.
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "", Some(&buf)),
+            None,
+            "empty title after Claude exit must classify as None",
+        );
+
+        // The marker must still be present so the next OSC 0/2 title
+        // (the path-like shell prompt) sees it and is_recently_exited
+        // returns true.
+        let mut buf2 = TerminalOutputBuffer::default();
+        buf2.push(b"\x1b]0;Claude Code\x07response\r\n");
+        buf2.push(b"\x1b]0;\x07");
+        buf2.push(b"\x1b]0;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\x07");
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(
+                &state,
+                tid,
+                "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                Some(&buf2),
+            ),
+            None,
+            "post-exit shell-prompt title must NOT re-pin Claude — the marker survived the empty-title reset",
+        );
+    }
+
+    #[test]
+    fn exit_marker_expires_after_grace_window() {
+        // The exit marker only suppresses revival for a bounded window
+        // (so a long-running shell that happens to have a stale banner
+        // somewhere is not stuck reporting nothing). After the window
+        // expires the buffer-scan helper is free to fire again — but
+        // by then ACTIVITY_SCAN_BYTES has almost always rotated the
+        // stale banner out, which is the normal recovery path.
+        use crate::constants::INTERACTIVE_APP_GRACE_WINDOW;
+
+        let state = AppState::new();
+        let tid = "t-claude-exit-marker-expires";
+
+        record_interactive_app_exit(&state, tid, "Claude");
+
+        // Age the marker beyond the window.
+        {
+            let mut guard = state.recently_exited_interactive_app.lock().unwrap();
+            let entry = guard.get_mut(tid).expect("entry must exist");
+            entry.1 = Instant::now() - INTERACTIVE_APP_GRACE_WINDOW - Duration::from_millis(10);
+        }
+
+        // Now a stale-banner buffer should revive Claude as before
+        // (the helper has no other signal to disambiguate against).
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07");
+
+        assert!(
+            is_claude_terminal_from_buffer(&state, tid, Some(&buf)),
+            "after the exit marker expires, the strong-signal buffer scan resumes",
+        );
     }
 }
