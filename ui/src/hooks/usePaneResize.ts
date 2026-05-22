@@ -20,6 +20,45 @@ export interface PaneBoundary {
 
 const EPSILON = 0.001;
 
+function pushUnique(indices: number[], value: number): void {
+  if (!indices.includes(value)) indices.push(value);
+}
+
+function mergeBoundarySegments(boundaries: PaneBoundary[]): PaneBoundary[] {
+  const sorted = [...boundaries].sort((a, b) => {
+    if (a.direction !== b.direction) return a.direction.localeCompare(b.direction);
+    if (Math.abs(a.position - b.position) >= EPSILON) return a.position - b.position;
+    return a.start - b.start;
+  });
+
+  const merged: PaneBoundary[] = [];
+
+  for (const boundary of sorted) {
+    const current = merged[merged.length - 1];
+    const canMerge =
+      current &&
+      current.direction === boundary.direction &&
+      Math.abs(current.position - boundary.position) < EPSILON &&
+      boundary.start <= current.end + EPSILON;
+
+    if (!canMerge) {
+      merged.push({
+        ...boundary,
+        leftPaneIndices: [...boundary.leftPaneIndices],
+        rightPaneIndices: [...boundary.rightPaneIndices],
+      });
+      continue;
+    }
+
+    current.start = Math.min(current.start, boundary.start);
+    current.end = Math.max(current.end, boundary.end);
+    for (const idx of boundary.leftPaneIndices) pushUnique(current.leftPaneIndices, idx);
+    for (const idx of boundary.rightPaneIndices) pushUnique(current.rightPaneIndices, idx);
+  }
+
+  return merged;
+}
+
 /**
  * Find all shared boundaries between panes.
  */
@@ -54,8 +93,8 @@ export function findPaneBoundaries(panes: GridRect[]): PaneBoundary[] {
                 Math.abs(bd.end - overlapEnd) < EPSILON,
             );
             if (existing) {
-              if (!existing.leftPaneIndices.includes(i)) existing.leftPaneIndices.push(i);
-              if (!existing.rightPaneIndices.includes(j)) existing.rightPaneIndices.push(j);
+              pushUnique(existing.leftPaneIndices, i);
+              pushUnique(existing.rightPaneIndices, j);
             } else {
               boundaries.push({
                 direction: "vertical",
@@ -84,8 +123,8 @@ export function findPaneBoundaries(panes: GridRect[]): PaneBoundary[] {
                 Math.abs(bd.end - overlapEnd) < EPSILON,
             );
             if (existing) {
-              if (!existing.leftPaneIndices.includes(j)) existing.leftPaneIndices.push(j);
-              if (!existing.rightPaneIndices.includes(i)) existing.rightPaneIndices.push(i);
+              pushUnique(existing.leftPaneIndices, j);
+              pushUnique(existing.rightPaneIndices, i);
             } else {
               boundaries.push({
                 direction: "vertical",
@@ -120,8 +159,8 @@ export function findPaneBoundaries(panes: GridRect[]): PaneBoundary[] {
                 Math.abs(bd.end - overlapEnd) < EPSILON,
             );
             if (existing) {
-              if (!existing.leftPaneIndices.includes(i)) existing.leftPaneIndices.push(i);
-              if (!existing.rightPaneIndices.includes(j)) existing.rightPaneIndices.push(j);
+              pushUnique(existing.leftPaneIndices, i);
+              pushUnique(existing.rightPaneIndices, j);
             } else {
               boundaries.push({
                 direction: "horizontal",
@@ -150,8 +189,8 @@ export function findPaneBoundaries(panes: GridRect[]): PaneBoundary[] {
                 Math.abs(bd.end - overlapEnd) < EPSILON,
             );
             if (existing) {
-              if (!existing.leftPaneIndices.includes(j)) existing.leftPaneIndices.push(j);
-              if (!existing.rightPaneIndices.includes(i)) existing.rightPaneIndices.push(i);
+              pushUnique(existing.leftPaneIndices, j);
+              pushUnique(existing.rightPaneIndices, i);
             } else {
               boundaries.push({
                 direction: "horizontal",
@@ -168,7 +207,7 @@ export function findPaneBoundaries(panes: GridRect[]): PaneBoundary[] {
     }
   }
 
-  return boundaries;
+  return mergeBoundarySegments(boundaries);
 }
 
 /**
