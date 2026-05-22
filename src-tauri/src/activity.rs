@@ -419,6 +419,38 @@ pub fn clear_interactive_app_grace_window(state: &AppState, terminal_id: &str) {
     }
 }
 
+fn clear_known_interactive_app_state(state: &AppState, terminal_id: &str) {
+    if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+        known.remove(terminal_id);
+    }
+    if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+        known.remove(terminal_id);
+    }
+    clear_interactive_app_grace_window(state, terminal_id);
+}
+
+fn has_known_interactive_app_state(state: &AppState, terminal_id: &str) -> bool {
+    state
+        .known_claude_terminals
+        .lock_or_err()
+        .map(|known| known.contains(terminal_id))
+        .unwrap_or(false)
+        || state
+            .known_codex_terminals
+            .lock_or_err()
+            .map(|known| known.contains(terminal_id))
+            .unwrap_or(false)
+}
+
+fn is_explicit_empty_title_reset(title: &str, buffer: Option<&TerminalOutputBuffer>) -> bool {
+    if !title.is_empty() {
+        return false;
+    }
+    buffer
+        .and_then(|buf| osc::extract_last_terminal_title(&buf.recent_bytes(ACTIVITY_SCAN_BYTES)))
+        .is_some_and(|latest| latest.is_empty())
+}
+
 pub fn detect_interactive_app_from_live_title(
     state: &AppState,
     terminal_id: &str,
@@ -432,6 +464,18 @@ pub fn detect_interactive_app_from_live_title(
         sync_known_caches(state, terminal_id, &name);
         record_interactive_app_detection(state, terminal_id, &name);
         return Some(name);
+    }
+
+    // An explicit empty OSC 0/2 title is a terminal title reset. Claude
+    // commonly emits this on exit in WSL; without this guard the stale
+    // "Claude Code" banner still present in the recent buffer can
+    // immediately repopulate known_claude_terminals after the PTY exit
+    // branch has cleared it.
+    if is_explicit_empty_title_reset(title, buffer)
+        && !has_known_interactive_app_state(state, terminal_id)
+    {
+        clear_known_interactive_app_state(state, terminal_id);
+        return None;
     }
 
     // 2) Persistent signals. Both helpers cover the cache fast-path AND a
@@ -1424,6 +1468,80 @@ mod tests {
         assert!(
             !state.known_claude_terminals.lock().unwrap().contains(tid),
             "lazy invalidation must drop the stale Claude cache entry"
+        );
+    }
+
+    #[test]
+    fn explicit_empty_title_reset_wins_over_stale_claude_banner() {
+        // WSL Claude exit regression: Claude can reset OSC 0/2 to an
+        // empty title. The PTY callback clears known_claude_terminals on
+        // that exit, but the recent buffer still contains the older
+        // "Claude Code" title. The title-change payload builder must not
+        // let that stale banner re-register Claude immediately.
+        let state = AppState::new();
+        let tid = "t-claude-wsl-empty-title-exit";
+
+        // The exit path has already cleared the persistent cache but the
+        // grace entry still exists from the previous confirmed Claude session.
+        record_interactive_app_detection(&state, tid, "Claude");
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07");
+        buf.push(b"\x1b]0;\x07");
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, "", Some(&buf)),
+            None,
+            "an explicit empty title reset is a Claude exit signal, not a stale-buffer recovery point"
+        );
+        assert!(
+            !state.known_claude_terminals.lock().unwrap().contains(tid),
+            "exit title must leave the Claude cache cleared"
+        );
+        assert_eq!(
+            lookup_interactive_app_within_grace_window(&state, tid),
+            None,
+            "exit title must clear the grace window so the frontend sees Shell immediately"
+        );
+    }
+
+    #[test]
+    fn stale_empty_title_does_not_clear_fresh_command_detected_claude_startup() {
+        // Relaunch regression: after a prior Claude exit, the recent buffer
+        // can still end in an empty OSC 0/2 reset. A new `claude` command is
+        // detected before the next "Claude Code" title arrives, so
+        // `mark_claude_terminal` seeds known_claude + grace. That fresh
+        // startup state must survive the stale empty title in the buffer.
+        let state = AppState::new();
+        let tid = "t-claude-relaunch-stale-empty-title";
+
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        sync_known_caches(&state, tid, "Claude");
+        record_interactive_app_detection(&state, tid, "Claude");
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07");
+        buf.push(b"\x1b]0;\x07");
+
+        assert_eq!(
+            detect_terminal_state(&state, tid, Some(&buf)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Claude".to_string()
+            },
+            "fresh command-detected Claude startup must not be cleared by a stale empty title reset"
+        );
+        assert!(
+            state.known_claude_terminals.lock().unwrap().contains(tid),
+            "fresh Claude cache entry must be preserved during startup"
+        );
+        assert_eq!(
+            lookup_interactive_app_within_grace_window(&state, tid),
+            Some("Claude".to_string()),
+            "fresh grace window must be preserved during startup"
         );
     }
 
