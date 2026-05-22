@@ -7,6 +7,7 @@ import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneGrid } from "./PaneGrid";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
+import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 
 interface DockProps {
   position: DockPosition;
@@ -53,6 +54,7 @@ export function Dock({
   });
 
   const singleHover = useHoverTimer(hoverIdleSeconds);
+  const resolveCwdDefaults = useCwdDefaultsResolver("dock");
 
   // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
@@ -72,6 +74,17 @@ export function Dock({
 
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
+  const singleView = panes[0]?.view;
+  const hasSingleCwdView =
+    singleView?.type === "TerminalView" || singleView?.type === "FileExplorerView";
+  const singleCwdDefaults = hasSingleCwdView && singleView ? resolveCwdDefaults(singleView) : null;
+  const singleCwdSendOn = singleCwdDefaults
+    ? ((singleView?.cwdSend as boolean | undefined) ?? singleCwdDefaults.send)
+    : undefined;
+  const singleCwdReceiveOn = singleCwdDefaults
+    ? ((singleView?.cwdReceive as boolean | undefined) ?? singleCwdDefaults.receive)
+    : undefined;
+
   return (
     <div
       data-testid={`dock-${position}`}
@@ -111,6 +124,8 @@ export function Dock({
           paneId={singlePaneId}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
           hovered={singleHover.hoveredId !== null}
+          cwdSendOn={singleCwdSendOn}
+          cwdReceiveOn={singleCwdReceiveOn}
           actions={{
             onSplitH:
               onSplitPane && singlePaneId
@@ -127,24 +142,21 @@ export function Dock({
                     : undefined
                 : undefined,
             onToggleCwdSend:
-              singlePaneId &&
-              onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
-                ? () =>
-                    onSetPaneView(singlePaneId, {
-                      ...panes[0].view,
-                      cwdSend: !((panes[0].view.cwdSend as boolean) ?? true),
-                    })
+              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+                ? () => {
+                    const current =
+                      (panes[0].view.cwdSend as boolean | undefined) ?? singleCwdDefaults.send;
+                    onSetPaneView(singlePaneId, { ...panes[0].view, cwdSend: !current });
+                  }
                 : undefined,
             onToggleCwdReceive:
-              singlePaneId &&
-              onSetPaneView &&
-              (panes[0]?.view.type === "TerminalView" || panes[0]?.view.type === "FileExplorerView")
-                ? () =>
-                    onSetPaneView(singlePaneId, {
-                      ...panes[0].view,
-                      cwdReceive: !((panes[0].view.cwdReceive as boolean) ?? true),
-                    })
+              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+                ? () => {
+                    const current =
+                      (panes[0].view.cwdReceive as boolean | undefined) ??
+                      singleCwdDefaults.receive;
+                    onSetPaneView(singlePaneId, { ...panes[0].view, cwdReceive: !current });
+                  }
                 : undefined,
           }}
         >
@@ -193,6 +205,7 @@ function DockGrid({
 }) {
   const focusedDock = useDockStore((s) => s.focusedDock);
   const focusedDockPaneId = useDockStore((s) => s.focusedDockPaneId);
+  const resolveCwdDefaults = useCwdDefaultsResolver("dock");
 
   return (
     <PaneGrid
@@ -209,7 +222,7 @@ function DockGrid({
       onSetPaneView={onSetPaneView}
       onSplitPane={onSplitPane}
       onRemovePane={onRemovePane}
-      getCwdDefaults={() => ({ send: true, receive: true })}
+      getCwdDefaults={resolveCwdDefaults}
       workspaceId={activeWorkspaceId}
       workspaceName={activeWsName}
       emptyViewContext="dock"

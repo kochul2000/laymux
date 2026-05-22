@@ -363,4 +363,223 @@ describe("Dock", () => {
     fireEvent.click(screen.getByTestId("pane-control-split-v"));
     expect(onSplitPane).toHaveBeenCalledWith("dp-1", "vertical");
   });
+
+  // -- CWD toggle defaults follow syncCwdDefaults --
+  //
+  // 기본 syncCwdDefaults는 workspace/dock 모두 { send: false, receive: false } 이다.
+  // 신규 dock 페인이 cwdSend/cwdReceive override 없이 표시될 때 OFF 아이콘이 나와야 한다.
+
+  it("single-pane dock shows CWD send/receive OFF by default (syncCwdDefaults.dock=off)", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-1",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={vi.fn()}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("single-pane dock toggling CWD send from default-off sets cwdSend=true", () => {
+    const onSetPaneView = vi.fn();
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-1",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={onSetPaneView}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith("dp-1", expect.objectContaining({ cwdSend: true }));
+  });
+
+  it("single-pane FileExplorer uses fileExplorer.shellProfile for CWD defaults", () => {
+    const onSetPaneView = vi.fn();
+    useSettingsStore.setState((s) => ({
+      fileExplorer: { ...s.fileExplorer, shellProfile: "WSL" },
+      profiles: s.profiles.map((p) =>
+        p.name === "WSL"
+          ? { ...p, syncCwd: { send: true, receive: true } }
+          : p.name === "PowerShell"
+            ? { ...p, syncCwd: { send: false, receive: false } }
+            : p,
+      ),
+    }));
+
+    render(
+      <Dock
+        position="bottom"
+        activeView="FileExplorerView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-files",
+            view: { type: "FileExplorerView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={onSetPaneView}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith(
+      "dp-files",
+      expect.objectContaining({ cwdSend: false }),
+    );
+  });
+
+  it("updates single-pane CWD indicators when dock syncCwdDefaults changes", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-1",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+
+    act(() => {
+      useSettingsStore.getState().setSyncCwdDefaults({ dock: { send: true, receive: true } });
+    });
+
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (on)",
+    );
+  });
+
+  it("split-pane dock shows CWD send/receive OFF by default", () => {
+    render(
+      <Dock
+        position="left"
+        activeView={null}
+        views={[]}
+        panes={[
+          {
+            id: "dp-1",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 0.5,
+          },
+          {
+            id: "dp-2",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0.5,
+            w: 1,
+            h: 0.5,
+          },
+        ]}
+        onSetPaneView={vi.fn()}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-pane-dp-1"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("split-pane FileExplorer uses fileExplorer.shellProfile for CWD defaults", () => {
+    const onSetPaneView = vi.fn();
+    useSettingsStore.setState((s) => ({
+      fileExplorer: { ...s.fileExplorer, shellProfile: "WSL" },
+      profiles: s.profiles.map((p) =>
+        p.name === "WSL"
+          ? { ...p, syncCwd: { send: true, receive: true } }
+          : p.name === "PowerShell"
+            ? { ...p, syncCwd: { send: false, receive: false } }
+            : p,
+      ),
+    }));
+
+    render(
+      <Dock
+        position="left"
+        activeView={null}
+        views={[]}
+        panes={[
+          {
+            id: "dp-files",
+            view: { type: "FileExplorerView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 0.5,
+          },
+          {
+            id: "dp-term",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0.5,
+            w: 1,
+            h: 0.5,
+          },
+        ]}
+        onSetPaneView={onSetPaneView}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-pane-dp-files"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith(
+      "dp-files",
+      expect.objectContaining({ cwdSend: false }),
+    );
+  });
 });

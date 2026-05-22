@@ -111,4 +111,119 @@ describe("PaneGrid", () => {
     expect(pane0.getAttribute("data-pane-index")).toBe("0");
     expect(pane1.getAttribute("data-pane-index")).toBe("1");
   });
+
+  // -- CWD toggle indicator reflects getCwdDefaults --
+  //
+  // 기본값(off)인 신규 페인에서도 viewConfig에 cwdSend/cwdReceive override가 없으면
+  // PaneControlBar 표시는 OFF여야 한다. (Regression: 표시는 ?? true로 폴백되어 ON으로 보였다)
+
+  it("shows CWD send/receive as OFF when getCwdDefaults returns {send:false, receive:false} and no override", () => {
+    const onePane: GridPane[] = [
+      {
+        id: "pane-x",
+        view: { type: "TerminalView", profile: "PowerShell" },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(
+      <PaneGrid
+        {...defaultProps}
+        panes={onePane}
+        onSetPaneView={vi.fn()}
+        getCwdDefaults={() => ({ send: false, receive: false })}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("shows CWD send/receive as ON when getCwdDefaults returns true and no override", () => {
+    const onePane: GridPane[] = [
+      {
+        id: "pane-x",
+        view: { type: "TerminalView", profile: "PowerShell" },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(
+      <PaneGrid
+        {...defaultProps}
+        panes={onePane}
+        onSetPaneView={vi.fn()}
+        getCwdDefaults={() => ({ send: true, receive: true })}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (on)",
+    );
+  });
+
+  it("per-pane override beats getCwdDefaults (override=false, defaults=true → OFF)", () => {
+    const onePane: GridPane[] = [
+      {
+        id: "pane-x",
+        view: { type: "TerminalView", profile: "PowerShell", cwdSend: false, cwdReceive: false },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(
+      <PaneGrid
+        {...defaultProps}
+        panes={onePane}
+        onSetPaneView={vi.fn()}
+        getCwdDefaults={() => ({ send: true, receive: true })}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (off)",
+    );
+  });
+
+  it("toggling CWD send from default-off (no override) sets cwdSend=true", () => {
+    const onSetPaneView = vi.fn();
+    const onePane: GridPane[] = [
+      {
+        id: "pane-x",
+        view: { type: "TerminalView", profile: "PowerShell" },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(
+      <PaneGrid
+        {...defaultProps}
+        panes={onePane}
+        onSetPaneView={onSetPaneView}
+        getCwdDefaults={() => ({ send: false, receive: false })}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith(
+      "pane-x",
+      expect.objectContaining({ cwdSend: true }),
+    );
+  });
 });

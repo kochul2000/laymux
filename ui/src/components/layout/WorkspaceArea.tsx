@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/stores/settings-store";
-import type { ViewInstanceConfig } from "@/stores/types";
+import type { TerminalLocation } from "@/stores/settings-store";
 import { PaneGrid } from "./PaneGrid";
+import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 
 export function WorkspaceArea() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -16,9 +16,8 @@ export function WorkspaceArea() {
   const setPaneView = useWorkspaceStore((s) => s.setPaneView);
   const splitPane = useWorkspaceStore((s) => s.splitPane);
   const removePane = useWorkspaceStore((s) => s.removePane);
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const resolveSyncCwdForProfile = useSettingsStore((s) => s.resolveSyncCwdForProfile);
   const location: TerminalLocation = "workspace";
+  const resolveCwdDefaults = useCwdDefaultsResolver(location);
 
   // Lazy mount: only render panes for workspaces that have been activated at least once.
   // Prevents unnecessary TerminalView/WebGL initialization for never-visited workspaces,
@@ -55,10 +54,7 @@ export function WorkspaceArea() {
             }
             onSplitPane={isActive ? (paneId, dir) => splitPane(idxOf(paneId), dir) : undefined}
             onRemovePane={isActive ? (paneId) => removePane(idxOf(paneId)) : undefined}
-            getCwdDefaults={(view: ViewInstanceConfig) => {
-              const profileName = (view.profile as string) || defaultProfile || FALLBACK_PROFILE;
-              return resolveSyncCwdForProfile(profileName, location);
-            }}
+            getCwdDefaults={resolveCwdDefaults}
             isHoveredOverride={
               isActive && automationHoverIndex !== null
                 ? (paneId) => automationHoverIndex === idxOf(paneId)

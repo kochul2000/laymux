@@ -108,6 +108,17 @@ export function PaneGrid({
         const hasCwdView =
           pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView";
 
+        // Effective CWD send/receive: per-pane override beats getCwdDefaults cascade.
+        // This is the same precedence the backend applies via ViewRenderer → resolveSyncCwd,
+        // so the indicator and the actual propagation stay in sync.
+        const cwdDefaults = hasCwdView && getCwdDefaults ? getCwdDefaults(pane.view) : null;
+        const cwdSendOn = cwdDefaults
+          ? ((pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send)
+          : undefined;
+        const cwdReceiveOn = cwdDefaults
+          ? ((pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive)
+          : undefined;
+
         return (
           <div
             key={pane.id}
@@ -137,6 +148,8 @@ export function PaneGrid({
               paneId={pane.id}
               currentView={pane.view}
               hovered={isActive && isHovered}
+              cwdSendOn={cwdSendOn}
+              cwdReceiveOn={cwdReceiveOn}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)
@@ -149,19 +162,18 @@ export function PaneGrid({
                 onDelete:
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
-                  hasCwdView && onSetPaneView && getCwdDefaults
+                  hasCwdView && onSetPaneView && cwdDefaults
                     ? () => {
-                        const defaults = getCwdDefaults(pane.view);
-                        const current = (pane.view.cwdSend as boolean | undefined) ?? defaults.send;
+                        const current =
+                          (pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send;
                         onSetPaneView(pane.id, { ...pane.view, cwdSend: !current });
                       }
                     : undefined,
                 onToggleCwdReceive:
-                  hasCwdView && onSetPaneView && getCwdDefaults
+                  hasCwdView && onSetPaneView && cwdDefaults
                     ? () => {
-                        const defaults = getCwdDefaults(pane.view);
                         const current =
-                          (pane.view.cwdReceive as boolean | undefined) ?? defaults.receive;
+                          (pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive;
                         onSetPaneView(pane.id, { ...pane.view, cwdReceive: !current });
                       }
                     : undefined,
