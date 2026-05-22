@@ -273,6 +273,36 @@ describe("shouldDismissClaudeInputPendingFromOutput", () => {
       ),
     ).toBe(false);
   });
+
+  it("dismisses when Claude is now running a working spinner and the only ❯ residue is conversation text", () => {
+    // Reproduces a real WSL-Claude session captured in release v0.3.8: the
+    // modal pending marker stayed pinned forever because the rolling
+    // dismissal buffer (4 KB) still contained 22 ❯ characters from the
+    // conversation that came after the user answered the modal. The
+    // normal `╰─❯ ` input prompt isn't drawn while Claude is working,
+    // so the original two-clause check returned false on every chunk and
+    // `requiresAction` notifications never got mark-read.
+    //
+    // The post-fix decisive signal: a working spinner glyph (✶✻✽✢ or
+    // Braille) anywhere in the buffer tail means modal answered →
+    // Claude is processing again → drop the marker.
+    const captured =
+      "Wibbling…running stop hook · 6m 16s · ↓16.5k tokens)✽Churned for 6m 16s❯\n" +
+      "❯ 4. INFO 로그 볼륨 (낮음)\n" +
+      'logger.info("reCAPTCHAwhitelistappliedforIP%s:required_score->%s",ip,score)\n' +
+      "  ⏵⏵ bypass permissions on (shift+tab to cycle) · PR #3422\n" +
+      "✽ Wibbling… (6m 16s · ↓ 16.5k tokens)\n";
+    expect(shouldDismissClaudeInputPendingFromOutput(captured)).toBe(true);
+  });
+
+  it("dismisses on Braille working spinner residue (Claude's animated working frame)", () => {
+    // Claude's working animation cycles through Braille glyphs
+    // (U+2800–U+28FF). Even when a stray ❯ from a prior modal frame
+    // is still in the buffer, the Braille marker is unambiguous proof
+    // that the modal has been answered.
+    const withBraille = "answer 1\n" + "❯ context line\n" + "⠋ Thinking…\n";
+    expect(shouldDismissClaudeInputPendingFromOutput(withBraille)).toBe(true);
+  });
 });
 
 describe("detectNewCodexInputPendingPrompt", () => {

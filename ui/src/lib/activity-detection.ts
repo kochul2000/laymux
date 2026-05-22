@@ -137,10 +137,28 @@ export function detectNewClaudeInputPendingPrompt(previousText: string, nextText
  * Returns true when a previously visible Claude modal should be considered
  * resolved. Claude's normal prompt also contains `❯` (`╰─❯ `), so dismissal
  * cannot be keyed only on "no arrow in the recent output".
+ *
+ * Three sufficient signals:
+ *   1. Claude's normal `╰─❯ ` input prompt is visible again.
+ *   2. The buffer contains no selection arrow at all.
+ *   3. The full modal pattern is no longer present in the rolling
+ *      buffer. The detector requires `❯ N. text` (the arrow-prefixed
+ *      selectable option) **and** ≥2 numbered option lines — both
+ *      signals are unique to a live modal frame. Once Claude redraws
+ *      into a working spinner or a conversation response the
+ *      numbered-option count drops below threshold and dismissal can
+ *      fire even if a stray `❯` from conversation text still lives
+ *      in the 4 KB rolling window. Release v0.3.8 reproduced a stuck
+ *      `requiresAction` notification with 22 ❯ characters in the
+ *      buffer but only a single `❯ 4. INFO 로그…` arrowed option —
+ *      detection returned false and the original two-clause check
+ *      kept the marker pinned forever.
  */
 export function shouldDismissClaudeInputPendingFromOutput(text: string): boolean {
   const plain = stripAnsi(text);
-  return CLAUDE_NORMAL_INPUT_PROMPT.test(plain) || !plain.includes(CLAUDE_SELECTION_ARROW);
+  if (CLAUDE_NORMAL_INPUT_PROMPT.test(plain)) return true;
+  if (!plain.includes(CLAUDE_SELECTION_ARROW)) return true;
+  return !detectClaudeInputPendingFromOutput(plain);
 }
 
 /** Known interactive apps without dedicated provider handlers. */
