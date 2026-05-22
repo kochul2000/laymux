@@ -422,6 +422,82 @@ describe("Dock", () => {
     expect(onSetPaneView).toHaveBeenCalledWith("dp-1", expect.objectContaining({ cwdSend: true }));
   });
 
+  it("single-pane FileExplorer uses fileExplorer.shellProfile for CWD defaults", () => {
+    const onSetPaneView = vi.fn();
+    useSettingsStore.setState((s) => ({
+      fileExplorer: { ...s.fileExplorer, shellProfile: "WSL" },
+      profiles: s.profiles.map((p) =>
+        p.name === "WSL"
+          ? { ...p, syncCwd: { send: true, receive: true } }
+          : p.name === "PowerShell"
+            ? { ...p, syncCwd: { send: false, receive: false } }
+            : p,
+      ),
+    }));
+
+    render(
+      <Dock
+        position="bottom"
+        activeView="FileExplorerView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-files",
+            view: { type: "FileExplorerView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={onSetPaneView}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith(
+      "dp-files",
+      expect.objectContaining({ cwdSend: false }),
+    );
+  });
+
+  it("updates single-pane CWD indicators when dock syncCwdDefaults changes", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[
+          {
+            id: "dp-1",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+          },
+        ]}
+        onSetPaneView={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe(
+      "CWD Send (off)",
+    );
+
+    act(() => {
+      useSettingsStore.getState().setSyncCwdDefaults({ dock: { send: true, receive: true } });
+    });
+
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (on)",
+    );
+  });
+
   it("split-pane dock shows CWD send/receive OFF by default", () => {
     render(
       <Dock
@@ -455,6 +531,55 @@ describe("Dock", () => {
     );
     expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
       "CWD Receive (off)",
+    );
+  });
+
+  it("split-pane FileExplorer uses fileExplorer.shellProfile for CWD defaults", () => {
+    const onSetPaneView = vi.fn();
+    useSettingsStore.setState((s) => ({
+      fileExplorer: { ...s.fileExplorer, shellProfile: "WSL" },
+      profiles: s.profiles.map((p) =>
+        p.name === "WSL"
+          ? { ...p, syncCwd: { send: true, receive: true } }
+          : p.name === "PowerShell"
+            ? { ...p, syncCwd: { send: false, receive: false } }
+            : p,
+      ),
+    }));
+
+    render(
+      <Dock
+        position="left"
+        activeView={null}
+        views={[]}
+        panes={[
+          {
+            id: "dp-files",
+            view: { type: "FileExplorerView", profile: "PowerShell" },
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 0.5,
+          },
+          {
+            id: "dp-term",
+            view: { type: "TerminalView", profile: "PowerShell" },
+            x: 0,
+            y: 0.5,
+            w: 1,
+            h: 0.5,
+          },
+        ]}
+        onSetPaneView={onSetPaneView}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("dock-pane-dp-files"));
+    expect(screen.getByTestId("pane-control-cwd-send").getAttribute("title")).toBe("CWD Send (on)");
+    fireEvent.click(screen.getByTestId("pane-control-cwd-send"));
+    expect(onSetPaneView).toHaveBeenCalledWith(
+      "dp-files",
+      expect.objectContaining({ cwdSend: false }),
     );
   });
 });
