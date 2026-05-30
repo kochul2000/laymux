@@ -95,6 +95,29 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
   });
 
+  it("renders the pane number badge in the bar when paneNumber is set", () => {
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={true}
+        paneNumber={4}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-number-badge")).toHaveTextContent("4");
+  });
+
+  it("does not render the badge when paneNumber is unset", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-number-badge")).not.toBeInTheDocument();
+  });
+
   it("bar contains view selector, split, clear, pin, minimize buttons", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>

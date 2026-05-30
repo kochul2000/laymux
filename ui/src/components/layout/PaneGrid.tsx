@@ -8,6 +8,7 @@ import { FocusIndicator } from "./FocusIndicator";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
+import { computePaneNumbers } from "@/lib/pane-numbers";
 
 export interface GridPane {
   id: string;
@@ -52,6 +53,10 @@ export interface PaneGridProps {
   // Optional: external hover override (automationHoverIndex)
   isHoveredOverride?: (paneId: string) => boolean;
 
+  // Optional: show spatial pane-number badges in the control bar (issue #256).
+  // Off by default so the dock (which reuses PaneGrid) stays unnumbered.
+  showPaneNumbers?: boolean;
+
   // PaneBoundaryHandles override props
   boundaryHandlesProps?: {
     panes?: Array<{ x: number; y: number; w: number; h: number }>;
@@ -84,6 +89,7 @@ export function PaneGrid({
   location,
   isActive = true,
   isHoveredOverride,
+  showPaneNumbers = false,
   boundaryHandlesProps,
   containerTestId,
   containerClassName = "relative h-full w-full",
@@ -93,6 +99,8 @@ export function PaneGrid({
   const size = useContainerSize(containerRef);
   const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
   const hover = useHoverTimer(hoverIdleSeconds);
+  // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
+  const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
 
   return (
     <div
@@ -150,6 +158,7 @@ export function PaneGrid({
               hovered={isActive && isHovered}
               cwdSendOn={cwdSendOn}
               cwdReceiveOn={cwdReceiveOn}
+              paneNumber={paneNumbers?.get(pane.id)}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)

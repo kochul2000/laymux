@@ -27,6 +27,12 @@ export interface PaneControlContextValue {
   leftBarContent: ReactNode;
   /** 좌측 슬롯 콘텐츠 설정/해제. `null` 이면 기본 스페이서로 복귀. */
   setLeftBarContent: (node: ReactNode) => void;
+  /**
+   * 화면 읽기 순서 기반 pane 번호(issue #256). 컨트롤바 좌측에 배지로 표시한다.
+   * 배열 인덱스(`paneIndex`)가 아니라 공간 위치 번호(`paneNumber`)이며, dock 등
+   * 번호가 없는 경우 `undefined`.
+   */
+  paneNumber?: number;
 }
 
 export const PaneControlContext = createContext<PaneControlContextValue | null>(null);

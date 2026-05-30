@@ -76,4 +76,16 @@ describe("ViewHeader with PaneControlContext", () => {
     renderWithCtx(ctx, <ViewHeader>My View Title</ViewHeader>);
     expect(screen.getByText("My View Title")).toBeInTheDocument();
   });
+
+  it("renders the pane number badge when paneNumber is set", () => {
+    const ctx = makeCtx({ paneNumber: 2 });
+    renderWithCtx(ctx, <ViewHeader title="term">x</ViewHeader>);
+    expect(screen.getByTestId("pane-number-badge")).toHaveTextContent("2");
+  });
+
+  it("does not render the badge when paneNumber is undefined", () => {
+    const ctx = makeCtx();
+    renderWithCtx(ctx, <ViewHeader title="term">x</ViewHeader>);
+    expect(screen.queryByTestId("pane-number-badge")).not.toBeInTheDocument();
+  });
 });

@@ -1362,3 +1362,168 @@ describe("notifications.clear bridge handler", () => {
     expect(result.error).toMatch(/array/i);
   });
 });
+
+describe("spatial pane numbers (issue #256)", () => {
+  // Seed a workspace whose array order [TL, BL, TR] diverges from reading order
+  // (TL=1, TR=2, BL=3). Terminals registered for all three panes.
+  const WS_ID = "ws-num";
+  const TL = "pane-TL";
+  const BL = "pane-BL";
+  const TR = "pane-TR";
+
+  function seedDivergentWorkspace() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: WS_ID,
+          name: "Nums",
+          panes: [
+            { id: TL, x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+            { id: BL, x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+            { id: TR, x: 0.5, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: WS_ID,
+    });
+    for (const id of [TL, BL, TR]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${id}`,
+        profile: "WSL",
+        syncGroup: "Default",
+        workspaceId: WS_ID,
+      });
+    }
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("list_terminals exposes paneNumber in reading order regardless of array order", () => {
+    seedDivergentWorkspace();
+    const result = handleAutomationRequest({
+      requestId: "n-list",
+      category: "query",
+      target: "terminals",
+      method: "list",
+      params: {},
+    });
+    const instances = (result.data as Record<string, unknown>).instances as Array<
+      Record<string, unknown>
+    >;
+    const byId = Object.fromEntries(instances.map((i) => [i.id, i.paneNumber]));
+    expect(byId[`terminal-${TL}`]).toBe(1);
+    expect(byId[`terminal-${TR}`]).toBe(2);
+    expect(byId[`terminal-${BL}`]).toBe(3);
+  });
+
+  it("identify exposes pane.number and neighbor paneNumber", () => {
+    seedDivergentWorkspace();
+    const result = handleAutomationRequest({
+      requestId: "n-id",
+      category: "query",
+      target: "terminals",
+      method: "identify",
+      params: { id: `terminal-${TL}` },
+    });
+    const data = result.data as Record<string, unknown>;
+    const pane = data.pane as Record<string, unknown>;
+    expect(pane.number).toBe(1);
+    const neighbors = data.neighbors as Record<string, Record<string, unknown> | null>;
+    // TL's right neighbor is TR (paneNumber 2); below neighbor is BL (paneNumber 3).
+    expect(neighbors.right?.paneNumber).toBe(2);
+    expect(neighbors.below?.paneNumber).toBe(3);
+  });
+
+  it("get_active_workspace exposes paneNumber and focusedPaneNumber", () => {
+    seedDivergentWorkspace();
+    useGridStore.setState({ focusedPaneIndex: 1 }); // array index 1 = BL = number 3
+    const result = handleAutomationRequest({
+      requestId: "n-gaw",
+      category: "query",
+      target: "workspaces",
+      method: "getActive",
+      params: {},
+    });
+    const ws = (result.data as Record<string, unknown>).workspace as Record<string, unknown>;
+    expect(ws.focusedPaneNumber).toBe(3);
+    const panes = ws.panes as Array<Record<string, unknown>>;
+    const byId = Object.fromEntries(panes.map((p) => [p.id, p.paneNumber]));
+    expect(byId[TL]).toBe(1);
+    expect(byId[TR]).toBe(2);
+    expect(byId[BL]).toBe(3);
+  });
+
+  it("grid.getState exposes focusedPaneNumber and a number<->terminal summary", () => {
+    seedDivergentWorkspace();
+    useGridStore.setState({ focusedPaneIndex: 2 }); // array index 2 = TR = number 2
+    const result = handleAutomationRequest({
+      requestId: "n-grid",
+      category: "query",
+      target: "grid",
+      method: "getState",
+      params: {},
+    });
+    const data = result.data as Record<string, unknown>;
+    expect(data.focusedPaneNumber).toBe(2);
+    const panes = data.panes as Array<Record<string, unknown>>;
+    // Sorted by paneNumber ascending.
+    expect(panes.map((p) => p.paneNumber)).toEqual([1, 2, 3]);
+    expect(panes[0]).toMatchObject({ paneNumber: 1, paneId: TL, terminalId: `terminal-${TL}` });
+    expect(panes[1]).toMatchObject({ paneNumber: 2, paneId: TR });
+  });
+
+  it("resolveByNumber maps a number to a terminal id in the active workspace", () => {
+    seedDivergentWorkspace();
+    const result = handleAutomationRequest({
+      requestId: "n-res",
+      category: "query",
+      target: "terminals",
+      method: "resolveByNumber",
+      params: { number: 2 },
+    });
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.terminalId).toBe(`terminal-${TR}`);
+    expect(data.paneId).toBe(TR);
+  });
+
+  it("resolveByNumber errors for an out-of-range number", () => {
+    seedDivergentWorkspace();
+    const result = handleAutomationRequest({
+      requestId: "n-res-bad",
+      category: "query",
+      target: "terminals",
+      method: "resolveByNumber",
+      params: { number: 9 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/No pane numbered 9/);
+  });
+
+  it("resolveByNumber errors when the pane is not a terminal", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: WS_ID,
+          name: "Nums",
+          panes: [{ id: "pane-empty", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+        },
+      ],
+      activeWorkspaceId: WS_ID,
+    });
+    const result = handleAutomationRequest({
+      requestId: "n-res-empty",
+      category: "query",
+      target: "terminals",
+      method: "resolveByNumber",
+      params: { number: 1 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not a terminal/);
+  });
+});
