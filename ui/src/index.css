@@ -49,6 +49,7 @@
   /* utility */
   --separator-bg: rgba(255, 255, 255, 0.08); /* intentionally same as --hover-bg-strong */
   --transition-fast: 0.1s;
+  --transition-list-collapse: 0.18s;
   --terminal-composition-underline-color: currentColor;
 }
 
@@ -139,6 +140,49 @@
   }
   .row-eye-btn:hover {
     background: var(--hover-bg-strong);
+  }
+
+  .workspace-item-animated {
+    display: grid;
+    grid-template-rows: 1fr;
+    overflow: hidden;
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+      grid-template-rows var(--transition-list-collapse) ease,
+      opacity var(--transition-list-collapse) ease,
+      transform var(--transition-list-collapse) ease,
+      border-bottom-width var(--transition-list-collapse) ease;
+  }
+  .workspace-item-content {
+    min-height: 0;
+    overflow: hidden;
+  }
+  .workspace-item-collapsed {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+  }
+
+  .workspace-pane-row {
+    max-height: 28px;
+    opacity: 1;
+    transform: translateY(0);
+    overflow: hidden;
+    transition:
+      max-height var(--transition-list-collapse) ease,
+      opacity var(--transition-list-collapse) ease,
+      transform var(--transition-list-collapse) ease,
+      margin var(--transition-list-collapse) ease;
+  }
+  .workspace-pane-row-collapsed {
+    max-height: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    margin-top: 0;
+    margin-bottom: 0;
   }
 
   /* Toolbar (28px header bar) */
