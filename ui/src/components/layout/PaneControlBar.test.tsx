@@ -118,6 +118,37 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-number-badge")).not.toBeInTheDocument();
   });
 
+  it("keeps controls right-aligned with a spacer when only the badge is on the hover bar", () => {
+    // paneNumber makes the hover bar full-width; without a flex-1 spacer the
+    // controls would collapse next to the badge on the left and overlay content.
+    const { rerender } = render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={defaultActions}
+        hovered={true}
+        paneNumber={2}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const bar = screen.getByTestId("pane-control-bar");
+    // full-width so the badge can sit at the left edge and controls at the right
+    expect(bar.className).toContain("left-0");
+    expect(bar.className).toContain("right-0");
+    // a flex-1 spacer (matching the pinned bar) pushes controls to the right
+    expect(Array.from(bar.children).some((c) => c.className === "flex-1")).toBe(true);
+
+    // sanity: no badge → no spacer, bar hugs the right edge instead
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const compactBar = screen.getByTestId("pane-control-bar");
+    expect(compactBar.className).toContain("right-0");
+    expect(compactBar.className).not.toContain("left-0");
+  });
+
   it("bar contains view selector, split, clear, pin, minimize buttons", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>

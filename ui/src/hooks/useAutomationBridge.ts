@@ -9,7 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import { computePaneNumbers } from "@/lib/pane-numbers";
+import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import type {
   DockPosition,
   ViewInstanceConfig,
@@ -80,8 +80,7 @@ function resolveTerminalPaneIndex(terminalId: string, workspaceId: string): numb
 
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
 function rangesOverlap(a: number, aLen: number, b: number, bLen: number): boolean {
-  const eps = 0.01;
-  return a < b + bLen - eps && b < a + aLen - eps;
+  return a < b + bLen - GRID_EPS && b < a + aLen - GRID_EPS;
 }
 
 type NeighborEntry = { paneIndex: number; paneNumber: number | null; terminalId: string | null };
@@ -113,28 +112,28 @@ function computeNeighbors(
 
     // Right: other starts where target ends on x-axis, y ranges overlap
     if (
-      Math.abs(other.x - (target.x + target.w)) < 0.01 &&
+      Math.abs(other.x - (target.x + target.w)) < GRID_EPS &&
       rangesOverlap(target.y, target.h, other.y, other.h)
     ) {
       if (!result.right || other.y < panes[result.right.paneIndex].y) result.right = entry;
     }
     // Left: other ends where target starts on x-axis
     if (
-      Math.abs(other.x + other.w - target.x) < 0.01 &&
+      Math.abs(other.x + other.w - target.x) < GRID_EPS &&
       rangesOverlap(target.y, target.h, other.y, other.h)
     ) {
       if (!result.left || other.y < panes[result.left.paneIndex].y) result.left = entry;
     }
     // Below: other starts where target ends on y-axis
     if (
-      Math.abs(other.y - (target.y + target.h)) < 0.01 &&
+      Math.abs(other.y - (target.y + target.h)) < GRID_EPS &&
       rangesOverlap(target.x, target.w, other.x, other.w)
     ) {
       if (!result.below || other.x < panes[result.below.paneIndex].x) result.below = entry;
     }
     // Above: other ends where target starts on y-axis
     if (
-      Math.abs(other.y + other.h - target.y) < 0.01 &&
+      Math.abs(other.y + other.h - target.y) < GRID_EPS &&
       rangesOverlap(target.x, target.w, other.x, other.w)
     ) {
       if (!result.above || other.x < panes[result.above.paneIndex].x) result.above = entry;

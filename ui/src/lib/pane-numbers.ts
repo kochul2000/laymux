@@ -24,11 +24,13 @@ export interface NumberablePane {
 }
 
 /**
- * Rows within this epsilon on the y-axis are treated as the same row.
- * Matches the floating-point tolerance used by the neighbor logic in
- * `useAutomationBridge.ts` (`rangesOverlap`).
+ * Floating-point tolerance for normalized (0-1) grid geometry comparisons.
+ * Two coordinates within this epsilon are treated as equal (same row/edge).
+ * Shared by the spatial numbering here and the neighbor adjacency logic in
+ * `useAutomationBridge.ts` (`rangesOverlap`, edge-meeting checks) so the two
+ * stay in lockstep instead of duplicating a magic number.
  */
-const EPS = 0.01;
+export const GRID_EPS = 0.01;
 
 /**
  * Compute the spatial reading-order number (1..N) for each pane.
@@ -37,7 +39,7 @@ const EPS = 0.01;
  */
 export function computePaneNumbers(panes: readonly NumberablePane[]): Map<string, number> {
   const sorted = [...panes].sort((a, b) => {
-    if (Math.abs(a.y - b.y) < EPS) return a.x - b.x;
+    if (Math.abs(a.y - b.y) < GRID_EPS) return a.x - b.x;
     return a.y - b.y;
   });
 

@@ -785,7 +785,11 @@ export function PaneControlBar({
                 >
                   {leftBarContent}
                 </div>
-              ) : null}
+              ) : (
+                // 배지만 있고 좌측 콘텐츠가 없을 때도 pinned 바와 동일하게
+                // flex-1 스페이서로 컨트롤을 오른쪽 끝에 정렬한다.
+                <div className="flex-1" />
+              )}
               {narrowBar ? (
                 <NarrowControlAnchor
                   currentView={currentView}
