@@ -1716,19 +1716,34 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByTestId("pane-eye-pane-b")).toBeInTheDocument();
     });
 
-    it("hiding a pane removes it from the list in normal mode", () => {
+    it("hiding a pane collapses it from the list in normal mode", () => {
       useUiStore.getState().togglePaneHidden("pane-a");
       render(<WorkspaceSelectorView />);
-      expect(screen.queryByTestId("pane-minimap-terminal-pane-a")).not.toBeInTheDocument();
+      const paneRow = screen.getByTestId("pane-row-pane-a");
+      expect(paneRow.className).toContain("workspace-pane-row-collapsed");
+      expect(paneRow).toHaveAttribute("aria-hidden", "true");
       expect(screen.getByText("PS")).toBeInTheDocument();
     });
 
-    it("hiding a workspace removes it from the list in normal mode", () => {
+    it("hiding a workspace collapses it from the list in normal mode", () => {
       useUiStore.getState().toggleWorkspaceHidden("ws-2");
       render(<WorkspaceSelectorView />);
-      expect(screen.queryByTestId("workspace-item-ws-2")).not.toBeInTheDocument();
+      const hidden = screen.getByTestId("workspace-item-ws-2");
+      expect(hidden.className).toContain("workspace-item-collapsed");
+      expect(hidden).toHaveAttribute("aria-hidden", "true");
       expect(screen.getByTestId("workspace-item-ws-1")).toBeInTheDocument();
       expect(screen.getByTestId("workspace-item-ws-3")).toBeInTheDocument();
+    });
+
+    it("expands hidden workspaces while hide mode is active", () => {
+      useUiStore.getState().toggleWorkspaceHidden("ws-2");
+      useUiStore.getState().toggleHideMode();
+      render(<WorkspaceSelectorView />);
+
+      const hidden = screen.getByTestId("workspace-item-ws-2");
+      expect(hidden.className).not.toContain("workspace-item-collapsed");
+      expect(hidden).not.toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
     });
 
     it("active workspace is never hidden even if in hiddenWorkspaceIds", () => {
