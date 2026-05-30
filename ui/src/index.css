@@ -50,6 +50,7 @@
   --separator-bg: rgba(255, 255, 255, 0.08); /* intentionally same as --hover-bg-strong */
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
+  --pane-row-max-h: 28px;
   --terminal-composition-underline-color: currentColor;
 }
 
@@ -166,7 +167,7 @@
   }
 
   .workspace-pane-row {
-    max-height: 28px;
+    max-height: var(--pane-row-max-h);
     opacity: 1;
     transform: translateY(0);
     overflow: hidden;

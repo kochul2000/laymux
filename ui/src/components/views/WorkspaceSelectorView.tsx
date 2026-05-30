@@ -234,7 +234,7 @@ function WorkspaceItem({
               ? "inset 0 2px 0 0 var(--accent)"
               : "inset 0 -2px 0 0 var(--accent)"
             : "none",
-        paddingLeft: isActive ? 9 : 9,
+        paddingLeft: 9,
         paddingRight: 10,
       }}
     >
