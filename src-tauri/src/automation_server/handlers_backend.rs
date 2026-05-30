@@ -142,6 +142,16 @@ pub async fn api_docs() -> impl IntoResponse {
                 "response": "{ output: string (raw with ANSI escapes), lines: number, bufferSize: number }"
             },
             {
+                "method": "GET", "path": "/api/v1/memos",
+                "description": "List every memo stored in cache/memo.json. Each entry is { key, content }. Keys are sorted alphabetically for stable ordering. Returns an empty list when the file does not exist.",
+                "response": "{ memos: [{ key: string, content: string }, ...], count: number }"
+            },
+            {
+                "method": "GET", "path": "/api/v1/memos/{key}",
+                "description": "Read the memo stored under the given key (e.g. a workspace pane ID like 'pane-abc12345'). 404 when the key is not present.",
+                "response": "{ key: string, content: string }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/notifications",
                 "description": "List all notifications across workspaces. Each has: id, terminalId, workspaceId, message, level (info|error|warning|success), createdAt (ms), readAt (ms|null)."
             },
@@ -341,6 +351,57 @@ pub async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl 
     )
 }
 
+/// Build the JSON payload returned by `GET /api/v1/memos` given a memo map.
+///
+/// Extracted so callers (the HTTP handler, the MCP tool, and unit tests) can
+/// exercise the sorting/shape contract without touching the real
+/// `cache/memo.json` on disk.
+pub fn build_memos_list_payload(
+    all: std::collections::HashMap<String, String>,
+) -> serde_json::Value {
+    let mut entries: Vec<(String, String)> = all.into_iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let memos: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|(key, content)| serde_json::json!({ "key": key, "content": content }))
+        .collect();
+    let count = memos.len();
+    serde_json::json!({ "memos": memos, "count": count })
+}
+
+/// `GET /api/v1/memos` — list every memo `{ key, content }` pair from `cache/memo.json`.
+///
+/// Returns `{ memos: [{ key, content }, ...], count: number }`. Empty list when
+/// the memo file does not exist or fails to parse (mirrors the read-side
+/// behavior of `settings::load_memo`). Keys are sorted alphabetically so
+/// callers get a stable ordering.
+pub async fn memos_list() -> impl IntoResponse {
+    let all = crate::settings::load_all_memos();
+    (StatusCode::OK, Json(build_memos_list_payload(all)))
+}
+
+/// `GET /api/v1/memos/{key}` — read the memo stored under `key`.
+///
+/// Returns `404 Not Found` when the key does not exist (distinguished from
+/// keys whose stored value is the empty string — which cannot happen because
+/// `save_memo("", "")` removes the entry).
+pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
+    let all = crate::settings::load_all_memos();
+    match all.get(&key) {
+        Some(content) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "key": key,
+                "content": content,
+            })),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(err_json(&format!("Memo '{key}' not found"))),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +460,51 @@ mod tests {
             "Routes registered but NOT documented in api_docs:\n  {}",
             missing.join("\n  ")
         );
+    }
+
+    #[test]
+    fn build_memos_list_payload_sorts_keys_alphabetically() {
+        let mut input = std::collections::HashMap::new();
+        input.insert("zeta".to_string(), "z".to_string());
+        input.insert("alpha".to_string(), "a".to_string());
+        input.insert("mike".to_string(), "m".to_string());
+
+        let payload = build_memos_list_payload(input);
+        assert_eq!(payload["count"], 3);
+        let memos = payload["memos"].as_array().unwrap();
+        assert_eq!(memos.len(), 3);
+        assert_eq!(memos[0]["key"], "alpha");
+        assert_eq!(memos[0]["content"], "a");
+        assert_eq!(memos[1]["key"], "mike");
+        assert_eq!(memos[2]["key"], "zeta");
+    }
+
+    #[test]
+    fn build_memos_list_payload_empty_map() {
+        let payload = build_memos_list_payload(std::collections::HashMap::new());
+        assert_eq!(payload["count"], 0);
+        assert_eq!(payload["memos"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn build_memos_list_payload_preserves_unicode_content() {
+        let mut input = std::collections::HashMap::new();
+        input.insert("pane-1".to_string(), "안녕하세요 🌍".to_string());
+        let payload = build_memos_list_payload(input);
+        let memos = payload["memos"].as_array().unwrap();
+        assert_eq!(memos[0]["content"], "안녕하세요 🌍");
+    }
+
+    #[tokio::test]
+    async fn memo_get_returns_404_for_unknown_key() {
+        // Real disk: assume the key is unlikely to exist in the dev cache.
+        // The handler reads load_all_memos() which returns an empty map if
+        // the file is missing, so a randomized key reliably yields 404.
+        let bogus = format!("__test_missing_{}", uuid::Uuid::new_v4());
+        let resp = memo_get(axum::extract::Path(bogus.clone()))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

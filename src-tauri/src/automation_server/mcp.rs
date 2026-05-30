@@ -300,6 +300,13 @@ struct SendNotificationParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MemoKeyParam {
+    /// Memo key — typically a workspace pane ID (e.g. "pane-abc12345").
+    /// Use `list_memos` to discover available keys.
+    key: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ExecuteCommandParam {
     /// Terminal ID
     terminal_id: String,
@@ -1543,6 +1550,37 @@ impl McpHandler {
             "written": written,
             "failed": failed,
         })))
+    }
+
+    /// List all memos stored in `cache/memo.json` as `{ key, content }` entries.
+    /// Returns an empty list when the memo file is missing or unreadable.
+    /// Memo keys are typically workspace pane IDs (e.g. `pane-abc12345`) so
+    /// pair this with `list_terminals` to map memos back to specific panes.
+    #[tool]
+    async fn list_memos(&self) -> Result<CallToolResult, ErrorData> {
+        let all = crate::settings::load_all_memos();
+        let payload = super::handlers_backend::build_memos_list_payload(all);
+        Ok(json_result(&payload))
+    }
+
+    /// Read the memo content stored under a specific key. Returns an error
+    /// when the key is not present (use `list_memos` to discover keys).
+    #[tool]
+    async fn read_memo(
+        &self,
+        Parameters(p): Parameters<MemoKeyParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let all = crate::settings::load_all_memos();
+        match all.get(&p.key) {
+            Some(content) => Ok(json_result(&json!({
+                "key": p.key,
+                "content": content,
+            }))),
+            None => Ok(CallToolResult::error(vec![Content::text(format!(
+                "Memo '{}' not found",
+                p.key
+            ))])),
+        }
     }
 
     /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).

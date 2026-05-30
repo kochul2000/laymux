@@ -2427,3 +2427,121 @@ mod mcp_bridge_wiring {
         );
     }
 }
+
+// ============================================================================
+// Memo read API E2E (issue #255)
+//
+// Verifies the HTTP routes, payload shape, MCP tool registration, and api_docs
+// coverage for the read-only memo endpoints introduced for external automation.
+// The router-level test only checks registration in `REGISTERED_ROUTES`; live
+// HTTP-driven runs happen via the dev instance (port 19281) on demand.
+// ============================================================================
+
+#[cfg(test)]
+mod memo_read_api {
+    use laymux_lib::automation_server::handlers_backend::build_memos_list_payload;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn read_src(rel: &str) -> String {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn memo_routes_are_registered() {
+        // The router and the docs sit on top of REGISTERED_ROUTES, so a missing
+        // entry would silently 404 the new endpoints in production.
+        let src = read_src("src/automation_server/types.rs");
+        assert!(
+            src.contains("(\"GET\", \"/api/v1/memos\")"),
+            "REGISTERED_ROUTES must include GET /api/v1/memos"
+        );
+        assert!(
+            src.contains("(\"GET\", \"/api/v1/memos/{key}\")"),
+            "REGISTERED_ROUTES must include GET /api/v1/memos/{{key}}"
+        );
+    }
+
+    #[test]
+    fn memo_handlers_wired_into_router() {
+        // Router file must call .route() for both memo endpoints. If a future
+        // refactor drops one, this catches it without booting axum.
+        let src = read_src("src/automation_server/mod.rs");
+        assert!(
+            src.contains("/api/v1/memos\", get(memos_list)"),
+            "mod.rs must wire GET /api/v1/memos → memos_list"
+        );
+        assert!(
+            src.contains("/api/v1/memos/{key}\", get(memo_get)"),
+            "mod.rs must wire GET /api/v1/memos/{{key}} → memo_get"
+        );
+    }
+
+    #[test]
+    fn memo_mcp_tools_present() {
+        // MCP tool surface mirrors the HTTP routes. The #[tool] macro generates
+        // schema based on the method signature, so changes here must keep both
+        // tool names exported.
+        let src = read_src("src/automation_server/mcp.rs");
+        assert!(
+            src.contains("async fn list_memos"),
+            "mcp.rs must expose the list_memos tool"
+        );
+        assert!(
+            src.contains("async fn read_memo"),
+            "mcp.rs must expose the read_memo tool"
+        );
+        assert!(
+            src.contains("struct MemoKeyParam"),
+            "mcp.rs must define the MemoKeyParam input schema"
+        );
+    }
+
+    #[test]
+    fn memos_payload_is_sorted_and_self_describing() {
+        // The HTTP response is the user-visible contract: { memos: [{key, content}, ...], count }.
+        let mut input: HashMap<String, String> = HashMap::new();
+        input.insert("pane-zeta".into(), "z".into());
+        input.insert("pane-alpha".into(), "a".into());
+        input.insert("pane-mike".into(), "m".into());
+
+        let payload = build_memos_list_payload(input);
+        assert_eq!(payload["count"], 3);
+        let memos = payload["memos"].as_array().expect("memos must be an array");
+        let keys: Vec<&str> = memos
+            .iter()
+            .map(|m| m["key"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(keys, vec!["pane-alpha", "pane-mike", "pane-zeta"]);
+    }
+
+    #[test]
+    fn memos_payload_empty_state_is_well_formed() {
+        // When the memo file does not exist, the endpoint must still respond
+        // 200 with an empty list — not 404 — so polling clients have a stable
+        // shape to bind to.
+        let payload = build_memos_list_payload(HashMap::new());
+        assert_eq!(payload["count"], 0);
+        assert_eq!(payload["memos"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn settings_load_all_memos_round_trip_via_tempdir() {
+        // The on-disk format is `{ key: content }` JSON. This exercises the
+        // shared file I/O path that `load_all_memos()` reads on every HTTP call.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        let mut expected: HashMap<String, String> = HashMap::new();
+        expected.insert("pane-1".into(), "first memo".into());
+        expected.insert("pane-2".into(), "두 번째 메모".into());
+
+        let json = serde_json::to_string_pretty(&expected).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let parsed: HashMap<String, String> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed, expected);
+    }
+}

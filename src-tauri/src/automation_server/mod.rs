@@ -221,6 +221,8 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .route("/api/v1/terminals", get(terminals_list))
         .route("/api/v1/terminals/{id}/write", post(terminal_write))
         .route("/api/v1/terminals/{id}/output", get(terminal_output))
+        .route("/api/v1/memos", get(memos_list))
+        .route("/api/v1/memos/{key}", get(memo_get))
         .route("/api/v1/notifications", get(notifications_list))
         .route("/api/v1/notifications", post(notifications_add))
         .route("/api/v1/notifications", delete(notifications_clear))
