@@ -2398,17 +2398,17 @@ function MemoSection() {
           </div>
         </div>
 
-        {/* Paragraph Copy */}
+        {/* Paragraph Detection */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              단락 복사
+              단락 인식
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              N줄 이상 빈 줄로 구분된 단락에 복사 버튼 표시
+              N줄 이상 빈 줄로 단락을 구분 (트리플클릭 단락 선택에 사용)
             </p>
           </div>
           <div className="min-w-0 flex-1">

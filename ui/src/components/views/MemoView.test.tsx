@@ -124,8 +124,8 @@ describe("MemoView", () => {
     expect(textarea.value).toBe("");
   });
 
-  describe("paragraph copy feature", () => {
-    it("renders paragraph overlay when enabled and text has paragraphs", async () => {
+  describe("no paragraph copy button (issue #266)", () => {
+    it("never renders the paragraph overlay or copy button, even with paragraphs", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
@@ -139,71 +139,32 @@ describe("MemoView", () => {
         await vi.runAllTimersAsync();
       });
 
-      // Should render paragraph overlay container
-      const overlay = screen.getByTestId("paragraph-overlay");
-      expect(overlay).toBeInTheDocument();
-
-      // Should have 2 paragraph regions
-      const regions = screen.getAllByTestId(/^paragraph-region-/);
-      expect(regions).toHaveLength(2);
-    });
-
-    it("does not render paragraph overlay when feature is disabled", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          paragraphCopy: { enabled: false, minBlankLines: 2 },
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
-      render(<MemoView memoKey="pane-disabled" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
+      // The copy-button overlay must be gone entirely.
       expect(screen.queryByTestId("paragraph-overlay")).not.toBeInTheDocument();
+      expect(screen.queryAllByTestId(/^paragraph-region-/)).toHaveLength(0);
+      expect(screen.queryAllByTestId(/^paragraph-copy-btn-/)).toHaveLength(0);
+      expect(screen.queryAllByTestId(/^paragraph-highlight-/)).toHaveLength(0);
     });
 
-    it("does not render paragraph overlay when only one paragraph exists", async () => {
+    it("does not write to the clipboard on paragraph hover/move", async () => {
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
         memo: {
           ...useSettingsStore.getState().memo,
           paragraphCopy: { enabled: true, minBlankLines: 2 },
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("abc\ndef");
-      render(<MemoView memoKey="pane-single" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      expect(screen.queryByTestId("paragraph-overlay")).not.toBeInTheDocument();
-    });
-
-    it("overlay does not block textarea input (pointer-events-none)", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          paragraphCopy: { enabled: true, minBlankLines: 2 },
+          copyOnSelect: false,
         },
       });
       vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
-      render(<MemoView memoKey="pane-no-block" />);
+      render(<MemoView memoKey="pane-no-copy" />);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
+      vi.mocked(clipboardWriteText).mockClear();
 
-      // Overlay should have pointer-events-none
-      const overlay = screen.getByTestId("paragraph-overlay");
-      expect(overlay.className).toContain("pointer-events-none");
-
-      // Textarea should still be interactable
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "typed text" } });
-      expect(textarea.value).toBe("typed text");
+      fireEvent.mouseMove(textarea, { clientX: 5, clientY: 5 });
+      expect(clipboardWriteText).not.toHaveBeenCalled();
     });
   });
 
@@ -431,30 +392,6 @@ describe("MemoView", () => {
       // Click on second memo's textarea (outside first memo's textarea)
       fireEvent.mouseDown(textareas[1], { bubbles: true });
       expect(clipboardWriteText).toHaveBeenCalledWith("aaa");
-    });
-  });
-
-  describe("copy button hover highlight", () => {
-    it("renders highlight overlay when copy button is hovered", async () => {
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: {
-          ...useSettingsStore.getState().memo,
-          paragraphCopy: { enabled: true, minBlankLines: 2 },
-        },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("abc\n\n\ndef");
-      render(<MemoView memoKey="pane-highlight" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      // Should have paragraph overlay
-      expect(screen.getByTestId("paragraph-overlay")).toBeInTheDocument();
-
-      // Initially no highlight
-      expect(screen.queryByTestId("paragraph-highlight-0")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("paragraph-highlight-1")).not.toBeInTheDocument();
     });
   });
 
