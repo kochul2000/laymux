@@ -380,6 +380,20 @@ pub async fn memos_list() -> impl IntoResponse {
     (StatusCode::OK, Json(build_memos_list_payload(all)))
 }
 
+/// Build the JSON payload returned by `GET /api/v1/memos/{key}` given a memo
+/// map and the requested key.
+///
+/// Returns `None` when the key is absent (the HTTP handler then emits 404).
+/// Extracted so unit tests can verify the shape contract without touching the
+/// real `cache/memo.json` on disk.
+pub fn build_memo_get_response(
+    map: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> Option<serde_json::Value> {
+    map.get(key)
+        .map(|content| serde_json::json!({ "key": key, "content": content }))
+}
+
 /// `GET /api/v1/memos/{key}` — read the memo stored under `key`.
 ///
 /// Returns `404 Not Found` when the key does not exist (distinguished from
@@ -387,18 +401,13 @@ pub async fn memos_list() -> impl IntoResponse {
 /// `save_memo("", "")` removes the entry).
 pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
     let all = crate::settings::load_all_memos();
-    match all.get(&key) {
-        Some(content) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "key": key,
-                "content": content,
-            })),
-        ),
+    match build_memo_get_response(&all, &key) {
+        Some(json) => (StatusCode::OK, Json(json)).into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(err_json(&format!("Memo '{key}' not found"))),
-        ),
+        )
+            .into_response(),
     }
 }
 
@@ -495,16 +504,19 @@ mod tests {
         assert_eq!(memos[0]["content"], "안녕하세요 🌍");
     }
 
-    #[tokio::test]
-    async fn memo_get_returns_404_for_unknown_key() {
-        // Real disk: assume the key is unlikely to exist in the dev cache.
-        // The handler reads load_all_memos() which returns an empty map if
-        // the file is missing, so a randomized key reliably yields 404.
-        let bogus = format!("__test_missing_{}", uuid::Uuid::new_v4());
-        let resp = memo_get(axum::extract::Path(bogus.clone()))
-            .await
-            .into_response();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    #[test]
+    fn build_memo_get_response_returns_some_for_existing_key() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("pane-1".into(), "hello".into());
+        let result = build_memo_get_response(&map, "pane-1").expect("must return Some");
+        assert_eq!(result["key"], "pane-1");
+        assert_eq!(result["content"], "hello");
+    }
+
+    #[test]
+    fn build_memo_get_response_returns_none_for_missing_key() {
+        let map = std::collections::HashMap::new();
+        assert!(build_memo_get_response(&map, "nonexistent").is_none());
     }
 
     #[test]

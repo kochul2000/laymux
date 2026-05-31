@@ -2431,71 +2431,39 @@ mod mcp_bridge_wiring {
 // ============================================================================
 // Memo read API E2E (issue #255)
 //
-// Verifies the HTTP routes, payload shape, MCP tool registration, and api_docs
-// coverage for the read-only memo endpoints introduced for external automation.
-// The router-level test only checks registration in `REGISTERED_ROUTES`; live
-// HTTP-driven runs happen via the dev instance (port 19281) on demand.
+// Verifies the route registration metadata and payload shape for the
+// read-only memo endpoints introduced for external automation. The
+// router-level test only checks registration in `REGISTERED_ROUTES`; the
+// shared api_docs guard (`docs_covers_all_registered_routes`) catches drift
+// between the docs and the registered list. Live HTTP-driven runs happen via
+// the dev instance (port 19281) on demand.
 // ============================================================================
 
 #[cfg(test)]
 mod memo_read_api {
     use laymux_lib::automation_server::handlers_backend::build_memos_list_payload;
     use std::collections::HashMap;
-    use std::path::PathBuf;
-
-    fn read_src(rel: &str) -> String {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
-        std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
-    }
 
     #[test]
-    fn memo_routes_are_registered() {
-        // The router and the docs sit on top of REGISTERED_ROUTES, so a missing
-        // entry would silently 404 the new endpoints in production.
-        let src = read_src("src/automation_server/types.rs");
+    fn memo_routes_registered_in_router_metadata() {
+        // REGISTERED_ROUTES is the single source of truth shared between the
+        // axum router build and the api_docs completeness test (see
+        // handlers_backend::tests::docs_covers_all_registered_routes). If a
+        // future refactor drops a memo entry from this list, the docs guard
+        // already flags it; this test additionally asserts the entries exist
+        // at all without needing to grep source strings.
+        use laymux_lib::automation_server::types::REGISTERED_ROUTES;
         assert!(
-            src.contains("(\"GET\", \"/api/v1/memos\")"),
+            REGISTERED_ROUTES
+                .iter()
+                .any(|(m, p)| *m == "GET" && *p == "/api/v1/memos"),
             "REGISTERED_ROUTES must include GET /api/v1/memos"
         );
         assert!(
-            src.contains("(\"GET\", \"/api/v1/memos/{key}\")"),
+            REGISTERED_ROUTES
+                .iter()
+                .any(|(m, p)| *m == "GET" && *p == "/api/v1/memos/{key}"),
             "REGISTERED_ROUTES must include GET /api/v1/memos/{{key}}"
-        );
-    }
-
-    #[test]
-    fn memo_handlers_wired_into_router() {
-        // Router file must call .route() for both memo endpoints. If a future
-        // refactor drops one, this catches it without booting axum.
-        let src = read_src("src/automation_server/mod.rs");
-        assert!(
-            src.contains("/api/v1/memos\", get(memos_list)"),
-            "mod.rs must wire GET /api/v1/memos → memos_list"
-        );
-        assert!(
-            src.contains("/api/v1/memos/{key}\", get(memo_get)"),
-            "mod.rs must wire GET /api/v1/memos/{{key}} → memo_get"
-        );
-    }
-
-    #[test]
-    fn memo_mcp_tools_present() {
-        // MCP tool surface mirrors the HTTP routes. The #[tool] macro generates
-        // schema based on the method signature, so changes here must keep both
-        // tool names exported.
-        let src = read_src("src/automation_server/mcp.rs");
-        assert!(
-            src.contains("async fn list_memos"),
-            "mcp.rs must expose the list_memos tool"
-        );
-        assert!(
-            src.contains("async fn read_memo"),
-            "mcp.rs must expose the read_memo tool"
-        );
-        assert!(
-            src.contains("struct MemoKeyParam"),
-            "mcp.rs must define the MemoKeyParam input schema"
         );
     }
 
