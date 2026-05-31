@@ -9,6 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
+import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import type {
   DockPosition,
   ViewInstanceConfig,
@@ -79,19 +80,21 @@ function resolveTerminalPaneIndex(terminalId: string, workspaceId: string): numb
 
 /** Check if two 1D ranges overlap (with tolerance for floating point). */
 function rangesOverlap(a: number, aLen: number, b: number, bLen: number): boolean {
-  const eps = 0.01;
-  return a < b + bLen - eps && b < a + aLen - eps;
+  return a < b + bLen - GRID_EPS && b < a + aLen - GRID_EPS;
 }
+
+type NeighborEntry = { paneIndex: number; paneNumber: number | null; terminalId: string | null };
 
 /** Compute directional neighbors for a pane in the grid. */
 function computeNeighbors(
   panes: WorkspacePane[],
   targetIndex: number,
-): Record<string, { paneIndex: number; terminalId: string | null } | null> {
+  paneNumbers: Map<string, number>,
+): Record<string, NeighborEntry | null> {
   const target = panes[targetIndex];
   if (!target) return { left: null, right: null, above: null, below: null };
 
-  const result: Record<string, { paneIndex: number; terminalId: string | null } | null> = {
+  const result: Record<string, NeighborEntry | null> = {
     left: null,
     right: null,
     above: null,
@@ -101,35 +104,36 @@ function computeNeighbors(
   for (let i = 0; i < panes.length; i++) {
     if (i === targetIndex) continue;
     const other = panes[i];
-    const entry = {
+    const entry: NeighborEntry = {
       paneIndex: i,
+      paneNumber: paneNumbers.get(other.id) ?? null,
       terminalId: other.view.type === "TerminalView" ? toTerminalId(other.id) : null,
     };
 
     // Right: other starts where target ends on x-axis, y ranges overlap
     if (
-      Math.abs(other.x - (target.x + target.w)) < 0.01 &&
+      Math.abs(other.x - (target.x + target.w)) < GRID_EPS &&
       rangesOverlap(target.y, target.h, other.y, other.h)
     ) {
       if (!result.right || other.y < panes[result.right.paneIndex].y) result.right = entry;
     }
     // Left: other ends where target starts on x-axis
     if (
-      Math.abs(other.x + other.w - target.x) < 0.01 &&
+      Math.abs(other.x + other.w - target.x) < GRID_EPS &&
       rangesOverlap(target.y, target.h, other.y, other.h)
     ) {
       if (!result.left || other.y < panes[result.left.paneIndex].y) result.left = entry;
     }
     // Below: other starts where target ends on y-axis
     if (
-      Math.abs(other.y - (target.y + target.h)) < 0.01 &&
+      Math.abs(other.y - (target.y + target.h)) < GRID_EPS &&
       rangesOverlap(target.x, target.w, other.x, other.w)
     ) {
       if (!result.below || other.x < panes[result.below.paneIndex].x) result.below = entry;
     }
     // Above: other ends where target starts on y-axis
     if (
-      Math.abs(other.y + other.h - target.y) < 0.01 &&
+      Math.abs(other.y + other.h - target.y) < GRID_EPS &&
       rangesOverlap(target.x, target.w, other.x, other.w)
     ) {
       if (!result.above || other.x < panes[result.above.paneIndex].x) result.above = entry;
@@ -156,11 +160,12 @@ function findTerminalContext(terminalId: string) {
   return { terminal, workspace, pane, paneIndex, activeWorkspaceId };
 }
 
-/** Enrich a pane with its index and terminal ID (null for non-terminal panes). */
-function enrichPane(p: WorkspacePane, index: number) {
+/** Enrich a pane with its index, spatial number, and terminal ID (null for non-terminal panes). */
+function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, number>) {
   return {
     ...p,
     paneIndex: index,
+    paneNumber: paneNumbers.get(p.id) ?? null,
     terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
   };
 }
@@ -175,10 +180,15 @@ const handlers: HandlerMap = {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       if (!ws) return ok({ workspace: null });
       const { focusedPaneIndex } = useGridStore.getState();
+      const paneNumbers = computePaneNumbers(ws.panes);
       const enriched = {
         ...ws,
         focusedPaneIndex,
-        panes: ws.panes.map(enrichPane),
+        focusedPaneNumber:
+          focusedPaneIndex != null
+            ? (paneNumbers.get(ws.panes[focusedPaneIndex]?.id) ?? null)
+            : null,
+        panes: ws.panes.map((p, i) => enrichPane(p, i, paneNumbers)),
       };
       return ok({ workspace: enriched });
     },
@@ -258,7 +268,24 @@ const handlers: HandlerMap = {
     getState: () => {
       const { editMode, focusedPaneIndex } = useGridStore.getState();
       const { activeWorkspaceId } = useWorkspaceStore.getState();
-      return ok({ editMode, focusedPaneIndex, activeWorkspaceId });
+      const ws = useWorkspaceStore.getState().getActiveWorkspace();
+      const paneNumbers = ws ? computePaneNumbers(ws.panes) : new Map<string, number>();
+      // Summary so an orchestrator can map paneNumber <-> terminalId in one call.
+      const panes = ws
+        ? ws.panes
+            .map((p, i) => ({
+              paneNumber: paneNumbers.get(p.id) ?? null,
+              paneIndex: i,
+              paneId: p.id,
+              terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
+            }))
+            .sort((a, b) => (a.paneNumber ?? 0) - (b.paneNumber ?? 0))
+        : [];
+      const focusedPaneNumber =
+        focusedPaneIndex != null && ws
+          ? (paneNumbers.get(ws.panes[focusedPaneIndex]?.id) ?? null)
+          : null;
+      return ok({ editMode, focusedPaneIndex, focusedPaneNumber, activeWorkspaceId, panes });
     },
     setEditMode: (p) => {
       useGridStore.getState().setEditMode(p.enabled as boolean);
@@ -307,6 +334,7 @@ const handlers: HandlerMap = {
               id: newPane.id,
               terminalId,
               paneIndex: newPaneIndex,
+              paneNumber: ws ? (computePaneNumbers(ws.panes).get(newPane.id) ?? null) : null,
               x: newPane.x,
               y: newPane.y,
               w: newPane.w,
@@ -432,14 +460,26 @@ const handlers: HandlerMap = {
     list: () => {
       const { instances } = useTerminalStore.getState();
       const { workspaces } = useWorkspaceStore.getState();
+      // Memoize per-workspace number maps so we compute each ws once.
+      const numbersByWs = new Map<string, Map<string, number>>();
       const enriched = instances.map((inst) => {
         const ws = workspaces.find((w) => w.id === inst.workspaceId);
         const paneId = toPaneId(inst.id);
         const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
         const pane = paneIndex >= 0 ? ws!.panes[paneIndex] : null;
+        let paneNumber: number | null = null;
+        if (ws) {
+          let numbers = numbersByWs.get(ws.id);
+          if (!numbers) {
+            numbers = computePaneNumbers(ws.panes);
+            numbersByWs.set(ws.id, numbers);
+          }
+          paneNumber = numbers.get(paneId) ?? null;
+        }
         return {
           ...inst,
           paneIndex: paneIndex >= 0 ? paneIndex : null,
+          paneNumber,
           panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
         };
       });
@@ -449,10 +489,12 @@ const handlers: HandlerMap = {
       const ctx = findTerminalContext(p.id as string);
       if (!ctx) return err(`Terminal '${p.id}' not found`);
       const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
+      const paneNumber = pane ? (computePaneNumbers(workspace.panes).get(pane.id) ?? null) : null;
       return ok({
         terminal: {
           ...terminal,
           paneIndex: paneIndex >= 0 ? paneIndex : null,
+          paneNumber,
           panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
         },
         workspace: {
@@ -467,6 +509,7 @@ const handlers: HandlerMap = {
       if (!ctx) return err(`Terminal '${p.id}' not found`);
       const { terminal, workspace, pane, paneIndex, activeWorkspaceId } = ctx;
       const { focusedPaneIndex } = useGridStore.getState();
+      const paneNumbers = computePaneNumbers(workspace.panes);
 
       return ok({
         terminal: {
@@ -488,6 +531,7 @@ const handlers: HandlerMap = {
           ? {
               id: pane.id,
               index: paneIndex,
+              number: paneNumbers.get(pane.id) ?? null,
               x: pane.x,
               y: pane.y,
               w: pane.w,
@@ -495,7 +539,7 @@ const handlers: HandlerMap = {
               isFocusedPane: workspace.id === activeWorkspaceId && focusedPaneIndex === paneIndex,
             }
           : null,
-        neighbors: pane ? computeNeighbors(workspace.panes, paneIndex) : null,
+        neighbors: pane ? computeNeighbors(workspace.panes, paneIndex, paneNumbers) : null,
       });
     },
     setFocus: (p) => {
@@ -521,6 +565,29 @@ const handlers: HandlerMap = {
         focused: terminalId,
         paneIndex: paneIndex >= 0 ? paneIndex : undefined,
         switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined,
+      });
+    },
+    // Resolve a spatial pane number to a terminal ID within a workspace (issue #256).
+    // Defaults to the active workspace when workspaceId is omitted.
+    resolveByNumber: (p) => {
+      const number = p.number as number;
+      const wsId = p.workspaceId as string | undefined;
+      const { workspaces } = useWorkspaceStore.getState();
+      const ws = wsId
+        ? workspaces.find((w) => w.id === wsId)
+        : useWorkspaceStore.getState().getActiveWorkspace();
+      if (!ws) return err(wsId ? `Workspace '${wsId}' not found` : "No active workspace");
+      const paneNumbers = computePaneNumbers(ws.panes);
+      const entry = ws.panes.find((pane) => paneNumbers.get(pane.id) === number);
+      if (!entry) return err(`No pane numbered ${number} in workspace '${ws.id}'`);
+      if (entry.view.type !== "TerminalView") {
+        return err(`Pane ${number} is not a terminal (view: ${entry.view.type})`);
+      }
+      return ok({
+        terminalId: toTerminalId(entry.id),
+        paneId: entry.id,
+        paneIndex: ws.panes.indexOf(entry),
+        workspaceId: ws.id,
       });
     },
   },

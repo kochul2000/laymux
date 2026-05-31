@@ -39,6 +39,7 @@ export function WorkspaceArea() {
             key={ws.id}
             panes={ws.panes}
             isActive={isActive}
+            showPaneNumbers
             containerClassName="absolute inset-0"
             containerStyle={{ display: isActive ? undefined : "none" }}
             testIdFn={(_pane, i) => (isActive ? `workspace-pane-${i}` : undefined)}

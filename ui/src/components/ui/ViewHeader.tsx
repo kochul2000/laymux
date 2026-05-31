@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
+import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 
 interface ViewHeaderProps {
   /** 헤더 제목. 지정하면 통일된 스타일(--text-secondary, --fs-sm, 600)로 렌더링. */
@@ -50,6 +51,7 @@ export function ViewHeader({
       }}
     >
       <div className="flex min-w-0 flex-1 items-center">
+        <PaneNumberBadge number={ctx?.paneNumber} />
         {title && (
           <span
             style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}

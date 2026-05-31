@@ -42,10 +42,31 @@ struct TerminalIdParam {
     terminal_id: String,
 }
 
+/// Target a terminal by stable ID or by spatial pane number (issue #256).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct TerminalTargetParam {
+    /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
+    terminal_id: Option<String>,
+    /// Spatial pane number (1-based reading order, same as the control bar badge).
+    /// Resolved within `workspace_id` at call time. Prefer `terminal_id` for durable refs.
+    pane_number: Option<u64>,
+    /// Workspace to resolve `pane_number` in. Defaults to the active workspace.
+    workspace_id: Option<String>,
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct WriteTerminalParam {
-    /// Terminal ID
-    terminal_id: String,
+    /// Stable terminal ID (e.g. "terminal-pane-abc12345"). Preferred — survives
+    /// layout changes. Provide either this or `pane_number`; `terminal_id` wins
+    /// if both are given.
+    terminal_id: Option<String>,
+    /// Spatial pane number (1-based, screen reading order — same as the control
+    /// bar badge). Convenient for "write to pane 3", but the number changes when
+    /// the layout changes, so it is resolved at call time. Use `terminal_id` for
+    /// durable references. Resolved within `workspace_id` (default: active workspace).
+    pane_number: Option<u64>,
+    /// Workspace to resolve `pane_number` in. Defaults to the active workspace.
+    workspace_id: Option<String>,
     /// Text to send.
     data: String,
     /// When true, C-style escape sequences in `data` are converted to real
@@ -105,8 +126,13 @@ impl std::fmt::Display for NeighborDirection {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ReadOutputParam {
-    /// Terminal ID
-    terminal_id: String,
+    /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
+    terminal_id: Option<String>,
+    /// Spatial pane number (1-based reading order, same as the control bar badge).
+    /// Resolved within `workspace_id` at call time. Prefer `terminal_id` for durable refs.
+    pane_number: Option<u64>,
+    /// Workspace to resolve `pane_number` in. Defaults to the active workspace.
+    workspace_id: Option<String>,
     /// Number of lines to read (default: 100)
     lines: Option<u64>,
     /// Output format: "raw" (default, with ANSI escapes) or "text" (plain text, ANSI stripped).
@@ -384,6 +410,42 @@ impl McpHandler {
                 terminal_id
             ))])),
         }
+    }
+
+    /// Resolve a terminal target (stable ID or spatial pane number) to a terminal ID.
+    /// `terminal_id` wins when both are given; otherwise `pane_number` is resolved via
+    /// the frontend bridge within `workspace_id` (default: active workspace). Issue #256.
+    async fn resolve_terminal_id(
+        &self,
+        terminal_id: Option<&str>,
+        pane_number: Option<u64>,
+        workspace_id: Option<&str>,
+    ) -> Result<String, CallToolResult> {
+        if let Some(id) = terminal_id {
+            if !id.is_empty() {
+                return Ok(id.to_string());
+            }
+        }
+        let Some(number) = pane_number else {
+            return Err(CallToolResult::error(vec![Content::text(
+                "Provide either terminal_id or pane_number".to_string(),
+            )]));
+        };
+        let mut params = json!({ "number": number });
+        if let Some(ws) = workspace_id {
+            params["workspaceId"] = json!(ws);
+        }
+        let data = self
+            .bridge_raw("query", "terminals", "resolveByNumber", params)
+            .await?;
+        data.get("terminalId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                CallToolResult::error(vec![Content::text(
+                    "resolveByNumber returned no terminalId".to_string(),
+                )])
+            })
     }
 
     /// Bridge request returning raw Value on success, or CallToolResult error.
@@ -739,11 +801,13 @@ impl McpHandler {
             .await
     }
 
-    /// Send input to a terminal. By default the input is submitted (Enter key)
-    /// after sending — suitable for running commands or replying to TUI prompts
-    /// (Claude Code, Codex, REPLs). Pass `enter: false` to type without
-    /// submitting (e.g. inserting text mid-line in vim, composing a multi-line
-    /// prompt before a manual submit).
+    /// Send input to a terminal. Target it with `terminal_id` (stable, preferred)
+    /// or `pane_number` (1-based screen reading order, same as the control bar
+    /// badge — convenient but changes with layout). By default the input is
+    /// submitted (Enter key) after sending — suitable for running commands or
+    /// replying to TUI prompts (Claude Code, Codex, REPLs). Pass `enter: false`
+    /// to type without submitting (e.g. inserting text mid-line in vim, composing
+    /// a multi-line prompt before a manual submit).
     /// Set `escape` to true for C-style sequences: `\\r` for Enter, `\\n` for
     /// newline, `\\u0003` for Ctrl+C. Leave `escape` false for literal text
     /// (preserves backslashes in Windows paths like `C:\\Users`).
@@ -752,13 +816,25 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<WriteTerminalParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        let terminal_id = match self
+            .resolve_terminal_id(
+                p.terminal_id.as_deref(),
+                p.pane_number,
+                p.workspace_id.as_deref(),
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => return Ok(e),
+        };
         let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        match self.write_pty(&p.terminal_id, data.as_bytes()) {
+        match self.write_pty(&terminal_id, data.as_bytes()) {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
                 "bytesWritten": bytes,
                 "enter": p.enter,
+                "terminalId": terminal_id,
             }))),
             Err(e) => Ok(e),
         }
@@ -823,8 +899,19 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<ReadOutputParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        let terminal_id = match self
+            .resolve_terminal_id(
+                p.terminal_id.as_deref(),
+                p.pane_number,
+                p.workspace_id.as_deref(),
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => return Ok(e),
+        };
         let lines = p.lines.unwrap_or(100) as usize;
-        let (raw, buffer_size) = match self.recent_output_lines(&p.terminal_id, lines) {
+        let (raw, buffer_size) = match self.recent_output_lines(&terminal_id, lines) {
             Ok(output) => output,
             Err(e) => return Ok(e),
         };
@@ -839,17 +926,28 @@ impl McpHandler {
         })))
     }
 
-    /// Set focus to a terminal pane.
+    /// Set focus to a terminal pane, by stable terminal_id or spatial pane_number.
     #[tool]
     async fn focus_terminal(
         &self,
-        Parameters(p): Parameters<TerminalIdParam>,
+        Parameters(p): Parameters<TerminalTargetParam>,
     ) -> Result<CallToolResult, ErrorData> {
+        let terminal_id = match self
+            .resolve_terminal_id(
+                p.terminal_id.as_deref(),
+                p.pane_number,
+                p.workspace_id.as_deref(),
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => return Ok(e),
+        };
         self.bridge(
             "action",
             "terminals",
             "setFocus",
-            json!({ "id": p.terminal_id }),
+            json!({ "id": terminal_id }),
         )
         .await
     }
@@ -1782,7 +1880,7 @@ mod tests {
     fn param_types_deserialize() {
         let json = r#"{"terminal_id":"t1","data":"ls\r\n"}"#;
         let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
-        assert_eq!(p.terminal_id, "t1");
+        assert_eq!(p.terminal_id.as_deref(), Some("t1"));
         assert_eq!(p.data, "ls\r\n");
     }
 
@@ -1791,6 +1889,51 @@ mod tests {
         let json = r#"{"terminal_id":"t1"}"#;
         let p: ReadOutputParam = serde_json::from_str(json).unwrap();
         assert!(p.lines.is_none());
+    }
+
+    #[test]
+    fn write_terminal_accepts_pane_number_without_terminal_id() {
+        // issue #256: address a pane by spatial number instead of terminal_id.
+        let json = r#"{"pane_number":3,"data":"ls"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(p.terminal_id.is_none());
+        assert_eq!(p.pane_number, Some(3));
+        assert!(p.workspace_id.is_none());
+    }
+
+    #[test]
+    fn write_terminal_accepts_both_terminal_id_and_pane_number() {
+        let json = r#"{"terminal_id":"t1","pane_number":2,"workspace_id":"ws-1","data":"x"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.terminal_id.as_deref(), Some("t1"));
+        assert_eq!(p.pane_number, Some(2));
+        assert_eq!(p.workspace_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn write_terminal_accepts_neither_id_nor_number_at_deserialize() {
+        // Deserialization must succeed; the missing-target case is handled at call time.
+        let json = r#"{"data":"x"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert!(p.terminal_id.is_none());
+        assert!(p.pane_number.is_none());
+    }
+
+    #[test]
+    fn read_output_accepts_pane_number() {
+        let json = r#"{"pane_number":1}"#;
+        let p: ReadOutputParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.pane_number, Some(1));
+        assert!(p.terminal_id.is_none());
+    }
+
+    #[test]
+    fn terminal_target_param_accepts_pane_number() {
+        let json = r#"{"pane_number":2,"workspace_id":"ws-1"}"#;
+        let p: TerminalTargetParam = serde_json::from_str(json).unwrap();
+        assert!(p.terminal_id.is_none());
+        assert_eq!(p.pane_number, Some(2));
+        assert_eq!(p.workspace_id.as_deref(), Some("ws-1"));
     }
 
     #[test]

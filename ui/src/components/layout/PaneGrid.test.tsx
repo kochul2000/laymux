@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
@@ -80,6 +80,42 @@ describe("PaneGrid", () => {
   it("renders with containerTestId", () => {
     render(<PaneGrid {...defaultProps} containerTestId="my-grid" />);
     expect(screen.getByTestId("my-grid")).toBeInTheDocument();
+  });
+
+  describe("pane number badges (issue #256)", () => {
+    // Array order [TL, BL, TR] (as splice-based splitting produces) must map to
+    // reading-order numbers TL=1, TR=2, BL=3 regardless of array index.
+    const spatialPanes: GridPane[] = [
+      { id: "TL", view: { type: "TerminalView" }, x: 0, y: 0, w: 0.5, h: 0.5 },
+      { id: "BL", view: { type: "TerminalView" }, x: 0, y: 0.5, w: 0.5, h: 0.5 },
+      { id: "TR", view: { type: "TerminalView" }, x: 0.5, y: 0, w: 0.5, h: 0.5 },
+    ];
+    const props = {
+      ...defaultProps,
+      panes: spatialPanes,
+      testIdFn: (p: GridPane) => `pane-box-${p.id}`,
+    };
+
+    beforeEach(() => {
+      // Pinned bar is always visible so the badge renders without hover.
+      useSettingsStore.setState((s) => ({
+        convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+      }));
+    });
+
+    it("shows reading-order badges when showPaneNumbers is set", () => {
+      render(<PaneGrid {...props} showPaneNumbers />);
+      const badgeIn = (id: string) =>
+        within(screen.getByTestId(`pane-box-${id}`)).getByTestId("pane-number-badge");
+      expect(badgeIn("TL")).toHaveTextContent("1");
+      expect(badgeIn("TR")).toHaveTextContent("2");
+      expect(badgeIn("BL")).toHaveTextContent("3");
+    });
+
+    it("does not show badges by default (dock reuse stays unnumbered)", () => {
+      render(<PaneGrid {...props} />);
+      expect(screen.queryByTestId("pane-number-badge")).not.toBeInTheDocument();
+    });
   });
 
   it("calls onSplitPane via PaneControlBar split button", () => {

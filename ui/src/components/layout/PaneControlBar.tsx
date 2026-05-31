@@ -4,6 +4,7 @@ import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
 import { useContainerSize } from "@/hooks/useContainerSize";
+import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
@@ -45,6 +46,8 @@ interface PaneControlBarProps {
    */
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
+  /** 화면 읽기 순서 기반 pane 번호(issue #256). 컨트롤바 좌측에 배지로 표시. */
+  paneNumber?: number;
   children: React.ReactNode;
 }
 
@@ -604,6 +607,7 @@ export function PaneControlBar({
   hovered,
   cwdSendOn,
   cwdReceiveOn,
+  paneNumber,
   children,
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -643,7 +647,7 @@ export function PaneControlBar({
   const hasBarLabel = currentView.type !== "TerminalView" && currentView.type !== "EmptyView";
   // 자식(TerminalView 등)이 주입한 좌측 콘텐츠가 있으면 기본 BarLabel 대신 사용.
   // 둘 다 없으면 flex-1 스페이서만 렌더하여 pane 컨트롤이 오른쪽 끝에 정렬되도록 한다.
-  const hasLeftContent = hasBarLabel || leftBarContent != null;
+  const hasLeftContent = hasBarLabel || leftBarContent != null || paneNumber != null;
 
   const paneControls = useMemo(
     () =>
@@ -688,6 +692,7 @@ export function PaneControlBar({
       unregisterHeader,
       leftBarContent,
       setLeftBarContent,
+      paneNumber,
     }),
     [
       paneControls,
@@ -699,6 +704,7 @@ export function PaneControlBar({
       unregisterHeader,
       leftBarContent,
       setLeftBarContent,
+      paneNumber,
     ],
   );
 
@@ -715,6 +721,7 @@ export function PaneControlBar({
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
+            <PaneNumberBadge number={paneNumber} />
             {hasBarLabel ? (
               <BarLabel viewType={currentView.type} />
             ) : leftBarContent ? (
@@ -768,6 +775,7 @@ export function PaneControlBar({
                 borderRadius: 0,
               }}
             >
+              <PaneNumberBadge number={paneNumber} />
               {hasBarLabel ? (
                 <BarLabel viewType={currentView.type} />
               ) : leftBarContent ? (
@@ -777,7 +785,11 @@ export function PaneControlBar({
                 >
                   {leftBarContent}
                 </div>
-              ) : null}
+              ) : (
+                // 배지만 있고 좌측 콘텐츠가 없을 때도 pinned 바와 동일하게
+                // flex-1 스페이서로 컨트롤을 오른쪽 끝에 정렬한다.
+                <div className="flex-1" />
+              )}
               {narrowBar ? (
                 <NarrowControlAnchor
                   currentView={currentView}

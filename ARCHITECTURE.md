@@ -1091,6 +1091,22 @@ claude mcp add-json -s user laymux '{"type":"http","url":"http://<IP>:19280/mcp"
 - 세션 간 안정적 — 캐시 파일 키로 사용
 - 기존 ID 없는 설정은 마이그레이션 시 자동 생성
 
+### 13.7 Pane 식별자 3종 (issue #256)
+
+Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼동하지 말 것.
+
+| 식별자 | 형식 | 용도 | 안정성 |
+|---|---|---|---|
+| `terminalId` | `terminal-pane-{uuid8}` | **안정 참조** — write/focus의 1차 식별자, `LX_TERMINAL_ID` env var | 세션 간 안정 |
+| `paneIndex` | `WorkspacePane[]` 0-based 배열 인덱스 | **레이아웃 조작** — `focus_pane`/`split_pane`/`remove_pane`/`resize_pane`/`swap_panes` 파라미터 | split 삽입 순서에 종속 |
+| `paneNumber` | 화면 읽기 순서 1..N | **표시 + 사람/AI 지칭** — 컨트롤바 배지, "N번 pane으로 보내" | 레이아웃 따라 실시간 변동 |
+
+- `paneNumber`는 `ui/src/lib/pane-numbers.ts`의 `computePaneNumbers()` **단일 함수**에서 (y 우선, 동일 y는 x 오름차순; eps 0.01) 도출하는 **파생값**이다. 어디에도 저장/캐시하지 않으며 panes가 바뀌면 재계산된다.
+- `paneIndex`(배열)와 `paneNumber`(공간)는 다를 수 있다. 예: 좌우 분할 후 왼쪽을 다시 가로 분할하면 배열은 `[좌상, 좌하, 우]`지만 읽기 순서는 `좌상=1, 우=2, 좌하=3`.
+- 자동화 노출: `list_terminals`/`get_active_workspace`의 각 pane, `identify_caller`의 `pane.number`와 `neighbors.{dir}.paneNumber`, `get_grid_state`의 `focusedPaneNumber` + `panes[]` 요약(번호↔terminalId 매핑)에 포함된다.
+- 번호 직접 주소 지정: `write_to_terminal`/`read_terminal_output`/`focus_terminal`는 `terminal_id` 대신 `pane_number`(+옵션 `workspace_id`)를 받을 수 있다. 브리지 `terminals.resolveByNumber`로 호출 시점에 terminalId로 해석하며, `terminal_id`가 주어지면 항상 우선한다. 번호는 휘발성이므로 지속 참조는 `terminal_id`를 쓴다.
+- `paneNumber`는 spawn-time env var로 주입하지 않는다(레이아웃 변경 시 stale). 자기 번호가 필요하면 `identify_caller`의 `pane.number`를 라이브 조회한다.
+
 ---
 
 ## 14. Rust 코드 설계 원칙
