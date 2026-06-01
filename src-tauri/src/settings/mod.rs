@@ -186,7 +186,7 @@ pub fn load_all_memos() -> std::collections::HashMap<String, String> {
     load_all_memos_from(&memo_path())
 }
 
-fn load_all_memos_from(path: &PathBuf) -> std::collections::HashMap<String, String> {
+pub fn load_all_memos_from(path: &PathBuf) -> std::collections::HashMap<String, String> {
     match fs::read_to_string(path) {
         Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
             .unwrap_or_default(),

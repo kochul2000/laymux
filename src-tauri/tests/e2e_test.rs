@@ -2442,6 +2442,7 @@ mod mcp_bridge_wiring {
 #[cfg(test)]
 mod memo_read_api {
     use laymux_lib::automation_server::handlers_backend::build_memos_list_payload;
+    use laymux_lib::settings::load_all_memos_from;
     use std::collections::HashMap;
 
     #[test]
@@ -2508,8 +2509,7 @@ mod memo_read_api {
         let json = serde_json::to_string_pretty(&expected).unwrap();
         std::fs::write(&path, json).unwrap();
 
-        let raw = std::fs::read_to_string(&path).unwrap();
-        let parsed: HashMap<String, String> = serde_json::from_str(&raw).unwrap();
+        let parsed = load_all_memos_from(&path);
         assert_eq!(parsed, expected);
     }
 }

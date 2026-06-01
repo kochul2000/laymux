@@ -1571,16 +1571,7 @@ impl McpHandler {
         Parameters(p): Parameters<MemoKeyParam>,
     ) -> Result<CallToolResult, ErrorData> {
         let all = crate::settings::load_all_memos();
-        match all.get(&p.key) {
-            Some(content) => Ok(json_result(&json!({
-                "key": p.key,
-                "content": content,
-            }))),
-            None => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Memo '{}' not found",
-                p.key
-            ))])),
-        }
+        Ok(read_memo_result_from_map(&all, &p.key))
     }
 
     /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).
@@ -1779,6 +1770,16 @@ fn json_result(data: &Value) -> CallToolResult {
     CallToolResult::success(vec![Content::text(text)])
 }
 
+fn read_memo_result_from_map(
+    map: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> CallToolResult {
+    match super::handlers_backend::build_memo_get_response(map, key) {
+        Some(json) => json_result(&json),
+        None => CallToolResult::error(vec![Content::text(format!("Memo '{key}' not found"))]),
+    }
+}
+
 /// Collapse a full workspaces/list response into a summary suitable for
 /// `workspace://list`. Mirrors the behavior of `list_workspaces(summary=true)`
 /// so MCP clients get a compact, cache-friendly payload.
@@ -1887,6 +1888,34 @@ mod tests {
         // is_error is None or Some(false) for success
         assert_ne!(result.is_error, Some(true));
         assert_eq!(result.content.len(), 1);
+    }
+
+    #[test]
+    fn read_memo_result_uses_shared_http_shape() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("pane-1".to_string(), "hello".to_string());
+
+        let result = read_memo_result_from_map(&map, "pane-1");
+        assert_ne!(result.is_error, Some(true));
+        let value = serde_json::to_value(&result.content).unwrap();
+        let text = value[0]["text"].as_str().expect("content must be text");
+        let payload: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(payload["key"], "pane-1");
+        assert_eq!(payload["content"], "hello");
+        assert_eq!(
+            payload,
+            super::super::handlers_backend::build_memo_get_response(&map, "pane-1").unwrap()
+        );
+    }
+
+    #[test]
+    fn read_memo_result_reports_missing_key_as_error() {
+        let map = std::collections::HashMap::new();
+        let result = read_memo_result_from_map(&map, "missing");
+        assert_eq!(result.is_error, Some(true));
+        let value = serde_json::to_value(&result.content).unwrap();
+        assert!(value[0]["text"].as_str().unwrap().contains("missing"));
     }
 
     #[test]

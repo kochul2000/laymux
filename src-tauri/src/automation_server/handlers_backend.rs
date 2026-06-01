@@ -249,7 +249,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "*", "path": "/mcp",
-                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint (stateful, session-based). POST: send JSON-RPC 2.0 requests (initialize, tools/list, tools/call, ping). After initialize, include the Mcp-Session-Id header from the response in all subsequent requests. GET: open SSE stream for server-initiated notifications. DELETE: terminate session. 15 tools available for terminal, workspace, grid, and utility operations."
+                "description": "MCP (Model Context Protocol) Streamable HTTP endpoint (stateful, session-based). POST: send JSON-RPC 2.0 requests (initialize, tools/list, tools/call, ping). After initialize, include the Mcp-Session-Id header from the response in all subsequent requests. GET: open SSE stream for server-initiated notifications. DELETE: terminate session. Use tools/list for the current terminal, workspace, grid, memo, and utility tool catalog."
             }
         ],
         "tips": [
@@ -468,6 +468,33 @@ mod tests {
             missing.is_empty(),
             "Routes registered but NOT documented in api_docs:\n  {}",
             missing.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn mcp_docs_do_not_embed_fixed_tool_count() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let response = rt.block_on(async {
+            let resp = api_docs().await;
+            use axum::response::IntoResponse;
+            let response = resp.into_response();
+            let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+                .await
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+        });
+
+        let mcp_description = response["endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ep| ep["path"] == "/mcp")
+            .and_then(|ep| ep["description"].as_str())
+            .expect("/mcp endpoint must be documented");
+
+        assert!(
+            !mcp_description.contains("tools available"),
+            "MCP docs should direct clients to tools/list instead of embedding a drifting tool count"
         );
     }
 
