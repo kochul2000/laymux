@@ -33,6 +33,11 @@ describe("IssueReporterView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    // Most tests cover the "no repo configured" path (repo: null). The
+    // "repository selection" block opts into a configured list explicitly.
+    useSettingsStore.setState({
+      issueReporter: { ...useSettingsStore.getState().issueReporter, repositories: [] },
+    });
     mockFetch.mockResolvedValue({
       json: () =>
         Promise.resolve({ path: "/tmp/screenshot.png", dataUrl: "data:image/png;base64,abc" }),

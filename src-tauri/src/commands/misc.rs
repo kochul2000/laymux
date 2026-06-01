@@ -916,9 +916,10 @@ mod tests {
     }
 
     #[test]
-    fn issue_reporter_settings_default_has_empty_repositories() {
+    fn issue_reporter_settings_default_repositories() {
+        // The laymux repo ships as the default target so issues land in the right place.
         let s = crate::settings::models::IssueReporterSettings::default();
-        assert!(s.repositories.is_empty());
+        assert_eq!(s.repositories, vec!["kochul2000/laymux".to_string()]);
     }
 
     #[test]

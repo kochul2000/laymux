@@ -627,7 +627,8 @@ impl Default for IssueReporterSettings {
             font_family: String::new(),
             font_size: 13,
             font_weight: String::new(),
-            repositories: Vec::new(),
+            // Default to the laymux repo so issues land in the right place out of the box.
+            repositories: vec!["kochul2000/laymux".to_string()],
         }
     }
 }

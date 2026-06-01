@@ -766,8 +766,8 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().issueReporter.shell).toBe("");
   });
 
-  it("has default issueReporter with empty repositories", () => {
-    expect(useSettingsStore.getState().issueReporter.repositories).toEqual([]);
+  it("has default issueReporter with the laymux repo as default", () => {
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual(["kochul2000/laymux"]);
   });
 
   it("setIssueReporter updates repositories", () => {
@@ -783,11 +783,11 @@ describe("settings-store", () => {
   });
 
   it("loadFromSettings fills repositories default when omitted", () => {
-    // Older settings without `repositories` should still merge to a valid array.
+    // Older settings without `repositories` should still merge to the default.
     useSettingsStore.getState().loadFromSettings({
       issueReporter: { shell: "bash -c" },
     });
-    expect(useSettingsStore.getState().issueReporter.repositories).toEqual([]);
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual(["kochul2000/laymux"]);
   });
 
   // workspaceSortOrder
