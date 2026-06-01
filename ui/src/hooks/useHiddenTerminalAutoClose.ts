@@ -60,8 +60,11 @@ export function useHiddenTerminalAutoClose() {
       ui.setEvictedPaneIds(evictPaneIds);
     };
 
-    // Run immediately so toggling a pane hidden starts the countdown without
-    // waiting a full tick, then poll on an interval.
+    // Run once on mount so panes that are already hidden (e.g. hidden state
+    // restored from a previous session) start their countdown right away, then
+    // poll on an interval. Hide toggles made after mount are picked up on the
+    // next tick (within TICK_INTERVAL_MS) — the hook does not subscribe to store
+    // changes.
     evaluate();
     const timer = setInterval(evaluate, TICK_INTERVAL_MS);
     return () => clearInterval(timer);
