@@ -267,6 +267,7 @@ describe("IssueReporterView", () => {
         body: "",
         screenshotPath: null,
         issueNumber: null,
+        repo: null,
       });
     });
   });
@@ -288,6 +289,7 @@ describe("IssueReporterView", () => {
         body: "Some description",
         screenshotPath: null,
         issueNumber: null,
+        repo: null,
       });
     });
   });
@@ -355,6 +357,7 @@ describe("IssueReporterView", () => {
       body: "Original body",
       screenshotPath: null,
       issueNumber: null,
+      repo: null,
     });
 
     // Form is still editable — modify body and re-submit
@@ -369,6 +372,7 @@ describe("IssueReporterView", () => {
         body: "Updated body",
         screenshotPath: null,
         issueNumber: 42,
+        repo: null,
       });
     });
   });
@@ -396,6 +400,7 @@ describe("IssueReporterView", () => {
         body: "",
         screenshotPath: null,
         issueNumber: 123,
+        repo: null,
       });
     });
   });
@@ -427,6 +432,7 @@ describe("IssueReporterView", () => {
         body: "",
         screenshotPath: null,
         issueNumber: null,
+        repo: null,
       });
     });
   });
@@ -497,6 +503,69 @@ describe("IssueReporterView", () => {
       render(<IssueReporterView />);
       const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("13px");
+    });
+  });
+
+  describe("repository selection", () => {
+    const setRepos = (repositories: string[]) =>
+      useSettingsStore.setState({
+        issueReporter: { ...useSettingsStore.getState().issueReporter, repositories },
+      });
+
+    it("does not show selector when repositories list is empty", () => {
+      setRepos([]);
+      render(<IssueReporterView />);
+      expect(screen.queryByTestId("issue-repo-select")).not.toBeInTheDocument();
+    });
+
+    it("defaults to the first repository when repositories are configured", () => {
+      setRepos(["owner/first", "owner/second"]);
+      render(<IssueReporterView />);
+      const select = screen.getByTestId("issue-repo-select") as HTMLSelectElement;
+      expect(select.value).toBe("owner/first");
+    });
+
+    it("submits with the default first repository", async () => {
+      const user = userEvent.setup();
+      mockSubmitInvoke.mockResolvedValue("https://github.com/owner/first/issues/1");
+      setRepos(["owner/first", "owner/second"]);
+
+      render(<IssueReporterView />);
+
+      await user.type(screen.getByTestId("issue-title"), "Test issue");
+      await user.click(screen.getByTestId("issue-submit"));
+
+      await waitFor(() => {
+        expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
+          title: "Test issue",
+          body: "",
+          screenshotPath: null,
+          issueNumber: null,
+          repo: "owner/first",
+        });
+      });
+    });
+
+    it("submits with the selected repository after changing the selector", async () => {
+      const user = userEvent.setup();
+      mockSubmitInvoke.mockResolvedValue("https://github.com/owner/second/issues/1");
+      setRepos(["owner/first", "owner/second"]);
+
+      render(<IssueReporterView />);
+
+      await user.selectOptions(screen.getByTestId("issue-repo-select"), "owner/second");
+      await user.type(screen.getByTestId("issue-title"), "Test issue");
+      await user.click(screen.getByTestId("issue-submit"));
+
+      await waitFor(() => {
+        expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
+          title: "Test issue",
+          body: "",
+          screenshotPath: null,
+          issueNumber: null,
+          repo: "owner/second",
+        });
+      });
     });
   });
 });

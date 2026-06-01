@@ -187,11 +187,43 @@ fn gh_command(shell_prefix: &str) -> std::process::Command {
     build_gh_command(shell_prefix)
 }
 
+/// Build the argument vector for `gh issue create`.
+/// When `repo` is `Some("owner/repo")`, a `--repo owner/repo` flag is prepended so the
+/// issue is created in the selected repository instead of the one detected from the cwd.
+fn build_issue_create_args(repo: Option<&str>, title: &str, body: &str) -> Vec<String> {
+    let mut args = vec!["issue".to_string(), "create".to_string()];
+    if let Some(repo) = repo {
+        args.push("--repo".to_string());
+        args.push(repo.to_string());
+    }
+    args.push("--title".to_string());
+    args.push(title.to_string());
+    args.push("--body".to_string());
+    args.push(body.to_string());
+    args
+}
+
+/// Build the argument vector for `gh issue edit {num}`.
+/// When `repo` is `Some("owner/repo")`, a `--repo owner/repo` flag is added.
+fn build_issue_edit_args(repo: Option<&str>, num: &str, title: &str, body: &str) -> Vec<String> {
+    let mut args = vec!["issue".to_string(), "edit".to_string(), num.to_string()];
+    if let Some(repo) = repo {
+        args.push("--repo".to_string());
+        args.push(repo.to_string());
+    }
+    args.push("--title".to_string());
+    args.push(title.to_string());
+    args.push("--body".to_string());
+    args.push(body.to_string());
+    args
+}
+
 /// Upload a screenshot to the GitHub repo via the contents API.
 /// Returns the raw download URL of the uploaded image.
 fn upload_screenshot_to_github(
     path: &std::path::Path,
     shell_prefix: &str,
+    repo: Option<&str>,
 ) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Failed to read screenshot: {e}"))?;
     let b64 = super::base64_encode(&bytes);
@@ -201,22 +233,28 @@ fn upload_screenshot_to_github(
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| "screenshot.png".to_string());
 
-    // Get repo name
-    let repo_out = gh_command(shell_prefix)
-        .args([
-            "repo",
-            "view",
-            "--json",
-            "nameWithOwner",
-            "-q",
-            ".nameWithOwner",
-        ])
-        .output()
-        .map_err(|e| format!("gh repo view failed: {e}"))?;
-    if !repo_out.status.success() {
-        return Err("Not in a GitHub repo or gh not configured".into());
-    }
-    let repo = String::from_utf8_lossy(&repo_out.stdout).trim().to_string();
+    // Resolve the target repo. When the caller selected one, use it directly;
+    // otherwise detect it from the current working directory via `gh repo view`.
+    let repo = match repo {
+        Some(repo) => repo.to_string(),
+        None => {
+            let repo_out = gh_command(shell_prefix)
+                .args([
+                    "repo",
+                    "view",
+                    "--json",
+                    "nameWithOwner",
+                    "-q",
+                    ".nameWithOwner",
+                ])
+                .output()
+                .map_err(|e| format!("gh repo view failed: {e}"))?;
+            if !repo_out.status.success() {
+                return Err("Not in a GitHub repo or gh not configured".into());
+            }
+            String::from_utf8_lossy(&repo_out.stdout).trim().to_string()
+        }
+    };
 
     // Write JSON body to temp file (avoids command-line length limits)
     let json_body = format!(r#"{{"message":"Upload issue screenshot","content":"{b64}"}}"#);
@@ -260,16 +298,20 @@ pub async fn submit_github_issue(
     body: String,
     screenshot_path: Option<String>,
     issue_number: Option<u64>,
+    repo: Option<String>,
 ) -> Result<String, String> {
     let settings = crate::settings::load_settings();
     let shell_prefix = &settings.issue_reporter.shell;
+    // Treat an empty string as "no selection" so the cwd-based detection kicks in.
+    let repo = repo.filter(|r| !r.trim().is_empty());
+    let repo_ref = repo.as_deref();
     let mut full_body = body;
 
     // Upload screenshot to GitHub and embed the image in the body
     if let Some(ref path_str) = screenshot_path {
         let p = std::path::Path::new(path_str);
         if p.exists() {
-            match upload_screenshot_to_github(p, shell_prefix) {
+            match upload_screenshot_to_github(p, shell_prefix, repo_ref) {
                 Ok(image_url) => {
                     full_body = format!("{full_body}\n\n![Screenshot]({image_url})");
                 }
@@ -283,21 +325,17 @@ pub async fn submit_github_issue(
     if let Some(num) = issue_number {
         // Update existing issue
         let num_str = num.to_string();
-        let output = gh_command(shell_prefix)
-            .args([
-                "issue", "edit", &num_str, "--title", &title, "--body", &full_body,
-            ])
-            .output()
-            .map_err(|e| {
-                format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
-            })?;
+        let args = build_issue_edit_args(repo_ref, &num_str, &title, &full_body);
+        let output = gh_command(shell_prefix).args(&args).output().map_err(|e| {
+            format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
+        })?;
 
         if output.status.success() {
             // gh issue edit outputs the issue URL to stdout
             let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if url.is_empty() {
                 // Some gh versions don't output URL on edit; construct it
-                let repo_url = get_repo_url(shell_prefix).unwrap_or_default();
+                let repo_url = get_repo_url(shell_prefix, repo_ref).unwrap_or_default();
                 Ok(format!("{repo_url}/issues/{num}"))
             } else {
                 Ok(url)
@@ -308,12 +346,10 @@ pub async fn submit_github_issue(
         }
     } else {
         // Create new issue
-        let output = gh_command(shell_prefix)
-            .args(["issue", "create", "--title", &title, "--body", &full_body])
-            .output()
-            .map_err(|e| {
-                format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
-            })?;
+        let args = build_issue_create_args(repo_ref, &title, &full_body);
+        let output = gh_command(shell_prefix).args(&args).output().map_err(|e| {
+            format!("Failed to run gh CLI: {e}. Is gh installed and authenticated?")
+        })?;
 
         if output.status.success() {
             let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -326,7 +362,11 @@ pub async fn submit_github_issue(
 }
 
 /// Get the GitHub repo URL (e.g., https://github.com/owner/repo)
-fn get_repo_url(shell_prefix: &str) -> Result<String, String> {
+/// When `repo` is `Some("owner/repo")`, the URL is built directly without invoking gh.
+fn get_repo_url(shell_prefix: &str, repo: Option<&str>) -> Result<String, String> {
+    if let Some(repo) = repo {
+        return Ok(format!("https://github.com/{repo}"));
+    }
     let output = gh_command(shell_prefix)
         .args(["repo", "view", "--json", "url", "-q", ".url"])
         .output()
@@ -757,6 +797,74 @@ mod tests {
     fn greet_returns_message() {
         let result = greet("Laymux");
         assert_eq!(result, "Hello, Laymux! Welcome to Laymux.");
+    }
+
+    #[test]
+    fn build_issue_create_args_without_repo() {
+        let args = build_issue_create_args(None, "My title", "My body");
+        assert_eq!(
+            args,
+            vec!["issue", "create", "--title", "My title", "--body", "My body"]
+        );
+    }
+
+    #[test]
+    fn build_issue_create_args_with_repo() {
+        let args = build_issue_create_args(Some("owner/repo"), "My title", "My body");
+        assert_eq!(
+            args,
+            vec![
+                "issue",
+                "create",
+                "--repo",
+                "owner/repo",
+                "--title",
+                "My title",
+                "--body",
+                "My body"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_issue_edit_args_without_repo() {
+        let args = build_issue_edit_args(None, "42", "My title", "My body");
+        assert_eq!(
+            args,
+            vec!["issue", "edit", "42", "--title", "My title", "--body", "My body"]
+        );
+    }
+
+    #[test]
+    fn build_issue_edit_args_with_repo() {
+        let args = build_issue_edit_args(Some("owner/repo"), "42", "My title", "My body");
+        assert_eq!(
+            args,
+            vec![
+                "issue",
+                "edit",
+                "42",
+                "--repo",
+                "owner/repo",
+                "--title",
+                "My title",
+                "--body",
+                "My body"
+            ]
+        );
+    }
+
+    #[test]
+    fn get_repo_url_with_repo_builds_directly() {
+        // When a repo is supplied, the URL is constructed without calling gh.
+        let url = get_repo_url("", Some("owner/repo")).expect("should build url");
+        assert_eq!(url, "https://github.com/owner/repo");
+    }
+
+    #[test]
+    fn issue_reporter_settings_default_has_empty_repositories() {
+        let s = crate::settings::models::IssueReporterSettings::default();
+        assert!(s.repositories.is_empty());
     }
 
     #[test]

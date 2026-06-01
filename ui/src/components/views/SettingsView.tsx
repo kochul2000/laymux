@@ -2228,6 +2228,17 @@ function IssueReporterSection() {
   const updateIssueReporter = (partial: Partial<typeof issueReporter>) =>
     setDraftIssueReporter((prev) => ({ ...prev, ...partial }));
 
+  const addRepository = () =>
+    updateIssueReporter({ repositories: [...issueReporter.repositories, ""] });
+  const removeRepository = (index: number) =>
+    updateIssueReporter({
+      repositories: issueReporter.repositories.filter((_, i) => i !== index),
+    });
+  const updateRepository = (index: number, value: string) =>
+    updateIssueReporter({
+      repositories: issueReporter.repositories.map((r, i) => (i === index ? value : r)),
+    });
+
   // Adapt flat fontFamily/fontSize/fontWeight to FontSettings for FontFields
   const irFont: FontSettings = {
     face: issueReporter.fontFamily || appFont.face,
@@ -2268,6 +2279,59 @@ function IssueReporterSection() {
             onChange={(e) => updateIssueReporter({ shell: e.target.value })}
           />
         </SettingRow>
+
+        {/* Repositories */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Repositories
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              이슈를 올릴 리포 목록 (owner/repo). 첫 번째 항목이 기본 선택됨.
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            {issueReporter.repositories.map((repo, i) => (
+              <div key={i} className="flex items-center gap-2 mb-2">
+                <FocusInput
+                  data-testid={`issue-reporter-repo-input-${i}`}
+                  className={inputCls}
+                  style={{ flex: 1 }}
+                  placeholder="owner/repo"
+                  value={repo}
+                  onChange={(e) => updateRepository(i, e.target.value)}
+                />
+                <button
+                  data-testid={`issue-reporter-repo-remove-${i}`}
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "var(--bg-overlay)",
+                    color: "var(--red)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onClick={() => removeRepository(i)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button
+              data-testid="issue-reporter-repo-add"
+              className="text-xs px-2 py-1 rounded"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={addRepository}
+            >
+              + Add Repository
+            </button>
+          </div>
+        </div>
 
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">

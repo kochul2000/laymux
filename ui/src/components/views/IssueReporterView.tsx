@@ -27,9 +27,24 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
   const [issueNumber, setIssueNumber] = useState<number | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+
+  const ir = useSettingsStore((s) => s.issueReporter);
+  const appFont = useSettingsStore((s) => s.appFont);
+  const repositories = ir.repositories;
+
+  // Default the selection to the first configured repository. Re-sync if the
+  // current selection is no longer present in the list (e.g. settings changed).
+  useEffect(() => {
+    if (repositories.length === 0) {
+      setSelectedRepo(null);
+    } else if (selectedRepo === null || !repositories.includes(selectedRepo)) {
+      setSelectedRepo(repositories[0]);
+    }
+  }, [repositories, selectedRepo]);
 
   // Auto-focus title input when view receives focus
   useEffect(() => {
@@ -67,6 +82,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         body,
         screenshotPath,
         issueNumber,
+        repo: selectedRepo,
       });
       setState("idle");
       setResultMsg(url);
@@ -94,9 +110,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setState("idle");
     setIssueNumber(null);
   };
-
-  const ir = useSettingsStore((s) => s.issueReporter);
-  const appFont = useSettingsStore((s) => s.appFont);
 
   return (
     <ViewShell
@@ -187,6 +200,29 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               style={{ maxHeight: 200, objectFit: "contain", background: "#000" }}
             />
           </div>
+        )}
+
+        {/* Repository selector — only when repositories are configured in Settings */}
+        {repositories.length > 0 && (
+          <select
+            data-testid="issue-repo-select"
+            value={selectedRepo ?? repositories[0]}
+            onChange={(e) => setSelectedRepo(e.target.value)}
+            disabled={state === "submitting"}
+            className="mb-1 w-full rounded px-1 py-1 ui-focus-ring"
+            style={{
+              ...inputStyle,
+              fontFamily: ir.fontFamily || appFont.face,
+              fontSize: `${ir.fontSize || appFont.size}px`,
+              fontWeight: ir.fontWeight || appFont.weight,
+            }}
+          >
+            {repositories.map((repo) => (
+              <option key={repo} value={repo}>
+                {repo}
+              </option>
+            ))}
+          </select>
         )}
 
         {/* Title */}

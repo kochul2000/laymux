@@ -390,6 +390,7 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   fontFamily: "",
   fontSize: 13,
   fontWeight: "",
+  repositories: [],
 };
 
 const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {

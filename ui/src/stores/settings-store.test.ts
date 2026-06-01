@@ -766,6 +766,30 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().issueReporter.shell).toBe("");
   });
 
+  it("has default issueReporter with empty repositories", () => {
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual([]);
+  });
+
+  it("setIssueReporter updates repositories", () => {
+    useSettingsStore.getState().setIssueReporter({ repositories: ["owner/a", "owner/b"] });
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual(["owner/a", "owner/b"]);
+  });
+
+  it("loadFromSettings loads issueReporter repositories", () => {
+    useSettingsStore.getState().loadFromSettings({
+      issueReporter: { repositories: ["foo/bar"] },
+    });
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual(["foo/bar"]);
+  });
+
+  it("loadFromSettings fills repositories default when omitted", () => {
+    // Older settings without `repositories` should still merge to a valid array.
+    useSettingsStore.getState().loadFromSettings({
+      issueReporter: { shell: "bash -c" },
+    });
+    expect(useSettingsStore.getState().issueReporter.repositories).toEqual([]);
+  });
+
   // workspaceSortOrder
   it("has default workspaceSortOrder of 'manual'", () => {
     expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
