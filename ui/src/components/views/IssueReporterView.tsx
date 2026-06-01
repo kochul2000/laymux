@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { matchesKeybinding, resolveKeybinding } from "@/lib/keybinding-registry";
 import { inputStyle } from "@/components/ui/FormControls";
@@ -34,7 +34,22 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
 
   const ir = useSettingsStore((s) => s.issueReporter);
   const appFont = useSettingsStore((s) => s.appFont);
-  const repositories = ir.repositories;
+  // Sanitize the configured list for display/selection: trim each entry, drop
+  // blanks, and de-duplicate. Keeps the dropdown free of empty/duplicate options
+  // (no React key collisions) and ensures the value sent to the backend has no
+  // stray whitespace that would break `gh --repo`.
+  const repositories = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const raw of ir.repositories) {
+      const repo = raw.trim();
+      if (repo && !seen.has(repo)) {
+        seen.add(repo);
+        result.push(repo);
+      }
+    }
+    return result;
+  }, [ir.repositories]);
 
   // Default the selection to the first configured repository. Re-sync if the
   // current selection is no longer present in the list (e.g. settings changed).

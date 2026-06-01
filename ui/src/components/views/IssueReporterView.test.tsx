@@ -567,5 +567,36 @@ describe("IssueReporterView", () => {
         });
       });
     });
+
+    it("trims, drops blanks, and de-duplicates configured repositories", () => {
+      setRepos(["  owner/first  ", "", "   ", "owner/first", "owner/second"]);
+      render(<IssueReporterView />);
+      const select = screen.getByTestId("issue-repo-select") as HTMLSelectElement;
+      const options = Array.from(select.options).map((o) => o.value);
+      expect(options).toEqual(["owner/first", "owner/second"]);
+      // Default selection is the first sanitized (trimmed) entry.
+      expect(select.value).toBe("owner/first");
+    });
+
+    it("submits the trimmed repository value", async () => {
+      const user = userEvent.setup();
+      mockSubmitInvoke.mockResolvedValue("https://github.com/owner/first/issues/1");
+      setRepos(["  owner/first  "]);
+
+      render(<IssueReporterView />);
+
+      await user.type(screen.getByTestId("issue-title"), "Test issue");
+      await user.click(screen.getByTestId("issue-submit"));
+
+      await waitFor(() => {
+        expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
+          title: "Test issue",
+          body: "",
+          screenshotPath: null,
+          issueNumber: null,
+          repo: "owner/first",
+        });
+      });
+    });
   });
 });

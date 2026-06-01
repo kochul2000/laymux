@@ -285,11 +285,35 @@ fn upload_screenshot_to_github(
         return Err(format!("GitHub upload failed: {stderr}"));
     }
 
-    // Use github.com/raw/ URL format — works for both public and private repos
-    // (authenticated users who have repo access can view the image)
-    Ok(format!(
-        "https://github.com/{repo}/raw/main/.github/issue-screenshots/{filename}"
-    ))
+    // The Contents API response includes the file's html_url on the branch it was
+    // committed to (the repo's default branch), e.g.
+    //   https://github.com/owner/repo/blob/master/.github/issue-screenshots/file.png
+    // Convert `/blob/` → `/raw/` to get a renderable raw URL on the CORRECT branch.
+    // We deliberately use the github.com/raw/ form (not raw.githubusercontent.com)
+    // because it respects the viewer's session auth, so it renders for private repos.
+    // Fall back to assuming `main` if the response can't be parsed.
+    let stdout = String::from_utf8_lossy(&upload_out.stdout);
+    let raw_url = serde_json::from_str::<serde_json::Value>(&stdout)
+        .ok()
+        .and_then(|v| {
+            v.get("content")?
+                .get("html_url")?
+                .as_str()
+                .map(|s| s.replacen("/blob/", "/raw/", 1))
+        })
+        .filter(|s| s.contains("/raw/"))
+        .unwrap_or_else(|| {
+            format!("https://github.com/{repo}/raw/main/.github/issue-screenshots/{filename}")
+        });
+    Ok(raw_url)
+}
+
+/// Normalize a caller-provided repo selection: trim surrounding whitespace and treat
+/// an empty/whitespace-only string as "no selection" (so cwd-based detection kicks in).
+/// Trimming matters because the value is passed verbatim to `gh --repo`, where stray
+/// whitespace (e.g. " owner/repo ") would fail repo resolution.
+fn normalize_repo(repo: Option<String>) -> Option<String> {
+    repo.map(|r| r.trim().to_string()).filter(|r| !r.is_empty())
 }
 
 #[tauri::command]
@@ -302,8 +326,8 @@ pub async fn submit_github_issue(
 ) -> Result<String, String> {
     let settings = crate::settings::load_settings();
     let shell_prefix = &settings.issue_reporter.shell;
-    // Treat an empty string as "no selection" so the cwd-based detection kicks in.
-    let repo = repo.filter(|r| !r.trim().is_empty());
+    // Trim and treat an empty string as "no selection" so cwd-based detection kicks in.
+    let repo = normalize_repo(repo);
     let repo_ref = repo.as_deref();
     let mut full_body = body;
 
@@ -851,6 +875,36 @@ mod tests {
                 "--body",
                 "My body"
             ]
+        );
+    }
+
+    #[test]
+    fn normalize_repo_none_stays_none() {
+        assert_eq!(normalize_repo(None), None);
+    }
+
+    #[test]
+    fn normalize_repo_blank_becomes_none() {
+        assert_eq!(normalize_repo(Some(String::new())), None);
+        assert_eq!(normalize_repo(Some("   ".to_string())), None);
+        assert_eq!(normalize_repo(Some("\t\n".to_string())), None);
+    }
+
+    #[test]
+    fn normalize_repo_trims_surrounding_whitespace() {
+        // A value with stray whitespace would otherwise be passed verbatim to
+        // `gh --repo " owner/repo "` and fail to resolve.
+        assert_eq!(
+            normalize_repo(Some("  owner/repo  ".to_string())),
+            Some("owner/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_repo_keeps_valid_value() {
+        assert_eq!(
+            normalize_repo(Some("owner/repo".to_string())),
+            Some("owner/repo".to_string())
         );
     }
 
