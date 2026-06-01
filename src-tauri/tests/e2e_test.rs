@@ -2427,3 +2427,89 @@ mod mcp_bridge_wiring {
         );
     }
 }
+
+// ============================================================================
+// Memo read API E2E (issue #255)
+//
+// Verifies the route registration metadata and payload shape for the
+// read-only memo endpoints introduced for external automation. The
+// router-level test only checks registration in `REGISTERED_ROUTES`; the
+// shared api_docs guard (`docs_covers_all_registered_routes`) catches drift
+// between the docs and the registered list. Live HTTP-driven runs happen via
+// the dev instance (port 19281) on demand.
+// ============================================================================
+
+#[cfg(test)]
+mod memo_read_api {
+    use laymux_lib::automation_server::handlers_backend::build_memos_list_payload;
+    use laymux_lib::settings::load_all_memos_from;
+    use std::collections::HashMap;
+
+    #[test]
+    fn memo_routes_registered_in_router_metadata() {
+        // REGISTERED_ROUTES is the single source of truth shared between the
+        // axum router build and the api_docs completeness test (see
+        // handlers_backend::tests::docs_covers_all_registered_routes). If a
+        // future refactor drops a memo entry from this list, the docs guard
+        // already flags it; this test additionally asserts the entries exist
+        // at all without needing to grep source strings.
+        use laymux_lib::automation_server::types::REGISTERED_ROUTES;
+        assert!(
+            REGISTERED_ROUTES
+                .iter()
+                .any(|(m, p)| *m == "GET" && *p == "/api/v1/memos"),
+            "REGISTERED_ROUTES must include GET /api/v1/memos"
+        );
+        assert!(
+            REGISTERED_ROUTES
+                .iter()
+                .any(|(m, p)| *m == "GET" && *p == "/api/v1/memos/{key}"),
+            "REGISTERED_ROUTES must include GET /api/v1/memos/{{key}}"
+        );
+    }
+
+    #[test]
+    fn memos_payload_is_sorted_and_self_describing() {
+        // The HTTP response is the user-visible contract: { memos: [{key, content}, ...], count }.
+        let mut input: HashMap<String, String> = HashMap::new();
+        input.insert("pane-zeta".into(), "z".into());
+        input.insert("pane-alpha".into(), "a".into());
+        input.insert("pane-mike".into(), "m".into());
+
+        let payload = build_memos_list_payload(input);
+        assert_eq!(payload["count"], 3);
+        let memos = payload["memos"].as_array().expect("memos must be an array");
+        let keys: Vec<&str> = memos
+            .iter()
+            .map(|m| m["key"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(keys, vec!["pane-alpha", "pane-mike", "pane-zeta"]);
+    }
+
+    #[test]
+    fn memos_payload_empty_state_is_well_formed() {
+        // When the memo file does not exist, the endpoint must still respond
+        // 200 with an empty list — not 404 — so polling clients have a stable
+        // shape to bind to.
+        let payload = build_memos_list_payload(HashMap::new());
+        assert_eq!(payload["count"], 0);
+        assert_eq!(payload["memos"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn settings_load_all_memos_round_trip_via_tempdir() {
+        // The on-disk format is `{ key: content }` JSON. This exercises the
+        // shared file I/O path that `load_all_memos()` reads on every HTTP call.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        let mut expected: HashMap<String, String> = HashMap::new();
+        expected.insert("pane-1".into(), "first memo".into());
+        expected.insert("pane-2".into(), "두 번째 메모".into());
+
+        let json = serde_json::to_string_pretty(&expected).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        let parsed = load_all_memos_from(&path);
+        assert_eq!(parsed, expected);
+    }
+}

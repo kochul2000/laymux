@@ -179,12 +179,23 @@ pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
     save_memo_to(&memo_path(), key, content)
 }
 
-fn load_memo_from(path: &PathBuf, key: &str) -> String {
-    let map = match fs::read_to_string(path) {
+/// Return the full map of memo `key → content` pairs.
+/// Returns an empty map when the memo file does not exist or fails to parse.
+pub fn load_all_memos() -> std::collections::HashMap<String, String> {
+    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    load_all_memos_from(&memo_path())
+}
+
+pub fn load_all_memos_from(path: &PathBuf) -> std::collections::HashMap<String, String> {
+    match fs::read_to_string(path) {
         Ok(content) => serde_json::from_str::<std::collections::HashMap<String, String>>(&content)
             .unwrap_or_default(),
         Err(_) => std::collections::HashMap::new(),
-    };
+    }
+}
+
+fn load_memo_from(path: &PathBuf, key: &str) -> String {
+    let map = load_all_memos_from(path);
     map.get(key).cloned().unwrap_or_default()
 }
 
@@ -371,6 +382,53 @@ mod tests {
         save_memo_to(&path, "pane-1", "data").unwrap();
         save_memo_to(&path, "pane-1", "").unwrap();
         assert_eq!(load_memo_from(&path, "pane-1"), "");
+    }
+
+    #[test]
+    fn load_all_memos_returns_all_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        save_memo_to(&path, "pane-a", "alpha").unwrap();
+        save_memo_to(&path, "pane-b", "beta").unwrap();
+        save_memo_to(&path, "pane-c", "gamma").unwrap();
+
+        let all = load_all_memos_from(&path);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all.get("pane-a").map(String::as_str), Some("alpha"));
+        assert_eq!(all.get("pane-b").map(String::as_str), Some("beta"));
+        assert_eq!(all.get("pane-c").map(String::as_str), Some("gamma"));
+    }
+
+    #[test]
+    fn load_all_memos_returns_empty_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        let all = load_all_memos_from(&path);
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn load_all_memos_returns_empty_on_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        fs::write(&path, "not valid json {{{").unwrap();
+        let all = load_all_memos_from(&path);
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn load_all_memos_excludes_deleted_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memo.json");
+        save_memo_to(&path, "pane-1", "one").unwrap();
+        save_memo_to(&path, "pane-2", "two").unwrap();
+        // Empty content removes the key.
+        save_memo_to(&path, "pane-1", "").unwrap();
+
+        let all = load_all_memos_from(&path);
+        assert_eq!(all.len(), 1);
+        assert!(!all.contains_key("pane-1"));
+        assert_eq!(all.get("pane-2").map(String::as_str), Some("two"));
     }
 
     #[test]

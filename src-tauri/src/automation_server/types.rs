@@ -171,6 +171,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/terminals"),
     ("POST", "/api/v1/terminals/{id}/write"),
     ("GET", "/api/v1/terminals/{id}/output"),
+    ("GET", "/api/v1/memos"),
+    ("GET", "/api/v1/memos/{key}"),
     ("GET", "/api/v1/notifications"),
     ("POST", "/api/v1/notifications"),
     ("DELETE", "/api/v1/notifications"),

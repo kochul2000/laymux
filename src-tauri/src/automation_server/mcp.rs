@@ -326,6 +326,13 @@ struct SendNotificationParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct MemoKeyParam {
+    /// Memo key — typically a workspace pane ID (e.g. "pane-abc12345").
+    /// Use `list_memos` to discover available keys.
+    key: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ExecuteCommandParam {
     /// Terminal ID
     terminal_id: String,
@@ -1643,6 +1650,28 @@ impl McpHandler {
         })))
     }
 
+    /// List all memos stored in `cache/memo.json` as `{ key, content }` entries.
+    /// Returns an empty list when the memo file is missing or unreadable.
+    /// Memo keys are typically workspace pane IDs (e.g. `pane-abc12345`) so
+    /// pair this with `list_terminals` to map memos back to specific panes.
+    #[tool]
+    async fn list_memos(&self) -> Result<CallToolResult, ErrorData> {
+        let all = crate::settings::load_all_memos();
+        let payload = super::handlers_backend::build_memos_list_payload(all);
+        Ok(json_result(&payload))
+    }
+
+    /// Read the memo content stored under a specific key. Returns an error
+    /// when the key is not present (use `list_memos` to discover keys).
+    #[tool]
+    async fn read_memo(
+        &self,
+        Parameters(p): Parameters<MemoKeyParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let all = crate::settings::load_all_memos();
+        Ok(read_memo_result_from_map(&all, &p.key))
+    }
+
     /// List available terminal profiles (e.g. PowerShell, WSL, custom profiles).
     /// Returns all configured profiles from settings, enriched with runtime info from active terminals.
     #[tool]
@@ -1839,6 +1868,16 @@ fn json_result(data: &Value) -> CallToolResult {
     CallToolResult::success(vec![Content::text(text)])
 }
 
+fn read_memo_result_from_map(
+    map: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> CallToolResult {
+    match super::handlers_backend::build_memo_get_response(map, key) {
+        Some(json) => json_result(&json),
+        None => CallToolResult::error(vec![Content::text(format!("Memo '{key}' not found"))]),
+    }
+}
+
 /// Collapse a full workspaces/list response into a summary suitable for
 /// `workspace://list`. Mirrors the behavior of `list_workspaces(summary=true)`
 /// so MCP clients get a compact, cache-friendly payload.
@@ -1992,6 +2031,34 @@ mod tests {
         // is_error is None or Some(false) for success
         assert_ne!(result.is_error, Some(true));
         assert_eq!(result.content.len(), 1);
+    }
+
+    #[test]
+    fn read_memo_result_uses_shared_http_shape() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("pane-1".to_string(), "hello".to_string());
+
+        let result = read_memo_result_from_map(&map, "pane-1");
+        assert_ne!(result.is_error, Some(true));
+        let value = serde_json::to_value(&result.content).unwrap();
+        let text = value[0]["text"].as_str().expect("content must be text");
+        let payload: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(payload["key"], "pane-1");
+        assert_eq!(payload["content"], "hello");
+        assert_eq!(
+            payload,
+            super::super::handlers_backend::build_memo_get_response(&map, "pane-1").unwrap()
+        );
+    }
+
+    #[test]
+    fn read_memo_result_reports_missing_key_as_error() {
+        let map = std::collections::HashMap::new();
+        let result = read_memo_result_from_map(&map, "missing");
+        assert_eq!(result.is_error, Some(true));
+        let value = serde_json::to_value(&result.content).unwrap();
+        assert!(value[0]["text"].as_str().unwrap().contains("missing"));
     }
 
     #[test]
