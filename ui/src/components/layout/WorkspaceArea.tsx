@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useUiStore } from "@/stores/ui-store";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { PaneGrid } from "./PaneGrid";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
@@ -9,6 +10,10 @@ import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 export function WorkspaceArea() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  // Panes auto-closed after staying hidden (issue #269). Their TerminalView is
+  // dropped from the background workspace so the PTY is torn down; un-hiding the
+  // pane removes it from this set and re-mounts a fresh terminal.
+  const evictedPaneIds = useUiStore((s) => s.evictedPaneIds);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
   const setFocusedPane = useGridStore((s) => s.setFocusedPane);
   const automationHoverIndex = useGridStore((s) => s.automationHoverIndex);
@@ -32,12 +37,18 @@ export function WorkspaceArea() {
       {workspaces.map((ws) => {
         const isActive = ws.id === activeWorkspaceId;
         if (!mountedWsIds.has(ws.id)) return null;
+        // Only background workspaces may have panes evicted; the active workspace
+        // always renders in full so the user never sees a blanked-out pane.
+        const renderedPanes =
+          isActive || evictedPaneIds.size === 0
+            ? ws.panes
+            : ws.panes.filter((p) => !evictedPaneIds.has(p.id));
         const indexMap = new Map(ws.panes.map((p, i) => [p.id, i]));
         const idxOf = (paneId: string) => indexMap.get(paneId) ?? -1;
         return (
           <PaneGrid
             key={ws.id}
-            panes={ws.panes}
+            panes={renderedPanes}
             isActive={isActive}
             showPaneNumbers
             containerClassName="absolute inset-0"

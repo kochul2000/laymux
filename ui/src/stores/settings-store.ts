@@ -92,6 +92,12 @@ export interface ConvenienceSettings {
   smartLinkJoin: boolean;
   /** Show a confirmation dialog when pasting large text. */
   largePasteWarning: boolean;
+  /**
+   * Seconds a pane/workspace must stay hidden (in the WorkspaceSelectorView hide mode)
+   * before its terminal (PTY) is automatically closed to free memory/CPU. 0 = disabled.
+   * See issue #269.
+   */
+  hiddenAutoCloseSeconds: number;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -775,6 +781,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     smartRemoveLineBreak: true,
     smartLinkJoin: true,
     largePasteWarning: true,
+    hiddenAutoCloseSeconds: 0,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: {
@@ -1003,6 +1010,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           smartRemoveLineBreak: true,
           smartLinkJoin: true,
           largePasteWarning: true,
+          hiddenAutoCloseSeconds: 0,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
       : undefined;

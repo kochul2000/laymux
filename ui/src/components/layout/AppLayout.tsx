@@ -14,6 +14,7 @@ import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
+import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
 
 function ModalOverlay({
   testIdPrefix,
@@ -149,6 +150,7 @@ function DockResizeHandle({ position }: { position: DockPosition }) {
 
 export function AppLayout() {
   useAppTheme();
+  useHiddenTerminalAutoClose();
   const docks = useDockStore((s) => s.docks);
   const layoutMode = useDockStore((s) => s.layoutMode);
   const focusedDock = useDockStore((s) => s.focusedDock);

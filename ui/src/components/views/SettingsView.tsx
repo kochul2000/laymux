@@ -1374,6 +1374,41 @@ function ConvenienceSection() {
           </div>
         </div>
 
+        {/* Hidden terminal auto-close (issue #269) */}
+        <div className="flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Hidden Auto-close
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              숨긴 워크스페이스/Pane의 터미널을 자동 종료해 리소스 절약 (0 = 종료 안 함). 다시
+              표시하면 새 터미널이 생성됩니다.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="hidden-auto-close-seconds-input"
+              type="number"
+              min={0}
+              step={30}
+              className={inputCls}
+              style={{ width: 80 }}
+              value={convenience.hiddenAutoCloseSeconds}
+              onChange={(e) =>
+                updateConvenience({
+                  hiddenAutoCloseSeconds: Math.max(0, Math.floor(Number(e.target.value))),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              초
+            </span>
+          </div>
+        </div>
+
         {/* Default control bar mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">

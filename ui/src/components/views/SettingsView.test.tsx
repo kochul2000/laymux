@@ -817,6 +817,41 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
   });
 
+  // -- Hidden terminal auto-close (issue #269) --
+
+  it("shows hidden auto-close input in convenience section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    expect(screen.getByTestId("hidden-auto-close-seconds-input")).toBeInTheDocument();
+  });
+
+  it("does NOT update hidden auto-close in store until Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const input = screen.getByTestId("hidden-auto-close-seconds-input") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "600");
+
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+  });
+
+  it("hidden auto-close input updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const input = screen.getByTestId("hidden-auto-close-seconds-input") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "600");
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(600);
+  });
+
   // -- Claude Code section --
 
   it("shows Claude Code nav button", () => {

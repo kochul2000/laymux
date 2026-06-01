@@ -256,6 +256,49 @@ describe("WorkspaceArea", () => {
     expect(hiddenDivs.length).toBeGreaterThan(0);
   });
 
+  it("unmounts evicted panes of a background workspace (issue #269)", () => {
+    // Two workspaces, both mounted (visited) with TerminalView panes. Switch back
+    // to WS1 so WS2 is in the background, then evict WS2's pane.
+    const store = useWorkspaceStore.getState();
+    store.addWorkspace("WS2", store.layouts[0].id);
+    const ws1Id = useWorkspaceStore.getState().workspaces[0].id;
+    const ws2Id = useWorkspaceStore.getState().workspaces[1].id;
+
+    // Make both panes terminals so they render the mock.
+    act(() => useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }));
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(ws2Id));
+    act(() => useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }));
+    const ws2Pane = useWorkspaceStore.getState().workspaces[1].panes[0].id;
+    // Back to WS1 so WS2 is in the background.
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(ws1Id));
+
+    render(<WorkspaceArea />);
+
+    // WS1 is mounted; visiting WS2 mounts it too, then switch back.
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(ws2Id));
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(ws1Id));
+
+    // Both workspaces mounted -> two terminal mocks.
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(2);
+
+    // Evict WS2's pane.
+    act(() => useUiStore.getState().setEvictedPaneIds(new Set([ws2Pane])));
+
+    // WS2's terminal is gone; the active WS1 terminal remains.
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(1);
+  });
+
+  it("never unmounts active-workspace panes even if listed as evicted", () => {
+    act(() => useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }));
+    const activePane = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    render(<WorkspaceArea />);
+    act(() => useUiStore.getState().setEvictedPaneIds(new Set([activePane])));
+    // Active workspace pane must still render (defensive: hook never evicts it,
+    // but WorkspaceArea must not blank the visible workspace).
+    expect(screen.getByTestId("workspace-pane-0")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-terminal")).toBeInTheDocument();
+  });
+
   it("preserves pane DOM elements when workspaces are reordered", () => {
     // Setup: create 2 workspaces with distinct pane IDs
     const store = useWorkspaceStore.getState();

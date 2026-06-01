@@ -142,6 +142,28 @@ describe("ui-store", () => {
     expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(2);
   });
 
+  // -- evicted (auto-closed) pane ids (issue #269) --
+
+  it("starts with no evicted panes", () => {
+    expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("setEvictedPaneIds replaces the evicted set", () => {
+    useUiStore.getState().setEvictedPaneIds(new Set(["p1", "p2"]));
+    expect(useUiStore.getState().evictedPaneIds.size).toBe(2);
+    expect(useUiStore.getState().evictedPaneIds.has("p1")).toBe(true);
+    useUiStore.getState().setEvictedPaneIds(new Set(["p3"]));
+    expect(useUiStore.getState().evictedPaneIds.has("p1")).toBe(false);
+    expect(useUiStore.getState().evictedPaneIds.has("p3")).toBe(true);
+  });
+
+  it("setEvictedPaneIds keeps the same reference when the set is unchanged", () => {
+    useUiStore.getState().setEvictedPaneIds(new Set(["p1"]));
+    const ref = useUiStore.getState().evictedPaneIds;
+    useUiStore.getState().setEvictedPaneIds(new Set(["p1"]));
+    expect(useUiStore.getState().evictedPaneIds).toBe(ref);
+  });
+
   // -- duplicate-aware hidden propagation --
 
   describe("propagateHiddenOnDuplicate", () => {
