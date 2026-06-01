@@ -221,8 +221,10 @@ export function FileExplorerView({
       if (cancelled) return;
       setCurrentCwd(cwd);
       refreshListing(cwd);
+      // Only initialize history (and reset the index to 0) when it is still
+      // empty; if entries already exist, leave navigation state untouched.
       setHistory((prev) => (prev.length ? prev : [cwd]));
-      setHistoryIndex((prev) => (prev === 0 ? 0 : prev));
+      setHistoryIndex((prev) => (history.length ? prev : 0));
     };
 
     const initialCwd = lastCwd || initialGroupCwd;
