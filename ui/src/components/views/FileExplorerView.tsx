@@ -5,6 +5,7 @@ import {
   clipboardWriteText,
   readFileForViewer,
   listDirectory,
+  getHomeDirectory,
   onTerminalCwdChanged,
   handleLxMessage,
   type DirEntry,
@@ -214,17 +215,47 @@ export function FileExplorerView({
 
   // --- Initial listing ---
   useEffect(() => {
+    let cancelled = false;
+
+    const applyInitialCwd = (cwd: string) => {
+      if (cancelled) return;
+      setCurrentCwd(cwd);
+      refreshListing(cwd);
+      // Only initialize history (and reset the index to 0) when it is still
+      // empty; if entries already exist, leave navigation state untouched.
+      setHistory((prev) => (prev.length ? prev : [cwd]));
+      setHistoryIndex((prev) => (history.length ? prev : 0));
+    };
+
     const initialCwd = lastCwd || initialGroupCwd;
     if (initialCwd) {
-      setCurrentCwd(initialCwd);
-      refreshListing(initialCwd);
-      if (!history.length) {
-        setHistory([initialCwd]);
-        setHistoryIndex(0);
-      }
-    } else {
-      setLoading(false);
+      applyInitialCwd(initialCwd);
+      return;
     }
+
+    // No lastCwd and no syncGroup CWD available. Rather than getting stuck
+    // showing "..." with an empty listing (#274), fall back to the user's
+    // home directory so the explorer always has a valid, navigable path.
+    getHomeDirectory()
+      .then((home) => {
+        if (cancelled || !home) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+        // If a syncGroup CWD arrived while we were resolving, prefer it.
+        if (currentCwdRef.current) {
+          setLoading(false);
+          return;
+        }
+        applyInitialCwd(home);
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
