@@ -417,6 +417,11 @@ export async function listDirectory(path: string, wslDistro?: string): Promise<D
   return invoke("list_directory", { path, wslDistro: wslDistro ?? null });
 }
 
+/** Resolve the user's home directory (fallback CWD for File Explorer). */
+export async function getHomeDirectory(): Promise<string> {
+  return invoke("get_home_directory");
+}
+
 /** Read a file and classify it for the file viewer. */
 export async function readFileForViewer(
   path: string,

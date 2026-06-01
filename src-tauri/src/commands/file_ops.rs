@@ -134,6 +134,24 @@ pub fn read_file_for_viewer(
     }
 }
 
+/// Resolve the current user's home directory as a path string.
+///
+/// Used by the File Explorer as a fallback CWD when no syncGroup CWD or
+/// restored `lastCwd` is available, so the explorer is never stuck showing
+/// "..." with an empty listing.
+pub fn home_directory() -> Option<String> {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+/// Return the current user's home directory path.
+#[tauri::command]
+pub fn get_home_directory() -> Result<String, String> {
+    home_directory().ok_or_else(|| "Could not determine home directory".to_string())
+}
+
 /// A single directory entry returned by `list_directory`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -274,6 +292,18 @@ mod tests {
     #[test]
     fn base64_encode_hello() {
         assert_eq!(base64_encode(b"Hello"), "SGVsbG8=");
+    }
+
+    #[test]
+    fn home_directory_resolves_to_existing_path() {
+        // The home directory must resolve to a non-empty, existing path so the
+        // File Explorer always has a valid fallback CWD (issue #274).
+        let home = home_directory().expect("home directory should resolve in test env");
+        assert!(!home.is_empty());
+        assert!(
+            std::path::Path::new(&home).exists(),
+            "resolved home dir should exist: {home}"
+        );
     }
 
     #[test]

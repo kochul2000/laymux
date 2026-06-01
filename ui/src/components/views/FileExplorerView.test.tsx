@@ -1,7 +1,12 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FileExplorerView } from "./FileExplorerView";
-import { clipboardWriteText, readFileForViewer, listDirectory } from "@/lib/tauri-api";
+import {
+  clipboardWriteText,
+  readFileForViewer,
+  listDirectory,
+  getHomeDirectory,
+} from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
@@ -16,6 +21,7 @@ vi.mock("@/lib/tauri-api", () => ({
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
   listDirectory: vi.fn().mockResolvedValue([]),
+  getHomeDirectory: vi.fn().mockResolvedValue("/home/fallback"),
   onTerminalCwdChanged: vi
     .fn()
     .mockImplementation(
@@ -69,6 +75,8 @@ describe("FileExplorerView", () => {
     vi.mocked(clipboardWriteText).mockClear();
     vi.mocked(readFileForViewer).mockClear();
     vi.mocked(listDirectory).mockClear();
+    vi.mocked(getHomeDirectory).mockClear();
+    vi.mocked(getHomeDirectory).mockResolvedValue("/home/fallback");
     mockListDir();
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
@@ -430,14 +438,30 @@ describe("FileExplorerView", () => {
     expect(screen.getByTestId("file-explorer-viewer-image")).toBeInTheDocument();
   });
 
-  it("shows empty state when no CWD available", async () => {
-    render(<FileExplorerView {...defaultProps} lastCwd="" />);
+  it("falls back to home directory when no CWD available (#274)", async () => {
+    // No lastCwd, no syncGroup terminal with cwd, cwdReceive off:
+    // explorer must NOT be stuck at "..." / "Empty directory" — it falls back to home.
+    render(<FileExplorerView {...defaultProps} lastCwd="" syncGroup="" cwdReceive={false} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
-    // No CWD → should not be stuck at Loading
+    expect(getHomeDirectory).toHaveBeenCalled();
+    // Path bar shows the resolved home dir, not "..."
+    expect(screen.getByTestId("file-explorer-path-bar")).toHaveTextContent("/home/fallback");
+    // Directory listing was fetched for the home dir
+    expect(listDirectory).toHaveBeenCalledWith("/home/fallback");
     expect(screen.getByTestId("file-explorer-list")).toBeInTheDocument();
+  });
+
+  it("does not call home fallback when a CWD is available", async () => {
+    render(<FileExplorerView {...defaultProps} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(getHomeDirectory).not.toHaveBeenCalled();
+    expect(listDirectory).toHaveBeenCalledWith("/home/user");
   });
 
   it("shows .. entry at top of file list", async () => {
