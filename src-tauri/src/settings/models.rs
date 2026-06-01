@@ -609,6 +609,11 @@ pub struct IssueReporterSettings {
     /// Font weight override. Empty string = inherit from app_font.
     #[serde(default)]
     pub font_weight: String,
+    /// Repository list for the issue reporter. Each entry is an "owner/repo" string.
+    /// The first entry is the default selection in the Report Issue view.
+    /// When empty, the repo is auto-detected from the current working directory.
+    #[serde(default)]
+    pub repositories: Vec<String>,
 }
 
 impl Default for IssueReporterSettings {
@@ -622,6 +627,7 @@ impl Default for IssueReporterSettings {
             font_family: String::new(),
             font_size: 13,
             font_weight: String::new(),
+            repositories: Vec::new(),
         }
     }
 }

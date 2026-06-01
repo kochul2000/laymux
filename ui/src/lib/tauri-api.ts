@@ -174,6 +174,8 @@ export interface IssueReporterSettings {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
+  /** Repository list ("owner/repo"). First entry is the default selection. */
+  repositories: string[];
 }
 
 export interface MemoParagraphCopySettings {
