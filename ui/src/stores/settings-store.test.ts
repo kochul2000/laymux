@@ -378,6 +378,29 @@ describe("settings-store", () => {
     expect(convenience.pasteImageDir).toBe("");
   });
 
+  it("hiddenAutoCloseSeconds defaults to 0 (disabled)", () => {
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+  });
+
+  it("setConvenience updates hiddenAutoCloseSeconds", () => {
+    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 600 });
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(600);
+  });
+
+  it("loadFromSettings fills missing hiddenAutoCloseSeconds with default 0", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+  });
+
+  it("loadFromSettings preserves explicit hiddenAutoCloseSeconds", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { hiddenAutoCloseSeconds: 1200 } as any,
+    });
+    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(1200);
+  });
+
   it("setConvenience updates smart paste", () => {
     useSettingsStore.getState().setConvenience({ smartPaste: false });
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);

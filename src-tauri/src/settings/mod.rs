@@ -276,6 +276,32 @@ mod tests {
     }
 
     #[test]
+    fn convenience_hidden_auto_close_default_is_disabled() {
+        // Default must be 0 (disabled) so existing users see no behavior change.
+        let settings = Settings::default();
+        assert_eq!(settings.convenience.hidden_auto_close_seconds, 0);
+    }
+
+    #[test]
+    fn convenience_hidden_auto_close_round_trip() {
+        // The timeout must persist through a full save/load cycle in settings.json.
+        let json = r#"{
+          "convenience": {
+            "hiddenAutoCloseSeconds": 600
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.convenience.hidden_auto_close_seconds, 600);
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"hiddenAutoCloseSeconds\":600"));
+
+        // Round-trip the serialized form back to ensure the field is not dropped.
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.convenience.hidden_auto_close_seconds, 600);
+    }
+
+    #[test]
     fn migrate_cmd_profile_to_powershell_in_workspace_panes() {
         let mut settings = Settings::default();
         settings.workspaces = vec![Workspace {

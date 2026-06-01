@@ -20,6 +20,14 @@ function saveHiddenIds(key: string, ids: Set<string>) {
   }
 }
 
+/** Value-equality for two string sets (order-independent). */
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
 interface UiState {
   settingsModalOpen: boolean;
   notificationPanelOpen: boolean;
@@ -34,6 +42,13 @@ interface UiState {
   hiddenPaneIds: Set<string>;
   /** Set of workspace IDs hidden in WorkspaceSelectorView. */
   hiddenWorkspaceIds: Set<string>;
+  /**
+   * Pane IDs whose terminal has been auto-closed after staying hidden past the
+   * configured timeout (issue #269). WorkspaceArea stops rendering these panes
+   * so their TerminalView unmounts and the PTY is torn down. Cleared (per pane)
+   * when the pane is un-hidden, which re-mounts it and spawns a fresh PTY.
+   */
+  evictedPaneIds: Set<string>;
 
   openSettingsModal: () => void;
   closeSettingsModal: () => void;
@@ -48,6 +63,12 @@ interface UiState {
   exitHideMode: () => void;
   togglePaneHidden: (paneId: string) => void;
   toggleWorkspaceHidden: (workspaceId: string) => void;
+  /**
+   * Replace the set of auto-evicted pane IDs. The reference is preserved when
+   * the new set is value-equal so Zustand subscribers do not re-render
+   * needlessly on every timer tick.
+   */
+  setEvictedPaneIds: (ids: Set<string>) => void;
   /**
    * Replay hide state from a source workspace onto its freshly-created duplicate.
    * - If the source workspace is hidden, mark the new workspace hidden too.
@@ -72,6 +93,7 @@ export const useUiStore = create<UiState>()((set) => ({
   hideMode: false,
   hiddenPaneIds: loadHiddenIds(HIDDEN_PANES_KEY),
   hiddenWorkspaceIds: loadHiddenIds(HIDDEN_WORKSPACES_KEY),
+  evictedPaneIds: new Set(),
 
   openSettingsModal: () => set({ settingsModalOpen: true, notificationPanelOpen: false }),
   closeSettingsModal: () => set({ settingsModalOpen: false }),
@@ -113,6 +135,8 @@ export const useUiStore = create<UiState>()((set) => ({
       saveHiddenIds(HIDDEN_WORKSPACES_KEY, next);
       return { hiddenWorkspaceIds: next };
     }),
+  setEvictedPaneIds: (ids) =>
+    set((state) => (setsEqual(state.evictedPaneIds, ids) ? state : { evictedPaneIds: ids })),
   propagateHiddenOnDuplicate: (sourceWorkspaceId, newWorkspaceId, paneIdMap) =>
     set((state) => {
       const patch: Partial<UiState> = {};

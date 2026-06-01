@@ -548,6 +548,11 @@ pub struct ConvenienceSettings {
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).
     #[serde(default = "default_true")]
     pub large_paste_warning: bool,
+    /// Seconds a pane/workspace must stay hidden (in WorkspaceSelectorView hide mode)
+    /// before its terminal (PTY) is automatically closed to save resources.
+    /// 0 = disabled (never auto-close). See issue #269.
+    #[serde(default)]
+    pub hidden_auto_close_seconds: u64,
 }
 
 impl Default for ConvenienceSettings {
@@ -564,6 +569,7 @@ impl Default for ConvenienceSettings {
             smart_remove_line_break: true,
             smart_link_join: true,
             large_paste_warning: true,
+            hidden_auto_close_seconds: 0,
         }
     }
 }
