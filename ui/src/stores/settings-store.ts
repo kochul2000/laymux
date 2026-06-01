@@ -390,6 +390,8 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   fontFamily: "",
   fontSize: 13,
   fontWeight: "",
+  // Default to the laymux repo so issues land in the right place out of the box.
+  repositories: ["kochul2000/laymux"],
 };
 
 const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
