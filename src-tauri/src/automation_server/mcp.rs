@@ -650,6 +650,7 @@ impl McpHandler {
     /// Enrich a JSON array of objects by injecting activity state from backend detection.
     /// `id_field` is the JSON key containing the terminal ID (e.g. "id" or "terminalId").
     /// `activity_field` is the key to insert (e.g. "activity" or "terminalActivity").
+    /// The inserted value is the flat `TerminalActivity` shape, not `TerminalStateInfo`.
     fn enrich_with_activity(
         app_state: &crate::state::AppState,
         items: &mut Vec<Value>,
@@ -663,7 +664,7 @@ impl McpHandler {
                     if let Some(obj) = item.as_object_mut() {
                         obj.insert(
                             activity_field.to_string(),
-                            serde_json::to_value(state_info).unwrap_or(json!(null)),
+                            serde_json::to_value(&state_info.activity).unwrap_or(json!(null)),
                         );
                     }
                 }
@@ -2262,5 +2263,38 @@ mod tests {
         let data = json!({ "workspaces": [], "activeWorkspaceId": null });
         let summary = workspace_list_summary(&data);
         assert_eq!(summary["workspaces"].as_array().map(|a| a.len()), Some(0));
+    }
+
+    #[test]
+    fn enrich_with_activity_injects_flat_activity_shape() {
+        let state = crate::state::AppState::new();
+        let terminal_id = "terminal-pane-codex";
+        let mut buffer = crate::output_buffer::TerminalOutputBuffer::default();
+        buffer.push(b"\x1b]0;OpenAI Codex\x07");
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert(terminal_id.to_string(), buffer);
+        state.terminals.lock().unwrap().insert(
+            terminal_id.to_string(),
+            crate::terminal::TerminalSession::new(
+                terminal_id.to_string(),
+                crate::terminal::TerminalConfig::default(),
+            ),
+        );
+
+        let mut items = vec![json!({ "id": terminal_id })];
+        McpHandler::enrich_with_activity(&state, &mut items, "id", "activity");
+
+        assert_eq!(
+            items[0]["activity"],
+            json!({ "type": "interactiveApp", "name": "Codex" }),
+            "MCP list_terminals must expose activity directly, not activity.activity"
+        );
+        assert!(
+            items[0]["activity"].get("activity").is_none(),
+            "nested activity.activity breaks clients that read the documented shape"
+        );
     }
 }
