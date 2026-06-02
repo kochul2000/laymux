@@ -264,28 +264,51 @@ describe("useKeyboardShortcuts", () => {
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
   });
 
-  // --- Ctrl+Shift+O: open file viewer anywhere (#279) ---
-  it("Ctrl+Shift+O opens the file viewer with the prompted path", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("/tmp/note.txt");
+  // --- Ctrl+Shift+O: open file viewer anywhere (#279 / #283) ---
+  it("Ctrl+Shift+O opens the viewer in empty (inline path input) mode", () => {
+    // #283: no native window.prompt — the overlay opens blank and shows an
+    // inline path input field that is driveable on every platform.
+    const promptSpy = vi.spyOn(window, "prompt");
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("O", { ctrlKey: true, shiftKey: true });
 
-    expect(promptSpy).toHaveBeenCalled();
+    expect(promptSpy).not.toHaveBeenCalled();
     const s = useFileViewerStore.getState();
     expect(s.open).toBe(true);
-    expect(s.path).toBe("/tmp/note.txt");
+    expect(s.path).toBe("");
     promptSpy.mockRestore();
   });
 
-  it("Ctrl+Shift+O does nothing when prompt is cancelled", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+  it("Ctrl+Shift+O does not tear down an in-progress terminal viewer", () => {
+    // A terminal-backed viewer (.txt→vi, video→mpv) holds a live PTY session.
+    // Like Esc and a backdrop click, the "open anywhere" shortcut must not
+    // silently discard it — the user closes such viewers with the explicit ✕.
+    const fe = useSettingsStore.getState().fileExplorer;
+    useSettingsStore.setState({
+      fileExplorer: { ...fe, extensionViewers: [{ extensions: [".txt"], command: "vi" }] },
+    });
+    useFileViewerStore.setState({ open: true, path: "/tmp/notes.txt", maximized: false });
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("O", { ctrlKey: true, shiftKey: true });
 
-    expect(useFileViewerStore.getState().open).toBe(false);
-    promptSpy.mockRestore();
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/tmp/notes.txt"); // unchanged — terminal session preserved
+  });
+
+  it("Ctrl+Shift+O re-prompts when a web viewer is open (no PTY to protect)", () => {
+    // Built-in web viewers (text/image/binary) have no live session, so the
+    // shortcut may reset to empty prompt mode just as Esc may close them.
+    const fe = useSettingsStore.getState().fileExplorer;
+    useSettingsStore.setState({ fileExplorer: { ...fe, extensionViewers: [] } });
+    useFileViewerStore.setState({ open: true, path: "/tmp/pic.png", maximized: false });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("O", { ctrlKey: true, shiftKey: true });
+
+    expect(useFileViewerStore.getState().path).toBe("");
   });
 
   // --- Ctrl+, : settings ---
