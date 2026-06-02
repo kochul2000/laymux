@@ -1,14 +1,10 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FileExplorerView } from "./FileExplorerView";
-import {
-  clipboardWriteText,
-  readFileForViewer,
-  listDirectory,
-  getHomeDirectory,
-} from "@/lib/tauri-api";
+import { clipboardWriteText, listDirectory, getHomeDirectory } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 
 // --- Mocks ---
 
@@ -17,9 +13,6 @@ let cwdCallback: ((data: { terminalId: string; cwd: string; cwdSend?: boolean })
 
 vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
-  readFileForViewer: vi
-    .fn()
-    .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
   listDirectory: vi.fn().mockResolvedValue([]),
   getHomeDirectory: vi.fn().mockResolvedValue("/home/fallback"),
   onTerminalCwdChanged: vi
@@ -35,16 +28,6 @@ vi.mock("@/lib/tauri-api", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
-}));
-
-vi.mock("./TerminalView", () => ({
-  TerminalView: (props: Record<string, unknown>) => (
-    <div
-      data-testid="mock-terminal-view"
-      data-startup-command={props.startupCommandOverride}
-      data-profile={props.profile}
-    />
-  ),
 }));
 
 const defaultProps = {
@@ -73,13 +56,13 @@ describe("FileExplorerView", () => {
     vi.useFakeTimers();
     cwdCallback = null;
     vi.mocked(clipboardWriteText).mockClear();
-    vi.mocked(readFileForViewer).mockClear();
     vi.mocked(listDirectory).mockClear();
     vi.mocked(getHomeDirectory).mockClear();
     vi.mocked(getHomeDirectory).mockResolvedValue("/home/fallback");
     mockListDir();
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
+    useFileViewerStore.setState({ open: false, path: "", maximized: false });
     // jsdom doesn't implement scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -198,7 +181,7 @@ describe("FileExplorerView", () => {
     expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
   });
 
-  it("Enter activates file (opens viewer)", async () => {
+  it("Enter activates file (opens shared viewer overlay)", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -210,14 +193,11 @@ describe("FileExplorerView", () => {
     fireEvent.keyDown(view, { key: "ArrowDown" });
     fireEvent.keyDown(view, { key: "Enter" });
 
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
-    expect(screen.getByTestId("file-explorer-viewer-titlebar")).toHaveTextContent(
-      "/home/user/a.txt",
-    );
+    // Opening a file delegates to the global file-viewer store (#277/#279),
+    // not an inline pane viewer.
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/home/user/a.txt");
   });
 
   it("double-click directory navigates", async () => {
@@ -236,7 +216,7 @@ describe("FileExplorerView", () => {
     expect(listDirectory).toHaveBeenCalledWith("/home/user/subdir");
   });
 
-  it("double-click file opens viewer", async () => {
+  it("double-click file opens shared viewer overlay", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
       await vi.runAllTimersAsync();
@@ -244,12 +224,9 @@ describe("FileExplorerView", () => {
 
     fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt (index 2)
 
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(readFileForViewer).toHaveBeenCalled();
-    expect(screen.getByTestId("file-explorer-viewer-titlebar")).toBeInTheDocument();
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/home/user/a.txt");
   });
 
   it("Ctrl+C copies selected paths", async () => {
@@ -363,79 +340,6 @@ describe("FileExplorerView", () => {
 
     // listDirectory SHOULD be called because cwdSend is true
     expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
-  });
-
-  it("viewer close button returns to listing", async () => {
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(screen.getByTestId("file-explorer-viewer-titlebar")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("file-explorer-viewer-close"));
-    expect(screen.getByTestId("file-explorer-list")).toBeInTheDocument();
-  });
-
-  it("Escape closes viewer", async () => {
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    const view = screen.getByTestId("file-explorer-view");
-    fireEvent.keyDown(view, { key: "Escape" });
-    expect(screen.getByTestId("file-explorer-list")).toBeInTheDocument();
-  });
-
-  it("web viewer shows text content", async () => {
-    vi.mocked(readFileForViewer).mockResolvedValue({
-      kind: "text",
-      content: "hello world",
-      truncated: false,
-    });
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(screen.getByTestId("file-explorer-viewer-text")).toHaveTextContent("hello world");
-  });
-
-  it("web viewer shows image", async () => {
-    vi.mocked(readFileForViewer).mockResolvedValue({
-      kind: "image",
-      dataUrl: "data:image/png;base64,abc123",
-    });
-    mockListDir([
-      { name: "photo.png", isDirectory: false, isSymlink: false, isExecutable: false, size: 5000 },
-    ]);
-    render(<FileExplorerView {...defaultProps} />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1")); // photo.png (after "..")
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(screen.getByTestId("file-explorer-viewer-image")).toBeInTheDocument();
   });
 
   it("falls back to home directory when no CWD available (#274)", async () => {
@@ -589,8 +493,9 @@ describe("FileExplorerView", () => {
     expect(listDirectory).toHaveBeenCalledWith("/home");
   });
 
-  it("opens file with terminal viewer when extensionViewers matches", async () => {
-    // Configure extensionViewers with vi for .txt files
+  it("opening a file with a configured extension viewer still opens the shared overlay", async () => {
+    // The extension→command resolution now lives in the shared FileViewer; the
+    // explorer simply opens the overlay with the file path regardless.
     useSettingsStore.setState({
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
@@ -603,141 +508,10 @@ describe("FileExplorerView", () => {
       await vi.runAllTimersAsync();
     });
 
-    // Double-click the a.txt file (index 2: ..=0, subdir=1, a.txt=2)
-    const fileItem = screen.getByTestId("file-explorer-item-2");
-    fireEvent.doubleClick(fileItem);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2")); // a.txt
 
-    // Should show terminal viewer (mocked), NOT call readFileForViewer
-    expect(readFileForViewer).not.toHaveBeenCalled();
-    expect(screen.getByTestId("mock-terminal-view")).toBeInTheDocument();
-    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute(
-      "data-startup-command",
-      "vi '/home/user/a.txt'",
-    );
-  });
-
-  it("opens file with web viewer when extensionViewers does not match", async () => {
-    // This test needs real timers for async readFileForViewer to resolve properly
-    vi.useRealTimers();
-
-    // Explicitly set mock to return text content (previous tests may have changed it)
-    vi.mocked(readFileForViewer).mockResolvedValue({
-      kind: "text",
-      content: "file content",
-      truncated: false,
-    });
-
-    // No extensionViewers configured (default)
-    render(<FileExplorerView {...defaultProps} />);
-    // Wait for initial listDirectory
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // Double-click the a.txt file (index 2: ..=0, subdir=1, a.txt=2)
-    const fileItem = screen.getByTestId("file-explorer-item-2");
-    await act(async () => {
-      fireEvent.doubleClick(fileItem);
-    });
-    // Wait for readFileForViewer promise to resolve and re-render
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // Should use web viewer (readFileForViewer called)
-    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
-    expect(screen.getByTestId("file-explorer-viewer-text")).toBeInTheDocument();
-
-    // Restore fake timers for other tests
-    vi.useFakeTimers();
-  });
-
-  it("uses WSL profile for terminal viewer when CWD is a Unix path and current profile is not WSL", async () => {
-    // Set up: PowerShell default profile, WSL profile available, Unix CWD
-    useSettingsStore.setState({
-      profiles: [
-        {
-          name: "PowerShell",
-          commandLine: "powershell.exe -NoLogo",
-          startingDirectory: "",
-          startupCommand: "",
-          syncCwd: "default",
-        },
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          startingDirectory: "",
-          startupCommand: "",
-          syncCwd: "default",
-        },
-      ],
-      fileExplorer: {
-        ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
-      },
-    });
-
-    // Render with PowerShell profile but Unix CWD
-    render(<FileExplorerView {...defaultProps} profile="PowerShell" lastCwd="/home/user" />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    // Double-click a.txt
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2"));
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    // Should use WSL profile instead of PowerShell
-    const terminalView = screen.getByTestId("mock-terminal-view");
-    expect(terminalView).toHaveAttribute("data-profile", "WSL");
-  });
-
-  it("keeps current profile for terminal viewer when CWD is a Windows path", async () => {
-    useSettingsStore.setState({
-      profiles: [
-        {
-          name: "PowerShell",
-          commandLine: "powershell.exe -NoLogo",
-          startingDirectory: "",
-          startupCommand: "",
-          syncCwd: "default",
-        },
-        {
-          name: "WSL",
-          commandLine: "wsl.exe",
-          startingDirectory: "",
-          startupCommand: "",
-          syncCwd: "default",
-        },
-      ],
-      fileExplorer: {
-        ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
-      },
-    });
-
-    mockListDir([
-      { name: "readme.txt", isDirectory: false, isSymlink: false, isExecutable: false, size: 100 },
-    ]);
-
-    render(<FileExplorerView {...defaultProps} profile="PowerShell" lastCwd="C:\\Users\\test" />);
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    // Double-click readme.txt (index 1: ..=0, readme.txt=1)
-    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    // Should keep PowerShell profile
-    const terminalView = screen.getByTestId("mock-terminal-view");
-    expect(terminalView).toHaveAttribute("data-profile", "PowerShell");
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/home/user/a.txt");
   });
 });

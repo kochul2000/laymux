@@ -11,6 +11,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
@@ -333,6 +334,61 @@ describe("handleAutomationRequest", () => {
       params: {},
     });
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  it("opens the file viewer via automation API (ui.openFileViewer)", () => {
+    useFileViewerStore.setState({ open: false, path: "", maximized: false });
+    const result = handleAutomationRequest({
+      requestId: "fv-1",
+      category: "action",
+      target: "ui",
+      method: "openFileViewer",
+      params: { path: "  /tmp/report.txt  " },
+    });
+    expect(result.success).toBe(true);
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/tmp/report.txt");
+    expect(s.maximized).toBe(false);
+  });
+
+  it("opens the file viewer maximized when newWindow=true", () => {
+    useFileViewerStore.setState({ open: false, path: "", maximized: false });
+    const result = handleAutomationRequest({
+      requestId: "fv-2",
+      category: "action",
+      target: "ui",
+      method: "openFileViewer",
+      params: { path: "/tmp/a.txt", newWindow: true },
+    });
+    expect(result.success).toBe(true);
+    expect(useFileViewerStore.getState().maximized).toBe(true);
+  });
+
+  it("rejects openFileViewer with a blank path", () => {
+    useFileViewerStore.setState({ open: false, path: "", maximized: false });
+    const result = handleAutomationRequest({
+      requestId: "fv-3",
+      category: "action",
+      target: "ui",
+      method: "openFileViewer",
+      params: { path: "   " },
+    });
+    expect(result.success).toBe(false);
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("closes the file viewer via automation API (ui.closeFileViewer)", () => {
+    useFileViewerStore.setState({ open: true, path: "/tmp/a.txt", maximized: false });
+    const result = handleAutomationRequest({
+      requestId: "fv-4",
+      category: "action",
+      target: "ui",
+      method: "closeFileViewer",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    expect(useFileViewerStore.getState().open).toBe(false);
   });
 });
 

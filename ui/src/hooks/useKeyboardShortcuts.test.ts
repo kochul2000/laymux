@@ -7,6 +7,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
@@ -29,6 +30,7 @@ describe("useKeyboardShortcuts", () => {
     useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useFileViewerStore.setState({ open: false, path: "", maximized: false });
   });
 
   // --- Ctrl+Alt+1~9: workspace switch ---
@@ -260,6 +262,30 @@ describe("useKeyboardShortcuts", () => {
 
     fireKey("I", { ctrlKey: true, shiftKey: true });
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  // --- Ctrl+Shift+O: open file viewer anywhere (#279) ---
+  it("Ctrl+Shift+O opens the file viewer with the prompted path", () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("/tmp/note.txt");
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("O", { ctrlKey: true, shiftKey: true });
+
+    expect(promptSpy).toHaveBeenCalled();
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/tmp/note.txt");
+    promptSpy.mockRestore();
+  });
+
+  it("Ctrl+Shift+O does nothing when prompt is cancelled", () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("O", { ctrlKey: true, shiftKey: true });
+
+    expect(useFileViewerStore.getState().open).toBe(false);
+    promptSpy.mockRestore();
   });
 
   // --- Ctrl+, : settings ---

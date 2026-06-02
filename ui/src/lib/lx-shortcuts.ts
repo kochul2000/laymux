@@ -7,7 +7,7 @@
  * IDE shortcuts use Ctrl+Shift, Ctrl+Alt, or Alt+Arrow.
  */
 
-const CTRL_SHIFT_KEYS = new Set(["U", "B", "I", "u", "b", "i"]);
+const CTRL_SHIFT_KEYS = new Set(["U", "B", "I", "O", "u", "b", "i", "o"]);
 const CTRL_ALT_KEYS = new Set([
   "1",
   "2",

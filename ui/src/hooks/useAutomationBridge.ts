@@ -8,6 +8,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore, type NotificationLevel } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import type {
@@ -719,6 +720,20 @@ const handlers: HandlerMap = {
       if (!id) return err("id required");
       useUiStore.getState().togglePaneHidden(id);
       return ok({ hidden: useUiStore.getState().hiddenPaneIds.has(id) });
+    },
+    // Open the unified file viewer overlay (#277/#279). Backs the MCP
+    // `open_file_viewer` tool and the REST endpoint.
+    openFileViewer: (p) => {
+      const path = typeof p.path === "string" ? p.path : "";
+      const maximized = p.newWindow === true || p.maximized === true;
+      const opened = useFileViewerStore.getState().openFileViewer(path, { maximized });
+      if (!opened) return err("A non-empty file path is required");
+      const state = useFileViewerStore.getState();
+      return ok({ opened: true, path: state.path, maximized: state.maximized });
+    },
+    closeFileViewer: () => {
+      useFileViewerStore.getState().closeFileViewer();
+      return ok({ closed: true });
     },
   },
 };

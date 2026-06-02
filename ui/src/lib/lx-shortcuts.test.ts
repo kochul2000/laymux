@@ -46,6 +46,11 @@ describe("isLxShortcut", () => {
     expect(isLxShortcut(makeKeyEvent("I", { ctrlKey: true, shiftKey: true }))).toBe(true);
   });
 
+  it("returns true for Ctrl+Shift+O (open file viewer)", () => {
+    expect(isLxShortcut(makeKeyEvent("O", { ctrlKey: true, shiftKey: true }))).toBe(true);
+    expect(isLxShortcut(makeKeyEvent("o", { ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
   it("returns true for Ctrl+, (toggle settings)", () => {
     expect(isLxShortcut(makeKeyEvent(",", { ctrlKey: true }))).toBe(true);
   });

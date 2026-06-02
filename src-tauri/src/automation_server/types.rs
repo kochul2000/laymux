@@ -184,6 +184,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/screenshot"),
     ("POST", "/api/v1/ui/settings"),
     ("POST", "/api/v1/ui/settings/navigate"),
+    ("POST", "/api/v1/ui/file-viewer"),
     ("PUT", "/api/v1/settings/app-theme"),
     ("PUT", "/api/v1/settings/profile-defaults"),
     ("PUT", "/api/v1/settings/profiles/{index}"),
