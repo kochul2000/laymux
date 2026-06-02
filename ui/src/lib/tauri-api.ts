@@ -417,6 +417,21 @@ export async function listDirectory(path: string, wslDistro?: string): Promise<D
   return invoke("list_directory", { path, wslDistro: wslDistro ?? null });
 }
 
+/** Filesystem facts about a path (used by the File Explorer address bar, #278). */
+export interface PathInfo {
+  exists: boolean;
+  isDirectory: boolean;
+}
+
+/**
+ * Resolve a path (WSL/Windows translation handled by the backend) and report
+ * whether it exists and is a directory. Never throws on a missing path —
+ * returns `{ exists: false }` so the caller can show validation feedback.
+ */
+export async function statPath(path: string, wslDistro?: string): Promise<PathInfo> {
+  return invoke("stat_path", { path, wslDistro: wslDistro ?? null });
+}
+
 /** Resolve the user's home directory (fallback CWD for File Explorer). */
 export async function getHomeDirectory(): Promise<string> {
   return invoke("get_home_directory");

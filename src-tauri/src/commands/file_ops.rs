@@ -64,13 +64,8 @@ pub fn read_file_for_viewer(
     path: String,
     max_bytes: Option<usize>,
 ) -> Result<FileViewerContent, String> {
-    // Resolve WSL paths on Windows
-    let distro = if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
-        path_utils::get_default_wsl_distro()
-    } else {
-        None
-    };
-    let resolved = path_utils::resolve_path_for_windows(&path, distro.as_deref());
+    // Resolve WSL/Windows paths with the shared inference rule (#282).
+    let resolved = path_utils::resolve_address_path(&path, None);
     let file_path = std::path::Path::new(&resolved);
     let ext = file_path
         .extension()
@@ -134,6 +129,37 @@ pub fn read_file_for_viewer(
     }
 }
 
+/// Filesystem facts about a path, used by the File Explorer address bar (#278)
+/// to decide whether a typed/pasted path should navigate (directory) or open a
+/// file (navigate to parent + open in the shared viewer).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathInfo {
+    pub exists: bool,
+    pub is_directory: bool,
+}
+
+/// Resolve an address-bar path (handling WSL/Windows translation the same way as
+/// `list_directory`) and report whether it exists and is a directory.
+///
+/// Never errors on a missing path — a non-existent path simply returns
+/// `{ exists: false, is_directory: false }` so the frontend can show feedback
+/// without treating "not found" as a hard error.
+#[tauri::command]
+pub fn stat_path(path: String, wsl_distro: Option<String>) -> PathInfo {
+    let resolved = path_utils::resolve_address_path(&path, wsl_distro.as_deref());
+    match std::fs::metadata(&resolved) {
+        Ok(meta) => PathInfo {
+            exists: true,
+            is_directory: meta.is_dir(),
+        },
+        Err(_) => PathInfo {
+            exists: false,
+            is_directory: false,
+        },
+    }
+}
+
 /// Resolve the current user's home directory as a path string.
 ///
 /// Used by the File Explorer as a fallback CWD when no syncGroup CWD or
@@ -166,16 +192,8 @@ pub struct DirEntry {
 /// List directory contents and return structured metadata for each entry.
 #[tauri::command]
 pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
-    // On Windows, resolve Linux paths to UNC paths
-    let distro = wsl_distro.or_else(|| {
-        // Auto-detect WSL distro if path looks like a Linux path
-        if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
-            path_utils::get_default_wsl_distro()
-        } else {
-            None
-        }
-    });
-    let resolved = path_utils::resolve_path_for_windows(&path, distro.as_deref());
+    // Resolve WSL/Windows paths with the shared inference rule (#282).
+    let resolved = path_utils::resolve_address_path(&path, wsl_distro.as_deref());
     let dir_path = std::path::Path::new(&resolved);
     let entries = std::fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
 
@@ -304,6 +322,34 @@ mod tests {
             std::path::Path::new(&home).exists(),
             "resolved home dir should exist: {home}"
         );
+    }
+
+    #[test]
+    fn stat_path_reports_directory() {
+        let dir = std::env::temp_dir();
+        let info = stat_path(dir.to_string_lossy().into_owned(), None);
+        assert!(info.exists, "temp dir should exist");
+        assert!(info.is_directory, "temp dir should be a directory");
+    }
+
+    #[test]
+    fn stat_path_reports_file() {
+        let mut file = std::env::temp_dir();
+        file.push(format!("laymux_stat_path_test_{}.txt", std::process::id()));
+        std::fs::write(&file, b"hi").expect("write temp file");
+        let info = stat_path(file.to_string_lossy().into_owned(), None);
+        assert!(info.exists, "temp file should exist");
+        assert!(!info.is_directory, "temp file should not be a directory");
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn stat_path_missing_is_not_an_error() {
+        let mut missing = std::env::temp_dir();
+        missing.push("laymux_stat_path_definitely_missing_xyz_123");
+        let info = stat_path(missing.to_string_lossy().into_owned(), None);
+        assert!(!info.exists, "missing path should report exists=false");
+        assert!(!info.is_directory);
     }
 
     #[test]

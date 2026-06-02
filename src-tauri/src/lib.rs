@@ -151,6 +151,7 @@ pub fn run() {
             commands::load_window_geometry,
             commands::read_file_for_viewer,
             commands::list_directory,
+            commands::stat_path,
             commands::get_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,
