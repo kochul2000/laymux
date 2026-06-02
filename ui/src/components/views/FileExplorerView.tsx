@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import {
   clipboardWriteText,
-  readFileForViewer,
   listDirectory,
   getHomeDirectory,
   onTerminalCwdChanged,
@@ -11,8 +11,7 @@ import {
   type DirEntry,
 } from "@/lib/tauri-api";
 // convertFileSrc no longer needed — images are returned as data URLs
-import { shellEscape, joinPath, parentPath } from "@/lib/file-explorer-parse";
-import { TerminalView } from "./TerminalView";
+import { joinPath, parentPath } from "@/lib/file-explorer-parse";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
@@ -29,14 +28,8 @@ export interface FileExplorerViewProps {
   lastCwd?: string;
 }
 
-type ExplorerMode =
-  | { type: "listing" }
-  | { type: "viewing"; filePath: string; viewerType: "web" | "terminal"; command?: string };
-
 export function FileExplorerView({
   instanceId,
-  paneId,
-  profile,
   syncGroup,
   cwdSend = true,
   cwdReceive = true,
@@ -46,22 +39,14 @@ export function FileExplorerView({
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.fileExplorer);
-  const profiles = useSettingsStore((s) => s.profiles);
+  const openFileViewer = useFileViewerStore((s) => s.openFileViewer);
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<ExplorerMode>({ type: "listing" });
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [focusIndex, setFocusIndex] = useState(0);
   const [lastClickIndex, setLastClickIndex] = useState(0);
-  const [viewerContent, setViewerContent] = useState<{
-    kind: "text" | "image" | "binary";
-    content?: string;
-    imageSrc?: string;
-    size?: number;
-    truncated?: boolean;
-  } | null>(null);
 
   // --- History stack for back/forward navigation ---
   const [history, setHistory] = useState<string[]>(lastCwd ? [lastCwd] : []);
@@ -73,7 +58,6 @@ export function FileExplorerView({
   currentCwdRef.current = currentCwd;
   const historyIndexRef = useRef(historyIndex);
   historyIndexRef.current = historyIndex;
-  const pendingRefreshRef = useRef(false);
 
   // --- Get initial CWD from syncGroup terminal store (one-time) ---
   const initialGroupCwd = useTerminalStore((s) => {
@@ -261,10 +245,10 @@ export function FileExplorerView({
 
   // --- Focus management ---
   useEffect(() => {
-    if (isFocused && mode.type === "listing") {
+    if (isFocused) {
       containerRef.current?.focus();
     }
-  }, [isFocused, mode.type]);
+  }, [isFocused]);
 
   // --- Selection helpers ---
   const selectSingle = useCallback((index: number) => {
@@ -317,40 +301,15 @@ export function FileExplorerView({
     }
   }, [settings.copyOnSelect, selectedIndices, copySelectedPaths]);
 
-  // --- Open file viewer ---
+  // --- Open file in the shared global viewer overlay (#277/#279) ---
+  // The viewer is a single floating overlay rendered in AppLayout, so it is no
+  // longer constrained to this pane's size.
   const openFile = useCallback(
-    async (entry: DirEntry) => {
+    (entry: DirEntry) => {
       const filePath = joinPath(currentCwd, entry.name);
-
-      const ext = entry.name.includes(".") ? "." + entry.name.split(".").pop()!.toLowerCase() : "";
-      const viewer = settings.extensionViewers.find((v) =>
-        v.extensions.some((e) => e.toLowerCase() === ext),
-      );
-
-      if (viewer) {
-        setMode({ type: "viewing", filePath, viewerType: "terminal", command: viewer.command });
-        return;
-      }
-
-      setMode({ type: "viewing", filePath, viewerType: "web" });
-      try {
-        const content = await readFileForViewer(filePath);
-        if (content.kind === "text") {
-          setViewerContent({
-            kind: "text",
-            content: content.content,
-            truncated: content.truncated,
-          });
-        } else if (content.kind === "image") {
-          setViewerContent({ kind: "image", imageSrc: content.dataUrl });
-        } else {
-          setViewerContent({ kind: "binary", size: content.size });
-        }
-      } catch (err) {
-        setViewerContent({ kind: "text", content: `Error reading file: ${err}` });
-      }
+      openFileViewer(filePath);
     },
-    [currentCwd, settings.extensionViewers],
+    [currentCwd, openFileViewer],
   );
 
   // --- Handle item activation (double-click or Enter) ---
@@ -365,16 +324,6 @@ export function FileExplorerView({
     [navigateToDir, openFile],
   );
 
-  // --- Close viewer ---
-  const closeViewer = useCallback(() => {
-    setMode({ type: "listing" });
-    setViewerContent(null);
-    if (pendingRefreshRef.current) {
-      pendingRefreshRef.current = false;
-      refreshListing();
-    }
-  }, [refreshListing]);
-
   // --- Scroll focused item into view ---
   const scrollToIndex = useCallback((index: number) => {
     const list = listRef.current;
@@ -388,30 +337,18 @@ export function FileExplorerView({
     (e: React.MouseEvent) => {
       if (e.button === 3) {
         e.preventDefault();
-        if (mode.type === "viewing") {
-          closeViewer();
-        } else {
-          goBack();
-        }
+        goBack();
       } else if (e.button === 4) {
         e.preventDefault();
         goForward();
       }
     },
-    [mode.type, goBack, goForward, closeViewer],
+    [goBack, goForward],
   );
 
   // --- Keyboard handler ---
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (mode.type === "viewing") {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          closeViewer();
-        }
-        return;
-      }
-
       const len = displayEntries.length;
       if (!len) return;
 
@@ -471,13 +408,11 @@ export function FileExplorerView({
       }
     },
     [
-      mode.type,
       displayEntries,
       focusIndex,
       selectSingle,
       selectRange,
       activateEntry,
-      closeViewer,
       scrollToIndex,
       navigateToDir,
     ],
@@ -543,19 +478,6 @@ export function FileExplorerView({
     [settings],
   );
 
-  // When CWD is a Unix path and the current profile is not WSL,
-  // use a WSL profile for the viewer terminal so paths resolve correctly.
-  const viewerProfile = useMemo(() => {
-    const isUnixPath = currentCwd.startsWith("/");
-    if (!isUnixPath) return profile;
-    // Check if current profile is already WSL-like
-    const currentProfileConfig = profiles.find((p) => p.name === profile);
-    if (currentProfileConfig?.commandLine?.toLowerCase().includes("wsl")) return profile;
-    // Find a WSL profile
-    const wslProfile = profiles.find((p) => p.commandLine?.toLowerCase().includes("wsl"));
-    return wslProfile ? wslProfile.name : profile;
-  }, [currentCwd, profile, profiles]);
-
   const navBtnStyle = {
     background: "none",
     border: "none",
@@ -565,87 +487,7 @@ export function FileExplorerView({
     lineHeight: 1,
   };
 
-  // ===== RENDER =====
-
-  if (mode.type === "viewing") {
-    return (
-      <ViewShell
-        testId="file-explorer-view"
-        className="outline-none"
-        ref={containerRef}
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        onMouseDown={handleMouseDown}
-      >
-        <ViewHeader className="px-3" testId="file-explorer-viewer-titlebar">
-          <span className="flex-1 text-xs truncate" style={{ color: "var(--text-primary)" }}>
-            {mode.filePath}
-          </span>
-          <button
-            onClick={closeViewer}
-            className="ml-2 mr-1 px-1 text-xs hover:opacity-80"
-            style={{ color: "var(--text-secondary)" }}
-            data-testid="file-explorer-viewer-close"
-          >
-            ✕
-          </button>
-        </ViewHeader>
-
-        <ViewBody style={listStyle}>
-          {mode.viewerType === "terminal" && mode.command ? (
-            <div className="h-full" data-testid="file-explorer-viewer-terminal">
-              <TerminalView
-                instanceId={paneId ? `file-viewer-${paneId}` : `file-viewer-${instanceId}`}
-                profile={viewerProfile}
-                syncGroup=""
-                cwdSend={false}
-                cwdReceive={false}
-                isFocused={isFocused}
-                lastCwd={currentCwd}
-                startupCommandOverride={`${mode.command} ${shellEscape(mode.filePath)}`}
-              />
-            </div>
-          ) : viewerContent?.kind === "image" ? (
-            <div className="flex items-center justify-center h-full">
-              <img
-                src={viewerContent.imageSrc}
-                alt={mode.filePath}
-                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                data-testid="file-explorer-viewer-image"
-              />
-            </div>
-          ) : viewerContent?.kind === "text" ? (
-            <pre
-              className="whitespace-pre-wrap break-words"
-              style={{ color: "var(--text-primary)", margin: 0 }}
-              data-testid="file-explorer-viewer-text"
-            >
-              {viewerContent.content}
-              {viewerContent.truncated && (
-                <div style={{ color: "var(--text-secondary)", marginTop: 8 }}>(truncated)</div>
-              )}
-            </pre>
-          ) : viewerContent?.kind === "binary" ? (
-            <div
-              className="flex flex-col items-center justify-center h-full gap-2"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <div>Binary file ({((viewerContent.size ?? 0) / 1024).toFixed(1)} KB)</div>
-            </div>
-          ) : (
-            <div
-              className="flex items-center justify-center h-full"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Loading...
-            </div>
-          )}
-        </ViewBody>
-      </ViewShell>
-    );
-  }
-
-  // --- Listing mode ---
+  // ===== RENDER (file listing) =====
   return (
     <ViewShell
       ref={containerRef}

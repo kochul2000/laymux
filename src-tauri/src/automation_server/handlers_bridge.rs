@@ -688,6 +688,38 @@ pub async fn ui_navigate_settings(
     }
 }
 
+/// POST /api/v1/ui/file-viewer — open the unified file viewer overlay for a path.
+/// Accepts `{ "path": "...", "newWindow": bool? }`. Backs the MCP
+/// `open_file_viewer` tool and the global Ctrl+Shift+O shortcut.
+pub async fn ui_open_file_viewer(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let path = body.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    if path.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json("'path' is required and must be non-empty")),
+        );
+    }
+    let new_window = body
+        .get("newWindow")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    match bridge_request(
+        &state,
+        "action",
+        "ui",
+        "openFileViewer",
+        serde_json::json!({ "path": path, "newWindow": new_window }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn settings_set_app_theme(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,

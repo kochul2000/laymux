@@ -203,6 +203,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "section": "\"startup\" | \"profile-0\" | \"profile-1\" | \"colorSchemes\" | \"keybindings\"" }
             },
             {
+                "method": "POST", "path": "/api/v1/ui/file-viewer",
+                "description": "Open the unified file viewer overlay for a file path (same viewer as File Explorer / Ctrl+Shift+O).",
+                "body": { "path": "string (absolute path, required)", "newWindow": "boolean (optional — fill the whole window)" }
+            },
+            {
                 "method": "POST", "path": "/api/v1/ui/notifications",
                 "description": "Toggle the notification panel overlay open/closed."
             },

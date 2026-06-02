@@ -244,6 +244,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
+        .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
         .route(
             "/api/v1/settings/profile-defaults",

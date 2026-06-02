@@ -326,6 +326,18 @@ struct SendNotificationParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct OpenFileViewerParam {
+    /// Absolute path of the file to open in the viewer. Text, images, and
+    /// binaries are recognized automatically; files whose extension matches a
+    /// configured external viewer open in a terminal running that command.
+    path: String,
+    /// When true, the viewer fills the whole app window (the "new window" feel).
+    /// When false (default) it opens as a large centered floating overlay.
+    #[serde(default)]
+    new_window: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct MemoKeyParam {
     /// Memo key — typically a workspace pane ID (e.g. "pane-abc12345").
     /// Use `list_memos` to discover available keys.
@@ -1739,6 +1751,33 @@ impl McpHandler {
             }
         }
     }
+
+    // ── File viewer ──
+
+    /// Open a file in laymux's unified file viewer overlay. This is the same
+    /// viewer used by the File Explorer and the Ctrl+Shift+O shortcut, so text,
+    /// images, and binaries render the same way everywhere. Pass `new_window:
+    /// true` to fill the whole window; otherwise it opens as a large floating
+    /// overlay. The path should be absolute and is resolved on the host
+    /// filesystem (use a WSL/Unix path for files inside WSL).
+    #[tool]
+    async fn open_file_viewer(
+        &self,
+        Parameters(p): Parameters<OpenFileViewerParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.path.trim().is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'path' is required and must be non-empty",
+            )]));
+        }
+        self.bridge(
+            "action",
+            "ui",
+            "openFileViewer",
+            json!({ "path": p.path, "newWindow": p.new_window }),
+        )
+        .await
+    }
 }
 
 // ── ServerHandler trait ───────────────────────────────────────────
@@ -2022,6 +2061,28 @@ mod tests {
     fn notification_level_rejects_invalid() {
         let json = r#"{"terminal_id":"t1","workspace_id":"ws1","message":"x","level":"critical"}"#;
         let result: Result<SendNotificationParam, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn open_file_viewer_param_defaults_new_window_false() {
+        let json = r#"{"path":"/tmp/a.txt"}"#;
+        let p: OpenFileViewerParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.path, "/tmp/a.txt");
+        assert!(!p.new_window);
+    }
+
+    #[test]
+    fn open_file_viewer_param_accepts_new_window() {
+        let json = r#"{"path":"/tmp/a.txt","new_window":true}"#;
+        let p: OpenFileViewerParam = serde_json::from_str(json).unwrap();
+        assert!(p.new_window);
+    }
+
+    #[test]
+    fn open_file_viewer_param_requires_path() {
+        let json = r#"{"new_window":true}"#;
+        let result: Result<OpenFileViewerParam, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 

@@ -11,6 +11,7 @@ import { WorkspaceArea } from "./WorkspaceArea";
 import { SettingsView } from "@/components/views/SettingsView";
 import { NotificationPanel } from "@/components/views/NotificationPanel";
 import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
+import { FileViewerOverlay } from "./FileViewerOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
@@ -387,6 +388,9 @@ export function AppLayout() {
           <ConnectionInfoModal />
         </ModalOverlay>
       )}
+
+      {/* Unified global file viewer (#277/#279) */}
+      <FileViewerOverlay />
     </div>
   );
 }

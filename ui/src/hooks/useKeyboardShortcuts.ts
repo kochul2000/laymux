@@ -5,6 +5,8 @@ import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
@@ -202,6 +204,19 @@ export function useKeyboardShortcuts() {
         if (shiftKey === "I") {
           e.preventDefault();
           useUiStore.getState().toggleNotificationPanel();
+          return;
+        }
+
+        // fileViewer.open (default Ctrl+Shift+O): open a file anywhere in the
+        // unified viewer (#279). Registered in keybinding-registry so it is
+        // user-overridable and shown in Settings. Prompts for a path and opens
+        // it in the same floating viewer used by File Explorer.
+        if (matchesKeybinding(e, "fileViewer.open")) {
+          e.preventDefault();
+          const input = window.prompt("Open file (absolute path):", "");
+          if (input !== null) {
+            useFileViewerStore.getState().openFileViewer(input);
+          }
           return;
         }
 
