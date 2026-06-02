@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computePaneNumbers, paneNumberFor, type NumberablePane } from "./pane-numbers";
+import {
+  computePaneNumbers,
+  paneNumberFor,
+  formatPaneIdentifier,
+  type NumberablePane,
+} from "./pane-numbers";
 
 /** Build a pane with only the fields the numbering cares about. */
 function p(id: string, x: number, y: number, w = 0.5, h = 0.5): NumberablePane {
@@ -73,6 +78,47 @@ describe("computePaneNumbers", () => {
 
   it("returns an empty map for no panes", () => {
     expect(computePaneNumbers([]).size).toBe(0);
+  });
+});
+
+describe("formatPaneIdentifier", () => {
+  it("includes a stable prefix so a human/LLM recognizes it as a pane identifier", () => {
+    const s = formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 });
+    expect(s).toContain("laymux pane");
+  });
+
+  it("includes the workspace id and pane number that map to MCP write_to_terminal params", () => {
+    const s = formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 });
+    expect(s).toContain("ws-a1b2c3d4");
+    expect(s).toContain("workspace=ws-a1b2c3d4");
+    expect(s).toContain("pane=3");
+  });
+
+  it("produces the canonical single-line format", () => {
+    expect(formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 })).toBe(
+      "[laymux pane] workspace=ws-a1b2c3d4 pane=3",
+    );
+  });
+
+  it("appends the workspace name as a human hint when provided", () => {
+    expect(
+      formatPaneIdentifier({
+        workspaceId: "ws-a1b2c3d4",
+        paneNumber: 2,
+        workspaceName: "Backend",
+      }),
+    ).toBe('[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=2');
+  });
+
+  it("omits the name hint when the name is empty or whitespace", () => {
+    expect(formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1, workspaceName: "   " })).toBe(
+      "[laymux pane] workspace=ws-x pane=1",
+    );
+  });
+
+  it("does not include a name hint when name is undefined", () => {
+    const s = formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1 });
+    expect(s).not.toContain("(");
   });
 });
 

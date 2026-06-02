@@ -51,7 +51,11 @@ export function ViewHeader({
       }}
     >
       <div className="flex min-w-0 flex-1 items-center">
-        <PaneNumberBadge number={ctx?.paneNumber} />
+        <PaneNumberBadge
+          number={ctx?.paneNumber}
+          workspaceId={ctx?.workspaceId}
+          workspaceName={ctx?.workspaceName}
+        />
         {title && (
           <span
             style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}

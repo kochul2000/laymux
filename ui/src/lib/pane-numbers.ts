@@ -52,3 +52,31 @@ export function computePaneNumbers(panes: readonly NumberablePane[]): Map<string
 export function paneNumberFor(panes: readonly NumberablePane[], paneId: string): number | null {
   return computePaneNumbers(panes).get(paneId) ?? null;
 }
+
+/**
+ * Build the clipboard string copied when a user clicks a pane-number badge (issue #276).
+ *
+ * The string identifies a pane by **workspace id + spatial pane number** — the exact
+ * pair the automation bridge's `terminals.resolveByNumber` (and MCP
+ * `write_to_terminal`/`read_terminal_output`/`focus_terminal`) accepts as
+ * `workspace_id` + `pane_number`. So an LLM that receives this can act on it directly.
+ *
+ * A literal `[laymux pane]` prefix makes it self-describing for both humans and LLMs.
+ * `paneNumber` is volatile (recomputed on layout change), so the copied value is a
+ * point-in-time reference, not a persistent handle.
+ *
+ * Example: `[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=3`
+ */
+export function formatPaneIdentifier({
+  workspaceId,
+  paneNumber,
+  workspaceName,
+}: {
+  workspaceId: string;
+  paneNumber: number;
+  workspaceName?: string;
+}): string {
+  const name = workspaceName?.trim();
+  const nameHint = name ? ` ("${name}")` : "";
+  return `[laymux pane] workspace=${workspaceId}${nameHint} pane=${paneNumber}`;
+}

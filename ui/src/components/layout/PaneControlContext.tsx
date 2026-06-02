@@ -33,6 +33,12 @@ export interface PaneControlContextValue {
    * 번호가 없는 경우 `undefined`.
    */
   paneNumber?: number;
+  /**
+   * 배지 클릭 시 복사할 식별자에 포함할 workspace id(issue #276). 없으면 배지는
+   * 비대화형 라벨로만 렌더된다(복사 불가). `workspaceName`은 사람이 읽기 쉬운 힌트.
+   */
+  workspaceId?: string;
+  workspaceName?: string;
 }
 
 export const PaneControlContext = createContext<PaneControlContextValue | null>(null);

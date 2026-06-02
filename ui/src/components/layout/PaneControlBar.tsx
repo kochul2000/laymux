@@ -48,6 +48,12 @@ interface PaneControlBarProps {
   cwdReceiveOn?: boolean;
   /** 화면 읽기 순서 기반 pane 번호(issue #256). 컨트롤바 좌측에 배지로 표시. */
   paneNumber?: number;
+  /**
+   * 배지 클릭 시 복사할 pane 식별자에 포함할 workspace 정보(issue #276).
+   * `workspaceId`가 있어야 배지가 클릭-복사 가능해진다.
+   */
+  workspaceId?: string;
+  workspaceName?: string;
   children: React.ReactNode;
 }
 
@@ -608,6 +614,8 @@ export function PaneControlBar({
   cwdSendOn,
   cwdReceiveOn,
   paneNumber,
+  workspaceId,
+  workspaceName,
   children,
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -693,6 +701,8 @@ export function PaneControlBar({
       leftBarContent,
       setLeftBarContent,
       paneNumber,
+      workspaceId,
+      workspaceName,
     }),
     [
       paneControls,
@@ -705,6 +715,8 @@ export function PaneControlBar({
       leftBarContent,
       setLeftBarContent,
       paneNumber,
+      workspaceId,
+      workspaceName,
     ],
   );
 
@@ -721,7 +733,11 @@ export function PaneControlBar({
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
-            <PaneNumberBadge number={paneNumber} />
+            <PaneNumberBadge
+              number={paneNumber}
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
+            />
             {hasBarLabel ? (
               <BarLabel viewType={currentView.type} />
             ) : leftBarContent ? (
@@ -775,7 +791,11 @@ export function PaneControlBar({
                 borderRadius: 0,
               }}
             >
-              <PaneNumberBadge number={paneNumber} />
+              <PaneNumberBadge
+                number={paneNumber}
+                workspaceId={workspaceId}
+                workspaceName={workspaceName}
+              />
               {hasBarLabel ? (
                 <BarLabel viewType={currentView.type} />
               ) : leftBarContent ? (
