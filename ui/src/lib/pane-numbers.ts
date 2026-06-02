@@ -76,7 +76,10 @@ export function formatPaneIdentifier({
   paneNumber: number;
   workspaceName?: string;
 }): string {
-  const name = workspaceName?.trim();
+  // Workspace names are free user input. Collapse any whitespace (incl. newlines) so the
+  // identifier stays a single line, and swap `"` for `'` so the `("...")` hint can't produce
+  // ambiguous output like `("a"b")`. Neither touches the machine-parsed `workspace=`/`pane=`.
+  const name = workspaceName?.replace(/\s+/g, " ").replace(/"/g, "'").trim();
   const nameHint = name ? ` ("${name}")` : "";
   return `[laymux pane] workspace=${workspaceId}${nameHint} pane=${paneNumber}`;
 }

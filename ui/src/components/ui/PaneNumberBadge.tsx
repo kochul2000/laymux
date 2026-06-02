@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { formatPaneIdentifier } from "@/lib/pane-numbers";
 
@@ -37,11 +37,27 @@ export function PaneNumberBadge({
   const handleCopy = useCallback(async () => {
     if (number == null || !workspaceId) return;
     const text = formatPaneIdentifier({ workspaceId, paneNumber: number, workspaceName });
-    await clipboardWriteText(text);
+    try {
+      await clipboardWriteText(text);
+    } catch {
+      // Clipboard can reject (permission denied, Tauri bridge error). There's no useful
+      // recovery for a badge click, so fail silently — but we must swallow it here so the
+      // caller's `void handleCopy()` doesn't surface an unhandled promise rejection.
+      return;
+    }
     setCopied(true);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
   }, [number, workspaceId, workspaceName]);
+
+  // Clear any pending feedback-reset timer on unmount so it can't fire after the badge
+  // is gone (e.g. pane closed / layout changed within COPIED_FEEDBACK_MS of a copy).
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   if (number == null) return null;
 
@@ -85,6 +101,9 @@ export function PaneNumberBadge({
       data-testid="pane-number-badge"
       className="hover-bg-accent mr-1.5 flex shrink-0 cursor-pointer items-center justify-center font-medium tabular-nums"
       style={baseStyle}
+      // Explicit name: during the copied feedback the child becomes an aria-hidden ✓, which
+      // would otherwise leave the button with no accessible name for COPIED_FEEDBACK_MS.
+      aria-label={`Copy pane ${number} identifier`}
       title={copied ? "Pane identifier copied" : `Click to copy pane ${number} identifier`}
       onClick={(e) => {
         // Badge lives inside focusable/clickable bars; don't bubble into pane focus/select.

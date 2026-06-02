@@ -120,6 +120,22 @@ describe("formatPaneIdentifier", () => {
     const s = formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1 });
     expect(s).not.toContain("(");
   });
+
+  it("swaps double quotes in the name so the hint stays unambiguous", () => {
+    expect(formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1, workspaceName: 'a"b' })).toBe(
+      '[laymux pane] workspace=ws-x ("a\'b") pane=1',
+    );
+  });
+
+  it("collapses whitespace/newlines so the identifier stays a single line", () => {
+    const s = formatPaneIdentifier({
+      workspaceId: "ws-x",
+      paneNumber: 1,
+      workspaceName: "Back\n  end",
+    });
+    expect(s).toBe('[laymux pane] workspace=ws-x ("Back end") pane=1');
+    expect(s).not.toContain("\n");
+  });
 });
 
 describe("paneNumberFor", () => {

@@ -48,4 +48,35 @@ describe("PaneNumberBadge", () => {
     fireEvent.click(screen.getByTestId("pane-number-badge"));
     await waitFor(() => expect(screen.getByTestId("pane-number-badge-copied")).toBeTruthy());
   });
+
+  it("does not enter the copied state when the clipboard write rejects", async () => {
+    mockClipboardWriteText.mockRejectedValueOnce(new Error("clipboard denied"));
+    render(<PaneNumberBadge number={1} workspaceId="ws-x" />);
+    fireEvent.click(screen.getByTestId("pane-number-badge"));
+    await waitFor(() => expect(mockClipboardWriteText).toHaveBeenCalledTimes(1));
+    // let the rejected promise settle, then assert no checkmark appeared
+    await Promise.resolve();
+    expect(screen.queryByTestId("pane-number-badge-copied")).toBeNull();
+  });
+
+  it("keeps a stable accessible name through the copied feedback", async () => {
+    render(<PaneNumberBadge number={4} workspaceId="ws-x" />);
+    const badge = screen.getByTestId("pane-number-badge");
+    expect(badge).toHaveAttribute("aria-label", "Copy pane 4 identifier");
+    fireEvent.click(badge);
+    // even while the aria-hidden ✓ replaces the number, the name must persist
+    await waitFor(() => expect(screen.getByTestId("pane-number-badge-copied")).toBeTruthy());
+    expect(badge).toHaveAttribute("aria-label", "Copy pane 4 identifier");
+  });
+
+  it("clears the pending feedback timer on unmount", async () => {
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    const { unmount } = render(<PaneNumberBadge number={1} workspaceId="ws-x" />);
+    fireEvent.click(screen.getByTestId("pane-number-badge"));
+    await waitFor(() => expect(screen.getByTestId("pane-number-badge-copied")).toBeTruthy());
+    clearSpy.mockClear();
+    unmount();
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+    clearSpy.mockRestore();
+  });
 });
