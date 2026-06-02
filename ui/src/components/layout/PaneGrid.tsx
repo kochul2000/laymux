@@ -159,6 +159,8 @@ export function PaneGrid({
               cwdSendOn={cwdSendOn}
               cwdReceiveOn={cwdReceiveOn}
               paneNumber={paneNumbers?.get(pane.id)}
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)
