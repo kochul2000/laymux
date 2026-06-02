@@ -280,6 +280,37 @@ describe("useKeyboardShortcuts", () => {
     promptSpy.mockRestore();
   });
 
+  it("Ctrl+Shift+O does not tear down an in-progress terminal viewer", () => {
+    // A terminal-backed viewer (.txt→vi, video→mpv) holds a live PTY session.
+    // Like Esc and a backdrop click, the "open anywhere" shortcut must not
+    // silently discard it — the user closes such viewers with the explicit ✕.
+    const fe = useSettingsStore.getState().fileExplorer;
+    useSettingsStore.setState({
+      fileExplorer: { ...fe, extensionViewers: [{ extensions: [".txt"], command: "vi" }] },
+    });
+    useFileViewerStore.setState({ open: true, path: "/tmp/notes.txt", maximized: false });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("O", { ctrlKey: true, shiftKey: true });
+
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/tmp/notes.txt"); // unchanged — terminal session preserved
+  });
+
+  it("Ctrl+Shift+O re-prompts when a web viewer is open (no PTY to protect)", () => {
+    // Built-in web viewers (text/image/binary) have no live session, so the
+    // shortcut may reset to empty prompt mode just as Esc may close them.
+    const fe = useSettingsStore.getState().fileExplorer;
+    useSettingsStore.setState({ fileExplorer: { ...fe, extensionViewers: [] } });
+    useFileViewerStore.setState({ open: true, path: "/tmp/pic.png", maximized: false });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("O", { ctrlKey: true, shiftKey: true });
+
+    expect(useFileViewerStore.getState().path).toBe("");
+  });
+
   // --- Ctrl+, : settings ---
   it("Ctrl+, toggles settings modal", () => {
     renderHook(() => useKeyboardShortcuts());

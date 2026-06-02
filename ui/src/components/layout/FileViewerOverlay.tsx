@@ -35,8 +35,9 @@ export function FileViewerOverlay() {
   const promptMode = open && path === "";
   const pathInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus the field each time we (re)enter prompt mode. Keying the input by
-  // `promptMode` (below) remounts it empty, so no draft reset is needed.
+  // Focus the field each time we (re)enter prompt mode. The conditional render
+  // below swaps the input for the path <span> when prompt mode ends, so each new
+  // prompt session mounts a fresh empty input — no draft reset is needed.
   useEffect(() => {
     if (promptMode) pathInputRef.current?.focus();
   }, [promptMode]);
@@ -127,6 +128,7 @@ export function FileViewerOverlay() {
                 data-testid="file-viewer-overlay-path-input"
               />
               <button
+                type="button"
                 onClick={submitPath}
                 className="hover-bg-strong rounded px-2 py-1 text-xs"
                 style={{

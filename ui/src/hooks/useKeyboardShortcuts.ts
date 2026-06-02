@@ -6,6 +6,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
@@ -215,7 +216,19 @@ export function useKeyboardShortcuts() {
         // platform (Windows/WebView2) and is driveable via the Automation API.
         if (matchesKeybinding(e, "fileViewer.open")) {
           e.preventDefault();
-          useFileViewerStore.getState().openEmptyFileViewer();
+          // Don't tear down an in-progress terminal viewer (.txt→vi, video→mpv):
+          // like Esc and a backdrop click (see FileViewerOverlay), the "open
+          // anywhere" shortcut must not silently discard a live PTY session —
+          // the user closes such viewers with the explicit ✕. Web viewers have
+          // no session, so re-prompting is fine.
+          const fv = useFileViewerStore.getState();
+          if (fv.open && fv.path) {
+            const { extensionViewers } = useSettingsStore.getState().fileExplorer;
+            if (resolveViewer(fv.path, extensionViewers).viewerType === "terminal") {
+              return;
+            }
+          }
+          fv.openEmptyFileViewer();
           return;
         }
 
