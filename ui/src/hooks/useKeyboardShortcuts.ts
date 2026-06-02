@@ -209,14 +209,13 @@ export function useKeyboardShortcuts() {
 
         // fileViewer.open (default Ctrl+Shift+O): open a file anywhere in the
         // unified viewer (#279). Registered in keybinding-registry so it is
-        // user-overridable and shown in Settings. Prompts for a path and opens
-        // it in the same floating viewer used by File Explorer.
+        // user-overridable and shown in Settings. Opens the floating viewer in
+        // empty (inline path input) mode (#283) — the overlay shows a path
+        // field instead of a native window.prompt, so it works on every
+        // platform (Windows/WebView2) and is driveable via the Automation API.
         if (matchesKeybinding(e, "fileViewer.open")) {
           e.preventDefault();
-          const input = window.prompt("Open file (absolute path):", "");
-          if (input !== null) {
-            useFileViewerStore.getState().openFileViewer(input);
-          }
+          useFileViewerStore.getState().openEmptyFileViewer();
           return;
         }
 

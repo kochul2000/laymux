@@ -264,27 +264,19 @@ describe("useKeyboardShortcuts", () => {
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
   });
 
-  // --- Ctrl+Shift+O: open file viewer anywhere (#279) ---
-  it("Ctrl+Shift+O opens the file viewer with the prompted path", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("/tmp/note.txt");
+  // --- Ctrl+Shift+O: open file viewer anywhere (#279 / #283) ---
+  it("Ctrl+Shift+O opens the viewer in empty (inline path input) mode", () => {
+    // #283: no native window.prompt — the overlay opens blank and shows an
+    // inline path input field that is driveable on every platform.
+    const promptSpy = vi.spyOn(window, "prompt");
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("O", { ctrlKey: true, shiftKey: true });
 
-    expect(promptSpy).toHaveBeenCalled();
+    expect(promptSpy).not.toHaveBeenCalled();
     const s = useFileViewerStore.getState();
     expect(s.open).toBe(true);
-    expect(s.path).toBe("/tmp/note.txt");
-    promptSpy.mockRestore();
-  });
-
-  it("Ctrl+Shift+O does nothing when prompt is cancelled", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
-    renderHook(() => useKeyboardShortcuts());
-
-    fireKey("O", { ctrlKey: true, shiftKey: true });
-
-    expect(useFileViewerStore.getState().open).toBe(false);
+    expect(s.path).toBe("");
     promptSpy.mockRestore();
   });
 

@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { FileViewer } from "@/components/ui/FileViewer";
+import { FocusInput } from "@/components/ui/FormControls";
 import { resolveViewer } from "@/lib/file-viewer";
 
 /**
@@ -18,10 +19,33 @@ export function FileViewerOverlay() {
   const maximized = useFileViewerStore((s) => s.maximized);
   const closeFileViewer = useFileViewerStore((s) => s.closeFileViewer);
   const toggleMaximized = useFileViewerStore((s) => s.toggleMaximized);
+  const openFileViewer = useFileViewerStore((s) => s.openFileViewer);
 
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const feSettings = useSettingsStore((s) => s.fileExplorer);
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
+
+  // Empty-path "open anywhere" mode (#283): the overlay is open but no file is
+  // loaded yet, so we show an inline path input field at the top instead of a
+  // native window.prompt (unreliable on WebView2, not driveable via the
+  // Automation API). Submitting a non-blank path loads it in the same viewer.
+  // The input is uncontrolled (read via ref on submit) so we don't need to
+  // mirror keystrokes into React state — this also keeps the focus effect free
+  // of setState (react-hooks/set-state-in-effect).
+  const promptMode = open && path === "";
+  const pathInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the field each time we (re)enter prompt mode. Keying the input by
+  // `promptMode` (below) remounts it empty, so no draft reset is needed.
+  useEffect(() => {
+    if (promptMode) pathInputRef.current?.focus();
+  }, [promptMode]);
+
+  const submitPath = () => {
+    // openFileViewer normalizes and rejects blank input, so a blank submit
+    // simply keeps the overlay in prompt mode.
+    openFileViewer(pathInputRef.current?.value ?? "");
+  };
 
   // When the file is shown via an external command (e.g. .txt→vi, video→mpv),
   // FileViewer renders a live TerminalView. In that mode Esc and a backdrop
@@ -81,13 +105,49 @@ export function FileViewerOverlay() {
           className="flex items-center px-3 py-2"
           style={{ borderBottom: "1px solid var(--border)" }}
         >
-          <span
-            className="flex-1 truncate text-xs"
-            style={{ color: "var(--text-primary)" }}
-            data-testid="file-viewer-overlay-path"
-          >
-            {path}
-          </span>
+          {promptMode ? (
+            <div className="flex flex-1 items-center gap-2">
+              <FocusInput
+                key="file-viewer-path-input"
+                ref={pathInputRef}
+                defaultValue=""
+                autoFocus
+                onKeyDown={(e) => {
+                  // Enter submits; Escape is handled by the global handler below
+                  // so we let it bubble (it closes the overlay).
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitPath();
+                  }
+                }}
+                placeholder="Open file (absolute path)…"
+                spellCheck={false}
+                autoComplete="off"
+                aria-label="File path"
+                data-testid="file-viewer-overlay-path-input"
+              />
+              <button
+                onClick={submitPath}
+                className="hover-bg-strong rounded px-2 py-1 text-xs"
+                style={{
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+                data-testid="file-viewer-overlay-path-submit"
+              >
+                Load
+              </button>
+            </div>
+          ) : (
+            <span
+              className="flex-1 truncate text-xs"
+              style={{ color: "var(--text-primary)" }}
+              data-testid="file-viewer-overlay-path"
+            >
+              {path}
+            </span>
+          )}
           <button
             onClick={toggleMaximized}
             className="hover-bg-strong ml-2 flex h-6 w-6 items-center justify-center rounded text-xs"
@@ -108,19 +168,29 @@ export function FileViewerOverlay() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <FileViewer
-            path={path}
-            profile={defaultProfile}
-            // Key the viewer terminal by path so re-opening a different file
-            // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
-            // the TerminalView instead of reusing the previous file's session.
-            // The session-spawn effect keys off instanceId, so a fresh id tears
-            // down the old PTY and runs the new startup command. Web viewers
-            // ignore the id, so this is harmless for them.
-            viewerInstanceId={`global-file-viewer:${path}`}
-            isFocused
-            bodyStyle={bodyStyle}
-          />
+          {promptMode ? (
+            <div
+              className="flex h-full items-center justify-center px-6 text-center text-xs"
+              style={{ color: "var(--text-secondary)" }}
+              data-testid="file-viewer-overlay-empty"
+            >
+              Enter an absolute file path above and press Enter to open it here.
+            </div>
+          ) : (
+            <FileViewer
+              path={path}
+              profile={defaultProfile}
+              // Key the viewer terminal by path so re-opening a different file
+              // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
+              // the TerminalView instead of reusing the previous file's session.
+              // The session-spawn effect keys off instanceId, so a fresh id tears
+              // down the old PTY and runs the new startup command. Web viewers
+              // ignore the id, so this is harmless for them.
+              viewerInstanceId={`global-file-viewer:${path}`}
+              isFocused
+              bodyStyle={bodyStyle}
+            />
+          )}
         </div>
       </div>
     </div>,

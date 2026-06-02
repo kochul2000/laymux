@@ -91,6 +91,80 @@ describe("FileViewerOverlay", () => {
     expect(useFileViewerStore.getState().open).toBe(false);
   });
 
+  // --- #283: inline path input (empty / "open anywhere" mode) ---
+  it("shows an autofocused inline path input when opened with no path", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    // No file is loaded yet, so the viewer body must not be mounted.
+    expect(screen.queryByTestId("mock-file-viewer")).not.toBeInTheDocument();
+  });
+
+  it("loads the file when a path is typed and Enter is pressed", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "  /home/user/note.txt  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/home/user/note.txt");
+    // The viewer body now renders the loaded file; the input is gone.
+    expect(screen.getByTestId("mock-file-viewer")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-overlay-path-input")).not.toBeInTheDocument();
+  });
+
+  it("loads the file when the load button is clicked", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "/home/user/b.txt" } });
+    fireEvent.click(screen.getByTestId("file-viewer-overlay-path-submit"));
+    expect(useFileViewerStore.getState().path).toBe("/home/user/b.txt");
+  });
+
+  it("does not load a blank path", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Still empty mode — input remains, nothing loaded.
+    expect(useFileViewerStore.getState().path).toBe("");
+    expect(screen.getByTestId("file-viewer-overlay-path-input")).toBeInTheDocument();
+  });
+
+  it("Escape closes the overlay while in empty (inline input) mode", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("does not show the inline input once a file is loaded", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    expect(screen.queryByTestId("file-viewer-overlay-path-input")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-file-viewer")).toBeInTheDocument();
+  });
+
   it("forwards a per-path viewer instance id so a new path remounts the viewer terminal", () => {
     act(() => {
       useFileViewerStore.getState().openFileViewer("/home/user/a.txt");

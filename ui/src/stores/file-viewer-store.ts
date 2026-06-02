@@ -23,10 +23,18 @@ interface FileViewerState {
 
   /**
    * Open the viewer for `path`. Returns false (and does nothing) when the path
-   * normalizes to empty, so callers (shortcut prompt, MCP tool) can report a
+   * normalizes to empty, so callers (MCP tool, REST/automation) can report a
    * validation error.
    */
   openFileViewer: (path: string, opts?: { maximized?: boolean }) => boolean;
+  /**
+   * Open the overlay with no file loaded (#283). The overlay then shows an
+   * inline path input field instead of a native `window.prompt`, so the
+   * "open anywhere" shortcut (Ctrl+Shift+O) works on every platform and is
+   * driveable via the Automation API. Always succeeds. Call `openFileViewer`
+   * once the user submits a path.
+   */
+  openEmptyFileViewer: (opts?: { maximized?: boolean }) => boolean;
   closeFileViewer: () => void;
   toggleMaximized: () => void;
 }
@@ -42,6 +50,11 @@ export const useFileViewerStore = create<FileViewerState>()((set) => ({
     set({ open: true, path: normalized, maximized: opts?.maximized ?? false });
     return true;
   },
+  openEmptyFileViewer: (opts) => {
+    set({ open: true, path: "", maximized: opts?.maximized ?? false });
+    return true;
+  },
+
   closeFileViewer: () => set({ open: false, path: "" }),
   toggleMaximized: () => set((s) => ({ maximized: !s.maximized })),
 }));

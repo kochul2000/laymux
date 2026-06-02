@@ -49,4 +49,32 @@ describe("file-viewer-store", () => {
     expect(s.path).toBe("/tmp/b.txt");
     expect(s.maximized).toBe(false);
   });
+
+  it("opens an empty viewer (prompt mode) with no path", () => {
+    // #283: Ctrl+Shift+O opens the overlay with a blank inline path input
+    // instead of a native window.prompt dialog.
+    const ok = useFileViewerStore.getState().openEmptyFileViewer();
+    expect(ok).toBe(true);
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("");
+    expect(s.maximized).toBe(false);
+  });
+
+  it("openEmptyFileViewer does not clobber a maximized request", () => {
+    useFileViewerStore.getState().openEmptyFileViewer({ maximized: true });
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("");
+    expect(s.maximized).toBe(true);
+  });
+
+  it("loading a path from the empty viewer fills it in", () => {
+    useFileViewerStore.getState().openEmptyFileViewer();
+    const ok = useFileViewerStore.getState().openFileViewer("/tmp/c.txt");
+    expect(ok).toBe(true);
+    const s = useFileViewerStore.getState();
+    expect(s.open).toBe(true);
+    expect(s.path).toBe("/tmp/c.txt");
+  });
 });
