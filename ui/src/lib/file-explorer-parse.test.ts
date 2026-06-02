@@ -74,6 +74,13 @@ describe("parentPath", () => {
   it("handles windows paths", () => {
     expect(parentPath("C:\\Users\\me\\project")).toBe("C:\\Users\\me");
   });
+
+  it("returns the drive root (with trailing separator) for a file at drive root", () => {
+    // "C:\foo.txt"'s parent is the drive root "C:\", not "C:" — the latter is a
+    // drive-relative cwd on Windows and would not navigate predictably.
+    expect(parentPath("C:\\foo.txt")).toBe("C:\\");
+    expect(parentPath("C:\\dir")).toBe("C:\\");
+  });
 });
 
 describe("normalizeAddressInput", () => {
@@ -145,6 +152,14 @@ describe("resolveAddressNavigation", () => {
       kind: "open-file",
       dir: "C:\\Users\\me",
       file: "C:\\Users\\me\\notes.txt",
+    });
+  });
+
+  it("opens a file at the drive root, navigating to the drive root itself", () => {
+    expect(resolveAddressNavigation("C:\\foo.txt", { exists: true, isDirectory: false })).toEqual({
+      kind: "open-file",
+      dir: "C:\\",
+      file: "C:\\foo.txt",
     });
   });
 

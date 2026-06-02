@@ -186,6 +186,27 @@ pub fn resolve_path_for_windows(path: &str, wsl_distro: Option<&str>) -> String 
     path.to_string()
 }
 
+/// Resolve a path supplied to a file command (address bar, listing, viewer) to a
+/// Windows-accessible path, applying one shared WSL-distro inference rule:
+///
+/// - an explicit `wsl_distro` always wins;
+/// - otherwise, on Windows, a Linux-looking path (`/...` that is not `/mnt/...`)
+///   auto-detects the default distro so `\\wsl.localhost\<distro>\...` resolves.
+///
+/// Centralizing this keeps `stat_path`, `list_directory`, and
+/// `read_file_for_viewer` from drifting — if their distro inference diverged, a
+/// path could `stat` as existing yet fail to open (or vice versa). (#282)
+pub fn resolve_address_path(path: &str, wsl_distro: Option<&str>) -> String {
+    let distro = wsl_distro.map(str::to_string).or_else(|| {
+        if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
+            get_default_wsl_distro()
+        } else {
+            None
+        }
+    });
+    resolve_path_for_windows(path, distro.as_deref())
+}
+
 /// Extract WSL distro name from a raw path (before normalization).
 /// Handles `//wsl.localhost/<distro>/path` and `//wsl$/<distro>/path` formats.
 pub fn extract_wsl_distro_from_path(path: &str) -> Option<String> {
@@ -356,6 +377,28 @@ mod tests {
             resolve_path_for_windows("/home/user", Some("Ubuntu")),
             "\\\\wsl.localhost\\Ubuntu\\home\\user"
         );
+    }
+
+    #[test]
+    fn resolve_address_path_explicit_distro_unc() {
+        // An explicit distro wins and yields a UNC path (same as the underlying
+        // resolve_path_for_windows) — shared by stat_path/list_directory.
+        assert_eq!(
+            resolve_address_path("/home/user", Some("Ubuntu")),
+            "\\\\wsl.localhost\\Ubuntu\\home\\user"
+        );
+    }
+
+    #[test]
+    fn resolve_address_path_mnt_to_windows() {
+        // /mnt/x paths need no distro and map straight to a drive path.
+        assert_eq!(resolve_address_path("/mnt/c/Users", None), "C:\\Users");
+    }
+
+    #[test]
+    fn resolve_address_path_windows_passthrough() {
+        // Already-Windows paths pass through unchanged regardless of distro.
+        assert_eq!(resolve_address_path("C:\\Users", None), "C:\\Users");
     }
 
     #[test]

@@ -59,6 +59,10 @@ export function FileExplorerView({
   const [addressValue, setAddressValue] = useState("");
   const [addressError, setAddressError] = useState(false);
   const addressInputRef = useRef<HTMLInputElement>(null);
+  // Monotonic token for the in-flight address commit. Bumped on every commit
+  // start and on cancel (Esc/blur), so a slow `statPath` that resolves after the
+  // user moved on can detect it is stale and skip navigating. (#282)
+  const commitSeqRef = useRef(0);
 
   // --- History stack for back/forward navigation ---
   const [history, setHistory] = useState<string[]>(lastCwd ? [lastCwd] : []);
@@ -345,6 +349,8 @@ export function FileExplorerView({
 
   // --- Address bar: cancel editing (Esc / blur) → revert to current path ---
   const cancelAddressEdit = useCallback(() => {
+    // Invalidate any in-flight commit so a late statPath can't navigate.
+    commitSeqRef.current += 1;
     setAddressEditing(false);
     setAddressError(false);
   }, []);
@@ -359,12 +365,17 @@ export function FileExplorerView({
       setAddressError(true);
       return;
     }
+    const seq = (commitSeqRef.current += 1);
     let info: { exists: boolean; isDirectory: boolean };
     try {
       info = await statPath(normalized);
     } catch {
       info = { exists: false, isDirectory: false };
     }
+    // Stale guard: if the user cancelled (Esc/blur) or fired a newer commit
+    // while statPath was in flight, discard this result so it can't navigate
+    // or open a viewer behind the user's back. (#282)
+    if (seq !== commitSeqRef.current) return;
     const action = resolveAddressNavigation(normalized, info);
     if (action.kind === "invalid") {
       setAddressError(true);
@@ -636,7 +647,17 @@ export function FileExplorerView({
             style={{ color: "var(--text-primary)" }}
             data-testid="file-explorer-address"
             title="Click to edit path"
+            role="button"
+            tabIndex={0}
+            aria-label="Edit path"
             onClick={beginAddressEdit}
+            onKeyDown={(e) => {
+              // Keyboard users enter edit mode with Enter/Space (#282 a11y).
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                beginAddressEdit();
+              }
+            }}
           >
             {currentCwd || "..."}
           </span>

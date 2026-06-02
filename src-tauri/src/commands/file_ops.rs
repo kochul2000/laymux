@@ -64,13 +64,8 @@ pub fn read_file_for_viewer(
     path: String,
     max_bytes: Option<usize>,
 ) -> Result<FileViewerContent, String> {
-    // Resolve WSL paths on Windows
-    let distro = if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
-        path_utils::get_default_wsl_distro()
-    } else {
-        None
-    };
-    let resolved = path_utils::resolve_path_for_windows(&path, distro.as_deref());
+    // Resolve WSL/Windows paths with the shared inference rule (#282).
+    let resolved = path_utils::resolve_address_path(&path, None);
     let file_path = std::path::Path::new(&resolved);
     let ext = file_path
         .extension()
@@ -152,14 +147,7 @@ pub struct PathInfo {
 /// without treating "not found" as a hard error.
 #[tauri::command]
 pub fn stat_path(path: String, wsl_distro: Option<String>) -> PathInfo {
-    let distro = wsl_distro.or_else(|| {
-        if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
-            path_utils::get_default_wsl_distro()
-        } else {
-            None
-        }
-    });
-    let resolved = path_utils::resolve_path_for_windows(&path, distro.as_deref());
+    let resolved = path_utils::resolve_address_path(&path, wsl_distro.as_deref());
     match std::fs::metadata(&resolved) {
         Ok(meta) => PathInfo {
             exists: true,
@@ -204,16 +192,8 @@ pub struct DirEntry {
 /// List directory contents and return structured metadata for each entry.
 #[tauri::command]
 pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
-    // On Windows, resolve Linux paths to UNC paths
-    let distro = wsl_distro.or_else(|| {
-        // Auto-detect WSL distro if path looks like a Linux path
-        if cfg!(windows) && path.starts_with('/') && !path.starts_with("/mnt/") {
-            path_utils::get_default_wsl_distro()
-        } else {
-            None
-        }
-    });
-    let resolved = path_utils::resolve_path_for_windows(&path, distro.as_deref());
+    // Resolve WSL/Windows paths with the shared inference rule (#282).
+    let resolved = path_utils::resolve_address_path(&path, wsl_distro.as_deref());
     let dir_path = std::path::Path::new(&resolved);
     let entries = std::fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
 

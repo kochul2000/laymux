@@ -1,3 +1,5 @@
+import { normalizeViewerPath } from "./file-viewer";
+
 /** Escape a string for safe use as a single-quoted shell argument. */
 export function shellEscape(s: string): string {
   // Wrap in single quotes; escape embedded single quotes as '\''
@@ -18,30 +20,24 @@ export function parentPath(path: string): string {
   const trimmed = path.endsWith(sep) ? path.slice(0, -1) : path;
   const lastSep = trimmed.lastIndexOf(sep);
   if (lastSep <= 0) return sep; // root
+  // Windows drive root: the parent of "C:\foo" is "C:\" (drive root), not "C:"
+  // — a bare "C:" is a drive-relative cwd and would not navigate predictably.
+  if (trimmed[lastSep - 1] === ":") return trimmed.slice(0, lastSep + 1);
   return trimmed.slice(0, lastSep);
 }
 
 /**
  * Normalize a path typed or pasted into the File Explorer address bar.
  *
- * - trims surrounding whitespace,
- * - strips one layer of wrapping quotes (drag-and-drop / shell copy often yields
- *   quoted paths — same convenience as the file viewer's {@link normalizeViewerPath}),
- * - removes a single trailing separator while preserving roots ("/" and "C:\\").
+ * Builds on the shared {@link normalizeViewerPath} core (trim + strip one layer
+ * of wrapping quotes — drag-and-drop / shell copy often yields quoted paths) and
+ * additionally removes a single trailing separator while preserving roots
+ * ("/" and "C:\\"). Sharing the core keeps the two entry points from drifting.
  *
  * Returns "" for blank input so callers can treat it as "do nothing".
  */
 export function normalizeAddressInput(raw: string): string {
-  if (typeof raw !== "string") return "";
-  let p = raw.trim();
-  if (p.length === 0) return "";
-  // Strip one layer of matching wrapping quotes (single or double).
-  if (
-    (p.startsWith('"') && p.endsWith('"') && p.length >= 2) ||
-    (p.startsWith("'") && p.endsWith("'") && p.length >= 2)
-  ) {
-    p = p.slice(1, -1).trim();
-  }
+  let p = normalizeViewerPath(raw);
   if (p.length === 0) return "";
 
   // Drop a single trailing separator unless the result would be a root.
