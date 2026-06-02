@@ -6,12 +6,18 @@ import {
   clipboardWriteText,
   listDirectory,
   getHomeDirectory,
+  statPath,
   onTerminalCwdChanged,
   handleLxMessage,
   type DirEntry,
 } from "@/lib/tauri-api";
 // convertFileSrc no longer needed — images are returned as data URLs
-import { joinPath, parentPath } from "@/lib/file-explorer-parse";
+import {
+  joinPath,
+  parentPath,
+  normalizeAddressInput,
+  resolveAddressNavigation,
+} from "@/lib/file-explorer-parse";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
@@ -47,6 +53,12 @@ export function FileExplorerView({
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [focusIndex, setFocusIndex] = useState(0);
   const [lastClickIndex, setLastClickIndex] = useState(0);
+
+  // --- Editable address bar (#278) ---
+  const [addressEditing, setAddressEditing] = useState(false);
+  const [addressValue, setAddressValue] = useState("");
+  const [addressError, setAddressError] = useState(false);
+  const addressInputRef = useRef<HTMLInputElement>(null);
 
   // --- History stack for back/forward navigation ---
   const [history, setHistory] = useState<string[]>(lastCwd ? [lastCwd] : []);
@@ -324,6 +336,77 @@ export function FileExplorerView({
     [navigateToDir, openFile],
   );
 
+  // --- Address bar: begin editing (click/focus) ---
+  const beginAddressEdit = useCallback(() => {
+    setAddressValue(currentCwdRef.current);
+    setAddressError(false);
+    setAddressEditing(true);
+  }, []);
+
+  // --- Address bar: cancel editing (Esc / blur) → revert to current path ---
+  const cancelAddressEdit = useCallback(() => {
+    setAddressEditing(false);
+    setAddressError(false);
+  }, []);
+
+  // --- Address bar: commit (Enter) ---
+  // Validates the typed/pasted path against the Rust backend, then either
+  // navigates to a directory, or navigates to a file's parent + opens the file
+  // in the shared viewer. Invalid paths keep the editor open and flag an error.
+  const commitAddress = useCallback(async () => {
+    const normalized = normalizeAddressInput(addressValue);
+    if (!normalized) {
+      setAddressError(true);
+      return;
+    }
+    let info: { exists: boolean; isDirectory: boolean };
+    try {
+      info = await statPath(normalized);
+    } catch {
+      info = { exists: false, isDirectory: false };
+    }
+    const action = resolveAddressNavigation(normalized, info);
+    if (action.kind === "invalid") {
+      setAddressError(true);
+      return;
+    }
+    setAddressEditing(false);
+    setAddressError(false);
+    if (action.kind === "navigate") {
+      navigateTo(action.dir);
+    } else {
+      // File: move into its directory AND open it in the shared viewer (#278).
+      navigateTo(action.dir);
+      openFileViewer(action.file);
+    }
+  }, [addressValue, navigateTo, openFileViewer]);
+
+  // --- Focus the input when entering edit mode ---
+  useEffect(() => {
+    if (addressEditing) {
+      const input = addressInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+  }, [addressEditing]);
+
+  const handleAddressKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Keep arrow/typing keys from reaching the list's keyboard handler.
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void commitAddress();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancelAddressEdit();
+      }
+    },
+    [commitAddress, cancelAddressEdit],
+  );
+
   // --- Scroll focused item into view ---
   const scrollToIndex = useCallback((index: number) => {
     const list = listRef.current;
@@ -525,9 +608,39 @@ export function FileExplorerView({
         >
           →
         </button>
-        <span className="text-xs truncate ml-1" style={{ color: "var(--text-primary)" }}>
-          {currentCwd || "..."}
-        </span>
+        {addressEditing ? (
+          <input
+            ref={addressInputRef}
+            type="text"
+            className="text-xs ml-1 flex-1 min-w-0 outline-none rounded px-1"
+            style={{
+              background: "var(--bg-base)",
+              color: "var(--text-primary)",
+              border: addressError ? "1px solid var(--red)" : "1px solid var(--accent)",
+            }}
+            value={addressValue}
+            spellCheck={false}
+            autoComplete="off"
+            data-testid="file-explorer-address-input"
+            aria-invalid={addressError}
+            onChange={(e) => {
+              setAddressValue(e.target.value);
+              if (addressError) setAddressError(false);
+            }}
+            onKeyDown={handleAddressKeyDown}
+            onBlur={cancelAddressEdit}
+          />
+        ) : (
+          <span
+            className="text-xs truncate ml-1 flex-1 min-w-0 cursor-text"
+            style={{ color: "var(--text-primary)" }}
+            data-testid="file-explorer-address"
+            title="Click to edit path"
+            onClick={beginAddressEdit}
+          >
+            {currentCwd || "..."}
+          </span>
+        )}
       </ViewHeader>
 
       <ViewBody ref={listRef} style={listStyle} testId="file-explorer-list">
