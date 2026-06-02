@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { FileViewer } from "@/components/ui/FileViewer";
+import { resolveViewer } from "@/lib/file-viewer";
 
 /**
  * The single global floating file viewer (#277 / #279). It is rendered once at
@@ -20,10 +21,20 @@ export function FileViewerOverlay() {
 
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const feSettings = useSettingsStore((s) => s.fileExplorer);
+  const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
 
-  // Esc closes the viewer globally while it is open.
+  // When the file is shown via an external command (e.g. .txt→vi, video→mpv),
+  // FileViewer renders a live TerminalView. In that mode Esc and a backdrop
+  // click must NOT dismiss the overlay: Esc belongs to the terminal app (leaving
+  // vi insert mode, quitting less/mpv) and a stray backdrop click would discard
+  // an in-progress session. The user closes such viewers with the explicit ✕
+  // button instead. Built-in web viewers (text/image/binary) keep the
+  // convenient Esc / backdrop dismiss.
+  const isTerminalViewer = open && resolveViewer(path, extensionViewers).viewerType === "terminal";
+
+  // Esc closes the (web) viewer globally while it is open.
   useEffect(() => {
-    if (!open) return;
+    if (!open || isTerminalViewer) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -32,7 +43,7 @@ export function FileViewerOverlay() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, closeFileViewer]);
+  }, [open, isTerminalViewer, closeFileViewer]);
 
   if (!open) return null;
 
@@ -57,7 +68,7 @@ export function FileViewerOverlay() {
         data-testid="file-viewer-overlay-backdrop"
         className="absolute inset-0"
         style={{ background: "var(--backdrop-heavy)" }}
-        onClick={closeFileViewer}
+        onClick={isTerminalViewer ? undefined : closeFileViewer}
       />
       <div
         className={`relative z-10 flex flex-col overflow-hidden shadow-2xl ${maximized ? "" : "rounded-lg"} ${panelSize}`}
@@ -100,7 +111,13 @@ export function FileViewerOverlay() {
           <FileViewer
             path={path}
             profile={defaultProfile}
-            viewerInstanceId="global-file-viewer"
+            // Key the viewer terminal by path so re-opening a different file
+            // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
+            // the TerminalView instead of reusing the previous file's session.
+            // The session-spawn effect keys off instanceId, so a fresh id tears
+            // down the old PTY and runs the new startup command. Web viewers
+            // ignore the id, so this is harmless for them.
+            viewerInstanceId={`global-file-viewer:${path}`}
             isFocused
             bodyStyle={bodyStyle}
           />
