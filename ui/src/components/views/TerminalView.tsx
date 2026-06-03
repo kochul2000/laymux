@@ -73,6 +73,16 @@ import { usePaneControl } from "@/components/layout/PaneControlContext";
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
 
+/**
+ * Trailing debounce (ms) before reflowing the terminal after a container-size
+ * change. A pane-divider drag emits a ResizeObserver burst (one entry per
+ * frame); reflowing on each intermediate width races xterm's synchronous
+ * buffer reflow against ConPTY's async resize repaints and corrupts scrollback
+ * (issue #285). Coalescing into a single fit after the drag settles removes the
+ * interleaving. Kept short so a settled resize still feels immediate.
+ */
+const RESIZE_FIT_DEBOUNCE_MS = 80;
+
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
@@ -429,6 +439,11 @@ export function TerminalView({
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
       scrollback: 10000,
+      // ConPTY backend with buildNumber >= 21376 enables xterm's own buffer
+      // reflow so scrollback re-wraps correctly on a width change. The #285
+      // scrollback corruption is NOT caused by this value (verified: 21375
+      // disables reflow and truncates instead) — its real cause is resize
+      // events racing ConPTY repaints, fixed by the debounced fit below.
       windowsPty: { backend: "conpty", buildNumber: 21376 },
     });
 
@@ -1446,6 +1461,8 @@ export function TerminalView({
     let prevW = 0;
     let prevH = 0;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
+    // Trailing-debounce handle for container-size reflow (see RESIZE_FIT_DEBOUNCE_MS).
+    let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
@@ -1566,23 +1583,46 @@ export function TerminalView({
         }
         prevW = w;
         prevH = h;
-        fitAddon.fit();
-        if (recoveringFromHidden || consumeDirty) {
-          // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
-          // atlas can go stale while the container is display:none (a DPR
-          // or font change that fires on a 0-size terminal cannot rebuild
-          // anything), so re-rasterise on the hide → show transition.
-          // Safe no-op without WebGL renderer.
-          try {
-            (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-          } catch {
-            /* older xterm builds / mocks may lack this method */
+
+        // The actual reflow, factored out so the common drag path can debounce
+        // it while one-shot recovery events run promptly.
+        const applyFit = () => {
+          if (cancelled) return;
+          fitAddon.fit();
+          if (recoveringFromHidden || consumeDirty) {
+            // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
+            // atlas can go stale while the container is display:none (a DPR
+            // or font change that fires on a 0-size terminal cannot rebuild
+            // anything), so re-rasterise on the hide → show transition.
+            // Safe no-op without WebGL renderer.
+            try {
+              (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+            } catch {
+              /* older xterm builds / mocks may lack this method */
+            }
+            terminal.refresh(0, terminal.rows - 1);
+            reflowDirtyRef.current = false;
           }
-          terminal.refresh(0, terminal.rows - 1);
-          reflowDirtyRef.current = false;
+          bindHelperTextareaEvents();
+          scheduleOverlayCaretUpdate();
+        };
+
+        if (recoveringFromHidden || consumeDirty) {
+          // Hide→show recovery / pending dirty reflow are single, important
+          // events — apply now and cancel any in-flight drag debounce so the
+          // atlas rebuild is not skipped.
+          if (resizeFitTimer !== undefined) {
+            clearTimeout(resizeFitTimer);
+            resizeFitTimer = undefined;
+          }
+          applyFit();
+        } else {
+          // Plain container-size change (e.g. dragging a pane divider): debounce
+          // so xterm reflow + the PTY resize happen ONCE after the drag settles,
+          // never interleaving with ConPTY's per-resize repaints (issue #285).
+          if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
+          resizeFitTimer = setTimeout(applyFit, RESIZE_FIT_DEBOUNCE_MS);
         }
-        bindHelperTextareaEvents();
-        scheduleOverlayCaretUpdate();
       }
       prevWasHidden = isNowHidden;
       isContainerHiddenRef.current = isNowHidden;
@@ -1594,6 +1634,7 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;

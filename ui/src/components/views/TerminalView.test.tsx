@@ -2466,6 +2466,78 @@ describe("TerminalView", () => {
     }
   });
 
+  // -- Regression: rapid resize burst (pane-divider drag) must coalesce (#285) --
+  //
+  // Dragging a pane divider emits a ResizeObserver entry every frame. Reflowing
+  // (fit → terminal.resize → xterm buffer reflow) on each intermediate width
+  // races xterm's synchronous reflow against ConPTY's async resize repaints and
+  // corrupts scrollback (duplicated / merged lines). The fix debounces the fit
+  // so a whole drag burst collapses into a single reflow after it settles.
+  it("coalesces a rapid resize burst into a single fit (issue #285)", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-coalesce" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Ignore the synchronous creation fit; measure only the drag burst.
+      mockFit.mockClear();
+
+      // Simulate a divider drag: many distinct widths in one synchronous burst.
+      act(() => {
+        for (let w = 790; w >= 700; w -= 5) {
+          obs.callback(
+            [{ target, contentRect: { width: w, height: 600 } } as unknown as ResizeObserverEntry],
+            {} as ResizeObserver,
+          );
+        }
+      });
+
+      // Debounced: no per-frame fit fires synchronously during the burst.
+      expect(mockFit).not.toHaveBeenCalled();
+
+      // After the burst settles, exactly one fit runs for the whole drag.
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   // -- Regression: reflow triggers fired while inactive workspace is hidden --
   //
   // WorkspaceArea hides inactive workspaces via `display: none`. The font /
