@@ -67,6 +67,9 @@ import { loadTerminalOutputCache } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
+  registerTerminalInspector,
+  unregisterTerminalInspector,
+  type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 
@@ -1502,6 +1505,36 @@ export function TerminalView({
         }
         registerTerminalSerializer(instanceId, () => serializeAddon.serialize());
 
+        // Register buffer inspector for automated reflow verification (issue #285).
+        // Exposes xterm's reflowed line model (text + isWrapped) so the
+        // Automation API can confirm width-change reflow without screenshots.
+        const dumpBuffer = (limit: number) => {
+          const buf = terminal.buffer.active;
+          const total = buf.length;
+          const start = limit > 0 ? Math.max(0, total - limit) : 0;
+          const lines: TerminalBufferLine[] = [];
+          for (let i = start; i < total; i++) {
+            const line = buf.getLine(i);
+            if (!line) continue;
+            lines.push({
+              index: i,
+              text: line.translateToString(true),
+              isWrapped: line.isWrapped,
+            });
+          }
+          return {
+            cols: terminal.cols,
+            rows: terminal.rows,
+            length: total,
+            baseY: buf.baseY,
+            lines,
+          };
+        };
+        if (paneId) {
+          registerTerminalInspector(paneId, dumpBuffer);
+        }
+        registerTerminalInspector(instanceId, dumpBuffer);
+
         fitAddon.fit();
         openedRef.current = true;
         scheduleOverlayCaretUpdate();
@@ -1665,8 +1698,10 @@ export function TerminalView({
       setSyncOutputCursorVisibility(false);
       if (paneId) {
         unregisterTerminalSerializer(paneId);
+        unregisterTerminalInspector(paneId);
       }
       unregisterTerminalSerializer(instanceId);
+      unregisterTerminalInspector(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

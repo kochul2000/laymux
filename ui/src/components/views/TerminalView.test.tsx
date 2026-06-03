@@ -161,9 +161,13 @@ vi.mock("@xterm/addon-serialize", () => ({
 
 const mockRegisterTerminalSerializer = vi.fn();
 const mockUnregisterTerminalSerializer = vi.fn();
+const mockRegisterTerminalInspector = vi.fn();
+const mockUnregisterTerminalInspector = vi.fn();
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
+  registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
+  unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
 }));
 
 // Mock tauri API

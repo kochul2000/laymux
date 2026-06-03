@@ -193,6 +193,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .route("/api/v1/grid/hover", post(grid_simulate_hover))
         .route("/api/v1/panes/split", post(panes_split))
         .route("/api/v1/panes/{index}", delete(panes_remove))
+        .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
         .route("/api/v1/docks", get(docks_list))
         .route(
@@ -221,6 +222,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .route("/api/v1/terminals", get(terminals_list))
         .route("/api/v1/terminals/{id}/write", post(terminal_write))
         .route("/api/v1/terminals/{id}/output", get(terminal_output))
+        .route("/api/v1/terminals/{id}/buffer", get(terminal_buffer_dump))
         .route("/api/v1/memos", get(memos_list))
         .route("/api/v1/memos/{key}", get(memo_get))
         .route("/api/v1/notifications", get(notifications_list))

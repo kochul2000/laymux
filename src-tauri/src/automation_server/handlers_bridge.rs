@@ -1,4 +1,4 @@
-use axum::extract::{Path, State as AxumState};
+use axum::extract::{Path, Query, State as AxumState};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -301,6 +301,43 @@ pub async fn panes_remove(
         "panes",
         "remove",
         serde_json::json!({ "paneIndex": index }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Resize a pane by a width/height delta (fraction of the grid). Used to
+/// drive fine-grained, drag-like resize sequences for reflow verification
+/// (issue #285). Body: { "dw": <f64>, "dh": <f64> } — either optional.
+pub async fn panes_resize(
+    AxumState(state): AxumState<ServerState>,
+    Path(index): Path<usize>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mut delta = serde_json::json!({});
+    if let Some(dw) = body.get("dw").and_then(|v| v.as_f64()) {
+        delta["w"] = serde_json::json!(dw);
+    }
+    if let Some(dh) = body.get("dh").and_then(|v| v.as_f64()) {
+        delta["h"] = serde_json::json!(dh);
+    }
+    if delta.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(err_json(
+                "at least one of 'dw' or 'dh' (number) is required",
+            )),
+        );
+    }
+    match bridge_request(
+        &state,
+        "action",
+        "panes",
+        "resize",
+        serde_json::json!({ "paneIndex": index, "delta": delta }),
     )
     .await
     {
@@ -635,6 +672,26 @@ pub async fn terminals_set_focus(
     )
     .await
     {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
+/// Dump xterm's reflowed line buffer (text + isWrapped) for a terminal.
+/// Reflects xterm's own wrapping model after a resize — used to verify
+/// ConPTY scrollback reflow on width changes (issue #285) without screenshots.
+pub async fn terminal_buffer_dump(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+    Query(q): Query<BufferDumpQuery>,
+) -> impl IntoResponse {
+    let mut params = serde_json::json!({ "id": id });
+    // Forward the line cap to the frontend (0 = whole buffer). Without this the
+    // JS handler always falls back to its default, so `?limit=` was ignored.
+    if let Some(limit) = q.limit {
+        params["limit"] = serde_json::json!(limit);
+    }
+    match bridge_request(&state, "query", "terminals", "dumpBuffer", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }
