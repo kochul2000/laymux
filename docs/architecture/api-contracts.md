@@ -1,0 +1,698 @@
+# 아키텍처 — 계약 · 규약 · 설계 원칙
+
+> **이 문서는 living doc 이다.** HEAD 의 현재 계약을 반영하며, 모델·REST 경로·tool 이름·설정 키가 코드와 어긋나면 **같은 PR 에서** 갱신한다. 계약은 issue 가 아니라 **코드에서 떠라**.
+> 정적 구조는 [overview.md](./overview.md), 런타임 흐름은 [data-flow.md](./data-flow.md), 결정 근거는 [ADR](../adr/) 를 본다.
+>
+> **이 문서가 담는 범위** — laymux 의 계약과 코드 규약: Settings(settings.json 계약) · Automation API(REST + 내장 MCP tool) · Rust 코드 설계 원칙 · UI 코드 설계 원칙.
+> 섹션 번호(§10·§12·§14·§15)는 구 `ARCHITECTURE.md` 기준을 보존한다.
+
+---
+## 10. Settings
+
+`settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 UI 상태(컨트롤 바 모드, 폰트 줌 등)는 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다.
+
+### 접근 방법
+
+- 모달로 열기 (기본)
+- SettingsView를 Dock에 배치하여 열기 (선택, Dock only)
+- `settings.json` 직접 텍스트 편집
+
+### Windows Terminal 호환 항목
+
+| 항목 | 설명 |
+|---|---|
+| `colorSchemes` | 색상 스킴 정의 |
+| `profiles` | 터미널 프로파일 (WSL, PowerShell 등) |
+| `keybindings` | 키 바인딩 |
+| `font.face` / `font.size` | 폰트 설정 (프로파일별 오버라이드, profileDefaults에서 상속) |
+| `defaultProfile` | 기본 프로파일 |
+
+우리가 구현한 기능과 교집합이 되는 항목만 호환. Windows Terminal의 settings.json을 복붙했을 때 해당 항목은 동일하게 동작한다.
+
+### Claude Code 설정
+
+Claude Code가 터미널에서 실행 중일 때 sync-cwd 전파를 제어한다.
+
+```jsonc
+{
+  "claude": {
+    "syncCwd": "skip"  // "skip" (기본) | "command"
+  }
+}
+```
+
+| 모드 | 동작 |
+|---|---|
+| `skip` | Claude Code 감지 시 cd 전파하지 않음 (기본값) |
+| `command` | Claude Code가 유휴(idle) 상태일 때 `! cd /path` 형식으로 전송 |
+
+**감지 방식 (타이틀 접두사 기반)**:
+
+Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 판단한다. Claude Code는 타이틀을 다음 패턴으로 설정한다:
+
+| 상태 | 타이틀 패턴 | 예시 |
+|------|------------|------|
+| 초기 진입 | `"Claude Code"` 문자열 포함 | `Claude Code` |
+| 유휴 (idle) | `✳` (U+2733) 접두어 | `✳ Claude Code` |
+| 작업 중 | 스피너 문자 접두어 (`✶✻✽✢` 또는 Braille U+2800..U+28FF) | `✢ Working on task`, `⠐ Task description` |
+
+**종료 판단**: 타이틀에 `"Claude Code"` 문자열이 없고 **동시에** 스피너 접두사 문자(`✶✻✽✢✳` 또는 Braille 패턴 U+2800..U+28FF)로도 시작하지 않을 때만 Claude Code가 종료된 것으로 판단한다. Claude Code v2.1+는 Braille 문자(`⠂⠐⠋⠙` 등)를 애니메이션 스피너로 사용한다. 스피너 접두사만 있는 타이틀(예: `✢ Working`, `⠐ Task`)은 여전히 Claude Code 실행 중이다.
+
+**`known_claude_terminals` 폴백**: 최초 `"Claude Code"` 타이틀 감지 시 `known_claude_terminals` 집합에 등록한다. 이후 스피너 타이틀이 오더라도 이 집합에 있으면 `interactiveApp: "Claude"`를 유지한다. 종료 판단 시에만 집합에서 제거한다.
+
+**`! cd` 형식**: Claude Code는 프롬프트에서 `! <shell_command>` 구문으로 인라인 셸 실행을 지원. `command` 모드에서는 이 형식으로 cd를 전달하며, `LX_PROPAGATED` 래핑이 불필요하다.
+
+### CWD 동기화 기본값
+
+위치(workspace/dock)별로 CWD sync의 send/receive 기본값을 설정한다. 프로파일별 오버라이드도 지원한다.
+
+**해상도 우선순위** (높은 순):
+1. 개별 프로파일 `syncCwd`
+2. `profileDefaults.syncCwd`
+3. 위치별 `syncCwdDefaults` (workspace / dock)
+
+값이 `"default"`이면 다음 단계로 위임한다.
+
+```jsonc
+{
+  "syncCwdDefaults": {
+    "workspace": { "send": false, "receive": false },  // 기본값
+    "dock": { "send": false, "receive": false }        // 기본값
+  },
+  "profileDefaults": {
+    "syncCwd": "default"    // "default" | { "send": bool, "receive": bool }
+  },
+  "profiles": [
+    { "name": "WSL", "syncCwd": "default" },
+    { "name": "Monitor", "syncCwd": { "send": false, "receive": false } }
+  ]
+}
+```
+
+per-pane `cwdSend`/`cwdReceive` 오버라이드는 cascade 결과보다 우선한다.
+
+### CWD 전파 가드: 소스 activity 조건
+
+OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재렌더될 때마다 재발행한다. 이 경우 interactive TUI 앱(OpenAI Codex, Claude Code, vim 등)이 활성 상태에서도 OSC 7이 흘러나올 수 있다. 또한 비대화형 명령이 실행 중일 때(`Running`)도 명령 자체가 OSC 7을 발행할 수 있다. 두 경우 모두 사용자가 직접 실행한 `cd`의 결과가 아니므로 그룹 터미널로 전파하지 않는다.
+
+`do_sync_cwd`는 다음 순서로 가드를 통과해야만 전파를 진행한다:
+
+1. `is_propagated` — 최근 전파된 터미널(에코 루프)인지
+2. **소스 activity가 `Shell`인지** (= `Running` 또는 `InteractiveApp`이 아닌지)
+3. `cwd_send` 플래그가 켜져 있는지
+4. 대상 필터링(`cwd_receive`, 대상 activity, Claude 모드, 동일 CWD 중복)
+
+2번 가드는 `detect_terminal_state`(= activity + 영구 추적 `known_claude_terminals`/`known_codex_terminals`)가 `TerminalActivity::Shell`이 아닌 모든 상태(`Running`, `InteractiveApp { .. }`)를 거짓으로 평가한다. `detect_terminal_activity`만으로는 Codex 스피너(브레일 문자) 타이틀이나 Claude Code 작업 타이틀처럼 `INTERACTIVE_APP_PATTERNS`에 직접 매칭되지 않는 상태를 놓치므로, 반드시 영구 추적을 경유하는 `detect_terminal_state`를 사용한다. 가드가 차단 판정하면 session.cwd 로컬 업데이트도 건너뛴다(스테일/실행 중 값을 후속 전파가 재사용하지 못하도록). `Shell`만 신뢰하는 이유는, OSC 7이 사용자 의도의 `cd`를 반영하는 시점은 셸이 프롬프트를 다시 그린 직후 — 즉 `OSC 133;D` 이후 — 뿐이기 때문이다.
+
+**대상 필터링 (`filter_targets_not_busy`)**도 동일한 `detect_terminal_state`로 판정한다 (#239):
+
+| 대상 activity | 처리 |
+|---|---|
+| `InteractiveApp { name: "Claude" }` | `claude.syncCwd`에 따름 — `skip`이면 제외, `command`이면 idle일 때만 `! cd '/path'` 주입 |
+| `InteractiveApp { name: other }` (vim/codex/nvim...) | 제외 — `LX_PROPAGATED=1 cd`가 TUI 입력 버퍼에 타이핑되는 것을 방지 |
+| `Running` | 제외 — 명령 실행 중 |
+| `Shell` | 포함 — `cd` 전파 |
+
+기존에는 대상 판정을 `is_claude_terminal_from_buffer` + `is_terminal_at_prompt_from_buffer` 조합으로 수행했지만, Claude 타이틀이 스캔 윈도우를 벗어나거나 `known_claude_terminals` 등록이 지연되면 누락이 발생했다. `detect_terminal_state`로 통일하여 모든 감지 경로(제목 패턴, 영구 추적, 전체 버퍼 스캔)가 한 곳에서 평가된다.
+
+---
+
+## 12. Automation API
+
+외부 도구(Claude Code CLI 등)가 IDE를 프로그래밍 방식으로 제어할 수 있는 HTTP REST API.
+
+### 12.1 아키텍처
+
+```
+[External Tool (curl)]
+    │  HTTP request
+    ▼
+[Rust axum HTTP Server :19280]
+    │
+    ├─ Backend-only (터미널 write/output)
+    │   → AppState 직접 접근
+    │
+    └─ Frontend 상태 필요 (워크스페이스, 그리드, 독)
+        │  app.emit("automation-request")
+        ▼
+    [useAutomationBridge hook]
+        │  Zustand store 조회/액션 실행
+        │  invoke("automation_response")
+        ▼
+    [oneshot channel → HTTP response]
+```
+
+### 12.2 포트 규칙
+
+**고정 포트**: release = `19280`, dev = `19281`. 각 빌드 타입은 하나의 인스턴스만 실행 가능하며, 포트 충돌 시 시작 실패한다.
+
+- **Windows**: `%APPDATA%\laymux\automation.json` (dev: `%APPDATA%\laymux-dev\automation.json`)
+- **Linux**: `~/.config/laymux/automation.json` (dev: `~/.config/laymux-dev/automation.json`)
+- 환경변수: `LX_AUTOMATION_PORT` (터미널 spawn 시 자동 주입)
+
+```jsonc
+{
+  "port": 19280,  // release=19280, dev=19281
+  "pid": 12345,
+  "version": "0.1.0",
+  "key": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  // Bearer token (매 시작마다 재생성)
+}
+```
+
+### 12.3 엔드포인트
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
+| GET | `/api/v1/health` | 헬스체크 |
+| GET | `/api/v1/workspaces` | 워크스페이스 목록 |
+| GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
+| POST | `/api/v1/workspaces/active` | 워크스페이스 전환 |
+| POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
+| PUT | `/api/v1/workspaces/:id` | 이름 변경 |
+| DELETE | `/api/v1/workspaces/:id` | 삭제 |
+| POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
+| GET | `/api/v1/grid` | 그리드 상태 |
+| POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
+| POST | `/api/v1/grid/focus` | Pane 포커스 |
+| POST | `/api/v1/panes/split` | Pane 분할 |
+| DELETE | `/api/v1/panes/:index` | Pane 제거 |
+| PUT | `/api/v1/panes/:index/view` | View 변경 |
+| GET | `/api/v1/docks` | 독 상태 |
+| PUT | `/api/v1/docks/:position/active-view` | 독 View 변경 |
+| POST | `/api/v1/docks/:position/toggle` | 독 가시성 토글 |
+| PUT | `/api/v1/docks/:position/size` | 독 크기 설정 (px) |
+| PUT | `/api/v1/docks/:position/views` | 독 View 목록 설정 |
+| GET | `/api/v1/terminals` | 터미널 목록 |
+| POST | `/api/v1/terminals/:id/write` | 터미널 입력 |
+| GET | `/api/v1/terminals/:id/output?lines=N` | 터미널 출력 읽기 |
+| GET | `/api/v1/memos` | 모든 메모 목록 조회 (`cache/memo.json` → `{ memos: [{ key, content }, ...], count }`) |
+| GET | `/api/v1/memos/:key` | 특정 키의 메모 내용 조회 (없으면 404) |
+| GET | `/api/v1/notifications` | 알림 목록 |
+| GET | `/api/v1/layouts` | 레이아웃 목록 |
+| POST | `/api/v1/screenshot` | 스크린샷 캡처 → `.screenshots/`에 저장 |
+| POST | `/api/v1/ui/file-viewer` | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `newWindow` 선택) — #277/#279 |
+
+### 12.4 터미널 출력 버퍼
+
+- 터미널별 1MB 링 버퍼 (AppState에 저장)
+- PTY 리더 스레드에서 자동 수집
+- `close_terminal_session` 시 자동 정리
+- `GET /api/v1/terminals/:id/output?lines=100`으로 조회
+
+### 12.5 스크린샷
+
+- `POST /api/v1/screenshot` → 프론트엔드 `html2canvas`로 DOM 캡처
+- `.screenshots/` 디렉터리에 `screenshot_{timestamp}.png`로 저장
+- 응답: `{ "path": ".../.screenshots/screenshot_xxx.png", "size": 12345 }`
+- `.screenshots/*.png`는 `.gitignore`에 의해 버전 관리 제외
+
+### 12.6 보안
+
+- `0.0.0.0` 바인딩 (WSL2에서 Windows 호스트 접근 허용)
+- IP allowlist 미들웨어: loopback, RFC 1918 사설 대역(10.x, 172.16-31.x, 192.168.x), link-local(169.254.x, fe80::)만 허용
+- 인증 헤더 불필요 — 로컬/사설 네트워크 IP 제한만으로 보안 확보 (Chrome DevTools, Jupyter 등과 동일 모델)
+- 외부 공인 IP에서 접근 시 403 Forbidden 반환
+
+### 12.7 내장 MCP 서버
+
+공식 `rmcp` SDK를 사용하여 MCP (Model Context Protocol) 서버를 Automation API에 직접 내장한다. 별도 바이너리 없이 `/mcp` 엔드포인트로 Streamable HTTP MCP 프로토콜을 제공한다. Stateful 세션 기반으로, `POST`(JSON-RPC 요청), `GET`(SSE 알림 스트림), `DELETE`(세션 종료)를 지원하며, `initialize` 후 `Mcp-Session-Id` 헤더를 유지해야 한다.
+
+#### 아키텍처
+
+```
+변경 전: Claude Code (WSL) → stdio → laymux-mcp 바이너리 (빌드 필요) → HTTP → axum
+변경 후: Claude Code (WSL) → HTTP → axum /mcp (빌드 불필요)
+```
+
+#### 기술 스택
+
+| 항목 | 선택 |
+|------|------|
+| SDK | `rmcp` v1.4 (공식 MCP Rust SDK) |
+| 프로토콜 | Streamable HTTP (JSON-RPC 2.0) |
+| 라우팅 | `nest_service("/mcp", StreamableHttpService)` |
+| Tool 정의 | `#[tool]` derive 매크로 — JSON Schema 자동 생성 |
+| 인증 | IP allowlist 미들웨어 자동 적용 (인증 헤더 불필요) |
+
+#### Tool 목록 (30개)
+
+**터미널 (8)**:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `list_terminals` | bridge_request | 터미널 목록 조회 (워크스페이스 필터) |
+| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 |
+| `get_terminal` | bridge_request | 단일 터미널 상세 조회 |
+| `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`) |
+| `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축) |
+| `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
+| `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
+| `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number) |
+
+**워크스페이스 (6)**:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `list_workspaces` | bridge_request | 워크스페이스 목록 (summary 옵션) |
+| `get_active_workspace` | bridge_request | 활성 워크스페이스 상세 |
+| `switch_workspace` | bridge_request | 워크스페이스 전환 |
+| `create_workspace` | bridge_request | 워크스페이스 생성 (레이아웃/프로필 지정) |
+| `delete_workspace` | bridge_request | 워크스페이스 삭제 |
+| `rename_workspace` | bridge_request | 워크스페이스 이름 변경 |
+
+**그리드/팬 (7)**:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `get_grid_state` | bridge_request | 그리드 상태 (editMode, focusedPane) |
+| `focus_pane` | bridge_request | 팬 포커스 |
+| `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시) |
+| `remove_pane` | bridge_request | 팬 제거 |
+| `resize_pane` | bridge_request | 팬 크기 조정 (상대 delta) |
+| `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
+| `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
+
+**유틸리티 (8)**:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `take_screenshot` | bridge_request → image content | 스크린샷 캡처 (팬 단위 가능) |
+| `list_notifications` | bridge_request | 알림 목록 (최신순 정렬, limit 지원) |
+| `send_notification` | bridge_request | 알림 생성 (terminal→workspace 자동 매핑) |
+| `search_terminal_output` | AppState 직접 | 출력 패턴 검색 (`max_lines` 조절 가능) |
+| `broadcast_write` | AppState 직접 | 다중 터미널 동시 입력 |
+| `list_profiles` | AppState 직접 | 사용 가능한 터미널 프로필 목록 |
+| `open_file_viewer` | bridge_request | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `new_window` 선택). File Explorer·Ctrl+Shift+O와 동일한 뷰어 (#277/#279) |
+| `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
+
+**메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
+| `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
+
+#### 구현 패턴
+
+```rust
+#[derive(Clone)]
+pub struct McpHandler {
+    state: ServerState,           // Arc<AppState> + AppHandle
+    tool_router: ToolRouter<Self>,
+    exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,  // per-terminal 세마포어
+}
+
+#[tool_router]
+impl McpHandler {
+    // 공용 헬퍼: 입력 준비 (escape + enter)
+    fn prepare_input(data: &str, escape: bool, enter: bool) -> String { ... }
+    // 공용 헬퍼: PTY 쓰기
+    fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> { ... }
+
+    // bridge 패턴: 프론트엔드 상태 조회/변경
+    #[tool]
+    async fn list_terminals(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("query", "terminals", "list", json!({})).await
+    }
+
+    // AppState 직접 접근 패턴: PTY 입력
+    #[tool]
+    async fn write_to_terminal(&self, p: WriteTerminalParam) -> Result<CallToolResult, ErrorData> {
+        let data = Self::prepare_input(&p.data, p.escape, p.enter);
+        self.write_pty(&p.terminal_id, data.as_bytes())...
+    }
+}
+```
+
+#### Tool 추가 시
+
+1. `mcp.rs`에 파라미터 구조체 추가 (`#[derive(Deserialize, JsonSchema)]`)
+2. `#[tool_router] impl McpHandler` 블록에 `#[tool(description = "...")]` 메서드 추가
+3. bridge_request 또는 AppState 직접 접근으로 구현
+4. JSON Schema가 매크로에 의해 자동 생성됨 — 수동 정의 불필요
+
+#### 설정
+
+`scripts/setup-mcp.sh` (WSL/Linux) 또는 `scripts/setup-mcp.ps1` (Windows PowerShell)을 실행하면 `claude mcp add-json`으로 MCP 설정을 자동 등록한다. 인증 불필요 — URL만 등록하면 영구 유효 (laymux 재시작해도 재등록 불필요).
+
+```bash
+# 전역 등록
+./scripts/setup-mcp.sh
+
+# 프로젝트별 등록
+./scripts/setup-mcp.sh --project
+
+# dev 인스턴스 대상
+./scripts/setup-mcp.sh --dev
+
+# laymux가 꺼져있어도 강제 등록
+./scripts/setup-mcp.sh --force
+```
+
+#### Troubleshooting
+
+**WSL에서 MCP 연결 안 됨**
+
+WSL2 네트워킹 모드에 따라 Windows 호스트 접근 IP가 다르다:
+
+| WSL2 모드 | Windows 호스트 IP | `ip route` 게이트웨이 |
+|-----------|-------------------|----------------------|
+| NAT (기본) | `172.x.x.x` (Hyper-V 게이트웨이) | `172.x.x.x` ✅ |
+| 미러링 (networkingMode=mirrored) | `127.0.0.1` | 공유기 IP (192.168.0.1 등) ❌ |
+
+`setup-mcp.sh`는 `127.0.0.1` → 게이트웨이 → 네임서버 순으로 health check하여 연결 가능한 IP를 자동 선택한다. 수동 확인:
+
+```bash
+# WSL에서 직접 연결 테스트
+curl -s http://127.0.0.1:19280/api/v1/health    # 미러링 모드
+curl -s http://$(ip route show default | awk '{print $3}'):19280/api/v1/health  # NAT 모드
+```
+
+연결 가능한 IP를 확인한 후 수동 등록:
+
+```bash
+claude mcp add-json -s user laymux '{"type":"http","url":"http://<IP>:19280/mcp"}'
+```
+
+**Windows에서 MCP 연결 안 됨**
+
+1. laymux가 실행 중인지 확인: `curl -s http://127.0.0.1:19280/api/v1/health`
+2. Claude Code에서 `/mcp`로 등록 상태 확인
+3. `~/.claude.json`의 `mcpServers.laymux` 항목에 불필요한 `headers` 필드가 있으면 제거
+
+**공통 체크리스트**
+
+- 포트: release=19280, dev=19281 (고정)
+- URL 형식: `http://<IP>:<PORT>/mcp` (trailing slash 없음)
+- 인증 헤더 불필요 — `headers` 필드가 있으면 오히려 문제 가능
+- Claude Code 재시작 필요 (MCP 설정 변경 후)
+
+---
+
+## 14. Rust 코드 설계 원칙
+> 추가: 2026.04.05
+
+### 14.1 모듈 구조 원칙
+
+**단일 책임**: 하나의 파일은 하나의 명확한 책임을 갖는다. 파일이 500줄을 넘으면 분할을 고려한다.
+
+**디렉토리 = 도메인**: 관련 코드가 3개 이상의 파일로 분할될 때 디렉토리로 승격한다. `mod.rs`는 `pub use` 재수출 허브로만 사용하며, 로직을 포함하지 않는다.
+
+**의존 방향**: 유틸리티(`error`, `lock_ext`, `constants`, `path_utils`, `osc`) → 도메인(`terminal`, `settings`, `activity`) → 진입점(`commands`, `automation_server`). 역방향 의존 금지.
+
+> **목표 구조**: 리팩토링 완료 후 최종 형태. 현재 코드베이스는 이 구조로 점진적으로 전환 중이다.
+
+```
+src-tauri/src/
+├── lib.rs                    # Tauri 앱 초기화, 모듈 선언
+├── error.rs                  # AppError — 통합 에러 타입
+├── lock_ext.rs               # MutexExt — 락 헬퍼
+├── constants.rs              # 이벤트명, 환경변수명, 공통 상수
+├── path_utils.rs             # 경로 변환 (WSL ↔ Windows ↔ Linux)
+├── osc.rs                    # OSC 이스케이프 시퀀스 파싱 (iter_osc_events)
+├── osc_hooks.rs              # OSC 훅 시스템 (조건/액션 모델, 프리셋, match_hooks)
+├── activity.rs               # 터미널 활동 상태 감지
+├── claude_bullet.rs          # Claude Code 상태 메시지 추출 + ANSI 스트리핑
+├── state.rs                  # AppState — 전역 상태
+├── commands/                 # Tauri IPC 커맨드 (프론트엔드 진입점)
+│   ├── mod.rs                # pub use 허브 (로직 없음)
+│   ├── terminal.rs           # 터미널 생명주기 (create/close/resize/write)
+│   ├── ipc_dispatch.rs       # LX CLI 메시지 라우팅 + CWD 동기화
+│   ├── claude_session.rs     # Claude Code 세션 감지 + 프로세스 트리
+│   ├── file_ops.rs           # 파일 뷰어, 디렉토리 목록
+│   └── misc.rs               # 설정, 알림, 클립보드, GitHub, 캐시 등
+├── settings/                 # 설정 관리
+│   ├── mod.rs                # pub use 허브
+│   ├── models.rs             # 구조체/enum 정의
+│   ├── io.rs                 # 로드/세이브, 경로 해석
+│   ├── migration.rs          # 설정 마이그레이션
+│   └── memo.rs               # 메모 시스템
+├── automation_server/        # Automation HTTP API (axum)
+│   ├── mod.rs                # 서버 시작, 라우터 빌드, 인증 미들웨어
+│   ├── types.rs              # 요청/응답 타입, REGISTERED_ROUTES
+│   ├── handlers_backend.rs   # 백엔드 직접 처리 핸들러
+│   ├── handlers_bridge.rs    # 프론트엔드 브릿지 핸들러
+│   └── helpers.rs            # bridge_request, JSON 응답 헬퍼
+├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
+├── pty.rs                    # PTY 스폰 및 I/O
+├── clipboard.rs              # 클립보드 (smart paste, 이미지)
+├── ipc_server.rs             # IPC 소켓 (lx CLI ↔ IDE)
+├── output_buffer.rs          # 터미널 출력 링 버퍼
+├── port_detect.rs            # 리스닝 포트 감지
+├── git_watcher.rs            # Git 브랜치 감지
+└── process.rs                # headless_command (Windows CREATE_NO_WINDOW)
+```
+
+### 14.2 에러 처리
+
+**통합 에러 타입**: `AppError` enum을 사용한다. `thiserror`로 파생하며, Tauri command 호환을 위해 `Into<String>` 변환을 제공한다.
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("Lock poisoned: {0}")]
+    Lock(String),
+    #[error("Session '{0}' not found")]
+    SessionNotFound(String),
+    #[error("IO: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    Other(String),
+}
+```
+
+**`unwrap()` 정책**:
+- 프로덕션 코드: `unwrap()` 금지. `?` 연산자 또는 `unwrap_or_default()` 사용
+- 테스트 코드: `unwrap()` 허용 (실패 시 명확한 panic이 테스트 의도)
+- 초기화 코드(lib.rs setup): `expect("이유 설명")` 허용 (복구 불가능한 상태)
+
+### 14.3 락 관리
+
+**`MutexExt` 트레이트**: 모든 `Mutex::lock()` 호출은 `lock_or_err()` 헬퍼를 사용한다.
+
+```rust
+// ❌ 금지 — 보일러플레이트 반복
+state.terminals.lock().map_err(|e| format!("Lock error: {e}"))?;
+
+// ✅ 사용
+use crate::lock_ext::MutexExt;
+state.terminals.lock_or_err()?;
+```
+
+**락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
+
+```
+1. terminals → 2. output_buffers → 3. known_claude_terminals →
+4. notifications → 5. sync_groups → 6. propagated_terminals →
+7. pty_handles / automation_channels / automation_port / ipc_socket_path
+```
+
+**콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
+
+### 14.4 상수 관리
+
+**`constants.rs`에 중앙화**: Tauri 이벤트명, 환경변수명, 타임아웃, 버퍼 크기 등 모든 매직 값을 `constants.rs`에 정의한다.
+
+```rust
+// ❌ 금지 — 문자열 리터럴 직접 사용
+app.emit("terminal-cwd-changed", payload);
+env.push(("LX_SOCKET".to_string(), path));
+
+// ✅ 사용
+use crate::constants::*;
+app.emit(EVENT_TERMINAL_CWD_CHANGED, payload);
+env.push((ENV_LX_SOCKET.to_string(), path));
+```
+
+**예외**: 해당 모듈에서만 사용되는 내부 상수는 모듈 내에 정의해도 된다.
+
+### 14.5 코딩 스타일
+
+**네이밍**:
+- 모듈/파일: `snake_case` (Rust 표준)
+- 구조체/enum: `PascalCase`
+- 함수/변수: `snake_case`
+- 상수: `SCREAMING_SNAKE_CASE`
+
+**Serde 규칙**:
+- 프론트엔드와 교환하는 모든 타입에 `#[serde(rename_all = "camelCase")]` 적용
+- Option 필드에 `#[serde(skip_serializing_if = "Option::is_none")]`
+- 기본값이 있는 필드에 `#[serde(default)]` 또는 `#[serde(default = "fn_name")]`
+
+**플랫폼 분기**: `#[cfg(target_os = "windows")]` / `#[cfg(not(target_os = "windows"))]`를 사용한다. 긴 플랫폼별 코드는 별도 함수로 추출하고 `cfg` 어트리뷰트를 함수 수준에 적용한다.
+
+**프로세스 실행**: `std::process::Command::new()` 대신 반드시 `crate::process::headless_command()`를 사용한다. (Windows 콘솔 창 깜빡임 방지)
+
+**로깅**: `eprintln!()` 대신 `tracing` 매크로를 사용한다.
+```rust
+// ❌ 금지
+eprintln!("[claude-session] PID tree match failed: {e}");
+
+// ✅ 사용
+tracing::warn!(terminal_id, error = %e, "PID tree match failed, using CWD fallback");
+```
+
+### 14.6 Tauri Command 패턴
+
+**반환 타입**: 모든 `#[tauri::command]`는 `Result<T, String>`을 반환한다. 내부에서 `AppError`를 사용하되, Tauri 경계에서 `String`으로 변환한다.
+
+**State 접근**: `State<Arc<AppState>>`로 받는다. 커맨드 함수는 얇은 진입점으로, 핵심 로직은 `&AppState`를 받는 내부 함수로 분리하여 테스트 가능하게 한다.
+
+```rust
+// Tauri command — 얇은 진입점
+#[tauri::command]
+pub fn get_terminal_summaries(
+    terminal_ids: Vec<String>,
+    state: State<Arc<AppState>>,
+) -> Result<Vec<TerminalSummaryResponse>, String> {
+    get_terminal_summaries_inner(&terminal_ids, &state)
+        .map_err(|e| e.to_string())
+}
+
+// 내부 함수 — 테스트 가능
+pub fn get_terminal_summaries_inner(
+    terminal_ids: &[String],
+    state: &AppState,
+) -> Result<Vec<TerminalSummaryResponse>, AppError> { ... }
+```
+
+**`pub use` 재수출**: `commands/mod.rs`는 서브모듈을 `pub use *`로 재수출하여, `lib.rs`의 `generate_handler![]` 매크로가 `commands::function_name`으로 참조할 수 있게 한다. 서브모듈 분할 시에도 외부 인터페이스는 변하지 않는다.
+
+### 14.7 Automation API 패턴
+
+**핸들러 분류**:
+- **Backend-only**: AppState를 직접 조작 (터미널 write/output, 헬스체크)
+- **Frontend-bridge**: Tauri 이벤트로 프론트엔드에 위임 후 oneshot 채널로 응답 수신
+
+**응답 헬퍼**: `ok_json()`, `err_json()`, `ok_json_data()` 헬퍼를 사용하여 응답 형식을 통일한다.
+
+**라우트 등록**: `REGISTERED_ROUTES` 상수와 `build_router()`의 라우트가 1:1 대응해야 한다. e2e 테스트로 이 일치를 검증한다.
+
+### 14.8 테스트 전략
+
+**단위 테스트**: 각 모듈 파일 하단의 `#[cfg(test)] mod tests` 블록에 작성한다. 모듈이 분할되면 테스트도 해당 모듈로 이동한다.
+
+**e2e 테스트**: `src-tauri/tests/` 디렉토리에 작성한다. Settings round-trip, 터미널 상태, 클립보드 등 통합 시나리오를 검증한다.
+
+**테스트 격리**: `tempfile::tempdir()`로 파일시스템 테스트를 격리한다. 전역 상태에 의존하는 테스트는 `#[serial_test::serial]`을 사용한다.
+
+---
+
+## 15. UI 코드 설계 원칙
+
+### 15.1 스타일링
+
+| 규칙 | 설명 |
+|------|------|
+| CSS 변수 우선 | 모든 공통 값(색상, 간격, 반경, 폰트 크기, hover overlay)은 `index.css` `:root`에 CSS 변수로 정의한다. 하드코딩된 매직 넘버를 직접 사용하지 않는다. |
+| Tailwind + CSS 변수 하이브리드 | 레이아웃(flex, grid, spacing)은 Tailwind 유틸리티 클래스, 테마 의존 값(색상, 배경)은 `style={{ }}` 내 CSS 변수로 지정한다. |
+| 인라인 스타일 제한 | 인라인 `style`은 CSS 변수 참조, 동적 계산값, 조건부 스타일에만 사용한다. 정적 값은 Tailwind 클래스 또는 CSS 클래스를 사용한다. |
+| `color-mix()` 금지 | html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. `var(--accent-50)` 등 사전 정의된 CSS 변수를 사용한다. |
+
+### 15.2 호버/인터랙션
+
+- `onMouseEnter`/`onMouseLeave`에서 `e.currentTarget.style.background`를 직접 조작하지 않는다.
+- CSS 호버 클래스(`.hover-bg`, `.hover-bg-strong` 등)를 사용한다.
+- 상태 기반 스타일(active, selected 등)은 조건부 className 또는 CSS 변수로 처리한다.
+
+### 15.3 공유 컴포넌트
+
+- 재사용 가능한 UI 요소(Modal, FormControls, Separator 등)는 `components/ui/`에 배치한다.
+- **3곳 이상** 동일 패턴이 반복되면 공통 컴포넌트로 추출한다.
+- 새 View 추가 시 기존 공유 컴포넌트를 우선 검토하고, 없으면 인라인으로 작성 후 반복이 확인되면 추출한다.
+
+### 15.4 컴포넌트 설계
+
+- View 내부의 로컬 서브 컴포넌트(`BarBtn`, `Sep` 등)는 같은 파일 내에 정의한다. 단, 2개 이상의 파일에서 사용되면 공유 모듈로 승격한다.
+- Props에 `data-testid`를 전달할 수 있도록 `testId` prop을 지원한다.
+- 스타일 상수(높이, 반경 등)는 컴포넌트 파일 상단에 `const`로 선언하되, CSS 변수로 정의된 토큰이 있으면 그것을 사용한다.
+
+### 15.5 키보드 단축키 설계 원칙
+
+**기능 구현에 키 조합을 하드코딩하지 않는다.** 단축키는 사용자가 언제든 재바인딩할 수 있으므로, 기능 코드에서 특정 키 조합(예: `e.ctrlKey && e.key === 'c'`)을 직접 검사하면 커스터마이징이 불가능해진다.
+
+| 규칙 | 설명 |
+|------|------|
+| 이벤트/액션 기반 설계 | 기능은 **액션(이벤트)에 반응**하도록 구현한다. 키 입력 → 액션 변환은 중앙 키바인딩 시스템(`useKeyboardShortcuts`, `lx-shortcuts`)이 담당한다. |
+| 컴포넌트 내 `e.key` 직접 검사 금지 | `onKeyDown`에서 `e.ctrlKey && e.key === 'x'` 같은 수정자+키 조합을 직접 검사하지 않는다. 네비게이션 키(`ArrowUp/Down`, `Enter`, `Escape`, `Tab`)만 컴포넌트 내에서 허용한다. |
+| 새 단축키 추가 시 | `settings.json`의 `keybindings` 배열에 기본값을 등록하고, 키바인딩 시스템에서 액션을 디스패치한다. 컴포넌트는 그 액션만 구독한다. |
+| 모든 단축키는 오버라이드 가능 | 모든 단축키는 `settings.json`의 `keybindings`에서 사용자가 재바인딩할 수 있어야 한다. 새 단축키 추가 시 **SettingsView의 Keybindings UI에도 반드시 반영**한다 (`defaultKeybindings` 배열 + 표시 라벨). Settings UI에 나타나지 않는 단축키는 존재하지 않는 것과 같다. |
+
+#### 키바인딩 vs 시스템 이벤트 구분
+
+입력을 처리할 때 **키바인딩**과 **시스템 이벤트**를 구분한다. 두 가지는 설계 경로가 완전히 다르다.
+
+| 구분 | 키바인딩 | 시스템 이벤트 |
+|------|---------|-------------|
+| 결정 주체 | 사용자 (오버라이드 가능) | OS (오버라이드 대상 아님) |
+| 구현 | `keybinding-registry` + `matchesKeybinding()` | 브라우저 이벤트 리스너 (`copy`, `paste` 등) |
+| Settings UI | 반드시 표시 | 표시하지 않음 |
+| 예시 | `Ctrl+Enter` 이슈 제출, `Ctrl+Alt+N` 새 워크스페이스 | 복사(`copy` event), 붙여넣기(`paste` event) |
+
+```typescript
+// ❌ 금지 — 키 조합으로 시스템 동작 감지
+if (e.ctrlKey && e.key === "v") { smartPaste(); }
+if (e.ctrlKey && e.key === "c") { copySelectedPaths(); }
+
+// ✅ 시스템 이벤트 — OS가 트리거하는 이벤트를 리슨
+container.addEventListener("paste", (e) => { smartPaste(); });
+container.addEventListener("copy", (e) => { copySelectedPaths(); });
+
+// ✅ 키바인딩 — 레지스트리에 등록, Settings UI에 반영
+if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
+```
+
+##### 예외: 터미널 copy/paste는 키바인딩으로 통합
+
+터미널(xterm.js)에서는 전통적으로 Linux 환경에서 `Ctrl+Shift+C`/`Ctrl+Shift+V`를
+복사/붙여넣기로 쓰는 관행이 있어, 복사/붙여넣기도 **키바인딩으로 재바인딩할 수
+있어야 한다**. 따라서 터미널은 시스템 `copy`/`paste` 이벤트 리스너를 두지 않고,
+`terminal.copy` / `terminal.paste` 키바인딩 한 경로로 통합한다.
+
+- `terminal.copy`/`terminal.paste`를 키바인딩 레지스트리에 등록(기본 `Ctrl+C`/`Ctrl+V`).
+- `attachCustomKeyEventHandler`에서 `matchesKeybinding("terminal.copy/paste")`로
+  감지하여 `smartPaste`/`clipboardWriteText`를 직접 호출한다 — 기본값/오버라이드
+  구분 없이 동일 경로.
+- `Ctrl+C`는 선택 영역이 없을 때만 xterm에 위임해 SIGINT를 그대로 전달한다(선택 상태로만
+  판단, 키 조합을 하드코딩하지 않음).
+- 우클릭 경로(`handleContextMenu`)도 같은 헬퍼(`runTerminalPaste`)를 재사용한다.
+- 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
+  시스템 이벤트 전용이다.
+
+### 15.6 앱 전용 편의 코드 격리
+
+각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
+
+#### ActivityHandler 인터페이스
+
+```typescript
+interface ActivityHandler {
+  computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
+  computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
+  computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
+}
+```
+
+#### 핸들러 등록
+
+```typescript
+const handlers: Record<string, ActivityHandler> = {
+  default: new ShellActivityHandler(),     // 셸 기본 (OSC 133 기반)
+  Claude: new ClaudeActivityHandler(),     // Claude Code 최적화
+  // 향후: neovim, htop 등 추가 가능
+};
+
+function getHandler(activity?: Activity): ActivityHandler {
+  return handlers[activity?.name] ?? handlers.default;
+}
+```
+
+#### 격리 규칙
+
+- 각 핸들러는 독립 모듈 파일에 구현한다 (`shell-activity-handler.ts`, `claude-activity-handler.ts`).
+- 핸들러를 import하지 않으면 해당 앱 전용 로직이 완전히 제거되어야 한다.
+- 핸들러 추가 시 기존 핸들러의 테스트가 깨지지 않아야 한다.
+- 설정 플래그(`claude.enhancedStatus` 등)로 핸들러를 default로 폴백시킬 수 있다.

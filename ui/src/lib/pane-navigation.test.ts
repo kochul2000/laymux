@@ -72,7 +72,7 @@ describe("findPaneInDirection", () => {
     expect(findPaneInDirection(grid2x2, 3, "up")).toBe(1);
   });
 
-  // Dev-split layout from ARCHITECTURE.md:
+  // Dev-split layout from docs/architecture/overview.md §4.3:
   // [    terminal (full width)    ]  top 60%
   // [ terminal 50% | browser 50% ]  bottom 40%
   const devSplit = [

@@ -170,7 +170,7 @@ Streamable-HTTP MCP 엔드포인트(`/mcp`)가 30개 툴(터미널, 워크스페
 }
 ```
 
-전체 툴 목록은 `ARCHITECTURE.md` §12.7 참조.
+전체 툴 목록은 [`docs/architecture/api-contracts.md`](./docs/architecture/api-contracts.md) §12.7 참조.
 
 ## 프로젝트 구조
 
@@ -198,10 +198,13 @@ laymux/
 │   │   └── lib/              # OSC, 색상, IME 등 유틸
 │   └── package.json
 ├── docs/
+│   ├── architecture/         # Living 아키텍처 문서 (overview / data-flow / api-contracts)
+│   ├── adr/                  # 아키텍처 결정 기록 (append-only)
+│   ├── roadmap.md            # 진행 상태 트래커
 │   ├── screenshots/          # README 이미지
 │   └── terminal/             # 커서 / IME / 플리커 레퍼런스 문서
-├── ARCHITECTURE.md           # 상세 아키텍처 명세
-└── CLAUDE.md                 # 개발 가이드라인
+├── AGENTS.md                 # 코딩 에이전트 진입점 (CLAUDE.md → AGENTS.md)
+└── CLAUDE.md                 # AGENTS.md 포인터
 ```
 
 ## 키보드 단축키
@@ -224,9 +227,10 @@ IDE 단축키는 셸·readline 바인딩과 겹치지 않도록 `Ctrl+단일키`
 
 ## 문서
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — 전체 아키텍처 명세.
+- [`docs/architecture/`](./docs/architecture/) — living 아키텍처 문서 (overview · data-flow · api-contracts).
+- [`docs/adr/`](./docs/adr/) — 아키텍처 결정 기록 ("왜 그렇게 정했나", append-only).
 - [`docs/terminal/`](./docs/terminal/) — 커서·IME·플리커 리서치 문서 (레퍼런스 전용).
-- [`CLAUDE.md`](./CLAUDE.md) — 개발 가이드라인.
+- [`AGENTS.md`](./AGENTS.md) — 코딩 에이전트 진입점 및 개발 가이드라인.
 
 ## 관련 프로젝트
 

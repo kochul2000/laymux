@@ -170,7 +170,7 @@ Streamable-HTTP MCP endpoint at `/mcp` exposes 30 tools (terminals, workspaces, 
 }
 ```
 
-See `ARCHITECTURE.md` §12.7 for the full tool list.
+See [`docs/architecture/api-contracts.md`](./docs/architecture/api-contracts.md) §12.7 for the full tool list.
 
 ## Project Structure
 
@@ -198,10 +198,13 @@ laymux/
 │   │   └── lib/              # OSC, colors, IME, etc.
 │   └── package.json
 ├── docs/
+│   ├── architecture/         # Living architecture docs (overview / data-flow / api-contracts)
+│   ├── adr/                  # Architecture Decision Records (append-only)
+│   ├── roadmap.md            # Progress tracker
 │   ├── screenshots/          # README images
 │   └── terminal/             # Cursor / IME / flicker reference docs
-├── ARCHITECTURE.md           # Detailed architecture specification
-└── CLAUDE.md                 # Development guidelines
+├── AGENTS.md                 # Coding-agent entry point (CLAUDE.md → AGENTS.md)
+└── CLAUDE.md                 # Pointer to AGENTS.md
 ```
 
 ## Keyboard Shortcuts
@@ -224,9 +227,10 @@ IDE shortcuts avoid `Ctrl+<single-key>` so they never shadow shell/readline bind
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full architecture specification.
+- [`docs/architecture/`](./docs/architecture/) — living architecture docs (overview · data-flow · api-contracts).
+- [`docs/adr/`](./docs/adr/) — architecture decision records ("why we decided", append-only).
 - [`docs/terminal/`](./docs/terminal/) — cursor, IME, and flicker research notes (reference-only).
-- [`CLAUDE.md`](./CLAUDE.md) — development guidelines.
+- [`AGENTS.md`](./AGENTS.md) — coding-agent entry point and development guidelines.
 
 ## Related Projects
 

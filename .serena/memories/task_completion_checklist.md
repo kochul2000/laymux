@@ -15,6 +15,6 @@ When completing a task, ensure the following:
 
 4. **UI changes**: Use `/screenshot` skill to verify visual result
 
-5. **Architecture sync**: If changes diverge from ARCHITECTURE.md, discuss with user and update it
+5. **Architecture sync**: If changes diverge from docs/architecture/ (living docs), update them in the same PR; new decisions → add an ADR under docs/adr/. If divergence is structural, discuss with the user first.
 
 6. **Automation API**: When adding features, consider API extension and autonomous verification loop
