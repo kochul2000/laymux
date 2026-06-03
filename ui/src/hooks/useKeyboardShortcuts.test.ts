@@ -220,7 +220,7 @@ describe("useKeyboardShortcuts", () => {
     fireKey("R", { ctrlKey: true, altKey: true });
 
     expect(promptSpy).toHaveBeenCalled();
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed WS");
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
     promptSpy.mockRestore();
   });
 
@@ -1256,7 +1256,7 @@ describe("useKeyboardShortcuts", () => {
     fireKey("r", { ctrlKey: true, altKey: true });
 
     expect(promptSpy).toHaveBeenCalled();
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed WS");
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
     promptSpy.mockRestore();
   });
 

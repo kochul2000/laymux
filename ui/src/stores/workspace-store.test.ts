@@ -43,6 +43,13 @@ describe("WorkspaceStore", () => {
     const { addWorkspace, layouts } = useWorkspaceStore.getState();
     addWorkspace("New WS", layouts[0].id);
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    expect(useWorkspaceStore.getState().workspaces[1].name).toBe("New-WS");
+  });
+
+  it("normalizes workspace names before storing them", () => {
+    const { addWorkspace, layouts } = useWorkspaceStore.getState();
+    addWorkspace("  New  Workspace\tAPI  ", layouts[0].id);
+    expect(useWorkspaceStore.getState().workspaces[1].name).toBe("New-Workspace-API");
   });
 
   it("addWorkspace does not include profile in pane view (uses defaults from ViewRenderer)", () => {
@@ -71,8 +78,8 @@ describe("WorkspaceStore", () => {
 
   it("renames a workspace", () => {
     const { renameWorkspace, workspaces } = useWorkspaceStore.getState();
-    renameWorkspace(workspaces[0].id, "Renamed");
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed");
+    renameWorkspace(workspaces[0].id, "Renamed Workspace");
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-Workspace");
   });
 
   // Pane manipulation tests
@@ -178,9 +185,7 @@ describe("WorkspaceStore", () => {
       useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
 
       // 타입은 그대로 TerminalView, profile만 교체 → 줌 유지.
-      useWorkspaceStore
-        .getState()
-        .setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "PowerShell" });
 
       expect(useOverridesStore.getState().getViewOverride(paneId)?.fontSize).toBe(20);
     });

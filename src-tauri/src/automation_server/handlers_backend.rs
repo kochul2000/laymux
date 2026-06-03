@@ -101,6 +101,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "type": "\"TerminalView\" | \"EmptyView\"", "profile": "(optional) string" }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/{index}/resize",
+                "description": "Micro-resize a pane against its neighbor by a delta in normalized (0-1) units. Used for reflow/layout verification.",
+                "body": { "dw": "(optional) number — width delta", "dh": "(optional) number — height delta; at least one of dw/dh is required" }
+            },
+            {
                 "method": "GET", "path": "/api/v1/docks",
                 "description": "List all 4 dock areas (top/bottom/left/right) with their active views."
             },
@@ -140,6 +145,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "GET", "path": "/api/v1/terminals/{id}/output",
                 "description": "Read recent terminal output from the ring buffer. Query param: ?lines=N (default 100).",
                 "response": "{ output: string (raw with ANSI escapes), lines: number, bufferSize: number }"
+            },
+            {
+                "method": "GET", "path": "/api/v1/terminals/{id}/buffer",
+                "description": "Dump the xterm on-screen buffer (trailing slice). Query param: ?limit=N (0 = whole buffer; omitted = frontend default).",
+                "response": "{ lines: string[] } — current on-screen buffer lines"
             },
             {
                 "method": "GET", "path": "/api/v1/memos",

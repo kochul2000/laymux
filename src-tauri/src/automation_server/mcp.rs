@@ -48,6 +48,8 @@ struct TerminalIdParam {
 struct TerminalTargetParam {
     /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
     terminal_id: Option<String>,
+    /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
+    pane_ref: Option<String>,
     /// Spatial pane number (1-based reading order, same as the control bar badge).
     /// Resolved within `workspace_id` at call time. Prefer `terminal_id` for durable refs.
     pane_number: Option<u64>,
@@ -61,6 +63,8 @@ struct WriteTerminalParam {
     /// layout changes. Provide either this or `pane_number`; `terminal_id` wins
     /// if both are given.
     terminal_id: Option<String>,
+    /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
+    pane_ref: Option<String>,
     /// Spatial pane number (1-based, screen reading order — same as the control
     /// bar badge). Convenient for "write to pane 3", but the number changes when
     /// the layout changes, so it is resolved at call time. Use `terminal_id` for
@@ -105,6 +109,43 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct PaneLocator {
+    workspace_name: String,
+    pane_number: u64,
+}
+
+fn parse_pane_locator(value: &str) -> Result<Option<PaneLocator>, String> {
+    let Some(rest) = value.strip_prefix("lx:pane:") else {
+        return Ok(None);
+    };
+    // The pane number is the final `:`-delimited segment, so split from the right.
+    // Workspace names only have whitespace normalized out (not colons), so a name like
+    // `API:v2` is valid storage; splitting on the last `:` keeps such names round-trippable.
+    let Some((workspace_name, pane_number)) = rest.rsplit_once(':') else {
+        return Err("Pane locator format is lx:pane:<workspaceName>:<paneNumber>".to_string());
+    };
+    if workspace_name.is_empty() {
+        return Err("Pane locator must include a workspace name".to_string());
+    }
+    if pane_number.is_empty() {
+        return Err("Pane locator must include a pane number".to_string());
+    }
+    if workspace_name.chars().any(char::is_whitespace) {
+        return Err("Pane locator workspace name must not contain whitespace".to_string());
+    }
+    let pane_number = pane_number
+        .parse::<u64>()
+        .map_err(|_| "Pane locator pane number must be an integer".to_string())?;
+    if pane_number == 0 {
+        return Err("Pane locator pane number must be greater than 0".to_string());
+    }
+    Ok(Some(PaneLocator {
+        workspace_name: workspace_name.to_string(),
+        pane_number,
+    }))
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum NeighborDirection {
@@ -129,6 +170,8 @@ impl std::fmt::Display for NeighborDirection {
 struct ReadOutputParam {
     /// Stable terminal ID. Provide either this or `pane_number` (terminal_id wins).
     terminal_id: Option<String>,
+    /// Pane locator copied from a pane badge, e.g. `lx:pane:Default:1`.
+    pane_ref: Option<String>,
     /// Spatial pane number (1-based reading order, same as the control bar badge).
     /// Resolved within `workspace_id` at call time. Prefer `terminal_id` for durable refs.
     pane_number: Option<u64>,
@@ -457,19 +500,69 @@ impl McpHandler {
     async fn resolve_terminal_id(
         &self,
         terminal_id: Option<&str>,
+        pane_ref: Option<&str>,
         pane_number: Option<u64>,
         workspace_id: Option<&str>,
     ) -> Result<String, CallToolResult> {
         if let Some(id) = terminal_id {
             if !id.is_empty() {
+                match parse_pane_locator(id) {
+                    Ok(Some(locator)) => {
+                        let workspace_id = self
+                            .resolve_workspace_id_by_name(&locator.workspace_name)
+                            .await?;
+                        return self
+                            .resolve_pane_number_to_terminal_id(
+                                locator.pane_number,
+                                Some(&workspace_id),
+                            )
+                            .await;
+                    }
+                    Ok(None) => {}
+                    Err(msg) => {
+                        return Err(CallToolResult::error(vec![Content::text(msg)]));
+                    }
+                }
                 return Ok(id.to_string());
+            }
+        }
+        if let Some(locator_text) = pane_ref {
+            match parse_pane_locator(locator_text) {
+                Ok(Some(locator)) => {
+                    let workspace_id = self
+                        .resolve_workspace_id_by_name(&locator.workspace_name)
+                        .await?;
+                    return self
+                        .resolve_pane_number_to_terminal_id(
+                            locator.pane_number,
+                            Some(&workspace_id),
+                        )
+                        .await;
+                }
+                Ok(None) => {
+                    return Err(CallToolResult::error(vec![Content::text(
+                        "pane_ref must use lx:pane:<workspaceName>:<paneNumber>".to_string(),
+                    )]));
+                }
+                Err(msg) => {
+                    return Err(CallToolResult::error(vec![Content::text(msg)]));
+                }
             }
         }
         let Some(number) = pane_number else {
             return Err(CallToolResult::error(vec![Content::text(
-                "Provide either terminal_id or pane_number".to_string(),
+                "Provide terminal_id, pane_ref, or pane_number".to_string(),
             )]));
         };
+        self.resolve_pane_number_to_terminal_id(number, workspace_id)
+            .await
+    }
+
+    async fn resolve_pane_number_to_terminal_id(
+        &self,
+        number: u64,
+        workspace_id: Option<&str>,
+    ) -> Result<String, CallToolResult> {
         let mut params = json!({ "number": number });
         if let Some(ws) = workspace_id {
             params["workspaceId"] = json!(ws);
@@ -485,6 +578,44 @@ impl McpHandler {
                     "resolveByNumber returned no terminalId".to_string(),
                 )])
             })
+    }
+
+    async fn resolve_workspace_id_by_name(
+        &self,
+        workspace_name: &str,
+    ) -> Result<String, CallToolResult> {
+        let data = self
+            .bridge_raw("query", "workspaces", "list", json!({}))
+            .await?;
+        let matches: Vec<&Value> = data
+            .get("workspaces")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter(|ws| ws.get("name").and_then(|v| v.as_str()) == Some(workspace_name))
+                    .collect()
+            })
+            .unwrap_or_default();
+        match matches.len() {
+            0 => Err(CallToolResult::error(vec![Content::text(format!(
+                "Workspace '{}' not found",
+                workspace_name
+            ))])),
+            1 => matches[0]
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|id| id.to_string())
+                .ok_or_else(|| {
+                    CallToolResult::error(vec![Content::text(format!(
+                        "Workspace '{}' has no id",
+                        workspace_name
+                    ))])
+                }),
+            _ => Err(CallToolResult::error(vec![Content::text(format!(
+                "Workspace name '{}' is not unique",
+                workspace_name
+            ))])),
+        }
     }
 
     /// Bridge request returning raw Value on success, or CallToolResult error.
@@ -859,6 +990,7 @@ impl McpHandler {
         let terminal_id = match self
             .resolve_terminal_id(
                 p.terminal_id.as_deref(),
+                p.pane_ref.as_deref(),
                 p.pane_number,
                 p.workspace_id.as_deref(),
             )
@@ -942,6 +1074,7 @@ impl McpHandler {
         let terminal_id = match self
             .resolve_terminal_id(
                 p.terminal_id.as_deref(),
+                p.pane_ref.as_deref(),
                 p.pane_number,
                 p.workspace_id.as_deref(),
             )
@@ -975,6 +1108,7 @@ impl McpHandler {
         let terminal_id = match self
             .resolve_terminal_id(
                 p.terminal_id.as_deref(),
+                p.pane_ref.as_deref(),
                 p.pane_number,
                 p.workspace_id.as_deref(),
             )
@@ -2185,8 +2319,25 @@ mod tests {
         let json = r#"{"pane_number":3,"data":"ls"}"#;
         let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
         assert!(p.terminal_id.is_none());
+        assert!(p.pane_ref.is_none());
         assert_eq!(p.pane_number, Some(3));
         assert!(p.workspace_id.is_none());
+    }
+
+    #[test]
+    fn write_terminal_accepts_pane_ref_locator() {
+        let json = r#"{"pane_ref":"lx:pane:Default:3","data":"ls"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.pane_ref.as_deref(), Some("lx:pane:Default:3"));
+        assert!(p.terminal_id.is_none());
+        assert!(p.pane_number.is_none());
+    }
+
+    #[test]
+    fn terminal_id_accepts_pane_locator_string() {
+        let json = r#"{"terminal_id":"lx:pane:Default:2","data":"ls"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.terminal_id.as_deref(), Some("lx:pane:Default:2"));
     }
 
     #[test]
@@ -2216,12 +2367,63 @@ mod tests {
     }
 
     #[test]
+    fn read_output_accepts_pane_ref_locator() {
+        let json = r#"{"pane_ref":"lx:pane:Default:1"}"#;
+        let p: ReadOutputParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.pane_ref.as_deref(), Some("lx:pane:Default:1"));
+        assert!(p.terminal_id.is_none());
+    }
+
+    #[test]
     fn terminal_target_param_accepts_pane_number() {
         let json = r#"{"pane_number":2,"workspace_id":"ws-1"}"#;
         let p: TerminalTargetParam = serde_json::from_str(json).unwrap();
         assert!(p.terminal_id.is_none());
         assert_eq!(p.pane_number, Some(2));
         assert_eq!(p.workspace_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn parse_pane_locator_accepts_canonical_form() {
+        let parsed = parse_pane_locator("lx:pane:Default:1").unwrap().unwrap();
+        assert_eq!(
+            parsed,
+            PaneLocator {
+                workspace_name: "Default".to_string(),
+                pane_number: 1
+            }
+        );
+    }
+
+    #[test]
+    fn parse_pane_locator_ignores_non_locator_values() {
+        assert!(parse_pane_locator("terminal-pane-abc").unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_pane_locator_allows_colon_in_workspace_name() {
+        // Workspace name normalization only strips whitespace, not colons, so a name like
+        // `API:v2` reaches the locator verbatim. The pane number is the last segment.
+        let parsed = parse_pane_locator("lx:pane:API:v2:3").unwrap().unwrap();
+        assert_eq!(
+            parsed,
+            PaneLocator {
+                workspace_name: "API:v2".to_string(),
+                pane_number: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parse_pane_locator_rejects_whitespace_workspace_names() {
+        let err = parse_pane_locator("lx:pane:My Workspace:1").unwrap_err();
+        assert!(err.contains("must not contain whitespace"));
+    }
+
+    #[test]
+    fn parse_pane_locator_rejects_zero_pane_number() {
+        let err = parse_pane_locator("lx:pane:Default:0").unwrap_err();
+        assert!(err.contains("greater than 0"));
     }
 
     #[test]

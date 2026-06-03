@@ -153,8 +153,8 @@ test.describe("Keyboard Shortcuts - Rename Workspace", () => {
 
     await page.keyboard.press("Control+Alt+R");
 
-    // Workspace name should be updated in the selector
-    await expect(page.getByTestId("workspace-name-ws-default")).toHaveText("Renamed WS");
+    // Workspace name should be updated in the selector (normalized: whitespace → "-")
+    await expect(page.getByTestId("workspace-name-ws-default")).toHaveText("Renamed-WS");
   });
 
   test("Ctrl+Alt+R cancel does not rename", async ({ appPage: page }) => {

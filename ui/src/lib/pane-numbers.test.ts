@@ -82,59 +82,27 @@ describe("computePaneNumbers", () => {
 });
 
 describe("formatPaneIdentifier", () => {
-  it("includes a stable prefix so a human/LLM recognizes it as a pane identifier", () => {
-    const s = formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 });
-    expect(s).toContain("laymux pane");
+  it("formats a compact LLM-facing pane locator", () => {
+    const s = formatPaneIdentifier({ workspaceName: "Default", paneNumber: 3 });
+    expect(s).toBe("lx:pane:Default:3");
   });
 
-  it("includes the workspace id and pane number that map to MCP write_to_terminal params", () => {
-    const s = formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 });
-    expect(s).toContain("ws-a1b2c3d4");
-    expect(s).toContain("workspace=ws-a1b2c3d4");
-    expect(s).toContain("pane=3");
+  it("uses the workspace name, not the internal workspace id", () => {
+    const s = formatPaneIdentifier({ workspaceName: "Backend", paneNumber: 2 });
+    expect(s).toBe("lx:pane:Backend:2");
+    expect(s).not.toContain("ws-");
   });
 
-  it("produces the canonical single-line format", () => {
-    expect(formatPaneIdentifier({ workspaceId: "ws-a1b2c3d4", paneNumber: 3 })).toBe(
-      "[laymux pane] workspace=ws-a1b2c3d4 pane=3",
+  it("requires a non-empty workspace name", () => {
+    expect(() => formatPaneIdentifier({ workspaceName: "", paneNumber: 1 })).toThrow(
+      "workspaceName is required",
     );
   });
 
-  it("appends the workspace name as a human hint when provided", () => {
-    expect(
-      formatPaneIdentifier({
-        workspaceId: "ws-a1b2c3d4",
-        paneNumber: 2,
-        workspaceName: "Backend",
-      }),
-    ).toBe('[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=2');
-  });
-
-  it("omits the name hint when the name is empty or whitespace", () => {
-    expect(formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1, workspaceName: "   " })).toBe(
-      "[laymux pane] workspace=ws-x pane=1",
+  it("rejects whitespace because workspace names are normalized before storage", () => {
+    expect(() => formatPaneIdentifier({ workspaceName: "My Workspace", paneNumber: 1 })).toThrow(
+      "workspaceName must not contain whitespace",
     );
-  });
-
-  it("does not include a name hint when name is undefined", () => {
-    const s = formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1 });
-    expect(s).not.toContain("(");
-  });
-
-  it("swaps double quotes in the name so the hint stays unambiguous", () => {
-    expect(formatPaneIdentifier({ workspaceId: "ws-x", paneNumber: 1, workspaceName: 'a"b' })).toBe(
-      '[laymux pane] workspace=ws-x ("a\'b") pane=1',
-    );
-  });
-
-  it("collapses whitespace/newlines so the identifier stays a single line", () => {
-    const s = formatPaneIdentifier({
-      workspaceId: "ws-x",
-      paneNumber: 1,
-      workspaceName: "Back\n  end",
-    });
-    expect(s).toBe('[laymux pane] workspace=ws-x ("Back end") pane=1');
-    expect(s).not.toContain("\n");
   });
 });
 

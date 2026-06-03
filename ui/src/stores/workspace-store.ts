@@ -32,13 +32,17 @@ function generateId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function normalizeWorkspaceName(name: string): string {
+  return name.trim().replace(/\s+/g, "-");
+}
+
 /** Return a name that doesn't collide with existing workspace names. */
 function ensureUniqueName(name: string, existing: { name: string }[]): string {
   const names = new Set(existing.map((ws) => ws.name));
   if (!names.has(name)) return name;
   let n = 2;
-  while (names.has(`${name} (${n})`)) n++;
-  return `${name} (${n})`;
+  while (names.has(`${name}-${n}`)) n++;
+  return `${name}-${n}`;
 }
 
 const defaultLayout: Layout = {
@@ -140,7 +144,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const layout = layouts.find((l) => l.id === layoutId);
     if (!layout) return;
 
-    const uniqueName = ensureUniqueName(name, workspaces);
+    const uniqueName = ensureUniqueName(normalizeWorkspaceName(name), workspaces);
 
     const ws: Workspace = {
       id: generateId("ws"),
@@ -178,7 +182,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     const duplicate: Workspace = {
       id: generateId("ws"),
-      name: `${source.name} Copy`,
+      name: ensureUniqueName(source.name ? `${source.name}-Copy` : "Copy", workspaces),
       panes: newPanes,
     };
 
@@ -216,7 +220,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   renameWorkspace: (id, name) => {
     const { workspaces } = get();
     const others = workspaces.filter((ws) => ws.id !== id);
-    const uniqueName = ensureUniqueName(name, others);
+    const uniqueName = ensureUniqueName(normalizeWorkspaceName(name), others);
     set((state) => ({
       workspaces: state.workspaces.map((ws) => (ws.id === id ? { ...ws, name: uniqueName } : ws)),
     }));
