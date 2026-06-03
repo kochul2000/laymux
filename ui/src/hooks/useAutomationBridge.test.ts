@@ -1105,7 +1105,7 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     // Find the newly created workspace
-    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "CWD Test")!;
+    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "CWD-Test")!;
     expect(ws).toBeDefined();
     expect(ws.panes.length).toBeGreaterThan(0);
     // Convert any non-TerminalView panes so we can test — but at minimum, check

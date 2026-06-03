@@ -957,7 +957,7 @@ describe("WorkspaceSelectorView", () => {
     const nameEl = screen.getByTestId("workspace-name-ws-default");
     fireEvent.doubleClick(nameEl);
     expect(promptSpy).toHaveBeenCalledWith("Rename workspace:", "Default");
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed WS");
+    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
     promptSpy.mockRestore();
   });
 
