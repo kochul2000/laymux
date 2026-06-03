@@ -1971,6 +1971,7 @@ name = "laymux"
 version = "0.3.10"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "clipboard-win",
  "font-kit",
  "png 0.17.16",
