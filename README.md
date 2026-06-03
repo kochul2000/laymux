@@ -219,8 +219,8 @@ IDE shortcuts avoid `Ctrl+<single-key>` so they never shadow shell/readline bind
 | `Ctrl+Alt+1-8`, `9` | Switch to workspace 1–9 |
 | `Ctrl+Shift+I` | Toggle notification panel |
 | `Ctrl+Shift+U` | Jump to unread notification |
-| `Ctrl+Shift+W` | Close workspace |
-| `Ctrl+Shift+R` | Rename workspace |
+| `Ctrl+Alt+W` | Close workspace |
+| `Ctrl+Alt+R` | Rename workspace |
 | `Ctrl+Shift+B` | Toggle sidebar |
 | `Delete` (edit mode) | Remove focused pane |
 | `Ctrl+,` | Settings |

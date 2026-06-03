@@ -120,6 +120,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 |---|---|---|
 | `controlBarMode` | `"hover" \| "pinned" \| "minimized"` | 해당 pane의 컨트롤 바 표시 모드. `settings.convenience.defaultControlBarMode`를 개별 덮어쓰기. |
 
+> ⚠️ **알려진 코드 갭**: `defaultControlBarMode` 는 현재 프론트(`settings-store.ts`)에만 있고 Rust `ConvenienceSettings`(`settings/models.rs`)에는 필드가 없어 `settings.json` 에 **영속되지 않는다**(매 기동 `"minimized"` 로 리셋). pane 단위 `paneOverrides` 는 localStorage 로 유지되지만, "기본값을 설정으로 영속"하려면 Rust 필드 추가가 필요하다(대조: `hiddenAutoCloseSeconds` 는 Rust 필드 + round-trip 테스트 완비). 별도 코드 이슈로 트래킹.
+
 #### View 인스턴스 오버라이드 (`viewOverrides`)
 
 **의미론**: 슬롯 내 콘텐츠(view)에 귀속. view 타입이 바뀌면 의미가 사라지므로 자동 리셋.
