@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 
 use crate::constants::MCP_SERVER_NAME;
+use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 
 use super::helpers::bridge_request;
@@ -331,6 +332,25 @@ struct OpenFileViewerParam {
     /// binaries are recognized automatically; files whose extension matches a
     /// configured external viewer open in a terminal running that command.
     path: String,
+    /// When true, the viewer fills the whole app window (the "new window" feel).
+    /// When false (default) it opens as a large centered floating overlay.
+    #[serde(default)]
+    new_window: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ShowImageParam {
+    /// Base64-encoded image bytes. A `data:` URI prefix
+    /// (e.g. `data:image/png;base64,...`) is accepted and stripped automatically.
+    /// Use this to show an image the MCP client holds in memory that does not
+    /// exist as a file on the laymux host filesystem.
+    data: String,
+    /// MIME type of the image (e.g. "image/png", "image/jpeg", "image/gif",
+    /// "image/webp", "image/bmp", "image/svg+xml"). Optional — defaults to
+    /// "image/png". Determines the temp file extension so the viewer renders it.
+    /// Ignored when `data` is a `data:` URI carrying its own MIME type.
+    #[serde(default)]
+    mime_type: Option<String>,
     /// When true, the viewer fills the whole app window (the "new window" feel).
     /// When false (default) it opens as a large centered floating overlay.
     #[serde(default)]
@@ -1778,6 +1798,42 @@ impl McpHandler {
         )
         .await
     }
+
+    /// Show an image the MCP client holds in memory (e.g. a generated chart or a
+    /// pasted screenshot) without it existing as a file on the laymux host.
+    /// Pass base64-encoded image bytes in `data` (a `data:` URI prefix is
+    /// accepted and stripped). The bytes are written to a temp file under
+    /// laymux's cache dir and opened in the same unified viewer used by
+    /// `open_file_viewer` / the File Explorer. To show an image that already
+    /// exists as a file, use `open_file_viewer` with its path instead. Pass
+    /// `new_window: true` to fill the whole window; otherwise it opens as a
+    /// large floating overlay.
+    #[tool]
+    async fn show_image(
+        &self,
+        Parameters(p): Parameters<ShowImageParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.data.trim().is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'data' is required and must be non-empty base64 image data",
+            )]));
+        }
+        let path = match save_image_to_dir(&p.data, p.mime_type.as_deref(), &mcp_image_dir()) {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!(error = %e, "show_image failed to save image");
+                return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+            }
+        };
+        let path_str = path.to_string_lossy().to_string();
+        self.bridge(
+            "action",
+            "ui",
+            "openFileViewer",
+            json!({ "path": path_str, "newWindow": p.new_window }),
+        )
+        .await
+    }
 }
 
 // ── ServerHandler trait ───────────────────────────────────────────
@@ -1906,6 +1962,159 @@ fn json_result(data: &Value) -> CallToolResult {
     let text = serde_json::to_string_pretty(data)
         .unwrap_or_else(|e| format!("{{\"error\": \"serialize failed: {e}\"}}"));
     CallToolResult::success(vec![Content::text(text)])
+}
+
+/// Map a MIME type to a sensible image file extension (no leading dot).
+///
+/// Only emits extensions the shared FileViewer classifier
+/// (`commands::file_ops::IMAGE_EXTENSIONS`) can actually render in the webview;
+/// otherwise `read_file_for_viewer` would classify the saved file as text/binary
+/// and the image would never display (see PR #289 review). Unknown/blank types
+/// and non-webview-renderable formats (e.g. TIFF) fall back to "png" so the
+/// viewer still attempts an image render rather than treating it as binary.
+fn image_extension_for_mime(mime_type: &str) -> &'static str {
+    match mime_type.trim().to_ascii_lowercase().as_str() {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        "image/svg+xml" => "svg",
+        "image/x-icon" | "image/vnd.microsoft.icon" => "ico",
+        "image/avif" => "avif",
+        _ => "png",
+    }
+}
+
+/// Split a possible `data:` URI into `(mime_type, base64_payload)`.
+/// For a bare base64 string (no `data:` prefix) returns `(None, input)`.
+/// Only base64-encoded data URIs are supported; a non-base64 data URI yields an
+/// error string.
+fn parse_image_data_uri(raw: &str) -> Result<(Option<String>, &str), String> {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed.strip_prefix("data:") else {
+        return Ok((None, trimmed));
+    };
+    // rest looks like: image/png;base64,AAAA  (mime portion may be empty)
+    let Some((meta, payload)) = rest.split_once(',') else {
+        return Err("Malformed data URI: missing ',' separator".to_string());
+    };
+    if !meta.split(';').any(|p| p.eq_ignore_ascii_case("base64")) {
+        return Err("Only base64-encoded data URIs are supported".to_string());
+    }
+    let mime = meta
+        .split(';')
+        .next()
+        .map(str::to_string)
+        .filter(|m| !m.is_empty());
+    Ok((mime, payload))
+}
+
+/// Decode a base64 image payload (bare or `data:` URI) and write it to a freshly
+/// named file under `dir`. Returns the written file path. The MIME type from a
+/// `data:` URI takes precedence over the caller-supplied `mime_type`.
+///
+/// Pure I/O helper shared by the `show_image` MCP tool and its tests; takes the
+/// target directory explicitly so tests can write into a tempdir.
+fn save_image_to_dir(
+    data: &str,
+    mime_type: Option<&str>,
+    dir: &std::path::Path,
+) -> Result<std::path::PathBuf, AppError> {
+    use base64::Engine as _;
+
+    let (uri_mime, payload) = parse_image_data_uri(data).map_err(AppError::Other)?;
+    // Strip ALL ASCII whitespace, not just the ends: some data URIs wrap the
+    // base64 payload across lines, which the STANDARD engine rejects (PR #289).
+    let cleaned: String = payload
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    if cleaned.is_empty() {
+        return Err(AppError::Other("'data' is empty".to_string()));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&cleaned)
+        .map_err(|e| AppError::Other(format!("Invalid base64 image data: {e}")))?;
+    if bytes.is_empty() {
+        return Err(AppError::Other("Decoded image is empty".to_string()));
+    }
+
+    let effective_mime = uri_mime.as_deref().or(mime_type).unwrap_or("image/png");
+    let ext = image_extension_for_mime(effective_mime);
+
+    std::fs::create_dir_all(dir)?;
+    let file_path = dir.join(format!("{MCP_IMAGE_PREFIX}{}.{ext}", uuid::Uuid::new_v4()));
+    std::fs::write(&file_path, &bytes)?;
+    Ok(file_path)
+}
+
+/// Resolve the directory where `show_image` writes temporary image files.
+/// Uses laymux's cache dir (`<config>/cache/mcp-images`) when available, else the
+/// OS temp dir, so the file is always on the host filesystem the viewer reads.
+fn mcp_image_dir() -> std::path::PathBuf {
+    crate::settings::cache_dir_path()
+        .map(|c| c.join("mcp-images"))
+        .unwrap_or_else(|| std::env::temp_dir().join("laymux-mcp-images"))
+}
+
+/// Filename prefix for files written by `show_image`. Used both for naming and
+/// for the cleanup routine so only our own temp files are ever deleted.
+const MCP_IMAGE_PREFIX: &str = "mcp-image-";
+
+/// Delete `mcp-image-*` files older than `max_age_days` from `dir`.
+///
+/// `show_image` writes a fresh file per call with no overwrite, so without this
+/// the directory grows unbounded (PR #289 review). The existing
+/// `clipboard::cleanup_old_paste_images` only matches `.png`, but show_image
+/// emits jpg/gif/webp/svg/etc., so we match on the `mcp-image-` filename prefix
+/// instead of the extension. Returns the number of files removed.
+///
+/// Pure helper (takes the directory explicitly) so tests can use a tempdir.
+fn cleanup_old_mcp_images(dir: &std::path::Path, max_age_days: u64) -> u32 {
+    if !dir.exists() {
+        return 0;
+    }
+    let max_age = std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+    let mut removed = 0u32;
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            // A persistent failure (e.g. permissions) would otherwise be silent;
+            // log once so it's diagnosable, but don't treat cleanup as fatal.
+            tracing::debug!(dir = %dir.display(), error = %e, "MCP image cleanup: read_dir failed");
+            return 0;
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_ours = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with(MCP_IMAGE_PREFIX));
+        if !is_ours {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        let is_old = now
+            .duration_since(modified)
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+        if is_old && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Startup hook: prune stale `show_image` temp files from the cache dir.
+/// Thin wrapper over [`cleanup_old_mcp_images`] resolving the real directory.
+pub(crate) fn cleanup_mcp_image_cache(max_age_days: u64) -> u32 {
+    cleanup_old_mcp_images(&mcp_image_dir(), max_age_days)
 }
 
 fn read_memo_result_from_map(
@@ -2084,6 +2293,190 @@ mod tests {
         let json = r#"{"new_window":true}"#;
         let result: Result<OpenFileViewerParam, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    // ── show_image ──
+
+    #[test]
+    fn show_image_param_defaults() {
+        let json = r#"{"data":"AAAA"}"#;
+        let p: ShowImageParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.data, "AAAA");
+        assert!(p.mime_type.is_none());
+        assert!(!p.new_window);
+    }
+
+    #[test]
+    fn show_image_param_accepts_mime_and_new_window() {
+        let json = r#"{"data":"AAAA","mime_type":"image/jpeg","new_window":true}"#;
+        let p: ShowImageParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.mime_type.as_deref(), Some("image/jpeg"));
+        assert!(p.new_window);
+    }
+
+    #[test]
+    fn show_image_param_requires_data() {
+        let json = r#"{"mime_type":"image/png"}"#;
+        let result: Result<ShowImageParam, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn image_extension_maps_known_mimes() {
+        assert_eq!(image_extension_for_mime("image/png"), "png");
+        assert_eq!(image_extension_for_mime("image/jpeg"), "jpg");
+        assert_eq!(image_extension_for_mime("IMAGE/JPG"), "jpg");
+        assert_eq!(image_extension_for_mime("image/gif"), "gif");
+        assert_eq!(image_extension_for_mime("image/webp"), "webp");
+        assert_eq!(image_extension_for_mime("image/svg+xml"), "svg");
+        // AVIF is webview-renderable and recognized by the FileViewer classifier.
+        assert_eq!(image_extension_for_mime("image/avif"), "avif");
+        // TIFF is not renderable in the webview <img>, so it falls back to png
+        // rather than emitting a `.tiff` the viewer would treat as binary (PR #289).
+        assert_eq!(image_extension_for_mime("image/tiff"), "png");
+        // Unknown falls back to png.
+        assert_eq!(image_extension_for_mime("application/octet-stream"), "png");
+        assert_eq!(image_extension_for_mime(""), "png");
+    }
+
+    #[test]
+    fn image_extensions_are_all_viewer_renderable() {
+        // Every extension `image_extension_for_mime` can emit must be in the
+        // shared FileViewer image classifier, otherwise the saved file would be
+        // classified as text/binary and never displayed (PR #289 review).
+        for mime in [
+            "image/png",
+            "image/jpeg",
+            "image/jpg",
+            "image/gif",
+            "image/webp",
+            "image/bmp",
+            "image/svg+xml",
+            "image/x-icon",
+            "image/avif",
+            "image/tiff",
+            "application/octet-stream",
+            "",
+        ] {
+            let ext = format!(".{}", image_extension_for_mime(mime));
+            assert!(
+                crate::commands::IMAGE_EXTENSIONS.contains(&ext.as_str()),
+                "emitted extension {ext} for mime {mime:?} is not viewer-renderable",
+            );
+        }
+    }
+
+    #[test]
+    fn parse_data_uri_bare_base64() {
+        let (mime, payload) = parse_image_data_uri("  AAAA  ").unwrap();
+        assert!(mime.is_none());
+        assert_eq!(payload, "AAAA");
+    }
+
+    #[test]
+    fn parse_data_uri_with_mime() {
+        let (mime, payload) = parse_image_data_uri("data:image/gif;base64,Zm9v").unwrap();
+        assert_eq!(mime.as_deref(), Some("image/gif"));
+        assert_eq!(payload, "Zm9v");
+    }
+
+    #[test]
+    fn parse_data_uri_rejects_non_base64() {
+        // URL-encoded (not base64) data URIs are unsupported.
+        assert!(parse_image_data_uri("data:image/svg+xml,<svg/>").is_err());
+    }
+
+    #[test]
+    fn save_image_writes_decoded_bytes_with_extension() {
+        // base64 of the 3 bytes 0x01 0x02 0x03.
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_image_to_dir("AQID", Some("image/jpeg"), dir.path()).unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("jpg"));
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes, vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn save_image_data_uri_mime_overrides_param() {
+        let dir = tempfile::tempdir().unwrap();
+        // data URI says gif; explicit param says png → URI wins.
+        let path =
+            save_image_to_dir("data:image/gif;base64,AQID", Some("image/png"), dir.path()).unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("gif"));
+    }
+
+    #[test]
+    fn save_image_defaults_to_png_without_mime() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_image_to_dir("AQID", None, dir.path()).unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    }
+
+    #[test]
+    fn save_image_rejects_invalid_base64() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = save_image_to_dir("not valid base64!!!", None, dir.path()).unwrap_err();
+        assert!(err.to_string().contains("base64"), "got: {err}");
+    }
+
+    #[test]
+    fn save_image_rejects_empty_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(save_image_to_dir("   ", None, dir.path()).is_err());
+        assert!(save_image_to_dir("data:image/png;base64,", None, dir.path()).is_err());
+    }
+
+    #[test]
+    fn save_image_creates_missing_dir_and_unique_names() {
+        let base = tempfile::tempdir().unwrap();
+        let nested = base.path().join("does/not/exist/yet");
+        let p1 = save_image_to_dir("AQID", None, &nested).unwrap();
+        let p2 = save_image_to_dir("AQID", None, &nested).unwrap();
+        assert!(p1.exists() && p2.exists());
+        assert_ne!(p1, p2, "each call must produce a uniquely named file");
+    }
+
+    #[test]
+    fn save_image_strips_internal_whitespace() {
+        // base64 "AQID" split across lines (as some data URIs wrap it).
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_image_to_dir("AQ\nID", None, dir.path()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn cleanup_removes_only_old_mcp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Old + recent show_image files, plus an unrelated old file.
+        let old_mcp = save_image_to_dir("AQID", None, dir.path()).unwrap();
+        let recent_mcp = save_image_to_dir("AQID", None, dir.path()).unwrap();
+        let unrelated = dir.path().join("keep-me.png");
+        std::fs::write(&unrelated, [9u8]).unwrap();
+
+        // Backdate the old files to 8 days ago.
+        let eight_days_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 24 * 60 * 60);
+        for p in [&old_mcp, &unrelated] {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(eight_days_ago)
+                .unwrap();
+        }
+
+        let removed = cleanup_old_mcp_images(dir.path(), 7);
+        assert_eq!(removed, 1, "only the old mcp-image file should be removed");
+        assert!(!old_mcp.exists(), "old mcp-image must be deleted");
+        assert!(recent_mcp.exists(), "recent mcp-image must be kept");
+        assert!(unrelated.exists(), "non-mcp file must never be touched");
+    }
+
+    #[test]
+    fn cleanup_missing_dir_is_noop() {
+        let base = tempfile::tempdir().unwrap();
+        let missing = base.path().join("nope");
+        assert_eq!(cleanup_old_mcp_images(&missing, 7), 0);
     }
 
     #[test]

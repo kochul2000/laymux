@@ -66,7 +66,7 @@ A shadow-cursor layer mirrors xterm.js's real cursor position so that the OS IME
 ### Automation API & MCP
 - Local HTTP REST API on fixed ports: **release `19280`, dev `19281`** (separate so they never collide).
 - IP allowlist (loopback + RFC 1918 + link-local) — WSL2 / Hyper-V subnets are pre-approved. No auth headers needed.
-- Built-in MCP server (rmcp, Streamable HTTP) exposing **29 tools** for terminals, workspaces, grid/panes, screenshots, notifications, and output search.
+- Built-in MCP server (rmcp, Streamable HTTP) exposing **30 tools** for terminals, workspaces, grid/panes, screenshots, notifications, output search, and a file/image viewer.
 
 ### `lx` CLI
 The `lx` binary is auto-injected into every Laymux terminal via `PATH` and configured through `LX_SOCKET` / `LX_TERMINAL_ID` / `LX_GROUP_ID` environment variables. It exposes 10 commands:
@@ -156,7 +156,7 @@ Port discovery file:
 
 ### MCP (Model Context Protocol)
 
-Streamable-HTTP MCP endpoint at `/mcp` exposes 29 tools (terminals, workspaces, grid/panes, screenshot, notifications, output search).
+Streamable-HTTP MCP endpoint at `/mcp` exposes 30 tools (terminals, workspaces, grid/panes, screenshot, notifications, output search, file/image viewer).
 
 ```jsonc
 // Claude Code ~/.claude.json

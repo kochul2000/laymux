@@ -90,6 +90,14 @@ pub fn run() {
                 }
             }
 
+            // Clean up old MCP show_image temp files (older than 7 days)
+            {
+                let removed = automation_server::mcp::cleanup_mcp_image_cache(7);
+                if removed > 0 {
+                    tracing::info!(removed, "Pruned stale MCP show_image temp files");
+                }
+            }
+
             // Start automation HTTP server
             let app_handle = app.handle().clone();
             let auto_state = app_state.clone();
