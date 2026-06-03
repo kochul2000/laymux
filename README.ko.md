@@ -66,7 +66,7 @@ Shadow cursor 레이어가 xterm.js 실제 커서 위치를 미러링하여 OS I
 ### Automation API & MCP
 - 고정 포트의 로컬 HTTP REST API: **release `19280`, dev `19281`** (둘은 절대 충돌하지 않음).
 - IP allowlist(loopback + RFC 1918 + link-local) — WSL2 / Hyper-V 서브넷이 미리 허용됨. 인증 헤더 불필요.
-- rmcp 기반 Streamable-HTTP MCP 서버로 **30개 툴**(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 노출.
+- rmcp 기반 Streamable-HTTP MCP 서버로 **33개 툴**(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 노출.
 
 ### `lx` CLI
 `lx` 바이너리는 모든 Laymux 터미널의 `PATH`에 자동 주입되며 `LX_SOCKET` / `LX_TERMINAL_ID` / `LX_GROUP_ID` 환경 변수로 연결됩니다. 10개 명령을 제공합니다:
@@ -156,7 +156,7 @@ curl http://localhost:19280/api/v1/docs
 
 ### MCP (Model Context Protocol)
 
-Streamable-HTTP MCP 엔드포인트(`/mcp`)가 30개 툴(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 제공합니다.
+Streamable-HTTP MCP 엔드포인트(`/mcp`)가 33개 툴(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 제공합니다.
 
 ```jsonc
 // Claude Code ~/.claude.json

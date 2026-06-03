@@ -41,5 +41,6 @@ laymux/
 ├── mcp-server/            # MCP server
 ├── docs/architecture/     # Living architecture docs (overview / data-flow / api-contracts)
 ├── docs/adr/              # Architecture Decision Records (append-only)
+├── docs/terminal/         # Cursor / IME / flicker research docs (reference-only)
 └── AGENTS.md              # Coding-agent entry point (CLAUDE.md → AGENTS.md)
 ```
