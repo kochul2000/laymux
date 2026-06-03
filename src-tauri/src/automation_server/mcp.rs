@@ -2079,8 +2079,14 @@ fn cleanup_old_mcp_images(dir: &std::path::Path, max_age_days: u64) -> u32 {
     let now = std::time::SystemTime::now();
     let mut removed = 0u32;
 
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            // A persistent failure (e.g. permissions) would otherwise be silent;
+            // log once so it's diagnosable, but don't treat cleanup as fatal.
+            tracing::debug!(dir = %dir.display(), error = %e, "MCP image cleanup: read_dir failed");
+            return 0;
+        }
     };
     for entry in entries.flatten() {
         let path = entry.path();
