@@ -4,7 +4,7 @@
 > "왜 그렇게 정했나" 의 불변 기록은 [ADR](../adr/), 런타임 흐름은 [data-flow.md](./data-flow.md), 설정·REST·MCP 계약과 코드 설계 원칙은 [api-contracts.md](./api-contracts.md) 를 본다.
 >
 > **이 문서가 담는 범위** — laymux 의 구조와 정적 모델: 개요 · 기술 스택 · 레이아웃 · Workspace/Layout 모델 · View 시스템 · SyncGroup.
-> 섹션 번호(§1·§2·§3·§4·§6·§7)는 구 `ARCHITECTURE.md` 기준을 보존한다(교차 참조 안정성). 비어 보이는 번호(§5·§8 등)는 다른 living doc 으로 이동한 섹션이다.
+> 섹션 번호(§1·§2·§3·§4·§6·§7)는 구 `ARCHITECTURE.md` 기준을 보존한다. 빠진 번호(§5·§8 등)는 다른 living doc 으로 이동한 섹션이다.
 
 ---
 ## 1. 개요

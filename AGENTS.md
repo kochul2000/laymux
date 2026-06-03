@@ -24,7 +24,7 @@ laymux — Tauri(Rust + WebView) 기반 자유 레이아웃 터미널 IDE. Windo
 - **`docs/roadmap.md`** — 진행 상태
 - **`docs/terminal/`** — 터미널 커서/플리커 research 정본 ([ADR-0008](docs/adr/0008-shell-cursor-shadow-cursor.md))
 
-**living doc 동기화 의무.** 기능 추가/수정 전 관련 `docs/architecture/` 섹션을 읽고 설계 원칙을 확인한다. 코드 변경이 서술과 어긋나면 **같은 PR 에서** 문서를 갱신한다. 구현이 아키텍처와 달라지면 사용자와 논의하여 반드시 갱신한다. 새 설계 결정을 내리면 → `docs/adr/0000-template.md` 를 복사해 ADR 추가(번복 시 옛 ADR 은 `Superseded by` 만 표시, 본문 유지).
+**living doc 동기화 의무.** 기능 추가/수정 전 관련 `docs/architecture/` 섹션을 읽는다. 코드가 서술과 어긋나면 **같은 PR 에서** 문서를 갱신하고, 구조가 달라지면 사용자와 논의한다. 새 설계 결정은 `docs/adr/0000-template.md` 를 복사해 ADR 로 남긴다(번복 시 옛 ADR 은 `Superseded by` 만, 본문 유지).
 
 ## 개발 환경
 
