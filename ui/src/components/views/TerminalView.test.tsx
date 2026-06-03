@@ -161,9 +161,13 @@ vi.mock("@xterm/addon-serialize", () => ({
 
 const mockRegisterTerminalSerializer = vi.fn();
 const mockUnregisterTerminalSerializer = vi.fn();
+const mockRegisterTerminalInspector = vi.fn();
+const mockUnregisterTerminalInspector = vi.fn();
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
+  registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
+  unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
 }));
 
 // Mock tauri API
@@ -2461,6 +2465,150 @@ describe("TerminalView", () => {
         expect(mockFit).toHaveBeenCalled();
       });
       expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  // -- Regression: rapid resize burst (pane-divider drag) must coalesce (#285) --
+  //
+  // Dragging a pane divider emits a ResizeObserver entry every frame. Reflowing
+  // (fit → terminal.resize → xterm buffer reflow) on each intermediate width
+  // races xterm's synchronous reflow against ConPTY's async resize repaints and
+  // corrupts scrollback (duplicated / merged lines). The fix debounces the fit
+  // so a whole drag burst collapses into a single reflow after it settles.
+  it("coalesces a rapid resize burst into a single fit (issue #285)", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-coalesce" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+
+      // Ignore the synchronous creation fit; measure only the drag burst.
+      mockFit.mockClear();
+
+      // Simulate a divider drag: many distinct widths in one synchronous burst.
+      act(() => {
+        for (let w = 790; w >= 700; w -= 5) {
+          obs.callback(
+            [{ target, contentRect: { width: w, height: 600 } } as unknown as ResizeObserverEntry],
+            {} as ResizeObserver,
+          );
+        }
+      });
+
+      // Debounced: no per-frame fit fires synchronously during the burst.
+      expect(mockFit).not.toHaveBeenCalled();
+
+      // After the burst settles, exactly one fit runs for the whole drag.
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  // -- Regression: pending debounced fit cancelled when container hides (#285 P2) --
+  //
+  // A normal resize schedules the trailing fit, then the workspace/pane can go
+  // display:none (0×0) before the 80ms debounce expires. If the pending timer
+  // is not cancelled it fires fitAddon.fit() against the hidden container,
+  // pushing cols/rows=0 through the PTY and garbling the pane on return.
+  it("cancels a pending debounced fit when the container becomes hidden (issue #285 P2)", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-hide" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+      mockFit.mockClear();
+
+      // 1) A normal size change schedules the debounced fit.
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 760, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // 2) Before the 80ms debounce fires, the pane is hidden (display:none → 0×0).
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // 3) Wait past the debounce window: the pending fit must NOT have fired
+      //    (cancelled on hide), so no fit runs against the 0×0 container.
+      await new Promise((r) => setTimeout(r, 150));
+      expect(mockFit).not.toHaveBeenCalled();
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
     }

@@ -67,11 +67,24 @@ import { loadTerminalOutputCache } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
+  registerTerminalInspector,
+  unregisterTerminalInspector,
+  type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
+
+/**
+ * Trailing debounce (ms) before reflowing the terminal after a container-size
+ * change. A pane-divider drag emits a ResizeObserver burst (one entry per
+ * frame); reflowing on each intermediate width races xterm's synchronous
+ * buffer reflow against ConPTY's async resize repaints and corrupts scrollback
+ * (issue #285). Coalescing into a single fit after the drag settles removes the
+ * interleaving. Kept short so a settled resize still feels immediate.
+ */
+const RESIZE_FIT_DEBOUNCE_MS = 80;
 
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
@@ -429,6 +442,11 @@ export function TerminalView({
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
       scrollback: 10000,
+      // ConPTY backend with buildNumber >= 21376 enables xterm's own buffer
+      // reflow so scrollback re-wraps correctly on a width change. The #285
+      // scrollback corruption is NOT caused by this value (verified: 21375
+      // disables reflow and truncates instead) — its real cause is resize
+      // events racing ConPTY repaints, fixed by the debounced fit below.
       windowsPty: { backend: "conpty", buildNumber: 21376 },
     });
 
@@ -1446,9 +1464,20 @@ export function TerminalView({
     let prevW = 0;
     let prevH = 0;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
+    // Trailing-debounce handle for container-size reflow (see RESIZE_FIT_DEBOUNCE_MS).
+    let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
+      // A pending debounced fit must never run against a hidden container.
+      // WorkspaceArea/PaneGrid hide inactive panes via display:none, firing a
+      // 0×0 entry; if a drag just scheduled a fit, fitting on the 0×0 box would
+      // push cols/rows=0 through the PTY and garble the pane on return. Cancel
+      // the pending fit the moment the container goes hidden (issue #285 P2).
+      if (isNowHidden && resizeFitTimer !== undefined) {
+        clearTimeout(resizeFitTimer);
+        resizeFitTimer = undefined;
+      }
       if (width > 0 && height > 0 && !sessionCreated) {
         sessionCreated = true;
         prevW = Math.round(width);
@@ -1484,6 +1513,36 @@ export function TerminalView({
           registerTerminalSerializer(paneId, () => serializeAddon.serialize());
         }
         registerTerminalSerializer(instanceId, () => serializeAddon.serialize());
+
+        // Register buffer inspector for automated reflow verification (issue #285).
+        // Exposes xterm's reflowed line model (text + isWrapped) so the
+        // Automation API can confirm width-change reflow without screenshots.
+        const dumpBuffer = (limit: number) => {
+          const buf = terminal.buffer.active;
+          const total = buf.length;
+          const start = limit > 0 ? Math.max(0, total - limit) : 0;
+          const lines: TerminalBufferLine[] = [];
+          for (let i = start; i < total; i++) {
+            const line = buf.getLine(i);
+            if (!line) continue;
+            lines.push({
+              index: i,
+              text: line.translateToString(true),
+              isWrapped: line.isWrapped,
+            });
+          }
+          return {
+            cols: terminal.cols,
+            rows: terminal.rows,
+            length: total,
+            baseY: buf.baseY,
+            lines,
+          };
+        };
+        if (paneId) {
+          registerTerminalInspector(paneId, dumpBuffer);
+        }
+        registerTerminalInspector(instanceId, dumpBuffer);
 
         fitAddon.fit();
         openedRef.current = true;
@@ -1566,23 +1625,53 @@ export function TerminalView({
         }
         prevW = w;
         prevH = h;
-        fitAddon.fit();
-        if (recoveringFromHidden || consumeDirty) {
-          // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
-          // atlas can go stale while the container is display:none (a DPR
-          // or font change that fires on a 0-size terminal cannot rebuild
-          // anything), so re-rasterise on the hide → show transition.
-          // Safe no-op without WebGL renderer.
-          try {
-            (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-          } catch {
-            /* older xterm builds / mocks may lack this method */
+
+        // The actual reflow, factored out so the common drag path can debounce
+        // it while one-shot recovery events run promptly.
+        const applyFit = () => {
+          if (cancelled) return;
+          fitAddon.fit();
+          if (recoveringFromHidden || consumeDirty) {
+            // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
+            // atlas can go stale while the container is display:none (a DPR
+            // or font change that fires on a 0-size terminal cannot rebuild
+            // anything), so re-rasterise on the hide → show transition.
+            // Safe no-op without WebGL renderer.
+            try {
+              (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+            } catch {
+              /* older xterm builds / mocks may lack this method */
+            }
+            terminal.refresh(0, terminal.rows - 1);
+            reflowDirtyRef.current = false;
           }
-          terminal.refresh(0, terminal.rows - 1);
-          reflowDirtyRef.current = false;
+          bindHelperTextareaEvents();
+          scheduleOverlayCaretUpdate();
+        };
+
+        if (recoveringFromHidden || consumeDirty) {
+          // Hide→show recovery / pending dirty reflow are single, important
+          // events — apply now and cancel any in-flight drag debounce so the
+          // atlas rebuild is not skipped.
+          if (resizeFitTimer !== undefined) {
+            clearTimeout(resizeFitTimer);
+            resizeFitTimer = undefined;
+          }
+          applyFit();
+        } else {
+          // Plain container-size change (e.g. dragging a pane divider): debounce
+          // so xterm reflow + the PTY resize happen ONCE after the drag settles,
+          // never interleaving with ConPTY's per-resize repaints (issue #285).
+          if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
+          resizeFitTimer = setTimeout(() => {
+            resizeFitTimer = undefined;
+            // Re-check at fire time: the container may have gone hidden after
+            // this was scheduled (race with the 0×0 cancel above). Skip — the
+            // hide→show recovery path re-fits on return (issue #285 P2).
+            if (cancelled || isContainerHiddenRef.current) return;
+            applyFit();
+          }, RESIZE_FIT_DEBOUNCE_MS);
         }
-        bindHelperTextareaEvents();
-        scheduleOverlayCaretUpdate();
       }
       prevWasHidden = isNowHidden;
       isContainerHiddenRef.current = isNowHidden;
@@ -1594,6 +1683,7 @@ export function TerminalView({
     return () => {
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
@@ -1624,8 +1714,10 @@ export function TerminalView({
       setSyncOutputCursorVisibility(false);
       if (paneId) {
         unregisterTerminalSerializer(paneId);
+        unregisterTerminalInspector(paneId);
       }
       unregisterTerminalSerializer(instanceId);
+      unregisterTerminalInspector(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

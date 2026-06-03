@@ -10,6 +10,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
+import { getTerminalInspector } from "@/lib/terminal-serialize-registry";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import type {
   DockPosition,
@@ -567,6 +568,17 @@ const handlers: HandlerMap = {
         paneIndex: paneIndex >= 0 ? paneIndex : undefined,
         switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined,
       });
+    },
+    // Dump xterm's reflowed buffer (text + isWrapped per line) for automated
+    // reflow verification (issue #285). Reads the live xterm line model, not the
+    // PTY ring buffer, so it reflects wrapping state after a width change.
+    dumpBuffer: (p) => {
+      const terminalId = p.id as string;
+      if (!findTerminalInstance(terminalId)) return err(`Terminal '${terminalId}' not found`);
+      const inspector = getTerminalInspector(toPaneId(terminalId));
+      if (!inspector) return err(`Terminal '${terminalId}' has no live buffer`);
+      const limit = typeof p.limit === "number" ? p.limit : 300;
+      return ok(inspector(limit));
     },
     // Resolve a spatial pane number to a terminal ID within a workspace (issue #256).
     // Defaults to the active workspace when workspaceId is omitted.

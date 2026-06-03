@@ -36,6 +36,12 @@ pub struct OutputQuery {
 }
 
 #[derive(Deserialize)]
+pub struct BufferDumpQuery {
+    /// Max lines to return (trailing slice). 0 = whole buffer. Omitted = frontend default.
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 pub struct SwitchWorkspaceBody {
     pub id: String,
 }
@@ -158,6 +164,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/v1/grid/hover"),
     ("POST", "/api/v1/panes/split"),
     ("DELETE", "/api/v1/panes/{index}"),
+    ("POST", "/api/v1/panes/{index}/resize"),
     ("PUT", "/api/v1/panes/{index}/view"),
     ("GET", "/api/v1/docks"),
     ("POST", "/api/v1/docks/layout-mode/toggle"),
@@ -171,6 +178,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/terminals"),
     ("POST", "/api/v1/terminals/{id}/write"),
     ("GET", "/api/v1/terminals/{id}/output"),
+    ("GET", "/api/v1/terminals/{id}/buffer"),
     ("GET", "/api/v1/memos"),
     ("GET", "/api/v1/memos/{key}"),
     ("GET", "/api/v1/notifications"),
