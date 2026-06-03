@@ -66,9 +66,10 @@ mod windows_tests {
     }
 
     /// Diagnostic: print what's currently on the clipboard.
-    /// Run after copying from Paint: cargo test --test clipboard_integration diagnostic -- --nocapture --test-threads=1
+    /// Run after copying from Paint: cargo test --test clipboard_integration diagnostic -- --ignored --nocapture --test-threads=1
     #[test]
     #[serial]
+    #[ignore] // 라이브 클립보드 상태에 의존하는 수동 진단용 — 자동 스위트에서 제외 (멀티바이트 내용에서 slice 패닉)
     fn diagnostic_clipboard_state() {
         eprintln!("\n=== Clipboard Diagnostic ===");
 
