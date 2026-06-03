@@ -66,7 +66,7 @@ Shadow cursor 레이어가 xterm.js 실제 커서 위치를 미러링하여 OS I
 ### Automation API & MCP
 - 고정 포트의 로컬 HTTP REST API: **release `19280`, dev `19281`** (둘은 절대 충돌하지 않음).
 - IP allowlist(loopback + RFC 1918 + link-local) — WSL2 / Hyper-V 서브넷이 미리 허용됨. 인증 헤더 불필요.
-- rmcp 기반 Streamable-HTTP MCP 서버로 **30개 툴**(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 노출.
+- rmcp 기반 Streamable-HTTP MCP 서버로 **33개 툴**(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 노출.
 
 ### `lx` CLI
 `lx` 바이너리는 모든 Laymux 터미널의 `PATH`에 자동 주입되며 `LX_SOCKET` / `LX_TERMINAL_ID` / `LX_GROUP_ID` 환경 변수로 연결됩니다. 10개 명령을 제공합니다:
@@ -156,7 +156,7 @@ curl http://localhost:19280/api/v1/docs
 
 ### MCP (Model Context Protocol)
 
-Streamable-HTTP MCP 엔드포인트(`/mcp`)가 30개 툴(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 제공합니다.
+Streamable-HTTP MCP 엔드포인트(`/mcp`)가 33개 툴(터미널, 워크스페이스, 그리드/페인, 스크린샷, 알림, 출력 검색, 파일/이미지 뷰어)을 제공합니다.
 
 ```jsonc
 // Claude Code ~/.claude.json
@@ -170,7 +170,7 @@ Streamable-HTTP MCP 엔드포인트(`/mcp`)가 30개 툴(터미널, 워크스페
 }
 ```
 
-전체 툴 목록은 `ARCHITECTURE.md` §12.7 참조.
+전체 툴 목록은 [`docs/architecture/api-contracts.md`](./docs/architecture/api-contracts.md) §12.7 참조.
 
 ## 프로젝트 구조
 
@@ -198,10 +198,13 @@ laymux/
 │   │   └── lib/              # OSC, 색상, IME 등 유틸
 │   └── package.json
 ├── docs/
+│   ├── architecture/         # Living 아키텍처 문서 (overview / data-flow / api-contracts)
+│   ├── adr/                  # 아키텍처 결정 기록 (append-only)
+│   ├── roadmap.md            # 진행 상태 트래커
 │   ├── screenshots/          # README 이미지
 │   └── terminal/             # 커서 / IME / 플리커 레퍼런스 문서
-├── ARCHITECTURE.md           # 상세 아키텍처 명세
-└── CLAUDE.md                 # 개발 가이드라인
+├── AGENTS.md                 # 코딩 에이전트 진입점 (CLAUDE.md → AGENTS.md)
+└── CLAUDE.md                 # AGENTS.md 포인터
 ```
 
 ## 키보드 단축키
@@ -216,17 +219,18 @@ IDE 단축키는 셸·readline 바인딩과 겹치지 않도록 `Ctrl+단일키`
 | `Ctrl+Alt+1-8`, `9` | 워크스페이스 1–9 이동 |
 | `Ctrl+Shift+I` | 알림 패널 토글 |
 | `Ctrl+Shift+U` | 읽지 않은 알림으로 이동 |
-| `Ctrl+Shift+W` | 워크스페이스 닫기 |
-| `Ctrl+Shift+R` | 워크스페이스 이름 변경 |
+| `Ctrl+Alt+W` | 워크스페이스 닫기 |
+| `Ctrl+Alt+R` | 워크스페이스 이름 변경 |
 | `Ctrl+Shift+B` | 사이드바 토글 |
 | `Delete` (편집 모드) | 포커스된 Pane 제거 |
 | `Ctrl+,` | 설정 |
 
 ## 문서
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — 전체 아키텍처 명세.
+- [`docs/architecture/`](./docs/architecture/) — living 아키텍처 문서 (overview · data-flow · api-contracts).
+- [`docs/adr/`](./docs/adr/) — 아키텍처 결정 기록 ("왜 그렇게 정했나", append-only).
 - [`docs/terminal/`](./docs/terminal/) — 커서·IME·플리커 리서치 문서 (레퍼런스 전용).
-- [`CLAUDE.md`](./CLAUDE.md) — 개발 가이드라인.
+- [`AGENTS.md`](./AGENTS.md) — 코딩 에이전트 진입점 및 개발 가이드라인.
 
 ## 관련 프로젝트
 

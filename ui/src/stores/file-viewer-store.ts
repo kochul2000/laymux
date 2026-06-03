@@ -17,7 +17,7 @@ interface FileViewerState {
    * When true the overlay fills the whole app window (the "new window" feel of
    * #277). When false it is a large but centered floating overlay. We render in
    * the existing single Tauri window rather than spawning a second OS window —
-   * see ARCHITECTURE §15 / the PR notes for the rationale.
+   * see docs/architecture/api-contracts.md §15 / the PR notes for the rationale.
    */
   maximized: boolean;
 

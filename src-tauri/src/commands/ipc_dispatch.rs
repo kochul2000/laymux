@@ -631,7 +631,7 @@ fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<Strin
 /// Uses the full `detect_terminal_state` pipeline (buffer scan + persistent
 /// tracking via `known_claude_terminals` / `known_codex_terminals` + braille
 /// spinner heuristic + title pattern matching) so the decision is consistent
-/// with every other activity-gated feature (see ARCHITECTURE.md §10).
+/// with every other activity-gated feature (see docs/architecture/api-contracts.md §10).
 ///
 /// Policy per target:
 /// - `InteractiveApp { name: "Claude" }` → governed by `claude_mode`:

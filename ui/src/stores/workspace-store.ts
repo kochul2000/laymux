@@ -351,7 +351,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (viewTypeChanged) useOverridesStore.getState().clearViewOverride(prev.id);
   },
 
-  // Layout actions per ARCHITECTURE.md section 4.1
+  // Layout actions per docs/architecture/overview.md §4.1
   exportAsNewLayout: (name) => {
     const ws = get().getActiveWorkspace();
     if (!ws) return;

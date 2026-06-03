@@ -39,5 +39,8 @@ laymux/
 │   └── tests/             # Integration/e2e tests
 ├── scripts/               # kill-dev.sh
 ├── mcp-server/            # MCP server
-└── ARCHITECTURE.md        # Detailed architecture doc
+├── docs/architecture/     # Living architecture docs (overview / data-flow / api-contracts)
+├── docs/adr/              # Architecture Decision Records (append-only)
+├── docs/terminal/         # Cursor / IME / flicker research docs (reference-only)
+└── AGENTS.md              # Coding-agent entry point (CLAUDE.md → AGENTS.md)
 ```

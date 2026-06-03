@@ -66,7 +66,7 @@ A shadow-cursor layer mirrors xterm.js's real cursor position so that the OS IME
 ### Automation API & MCP
 - Local HTTP REST API on fixed ports: **release `19280`, dev `19281`** (separate so they never collide).
 - IP allowlist (loopback + RFC 1918 + link-local) — WSL2 / Hyper-V subnets are pre-approved. No auth headers needed.
-- Built-in MCP server (rmcp, Streamable HTTP) exposing **30 tools** for terminals, workspaces, grid/panes, screenshots, notifications, output search, and a file/image viewer.
+- Built-in MCP server (rmcp, Streamable HTTP) exposing **33 tools** for terminals, workspaces, grid/panes, screenshots, notifications, output search, and a file/image viewer.
 
 ### `lx` CLI
 The `lx` binary is auto-injected into every Laymux terminal via `PATH` and configured through `LX_SOCKET` / `LX_TERMINAL_ID` / `LX_GROUP_ID` environment variables. It exposes 10 commands:
@@ -156,7 +156,7 @@ Port discovery file:
 
 ### MCP (Model Context Protocol)
 
-Streamable-HTTP MCP endpoint at `/mcp` exposes 30 tools (terminals, workspaces, grid/panes, screenshot, notifications, output search, file/image viewer).
+Streamable-HTTP MCP endpoint at `/mcp` exposes 33 tools (terminals, workspaces, grid/panes, screenshot, notifications, output search, file/image viewer).
 
 ```jsonc
 // Claude Code ~/.claude.json
@@ -170,7 +170,7 @@ Streamable-HTTP MCP endpoint at `/mcp` exposes 30 tools (terminals, workspaces, 
 }
 ```
 
-See `ARCHITECTURE.md` §12.7 for the full tool list.
+See [`docs/architecture/api-contracts.md`](./docs/architecture/api-contracts.md) §12.7 for the full tool list.
 
 ## Project Structure
 
@@ -198,10 +198,13 @@ laymux/
 │   │   └── lib/              # OSC, colors, IME, etc.
 │   └── package.json
 ├── docs/
+│   ├── architecture/         # Living architecture docs (overview / data-flow / api-contracts)
+│   ├── adr/                  # Architecture Decision Records (append-only)
+│   ├── roadmap.md            # Progress tracker
 │   ├── screenshots/          # README images
 │   └── terminal/             # Cursor / IME / flicker reference docs
-├── ARCHITECTURE.md           # Detailed architecture specification
-└── CLAUDE.md                 # Development guidelines
+├── AGENTS.md                 # Coding-agent entry point (CLAUDE.md → AGENTS.md)
+└── CLAUDE.md                 # Pointer to AGENTS.md
 ```
 
 ## Keyboard Shortcuts
@@ -216,17 +219,18 @@ IDE shortcuts avoid `Ctrl+<single-key>` so they never shadow shell/readline bind
 | `Ctrl+Alt+1-8`, `9` | Switch to workspace 1–9 |
 | `Ctrl+Shift+I` | Toggle notification panel |
 | `Ctrl+Shift+U` | Jump to unread notification |
-| `Ctrl+Shift+W` | Close workspace |
-| `Ctrl+Shift+R` | Rename workspace |
+| `Ctrl+Alt+W` | Close workspace |
+| `Ctrl+Alt+R` | Rename workspace |
 | `Ctrl+Shift+B` | Toggle sidebar |
 | `Delete` (edit mode) | Remove focused pane |
 | `Ctrl+,` | Settings |
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — full architecture specification.
+- [`docs/architecture/`](./docs/architecture/) — living architecture docs (overview · data-flow · api-contracts).
+- [`docs/adr/`](./docs/adr/) — architecture decision records ("why we decided", append-only).
 - [`docs/terminal/`](./docs/terminal/) — cursor, IME, and flicker research notes (reference-only).
-- [`CLAUDE.md`](./CLAUDE.md) — development guidelines.
+- [`AGENTS.md`](./AGENTS.md) — coding-agent entry point and development guidelines.
 
 ## Related Projects
 
