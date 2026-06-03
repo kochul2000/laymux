@@ -150,10 +150,15 @@ describe("Workspace Store E2E", () => {
       useWorkspaceStore.getState().addWorkspace("New WS", "default-layout");
       const { workspaces } = useWorkspaceStore.getState();
       expect(workspaces.length).toBe(2);
-      expect(workspaces[1].name).toBe("New WS");
+      expect(workspaces[1].name).toBe("New-WS");
 
       expect(workspaces[1].panes.length).toBe(1);
       expect(workspaces[1].panes[0].view.type).toBe("EmptyView");
+    });
+
+    it("normalizes whitespace in new workspace names before storage", () => {
+      useWorkspaceStore.getState().addWorkspace("  Dev  Main\tAPI  ", "default-layout");
+      expect(useWorkspaceStore.getState().workspaces[1].name).toBe("Dev-Main-API");
     });
 
     it("should not remove the last workspace", () => {
@@ -186,7 +191,13 @@ describe("Workspace Store E2E", () => {
     it("should rename workspace with unicode", () => {
       useWorkspaceStore.getState().renameWorkspace("ws-default", "프로젝트 A");
       const ws = useWorkspaceStore.getState().workspaces[0];
-      expect(ws.name).toBe("프로젝트 A");
+      expect(ws.name).toBe("프로젝트-A");
+    });
+
+    it("normalizes whitespace in renamed workspace names before storage", () => {
+      useWorkspaceStore.getState().renameWorkspace("ws-default", "  My  Workspace\nMain  ");
+      const ws = useWorkspaceStore.getState().workspaces[0];
+      expect(ws.name).toBe("My-Workspace-Main");
     });
 
     it("should rename nonexistent workspace silently", () => {
@@ -229,7 +240,7 @@ describe("Workspace Store E2E", () => {
 
       useWorkspaceStore.getState().addWorkspace("Test WS", "default-layout");
 
-      const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "Test WS")!;
+      const ws = useWorkspaceStore.getState().workspaces.find((w) => w.name === "Test-WS")!;
       expect(ws.panes[0].view).toEqual({ type: "TerminalView", profile: "WSL" });
     });
 
@@ -996,7 +1007,7 @@ describe("Complex Workspace Layout Scenarios", () => {
     expect(layout.panes.length).toBe(4);
 
     // Project B should NOT be affected (independent workspace)
-    const wsB = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "Project B")!;
+    const wsB = useWorkspaceStore.getState().workspaces.find((ws) => ws.name === "Project-B")!;
     expect(wsB.panes.length).toBe(3); // Still original 3 panes
   });
 

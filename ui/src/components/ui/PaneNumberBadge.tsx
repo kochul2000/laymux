@@ -11,11 +11,8 @@ import { formatPaneIdentifier } from "@/lib/pane-numbers";
  *
  * Clicking the badge copies a self-describing identifier of the pane to the
  * clipboard (issue #276) so it can be pasted into an LLM prompt. The copied
- * string is `formatPaneIdentifier({ workspaceId, paneNumber, workspaceName })`,
- * e.g. `[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=3` — the
- * `workspace=` / `pane=` pair maps directly to the automation/MCP
- * `write_to_terminal`/`read_terminal_output`/`focus_terminal` params
- * (`workspace_id` + `pane_number`).
+ * string is `formatPaneIdentifier({ workspaceName, paneNumber })`, e.g.
+ * `lx:pane:Backend:3`, which MCP accepts directly as `terminal_id` or `pane_ref`.
  *
  * Renders nothing when `number` is undefined (e.g. dock panes, previews). When
  * `workspaceId` is omitted it falls back to a non-interactive label (no copy).
@@ -35,8 +32,8 @@ export function PaneNumberBadge({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = useCallback(async () => {
-    if (number == null || !workspaceId) return;
-    const text = formatPaneIdentifier({ workspaceId, paneNumber: number, workspaceName });
+    if (number == null || !workspaceId || !workspaceName) return;
+    const text = formatPaneIdentifier({ paneNumber: number, workspaceName });
     try {
       await clipboardWriteText(text);
     } catch {

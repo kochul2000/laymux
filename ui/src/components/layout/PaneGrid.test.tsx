@@ -38,7 +38,7 @@ describe("PaneGrid", () => {
     isFocused: () => false,
     onPaneFocus: vi.fn(),
     workspaceId: "ws-1",
-    workspaceName: "Test WS",
+    workspaceName: "Test-WS",
   };
 
   it("renders all panes with correct test ids", () => {

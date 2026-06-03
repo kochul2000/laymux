@@ -61,25 +61,24 @@ export function paneNumberFor(panes: readonly NumberablePane[], paneId: string):
  * `write_to_terminal`/`read_terminal_output`/`focus_terminal`) accepts as
  * `workspace_id` + `pane_number`. So an LLM that receives this can act on it directly.
  *
- * A literal `[laymux pane]` prefix makes it self-describing for both humans and LLMs.
- * `paneNumber` is volatile (recomputed on layout change), so the copied value is a
- * point-in-time reference, not a persistent handle.
+ * The `lx:pane:` prefix makes it self-describing for both humans and LLMs.
+ * `paneNumber` is volatile (recomputed on layout change), so the copied value is
+ * a point-in-time reference, not a persistent handle.
  *
- * Example: `[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=3`
+ * Example: `lx:pane:Backend:3`
  */
 export function formatPaneIdentifier({
-  workspaceId,
   paneNumber,
   workspaceName,
 }: {
-  workspaceId: string;
   paneNumber: number;
-  workspaceName?: string;
+  workspaceName: string;
 }): string {
-  // Workspace names are free user input. Collapse any whitespace (incl. newlines) so the
-  // identifier stays a single line, and swap `"` for `'` so the `("...")` hint can't produce
-  // ambiguous output like `("a"b")`. Neither touches the machine-parsed `workspace=`/`pane=`.
-  const name = workspaceName?.replace(/\s+/g, " ").replace(/"/g, "'").trim();
-  const nameHint = name ? ` ("${name}")` : "";
-  return `[laymux pane] workspace=${workspaceId}${nameHint} pane=${paneNumber}`;
+  if (!workspaceName) {
+    throw new Error("workspaceName is required");
+  }
+  if (/\s/.test(workspaceName)) {
+    throw new Error("workspaceName must not contain whitespace");
+  }
+  return `lx:pane:${workspaceName}:${paneNumber}`;
 }

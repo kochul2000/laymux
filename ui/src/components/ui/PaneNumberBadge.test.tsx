@@ -38,20 +38,18 @@ describe("PaneNumberBadge", () => {
     expect(badge.tagName).toBe("BUTTON");
     fireEvent.click(badge);
     await waitFor(() => expect(mockClipboardWriteText).toHaveBeenCalledTimes(1));
-    expect(mockClipboardWriteText).toHaveBeenCalledWith(
-      '[laymux pane] workspace=ws-a1b2c3d4 ("Backend") pane=3',
-    );
+    expect(mockClipboardWriteText).toHaveBeenCalledWith("lx:pane:Backend:3");
   });
 
   it("shows a copied checkmark after a successful copy", async () => {
-    render(<PaneNumberBadge number={1} workspaceId="ws-x" />);
+    render(<PaneNumberBadge number={1} workspaceId="ws-x" workspaceName="Default" />);
     fireEvent.click(screen.getByTestId("pane-number-badge"));
     await waitFor(() => expect(screen.getByTestId("pane-number-badge-copied")).toBeTruthy());
   });
 
   it("does not enter the copied state when the clipboard write rejects", async () => {
     mockClipboardWriteText.mockRejectedValueOnce(new Error("clipboard denied"));
-    render(<PaneNumberBadge number={1} workspaceId="ws-x" />);
+    render(<PaneNumberBadge number={1} workspaceId="ws-x" workspaceName="Default" />);
     fireEvent.click(screen.getByTestId("pane-number-badge"));
     await waitFor(() => expect(mockClipboardWriteText).toHaveBeenCalledTimes(1));
     // let the rejected promise settle, then assert no checkmark appeared
@@ -60,7 +58,7 @@ describe("PaneNumberBadge", () => {
   });
 
   it("keeps a stable accessible name through the copied feedback", async () => {
-    render(<PaneNumberBadge number={4} workspaceId="ws-x" />);
+    render(<PaneNumberBadge number={4} workspaceId="ws-x" workspaceName="Default" />);
     const badge = screen.getByTestId("pane-number-badge");
     expect(badge).toHaveAttribute("aria-label", "Copy pane 4 identifier");
     fireEvent.click(badge);
@@ -71,7 +69,9 @@ describe("PaneNumberBadge", () => {
 
   it("clears the pending feedback timer on unmount", async () => {
     const clearSpy = vi.spyOn(globalThis, "clearTimeout");
-    const { unmount } = render(<PaneNumberBadge number={1} workspaceId="ws-x" />);
+    const { unmount } = render(
+      <PaneNumberBadge number={1} workspaceId="ws-x" workspaceName="Default" />,
+    );
     fireEvent.click(screen.getByTestId("pane-number-badge"));
     await waitFor(() => expect(screen.getByTestId("pane-number-badge-copied")).toBeTruthy());
     clearSpy.mockClear();
