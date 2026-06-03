@@ -57,6 +57,22 @@ describe("PaneNumberBadge", () => {
     expect(screen.queryByTestId("pane-number-badge-copied")).toBeNull();
   });
 
+  it("is a no-op (no throw, no copy) for a legacy un-normalized whitespace name", async () => {
+    // No migration runs, so a workspace created before name normalization can still hold
+    // whitespace. The badge must bail rather than let formatPaneIdentifier's throw escape
+    // `void handleCopy()` as an unhandled rejection.
+    const rejections: unknown[] = [];
+    const onRejection = (e: PromiseRejectionEvent) => rejections.push(e.reason);
+    window.addEventListener("unhandledrejection", onRejection);
+    render(<PaneNumberBadge number={1} workspaceId="ws-x" workspaceName="Legacy Name" />);
+    fireEvent.click(screen.getByTestId("pane-number-badge"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.removeEventListener("unhandledrejection", onRejection);
+    expect(rejections).toEqual([]);
+    expect(mockClipboardWriteText).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pane-number-badge-copied")).toBeNull();
+  });
+
   it("keeps a stable accessible name through the copied feedback", async () => {
     render(<PaneNumberBadge number={4} workspaceId="ws-x" workspaceName="Default" />);
     const badge = screen.getByTestId("pane-number-badge");

@@ -32,7 +32,11 @@ export function PaneNumberBadge({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = useCallback(async () => {
-    if (number == null || !workspaceId || !workspaceName) return;
+    // `formatPaneIdentifier` throws on un-normalized (whitespace) names. There's no
+    // migration, so a legacy workspace name can still contain whitespace until its next
+    // rename — bail here rather than let the throw escape `void handleCopy()` as an
+    // unhandled rejection (the same reason the clipboard reject below is swallowed).
+    if (number == null || !workspaceId || !workspaceName || /\s/.test(workspaceName)) return;
     const text = formatPaneIdentifier({ paneNumber: number, workspaceName });
     try {
       await clipboardWriteText(text);

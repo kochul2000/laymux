@@ -119,17 +119,17 @@ fn parse_pane_locator(value: &str) -> Result<Option<PaneLocator>, String> {
     let Some(rest) = value.strip_prefix("lx:pane:") else {
         return Ok(None);
     };
-    let mut parts = rest.split(':');
-    let workspace_name = parts
-        .next()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| "Pane locator must include a workspace name".to_string())?;
-    let pane_number = parts
-        .next()
-        .filter(|number| !number.is_empty())
-        .ok_or_else(|| "Pane locator must include a pane number".to_string())?;
-    if parts.next().is_some() {
+    // The pane number is the final `:`-delimited segment, so split from the right.
+    // Workspace names only have whitespace normalized out (not colons), so a name like
+    // `API:v2` is valid storage; splitting on the last `:` keeps such names round-trippable.
+    let Some((workspace_name, pane_number)) = rest.rsplit_once(':') else {
         return Err("Pane locator format is lx:pane:<workspaceName>:<paneNumber>".to_string());
+    };
+    if workspace_name.is_empty() {
+        return Err("Pane locator must include a workspace name".to_string());
+    }
+    if pane_number.is_empty() {
+        return Err("Pane locator must include a pane number".to_string());
     }
     if workspace_name.chars().any(char::is_whitespace) {
         return Err("Pane locator workspace name must not contain whitespace".to_string());
@@ -2398,6 +2398,20 @@ mod tests {
     #[test]
     fn parse_pane_locator_ignores_non_locator_values() {
         assert!(parse_pane_locator("terminal-pane-abc").unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_pane_locator_allows_colon_in_workspace_name() {
+        // Workspace name normalization only strips whitespace, not colons, so a name like
+        // `API:v2` reaches the locator verbatim. The pane number is the last segment.
+        let parsed = parse_pane_locator("lx:pane:API:v2:3").unwrap().unwrap();
+        assert_eq!(
+            parsed,
+            PaneLocator {
+                workspace_name: "API:v2".to_string(),
+                pane_number: 3
+            }
+        );
     }
 
     #[test]
