@@ -1965,8 +1965,13 @@ fn json_result(data: &Value) -> CallToolResult {
 }
 
 /// Map a MIME type to a sensible image file extension (no leading dot).
-/// Falls back to "png" for unknown/blank types so the viewer still attempts to
-/// render it as an image.
+///
+/// Only emits extensions the shared FileViewer classifier
+/// (`commands::file_ops::IMAGE_EXTENSIONS`) can actually render in the webview;
+/// otherwise `read_file_for_viewer` would classify the saved file as text/binary
+/// and the image would never display (see PR #289 review). Unknown/blank types
+/// and non-webview-renderable formats (e.g. TIFF) fall back to "png" so the
+/// viewer still attempts an image render rather than treating it as binary.
 fn image_extension_for_mime(mime_type: &str) -> &'static str {
     match mime_type.trim().to_ascii_lowercase().as_str() {
         "image/png" => "png",
@@ -1977,7 +1982,6 @@ fn image_extension_for_mime(mime_type: &str) -> &'static str {
         "image/svg+xml" => "svg",
         "image/x-icon" | "image/vnd.microsoft.icon" => "ico",
         "image/avif" => "avif",
-        "image/tiff" => "tiff",
         _ => "png",
     }
 }
@@ -2020,11 +2024,17 @@ fn save_image_to_dir(
     use base64::Engine as _;
 
     let (uri_mime, payload) = parse_image_data_uri(data).map_err(AppError::Other)?;
-    if payload.trim().is_empty() {
+    // Strip ALL ASCII whitespace, not just the ends: some data URIs wrap the
+    // base64 payload across lines, which the STANDARD engine rejects (PR #289).
+    let cleaned: String = payload
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    if cleaned.is_empty() {
         return Err(AppError::Other("'data' is empty".to_string()));
     }
     let bytes = base64::engine::general_purpose::STANDARD
-        .decode(payload.trim())
+        .decode(&cleaned)
         .map_err(|e| AppError::Other(format!("Invalid base64 image data: {e}")))?;
     if bytes.is_empty() {
         return Err(AppError::Other("Decoded image is empty".to_string()));
@@ -2034,7 +2044,7 @@ fn save_image_to_dir(
     let ext = image_extension_for_mime(effective_mime);
 
     std::fs::create_dir_all(dir)?;
-    let file_path = dir.join(format!("mcp-image-{}.{ext}", uuid::Uuid::new_v4()));
+    let file_path = dir.join(format!("{MCP_IMAGE_PREFIX}{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::write(&file_path, &bytes)?;
     Ok(file_path)
 }
@@ -2046,6 +2056,59 @@ fn mcp_image_dir() -> std::path::PathBuf {
     crate::settings::cache_dir_path()
         .map(|c| c.join("mcp-images"))
         .unwrap_or_else(|| std::env::temp_dir().join("laymux-mcp-images"))
+}
+
+/// Filename prefix for files written by `show_image`. Used both for naming and
+/// for the cleanup routine so only our own temp files are ever deleted.
+const MCP_IMAGE_PREFIX: &str = "mcp-image-";
+
+/// Delete `mcp-image-*` files older than `max_age_days` from `dir`.
+///
+/// `show_image` writes a fresh file per call with no overwrite, so without this
+/// the directory grows unbounded (PR #289 review). The existing
+/// `clipboard::cleanup_old_paste_images` only matches `.png`, but show_image
+/// emits jpg/gif/webp/svg/etc., so we match on the `mcp-image-` filename prefix
+/// instead of the extension. Returns the number of files removed.
+///
+/// Pure helper (takes the directory explicitly) so tests can use a tempdir.
+fn cleanup_old_mcp_images(dir: &std::path::Path, max_age_days: u64) -> u32 {
+    if !dir.exists() {
+        return 0;
+    }
+    let max_age = std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+    let mut removed = 0u32;
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_ours = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with(MCP_IMAGE_PREFIX));
+        if !is_ours {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        let is_old = now
+            .duration_since(modified)
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+        if is_old && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Startup hook: prune stale `show_image` temp files from the cache dir.
+/// Thin wrapper over [`cleanup_old_mcp_images`] resolving the real directory.
+pub(crate) fn cleanup_mcp_image_cache(max_age_days: u64) -> u32 {
+    cleanup_old_mcp_images(&mcp_image_dir(), max_age_days)
 }
 
 fn read_memo_result_from_map(
@@ -2260,9 +2323,41 @@ mod tests {
         assert_eq!(image_extension_for_mime("image/gif"), "gif");
         assert_eq!(image_extension_for_mime("image/webp"), "webp");
         assert_eq!(image_extension_for_mime("image/svg+xml"), "svg");
+        // AVIF is webview-renderable and recognized by the FileViewer classifier.
+        assert_eq!(image_extension_for_mime("image/avif"), "avif");
+        // TIFF is not renderable in the webview <img>, so it falls back to png
+        // rather than emitting a `.tiff` the viewer would treat as binary (PR #289).
+        assert_eq!(image_extension_for_mime("image/tiff"), "png");
         // Unknown falls back to png.
         assert_eq!(image_extension_for_mime("application/octet-stream"), "png");
         assert_eq!(image_extension_for_mime(""), "png");
+    }
+
+    #[test]
+    fn image_extensions_are_all_viewer_renderable() {
+        // Every extension `image_extension_for_mime` can emit must be in the
+        // shared FileViewer image classifier, otherwise the saved file would be
+        // classified as text/binary and never displayed (PR #289 review).
+        for mime in [
+            "image/png",
+            "image/jpeg",
+            "image/jpg",
+            "image/gif",
+            "image/webp",
+            "image/bmp",
+            "image/svg+xml",
+            "image/x-icon",
+            "image/avif",
+            "image/tiff",
+            "application/octet-stream",
+            "",
+        ] {
+            let ext = format!(".{}", image_extension_for_mime(mime));
+            assert!(
+                crate::commands::IMAGE_EXTENSIONS.contains(&ext.as_str()),
+                "emitted extension {ext} for mime {mime:?} is not viewer-renderable",
+            );
+        }
     }
 
     #[test]
@@ -2333,6 +2428,49 @@ mod tests {
         let p2 = save_image_to_dir("AQID", None, &nested).unwrap();
         assert!(p1.exists() && p2.exists());
         assert_ne!(p1, p2, "each call must produce a uniquely named file");
+    }
+
+    #[test]
+    fn save_image_strips_internal_whitespace() {
+        // base64 "AQID" split across lines (as some data URIs wrap it).
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_image_to_dir("AQ\nID", None, dir.path()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn cleanup_removes_only_old_mcp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Old + recent show_image files, plus an unrelated old file.
+        let old_mcp = save_image_to_dir("AQID", None, dir.path()).unwrap();
+        let recent_mcp = save_image_to_dir("AQID", None, dir.path()).unwrap();
+        let unrelated = dir.path().join("keep-me.png");
+        std::fs::write(&unrelated, [9u8]).unwrap();
+
+        // Backdate the old files to 8 days ago.
+        let eight_days_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 24 * 60 * 60);
+        for p in [&old_mcp, &unrelated] {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(eight_days_ago)
+                .unwrap();
+        }
+
+        let removed = cleanup_old_mcp_images(dir.path(), 7);
+        assert_eq!(removed, 1, "only the old mcp-image file should be removed");
+        assert!(!old_mcp.exists(), "old mcp-image must be deleted");
+        assert!(recent_mcp.exists(), "recent mcp-image must be kept");
+        assert!(unrelated.exists(), "non-mcp file must never be touched");
+    }
+
+    #[test]
+    fn cleanup_missing_dir_is_noop() {
+        let base = tempfile::tempdir().unwrap();
+        let missing = base.path().join("nope");
+        assert_eq!(cleanup_old_mcp_images(&missing, 7), 0);
     }
 
     #[test]

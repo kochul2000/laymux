@@ -15,8 +15,8 @@ pub enum FileViewerContent {
     Binary { size: u64 },
 }
 
-const IMAGE_EXTENSIONS: &[&str] = &[
-    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico",
+pub(crate) const IMAGE_EXTENSIONS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".avif",
 ];
 
 const TEXT_EXTENSIONS: &[&str] = &[
@@ -84,6 +84,7 @@ pub fn read_file_for_viewer(
             ".webp" => "image/webp",
             ".bmp" => "image/bmp",
             ".ico" => "image/x-icon",
+            ".avif" => "image/avif",
             _ => "application/octet-stream",
         };
         let b64 = base64_encode(&bytes);
