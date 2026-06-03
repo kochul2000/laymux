@@ -1469,6 +1469,15 @@ export function TerminalView({
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
+      // A pending debounced fit must never run against a hidden container.
+      // WorkspaceArea/PaneGrid hide inactive panes via display:none, firing a
+      // 0×0 entry; if a drag just scheduled a fit, fitting on the 0×0 box would
+      // push cols/rows=0 through the PTY and garble the pane on return. Cancel
+      // the pending fit the moment the container goes hidden (issue #285 P2).
+      if (isNowHidden && resizeFitTimer !== undefined) {
+        clearTimeout(resizeFitTimer);
+        resizeFitTimer = undefined;
+      }
       if (width > 0 && height > 0 && !sessionCreated) {
         sessionCreated = true;
         prevW = Math.round(width);
@@ -1654,7 +1663,14 @@ export function TerminalView({
           // so xterm reflow + the PTY resize happen ONCE after the drag settles,
           // never interleaving with ConPTY's per-resize repaints (issue #285).
           if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
-          resizeFitTimer = setTimeout(applyFit, RESIZE_FIT_DEBOUNCE_MS);
+          resizeFitTimer = setTimeout(() => {
+            resizeFitTimer = undefined;
+            // Re-check at fire time: the container may have gone hidden after
+            // this was scheduled (race with the 0×0 cancel above). Skip — the
+            // hide→show recovery path re-fits on return (issue #285 P2).
+            if (cancelled || isContainerHiddenRef.current) return;
+            applyFit();
+          }, RESIZE_FIT_DEBOUNCE_MS);
         }
       }
       prevWasHidden = isNowHidden;
