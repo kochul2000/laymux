@@ -19,6 +19,7 @@ pub mod output_buffer;
 pub mod path_utils;
 pub mod port_detect;
 pub mod process;
+pub mod process_tree;
 pub mod pty;
 pub mod pty_trace;
 pub mod settings;

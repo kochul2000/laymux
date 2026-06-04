@@ -64,6 +64,28 @@ pub fn is_claude_terminal_from_buffer(
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
+    // Authority: the process tree (ADR-0009). A live `claude` process under
+    // this PTY means Claude regardless of how the title/buffer currently look
+    // — refresh the cache and report it. This is what survives a long session
+    // where the "Claude Code" banner has scrolled past the 16KB window and the
+    // title is a bare spinner. A *different* live app (Codex) means this pane
+    // is not Claude. `None` is inconclusive (PTY without a PID, snapshot miss,
+    // or no app in the tree), so fall through to the title/buffer signals
+    // rather than treat it as proof of exit.
+    match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
+        Some("Claude") => {
+            sync_known_caches(state, terminal_id, "Claude");
+            return true;
+        }
+        Some(_) => {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        None => {}
+    }
+
     let Some(buf) = buffer else {
         return false;
     };
@@ -294,6 +316,23 @@ pub fn is_codex_terminal_from_buffer(
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
+    // Authority: the process tree (ADR-0009). Mirror of the Claude path —
+    // a live `codex` process under this PTY is authoritative; a live `claude`
+    // means this pane is not Codex; `None` is inconclusive and falls through.
+    match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
+        Some("Codex") => {
+            sync_known_caches(state, terminal_id, "Codex");
+            return true;
+        }
+        Some(_) => {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        None => {}
+    }
+
     let Some(buf) = buffer else {
         return false;
     };
