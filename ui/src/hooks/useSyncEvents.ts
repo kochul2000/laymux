@@ -420,8 +420,13 @@ export function useSyncEvents() {
           const { updateInstanceInfo, instances } = useTerminalStore.getState();
           for (const inst of instances) {
             const activity = pending.get(inst.id);
-            // Don't clobber a fresher live-event detection.
-            if (activity && inst.activity?.type !== "interactiveApp") {
+            // Apply only to a freshly-registered instance that no live event has
+            // classified yet (activity still unset). Once any event has set the
+            // activity — to interactiveApp OR to shell/command (e.g. the app
+            // exited during the get_terminal_states round-trip) — that signal is
+            // fresher than the mount snapshot, so we must not override it. This
+            // closes the narrow reload race in both directions.
+            if (activity && !inst.activity) {
               updateInstanceInfo(inst.id, { activity });
             }
             pending.delete(inst.id);

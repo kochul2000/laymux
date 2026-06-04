@@ -119,20 +119,24 @@ pub fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'s
 /// mirrors OS state, not app state — so it carries no lock-ordering obligation.
 static SNAPSHOT_CACHE: Mutex<Option<(Instant, Vec<ProcessEntry>)>> = Mutex::new(None);
 
-/// Return a process snapshot no older than `SNAPSHOT_TTL`, refreshing on miss.
-/// On lock poisoning, falls back to an uncached fresh enumeration.
-fn cached_snapshot() -> Vec<ProcessEntry> {
+/// Run `f` against a process snapshot no older than `SNAPSHOT_TTL`, refreshing
+/// on miss (or unconditionally when `force_fresh`). `f` runs while the cache
+/// lock is held, so the snapshot is borrowed, never cloned — the hot detection
+/// path calls this per terminal per title tick, so avoiding the per-call clone
+/// of the whole process list matters. On lock poisoning, falls back to an
+/// uncached fresh enumeration.
+fn with_snapshot<R>(force_fresh: bool, f: impl FnOnce(&[ProcessEntry]) -> R) -> R {
     let Ok(mut guard) = SNAPSHOT_CACHE.lock() else {
-        return snapshot_processes();
+        return f(&snapshot_processes());
     };
-    if let Some((ts, snap)) = guard.as_ref() {
-        if ts.elapsed() < SNAPSHOT_TTL {
-            return snap.clone();
-        }
+    let stale = guard
+        .as_ref()
+        .is_none_or(|(ts, _)| ts.elapsed() >= SNAPSHOT_TTL);
+    if force_fresh || stale {
+        *guard = Some((Instant::now(), snapshot_processes()));
     }
-    let fresh = snapshot_processes();
-    *guard = Some((Instant::now(), fresh.clone()));
-    fresh
+    // Just populated above when stale/forced; otherwise the existing entry is fresh.
+    f(&guard.as_ref().expect("snapshot cache populated").1)
 }
 
 /// The liveness oracle: which interactive app, if any, is alive under the PTY
@@ -141,14 +145,28 @@ fn cached_snapshot() -> Vec<ProcessEntry> {
 /// its descendant tree.
 ///
 /// Uses the TTL-cached snapshot so repeated calls within a burst of title
-/// events share a single enumeration.
+/// events share a single enumeration. For the hot positive-detection path,
+/// a snapshot up to `SNAPSHOT_TTL` stale is fine (a just-exited process is
+/// reported alive for at most one TTL, then self-corrects).
 pub fn interactive_app_in_pty(state: &AppState, terminal_id: &str) -> Option<&'static str> {
+    app_in_pty(state, terminal_id, false)
+}
+
+/// Like [`interactive_app_in_pty`] but forces a fresh enumeration, bypassing
+/// the TTL cache. Used at exit-decision points (false-exit suppression): a
+/// stale "still alive" snapshot taken just before the process exited would
+/// wrongly suppress a genuine exit — by the time the shell emits its prompt
+/// title the process is already gone, so the decision must use ground truth.
+pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> Option<&'static str> {
+    app_in_pty(state, terminal_id, true)
+}
+
+fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> Option<&'static str> {
     let child_pid = {
         let handles = state.pty_handles.lock_or_err().ok()?;
         handles.get(terminal_id).and_then(|h| h.child_pid())?
     };
-    let snapshot = cached_snapshot();
-    match_interactive_app(&snapshot, child_pid)
+    with_snapshot(force_fresh, |snap| match_interactive_app(snap, child_pid))
 }
 
 // ── OS process enumeration ────────────────────────────────────────
