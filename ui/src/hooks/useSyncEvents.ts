@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
@@ -14,6 +14,7 @@ import {
   onTerminalTitleChanged,
   onTerminalOutputActivity,
   markClaudeTerminal,
+  getTerminalStates,
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
@@ -393,6 +394,56 @@ export function useSyncEvents() {
       }),
     );
 
+    // Initial state sync (ADR-0009 / option 2). After a webview reload the
+    // activity store is empty, but the backend retains live detection (its
+    // AppState survives the reload). Pull the current truth once and re-seed
+    // interactive-app activity so an already-running app — especially an idle
+    // Claude/Codex that emits no further title events — is restored
+    // immediately instead of showing as "shell" until the next event.
+    //
+    // Instances may register slightly after this hook mounts, so unresolved
+    // entries are applied via a store subscription that stops once every
+    // pending terminal has been matched.
+    let initialSyncUnsub: (() => void) | undefined;
+    getTerminalStates()
+      .then((states) => {
+        if (cancelled) return;
+        const pending = new Map<string, TerminalActivityInfo>();
+        for (const [terminalId, info] of Object.entries(states)) {
+          if (info.activity?.type === "interactiveApp") {
+            pending.set(terminalId, info.activity);
+          }
+        }
+        if (pending.size === 0) return;
+
+        const applyPending = () => {
+          const { updateInstanceInfo, instances } = useTerminalStore.getState();
+          for (const inst of instances) {
+            const activity = pending.get(inst.id);
+            // Apply only to a freshly-registered instance that no live event has
+            // classified yet (activity still unset). Once any event has set the
+            // activity — to interactiveApp OR to shell/command (e.g. the app
+            // exited during the get_terminal_states round-trip) — that signal is
+            // fresher than the mount snapshot, so we must not override it. This
+            // closes the narrow reload race in both directions.
+            if (activity && !inst.activity) {
+              updateInstanceInfo(inst.id, { activity });
+            }
+            pending.delete(inst.id);
+          }
+          if (pending.size === 0 && initialSyncUnsub) {
+            initialSyncUnsub();
+            initialSyncUnsub = undefined;
+          }
+        };
+
+        applyPending(); // instances already present at mount
+        if (pending.size > 0) {
+          initialSyncUnsub = useTerminalStore.subscribe(applyPending);
+        }
+      })
+      .catch(() => {});
+
     const unsubStore = useTerminalStore.subscribe((state, prevState) => {
       if (state.instances.length < prevState.instances.length) {
         const currentIds = new Set(state.instances.map((i) => i.id));
@@ -408,6 +459,7 @@ export function useSyncEvents() {
     return () => {
       cancelled = true;
       unsubStore();
+      if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
       for (const timer of outputActiveTimers.current.values()) {
         clearTimeout(timer);

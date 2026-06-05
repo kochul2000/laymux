@@ -25,6 +25,7 @@ const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
 const mockGetTerminalSerializeMap = vi.fn();
+const mockGetTerminalStates = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/tauri-api", () => ({
   onSyncCwd: (...args: unknown[]) => mockOnSyncCwd(...args),
@@ -38,6 +39,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
   onTerminalOutputActivity: (...args: unknown[]) => mockOnTerminalOutputActivity(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
+  getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -301,6 +303,111 @@ describe("useSyncEvents", () => {
   it("registers claude-message-changed listener on mount", () => {
     renderHook(() => useSyncEvents());
     expect(mockOnClaudeMessageChanged).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  // ── Initial state sync on mount (ADR-0009 / option 2) ──
+
+  it("restores interactiveApp activity from backend get_terminal_states on mount", async () => {
+    // Webview reload: the backend retains live detection but the activity
+    // store is empty. The mount sync must re-seed it (here: an idle Claude
+    // that will emit no further title events).
+    mockGetTerminalStates.mockResolvedValueOnce({
+      t1: { activity: { type: "interactiveApp", name: "Claude" } },
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("restores interactiveApp activity for a terminal that registers after mount", async () => {
+    // The backend snapshot resolves before TerminalView has registered the
+    // instance; the store subscription must apply it once the instance appears.
+    mockGetTerminalStates.mockResolvedValueOnce({
+      t2: { activity: { type: "interactiveApp", name: "Codex" } },
+    });
+
+    renderHook(() => useSyncEvents());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useTerminalStore.getState().registerInstance({
+        id: "t2",
+        profile: "WSL",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t2");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
+  it("does not overwrite a fresher live interactiveApp detection on mount sync", async () => {
+    // If a live event already classified the pane, the (possibly staler)
+    // mount snapshot must not clobber it.
+    mockGetTerminalStates.mockResolvedValueOnce({
+      t1: { activity: { type: "interactiveApp", name: "Claude" } },
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Codex" },
+    });
+
+    renderHook(() => useSyncEvents());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Codex" });
+  });
+
+  it("does not resurrect an app that a live event already moved to shell during the sync round-trip", async () => {
+    // Reverse reload race: the mount snapshot still shows interactiveApp, but a
+    // live event has since moved the pane to shell (the app exited in the gap).
+    // The fresher live signal wins — the stale snapshot must not re-pin it.
+    mockGetTerminalStates.mockResolvedValueOnce({
+      t1: { activity: { type: "interactiveApp", name: "Claude" } },
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "shell" },
+    });
+
+    renderHook(() => useSyncEvents());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "shell" });
   });
 
   it("updates terminal activityMessage on claude-message-changed event", () => {

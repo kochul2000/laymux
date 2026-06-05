@@ -308,12 +308,35 @@ pub fn create_terminal_session(
                     (false, None)
                 };
 
-                let cr = claude_activity::process_claude_title(
+                let mut cr = claude_activity::process_claude_title(
                     &event.data,
                     was_detected,
                     was_working,
                     prev_working_title.as_deref(),
                 );
+
+                // False-exit suppression (ADR-0009). `process_claude_title`
+                // reports `exited` whenever the new title is not Claude-shaped
+                // — but a transient non-Claude title (a subprocess's OSC title,
+                // a path-like prompt, a compaction frame) is NOT Claude exiting
+                // if the claude process is still alive under this PTY. The
+                // process tree is ground truth: when it still sees `claude`,
+                // neutralize the exit so detection, the cache, the grace window,
+                // and `claude_was_working` survive untouched, and no spurious
+                // "task completed" notification fires. The genuine exit (process
+                // gone) flows through unchanged.
+                if cr.exited
+                    && matches!(
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                        crate::process_tree::PtyAppLiveness::Running("Claude")
+                    )
+                {
+                    cr.exited = false;
+                    cr.task_completed = None;
+                }
 
                 if cr.entered {
                     pty_cb_state
@@ -470,7 +493,22 @@ pub fn create_terminal_session(
                         .map(|known| known.contains(&terminal_id))
                         .unwrap_or(false);
 
-                let cr_codex = codex_activity::process_codex_title(&event.data, was_detected);
+                let mut cr_codex = codex_activity::process_codex_title(&event.data, was_detected);
+
+                // False-exit suppression (ADR-0009), mirror of the Claude path:
+                // a non-Codex title while the `codex` process is still alive
+                // under this PTY is a transient title, not an exit.
+                if cr_codex.exited
+                    && matches!(
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                        crate::process_tree::PtyAppLiveness::Running("Codex")
+                    )
+                {
+                    cr_codex.exited = false;
+                }
 
                 if cr_codex.entered {
                     pty_cb_state.codex_detected.store(true, Ordering::Relaxed);

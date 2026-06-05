@@ -64,6 +64,35 @@ pub fn is_claude_terminal_from_buffer(
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
+    // Authority: the process tree (ADR-0009). A live `claude` process under
+    // this PTY means Claude regardless of how the title/buffer currently look
+    // — refresh the cache and report it. This is what survives a long session
+    // where the "Claude Code" banner has scrolled past the 16KB window and the
+    // title is a bare spinner.
+    //
+    // `NoneAlive` is the process tree's AUTHORITATIVE negative (readable
+    // snapshot + known PID, no claude/codex under it) — as is a different live
+    // app (Codex). Both clear the stale cache and return false WITHOUT falling
+    // through to the buffer scan: otherwise a `Claude Code` banner still
+    // resident in the recent 16KB after a title-less exit (SIGKILL, dropped
+    // callback) would re-pin the pane via the strong-signal branch below until
+    // it scrolls out (PR #292 review P2). Only `Unknown` (no PID / snapshot
+    // miss) is inconclusive and falls back to the title/buffer heuristics.
+    use crate::process_tree::PtyAppLiveness;
+    match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
+        PtyAppLiveness::Running("Claude") => {
+            sync_known_caches(state, terminal_id, "Claude");
+            return true;
+        }
+        PtyAppLiveness::Running(_) | PtyAppLiveness::NoneAlive => {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        PtyAppLiveness::Unknown => {}
+    }
+
     let Some(buf) = buffer else {
         return false;
     };
@@ -294,6 +323,27 @@ pub fn is_codex_terminal_from_buffer(
     terminal_id: &str,
     buffer: Option<&TerminalOutputBuffer>,
 ) -> bool {
+    // Authority: the process tree (ADR-0009). Mirror of the Claude path —
+    // a live `codex` process under this PTY is authoritative (`Running`); the
+    // process tree's authoritative negative (`NoneAlive`) or a live `claude`
+    // both clear the stale cache and return false WITHOUT the buffer-scan
+    // fallback, so a stale `OpenAI Codex` banner can't re-pin a dead pane
+    // (PR #292 review P2). Only `Unknown` (no PID / snapshot miss) falls through.
+    use crate::process_tree::PtyAppLiveness;
+    match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
+        PtyAppLiveness::Running("Codex") => {
+            sync_known_caches(state, terminal_id, "Codex");
+            return true;
+        }
+        PtyAppLiveness::Running(_) | PtyAppLiveness::NoneAlive => {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        PtyAppLiveness::Unknown => {}
+    }
+
     let Some(buf) = buffer else {
         return false;
     };

@@ -544,17 +544,32 @@ pub fn get_terminal_summaries_inner(
 ) -> Result<Vec<TerminalSummaryResponse>, String> {
     let terminals = state.terminals.lock_or_err()?;
     let buffers = state.output_buffers.lock_or_err()?;
+
+    // Phase 1: detect activity WITHOUT holding known_claude_terminals.
+    // `detect_terminal_state` → `is_claude_terminal_from_buffer` may call
+    // `sync_known_caches`, which locks `known_claude_terminals`; holding that
+    // lock here would self-deadlock (std `Mutex` is non-reentrant). Its internal
+    // `known_*_terminals` (#3/#4) and `pty_handles` (#10) acquisitions are fresh
+    // and respect the #1<#2<#3<#4<#10 order while we hold only #1/#2.
+    let detected: Vec<_> = terminal_ids
+        .iter()
+        .filter_map(|tid| {
+            terminals.get(tid.as_str()).map(|session| {
+                let state_info =
+                    activity::detect_terminal_state(state, tid.as_str(), buffers.get(tid.as_str()));
+                (tid, session, state_info)
+            })
+        })
+        .collect();
+
+    // Phase 2: read the per-app cache + notifications. Acquired AFTER detection
+    // so neither is ever held across the re-entrant detect path above.
     let known_claude = state.known_claude_terminals.lock_or_err()?;
     let notifications = state.notifications.lock_or_err()?;
 
-    let mut result = Vec::with_capacity(terminal_ids.len());
+    let mut result = Vec::with_capacity(detected.len());
 
-    for tid in terminal_ids {
-        let Some(session) = terminals.get(tid.as_str()) else {
-            continue;
-        };
-        let state_info =
-            activity::detect_terminal_state(state, tid.as_str(), buffers.get(tid.as_str()));
+    for (tid, session, state_info) in detected {
         let is_claude = known_claude.contains(tid.as_str());
         let term_notifs: Vec<&TerminalNotification> = notifications
             .iter()
@@ -1246,6 +1261,61 @@ mod tests {
 
         let result = get_terminal_summaries_inner(&["t1".into()], &state).unwrap();
         assert!(result[0].is_claude);
+    }
+
+    #[test]
+    fn get_terminal_summaries_no_deadlock_with_claude_banner_and_cache() {
+        // Regression (PR #292 review): get_terminal_summaries_inner held
+        // known_claude_terminals (#3) while detect_terminal_state ->
+        // detect_interactive_app_from_live_title -> sync_known_caches re-locked
+        // the same mutex. std Mutex is non-reentrant, so that self-deadlocks.
+        // A "Claude Code" OSC title in the buffer reaches sync_known_caches via
+        // the direct-title path without needing a live process, reproducing the
+        // hang deterministically. The earlier empty-buffer tests dodged it
+        // because detect_terminal_state early-returns on an empty recent window.
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let state = Arc::new(AppState::new());
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+            buf.push(b"\x1b]0;Claude Code\x07");
+            buffers.insert("t1".into(), buf);
+        }
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".into());
+
+        // Run on a worker thread and assert completion within a timeout so a
+        // regression surfaces as a test FAILURE, not an infinite CI hang.
+        let worker = Arc::clone(&state);
+        let handle =
+            std::thread::spawn(move || get_terminal_summaries_inner(&["t1".into()], &worker));
+        let start = Instant::now();
+        while !handle.is_finished() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "get_terminal_summaries_inner deadlocked while a terminal was in known_claude_terminals"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let result = handle.join().unwrap().unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_claude);
+        assert!(matches!(
+            result[0].activity,
+            crate::terminal::TerminalActivity::InteractiveApp { .. }
+        ));
     }
 
     #[test]

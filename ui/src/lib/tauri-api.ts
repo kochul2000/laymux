@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
+import type { TerminalActivityInfo } from "@/stores/terminal-store";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
@@ -54,6 +55,21 @@ export async function closeTerminalSession(id: string): Promise<void> {
 
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
   return invoke("get_sync_group_terminals", { groupName });
+}
+
+export interface TerminalStateInfo {
+  activity: TerminalActivityInfo;
+}
+
+/**
+ * Snapshot of every live terminal's backend-detected activity. Unlike the
+ * `terminal-title-changed` event stream (which only fires on new OSC titles),
+ * this is a pull of the current truth — used on mount/reload to re-seed the
+ * activity store for already-running interactive apps that emit no further
+ * events (e.g. an idle Claude after a webview reload). See ADR-0009.
+ */
+export async function getTerminalStates(): Promise<Record<string, TerminalStateInfo>> {
+  return invoke("get_terminal_states");
 }
 
 export interface LxResponse {

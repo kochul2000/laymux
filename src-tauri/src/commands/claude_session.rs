@@ -241,119 +241,13 @@ fn read_claude_session_files(
 }
 
 /// Get all descendant PIDs of a given process (including the process itself).
-/// Uses platform-specific process enumeration.
+/// Delegates to the shared process enumeration in `crate::process_tree`
+/// (ADR-0009) so there is a single snapshot implementation per platform.
 fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
-    use std::collections::{HashSet, VecDeque};
-
-    let mut result = vec![root_pid];
-    let mut seen = HashSet::new();
-    seen.insert(root_pid);
-
-    #[cfg(windows)]
-    {
-        match create_process_snapshot() {
-            Ok(snapshot) => {
-                let parent_map = build_parent_map(&snapshot);
-                let mut queue = VecDeque::new();
-                queue.push_back(root_pid);
-                while let Some(pid) = queue.pop_front() {
-                    if let Some(children) = parent_map.get(&pid) {
-                        for &child in children {
-                            if seen.insert(child) {
-                                result.push(child);
-                                queue.push_back(child);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    root_pid,
-                    error = %e,
-                    "Failed to create process snapshot"
-                );
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut queue = VecDeque::new();
-        queue.push_back(root_pid);
-        while let Some(pid) = queue.pop_front() {
-            let children_path = format!("/proc/{pid}/task/{pid}/children");
-            match std::fs::read_to_string(&children_path) {
-                Ok(content) => {
-                    for token in content.split_whitespace() {
-                        if let Ok(child_pid) = token.parse::<u32>() {
-                            if seen.insert(child_pid) {
-                                result.push(child_pid);
-                                queue.push_back(child_pid);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        pid,
-                        error = %e,
-                        "Cannot read /proc children (CONFIG_PROC_CHILDREN may be disabled)"
-                    );
-                }
-            }
-        }
-    }
-
-    result
-}
-
-#[cfg(windows)]
-fn create_process_snapshot() -> Result<Vec<(u32, u32)>, String> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
-    };
-
-    /// RAII guard that closes a Windows HANDLE on drop, preventing leaks on panic.
-    struct SnapshotGuard(windows_sys::Win32::Foundation::HANDLE);
-    impl Drop for SnapshotGuard {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
-            return Err("Failed to create snapshot".into());
-        }
-        let _guard = SnapshotGuard(snap);
-
-        let mut entry: PROCESSENTRY32 = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
-        let mut pairs = Vec::new();
-        if Process32First(snap, &mut entry) != 0 {
-            loop {
-                pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-                if Process32Next(snap, &mut entry) == 0 {
-                    break;
-                }
-            }
-        }
-        Ok(pairs)
-    }
-}
-
-#[cfg(windows)]
-fn build_parent_map(snapshot: &[(u32, u32)]) -> HashMap<u32, Vec<u32>> {
-    let mut map: HashMap<u32, Vec<u32>> = HashMap::new();
-    for &(pid, ppid) in snapshot {
-        map.entry(ppid).or_default().push(pid);
-    }
-    map
+    let snapshot = crate::process_tree::snapshot_processes();
+    crate::process_tree::descendant_pids(&snapshot, root_pid)
+        .into_iter()
+        .collect()
 }
 
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.

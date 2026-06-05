@@ -98,6 +98,7 @@ vi.mock("@/lib/tauri-api", () => {
     onTerminalTitleChanged: vi.fn().mockResolvedValue(unlisten),
     markClaudeTerminal: vi.fn().mockResolvedValue(true),
     onTerminalOutputActivity: vi.fn().mockResolvedValue(unlisten),
+    getTerminalStates: vi.fn().mockResolvedValue({}),
     cleanTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
     loadWindowGeometry: vi.fn().mockResolvedValue(null),
     saveWindowGeometry: vi.fn().mockResolvedValue(undefined),
