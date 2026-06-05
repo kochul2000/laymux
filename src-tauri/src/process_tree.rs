@@ -139,16 +139,55 @@ fn with_snapshot<R>(force_fresh: bool, f: impl FnOnce(&[ProcessEntry]) -> R) -> 
     f(&guard.as_ref().expect("snapshot cache populated").1)
 }
 
-/// The liveness oracle: which interactive app, if any, is alive under the PTY
-/// backing `terminal_id`. Returns `None` when the terminal has no PTY, the PTY
-/// has no PID (e.g. serial connections), or no `claude`/`codex` process is in
-/// its descendant tree.
+/// Result of the liveness oracle. Distinguishes an authoritative negative from
+/// "no signal" — the distinction the call sites need: a negative is ground
+/// truth and must beat stale heuristics (e.g. a `Claude Code` banner still
+/// resident in the recent 16KB buffer after a title-less exit — SIGKILL, a
+/// dropped PTY callback), whereas `Unknown` must fall back to those heuristics
+/// rather than assert an exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PtyAppLiveness {
+    /// `claude`/`codex` is alive in the PTY's descendant tree.
+    Running(&'static str),
+    /// The snapshot was readable and the PTY's PID is known, but no
+    /// `claude`/`codex` process is under it — authoritative "nothing alive here".
+    NoneAlive,
+    /// No liveness signal: the PTY has no PID (e.g. serial), or the process
+    /// snapshot could not be enumerated. Callers fall back to title/buffer.
+    Unknown,
+}
+
+/// Classify liveness from a `child_pid` and a process `snapshot`. Pure — split
+/// out so the negative/unknown distinction is unit-testable without a live PTY
+/// or real OS enumeration.
+///
+/// - `child_pid == None` → `Unknown` (no PID to anchor the tree walk).
+/// - empty `snapshot` → `Unknown` (enumeration failed; there is always at least
+///   the calling process, so an empty list means failure, not "no processes").
+/// - non-empty snapshot, app found → `Running`.
+/// - non-empty snapshot, no app found → `NoneAlive` (authoritative negative).
+fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness {
+    let Some(pid) = child_pid else {
+        return PtyAppLiveness::Unknown;
+    };
+    if snapshot.is_empty() {
+        return PtyAppLiveness::Unknown;
+    }
+    match match_interactive_app(snapshot, pid) {
+        Some(app) => PtyAppLiveness::Running(app),
+        None => PtyAppLiveness::NoneAlive,
+    }
+}
+
+/// The liveness oracle: whether `claude`/`codex` is alive under the PTY backing
+/// `terminal_id` (`Running`), or the process tree authoritatively says nothing
+/// is (`NoneAlive`), or there is no signal (`Unknown`).
 ///
 /// Uses the TTL-cached snapshot so repeated calls within a burst of title
 /// events share a single enumeration. For the hot positive-detection path,
 /// a snapshot up to `SNAPSHOT_TTL` stale is fine (a just-exited process is
 /// reported alive for at most one TTL, then self-corrects).
-pub fn interactive_app_in_pty(state: &AppState, terminal_id: &str) -> Option<&'static str> {
+pub fn interactive_app_in_pty(state: &AppState, terminal_id: &str) -> PtyAppLiveness {
     app_in_pty(state, terminal_id, false)
 }
 
@@ -157,16 +196,20 @@ pub fn interactive_app_in_pty(state: &AppState, terminal_id: &str) -> Option<&'s
 /// stale "still alive" snapshot taken just before the process exited would
 /// wrongly suppress a genuine exit — by the time the shell emits its prompt
 /// title the process is already gone, so the decision must use ground truth.
-pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> Option<&'static str> {
+pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> PtyAppLiveness {
     app_in_pty(state, terminal_id, true)
 }
 
-fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> Option<&'static str> {
-    let child_pid = {
-        let handles = state.pty_handles.lock_or_err().ok()?;
-        handles.get(terminal_id).and_then(|h| h.child_pid())?
+fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppLiveness {
+    let child_pid = match state.pty_handles.lock_or_err() {
+        Ok(handles) => handles.get(terminal_id).and_then(|h| h.child_pid()),
+        Err(_) => None,
     };
-    with_snapshot(force_fresh, |snap| match_interactive_app(snap, child_pid))
+    // No PID → no tree to walk; skip enumeration entirely.
+    if child_pid.is_none() {
+        return PtyAppLiveness::Unknown;
+    }
+    with_snapshot(force_fresh, |snap| classify(child_pid, snap))
 }
 
 // ── OS process enumeration ────────────────────────────────────────
@@ -396,5 +439,48 @@ mod tests {
             entry(900, 1, "codex.exe"),
         ];
         assert_eq!(match_interactive_app(&snapshot, 100), None);
+    }
+
+    // ── classify: negative liveness vs unknown (PR #292 review P2) ──
+
+    #[test]
+    fn classify_unknown_without_pid() {
+        // No PID to anchor the walk → no signal, even with a populated snapshot.
+        let snapshot = vec![entry(100, 1, "pwsh.exe")];
+        assert_eq!(classify(None, &snapshot), PtyAppLiveness::Unknown);
+    }
+
+    #[test]
+    fn classify_unknown_on_empty_snapshot() {
+        // Enumeration failure (empty list) is "no signal", not a negative —
+        // there is always at least the calling process in a real snapshot.
+        assert_eq!(classify(Some(100), &[]), PtyAppLiveness::Unknown);
+    }
+
+    #[test]
+    fn classify_running_when_app_in_tree() {
+        let snapshot = vec![entry(100, 1, "pwsh.exe"), entry(200, 100, "claude.exe")];
+        assert_eq!(
+            classify(Some(100), &snapshot),
+            PtyAppLiveness::Running("Claude")
+        );
+    }
+
+    #[test]
+    fn classify_none_alive_when_pid_and_snapshot_but_no_app() {
+        // The crux of the P2 fix: a readable snapshot + known PID but no
+        // claude/codex under it is an AUTHORITATIVE negative, not Unknown. This
+        // is what lets a title-less native exit (SIGKILL) beat a stale
+        // "Claude Code" banner still sitting in the recent buffer.
+        let snapshot = vec![entry(100, 1, "pwsh.exe"), entry(200, 100, "git.exe")];
+        assert_eq!(classify(Some(100), &snapshot), PtyAppLiveness::NoneAlive);
+    }
+
+    #[test]
+    fn classify_none_alive_when_pid_absent_from_snapshot() {
+        // PTY child fully gone (reaped): its PID is not even in the snapshot.
+        // Still authoritative negative — nothing of ours is alive.
+        let snapshot = vec![entry(1, 0, "init"), entry(2, 1, "systemd")];
+        assert_eq!(classify(Some(9999), &snapshot), PtyAppLiveness::NoneAlive);
     }
 }
