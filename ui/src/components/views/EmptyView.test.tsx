@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EmptyView } from "./EmptyView";
@@ -184,6 +184,16 @@ describe("EmptyView", () => {
     } finally {
       restore();
     }
+  });
+
+  it("gives each option label min-w-0 so truncate works on the flex child (issue #298)", () => {
+    // jsdom does not lay out, so guard the class contract instead: a flex child
+    // needs min-w-0 for `truncate` to clip rather than overflow the card.
+    render(<EmptyView />);
+    const button = screen.getByTestId("empty-view-memo");
+    const label = within(button).getByText("Memo");
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
   });
 
   it("does not clip top content when overflowing (issue #298)", () => {

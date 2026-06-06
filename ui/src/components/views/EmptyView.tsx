@@ -101,8 +101,10 @@ function EmptyViewCard({
           {shortcutNum <= 9 ? shortcutNum : ""}
         </span>
 
-        {/* Label */}
-        <span className="flex-1 truncate text-xs font-medium">{option.label}</span>
+        {/* Label — min-w-0 is required for truncate to work on a flex child,
+            otherwise the default min-width:auto keeps the nowrap label at its
+            intrinsic width and it overflows the card instead of clipping. */}
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{option.label}</span>
 
         {/* Category tag + drag handle drop out at narrow widths (see #298) —
             they wrap and overflow the card, crowding out the label. */}
