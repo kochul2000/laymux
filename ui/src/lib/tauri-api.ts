@@ -506,13 +506,20 @@ export function onTerminalOutput(
   });
 }
 
-/** Listen for sync-cwd events from the backend. */
+/**
+ * Listen for sync-cwd events from the backend.
+ *
+ * `force`(issue #293): 컨트롤 패널의 "1회 전파" 버튼이 `propagate_cwd_once`(force=true)
+ * 로 트리거한 전파에는 true 가 실린다. 평소 동기화를 꺼둔 file explorer 가 이 1회 전파에는
+ * 따라오도록 프론트 게이트를 우회하는 데 사용한다.
+ */
 export function onSyncCwd(
   callback: (data: {
     path: string;
     terminalId: string;
     groupId: string;
     targets: string[];
+    force?: boolean;
   }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-cwd", (event) => {
@@ -522,6 +529,7 @@ export function onSyncCwd(
         terminalId: string;
         groupId: string;
         targets: string[];
+        force?: boolean;
       },
     );
   });

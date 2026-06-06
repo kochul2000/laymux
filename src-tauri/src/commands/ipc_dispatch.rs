@@ -47,6 +47,7 @@ fn handle_lx_message_dispatch(
             group_id,
             all,
             target_group,
+            force,
         } => do_sync_cwd(
             state,
             app,
@@ -55,7 +56,7 @@ fn handle_lx_message_dispatch(
             &path,
             all,
             target_group.as_deref(),
-            false,
+            force,
         ),
         LxMessage::SyncBranch {
             branch,
@@ -239,6 +240,8 @@ pub fn do_sync_cwd(
         update_terminal_cwd(state, tid, &normalized_path);
     }
 
+    // `force`(issue #293): file explorer/viewer 처럼 평소 동기화를 꺼둔 프론트 view 가
+    // 이 1회성 전파에는 따라오도록, 프론트 리스너가 게이트를 우회할 수 있게 force 를 싣는다.
     let _ = app.emit(
         EVENT_SYNC_CWD,
         serde_json::json!({
@@ -246,6 +249,7 @@ pub fn do_sync_cwd(
             "terminalId": terminal_id,
             "groupId": group_id,
             "targets": receiving_targets,
+            "force": force,
         }),
     );
 
@@ -1956,6 +1960,41 @@ mod tests {
         assert!(
             filtered.contains(&"t3".to_string()),
             "t3 with cwd_receive=true should pass"
+        );
+    }
+
+    #[test]
+    fn force_bypasses_cwd_receive_filter() {
+        // 회귀(issue #293): force=true 1회 전파는 대상의 cwd_receive off 를 무시하고
+        // 모든 대상에 전파해야 한다. do_sync_cwd 의 분기
+        //   `let receiving_targets = if force { all_targets } else { filter_targets_cwd_receive(..) }`
+        // 를 직접 미러링하여 검증한다(do_sync_cwd 는 AppHandle 이 필요해 단위 테스트 곤란).
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut t2 = TerminalSession::new("t2".into(), TerminalConfig::default());
+            t2.cwd_receive = false; // 평소 수신 비활성 (file explorer 등)
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+            terminals.insert("t2".into(), t2);
+        }
+
+        let all_targets: Vec<String> = vec!["t1".into(), "t2".into()];
+
+        // 일반 경로: cwd_receive off 인 t2 제외.
+        let normal = filter_targets_cwd_receive(&state, &all_targets);
+        assert!(
+            !normal.contains(&"t2".to_string()),
+            "normal path excludes cwd_receive=off"
+        );
+
+        // force 경로: 필터를 우회하므로 t2 포함.
+        let forced = all_targets.clone();
+        assert!(
+            forced.contains(&"t2".to_string()),
+            "force path includes cwd_receive=off targets"
         );
     }
 

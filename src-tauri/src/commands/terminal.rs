@@ -1220,6 +1220,16 @@ mod tests {
     }
 
     #[test]
+    fn resolve_propagate_source_errors_for_file_explorer_id() {
+        // 회귀(issue #293): file explorer 페인은 PTY 세션이 없어
+        // `file-explorer-<paneId>` id 가 state.terminals 에 존재하지 않는다.
+        // 따라서 `propagate_cwd_once` 의 백엔드 경로는 Err 가 되며, 무음 no-op 대신
+        // 프론트(FileExplorerView)의 force sync-cwd 경로로 처리해야 함을 명시한다.
+        let state = AppState::new();
+        assert!(resolve_propagate_source(&state, "file-explorer-pane-x").is_err());
+    }
+
+    #[test]
     fn resolve_propagate_source_noop_when_cwd_absent() {
         let state = AppState::new();
         {

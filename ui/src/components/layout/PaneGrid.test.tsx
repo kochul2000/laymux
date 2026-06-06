@@ -10,18 +10,23 @@ vi.mock("@/components/views/TerminalView", () => ({
 
 // 1회성 CWD 전파 버튼이 호출하는 백엔드 invoke 를 stub 한다 (issue #293).
 // 나머지 tauri-api 함수(FileExplorerView 등이 마운트 시 사용)는 실제 구현을 유지한다.
+// 단, 이벤트 리스너(onSyncCwd/onTerminalCwdChanged)는 실제 Tauri `listen` 을 호출해
+// jsdom 에서 throw 하므로 no-op 으로 stub 한다.
 const propagateCwdOnceMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/tauri-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tauri-api")>();
   return {
     ...actual,
     propagateCwdOnce: (terminalId: string) => propagateCwdOnceMock(terminalId),
+    onSyncCwd: vi.fn().mockResolvedValue(vi.fn()),
+    onTerminalCwdChanged: vi.fn().mockResolvedValue(vi.fn()),
   };
 });
 
 import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -295,8 +300,12 @@ describe("PaneGrid", () => {
     expect(propagateCwdOnceMock).toHaveBeenCalledWith("terminal-pane-x");
   });
 
-  it("propagates CWD once with the file-explorer instanceId on click", () => {
+  // file explorer 는 백엔드 PTY 세션이 없어 propagate_cwd_once 커맨드를 쓰면
+  // Session not found 로 무음 실패한다(issue #293). 대신 cwd-propagate-store 의
+  // 요청 카운터를 올려, cwd 를 아는 FileExplorerView 가 force sync-cwd 를 디스패치하게 한다.
+  it("requests a propagate via the store for FileExplorerView (no backend invoke)", () => {
     propagateCwdOnceMock.mockClear();
+    useCwdPropagateStore.setState({ requests: {} });
     const onePane: GridPane[] = [
       {
         id: "pane-fe",
@@ -310,6 +319,8 @@ describe("PaneGrid", () => {
     render(<PaneGrid {...defaultProps} panes={onePane} onSetPaneView={vi.fn()} />);
     fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
     fireEvent.click(screen.getByTestId("pane-control-cwd-propagate-once"));
-    expect(propagateCwdOnceMock).toHaveBeenCalledWith("file-explorer-pane-fe");
+    // 백엔드 커맨드는 호출되지 않고, 스토어 요청 카운터가 증가해야 한다.
+    expect(propagateCwdOnceMock).not.toHaveBeenCalled();
+    expect(useCwdPropagateStore.getState().requests["pane-fe"]).toBe(1);
   });
 });

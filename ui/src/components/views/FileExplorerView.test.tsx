@@ -1,15 +1,30 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FileExplorerView } from "./FileExplorerView";
-import { clipboardWriteText, listDirectory, getHomeDirectory } from "@/lib/tauri-api";
+import {
+  clipboardWriteText,
+  listDirectory,
+  getHomeDirectory,
+  handleLxMessage,
+} from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 
 // --- Mocks ---
 
 let cwdCallback: ((data: { terminalId: string; cwd: string; cwdSend?: boolean }) => void) | null =
   null;
+let syncCwdCallback:
+  | ((data: {
+      path: string;
+      terminalId: string;
+      groupId: string;
+      targets: string[];
+      force?: boolean;
+    }) => void)
+  | null = null;
 
 vi.mock("@/lib/tauri-api", () => ({
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
@@ -20,6 +35,22 @@ vi.mock("@/lib/tauri-api", () => ({
     .mockImplementation(
       (cb: (data: { terminalId: string; cwd: string; cwdSend?: boolean }) => void) => {
         cwdCallback = cb;
+        return Promise.resolve(vi.fn());
+      },
+    ),
+  onSyncCwd: vi
+    .fn()
+    .mockImplementation(
+      (
+        cb: (data: {
+          path: string;
+          terminalId: string;
+          groupId: string;
+          targets: string[];
+          force?: boolean;
+        }) => void,
+      ) => {
+        syncCwdCallback = cb;
         return Promise.resolve(vi.fn());
       },
     ),
@@ -55,6 +86,9 @@ describe("FileExplorerView", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     cwdCallback = null;
+    syncCwdCallback = null;
+    useCwdPropagateStore.setState({ requests: {} });
+    vi.mocked(handleLxMessage).mockClear();
     vi.mocked(clipboardWriteText).mockClear();
     vi.mocked(listDirectory).mockClear();
     vi.mocked(getHomeDirectory).mockClear();
@@ -340,6 +374,104 @@ describe("FileExplorerView", () => {
 
     // listDirectory SHOULD be called because cwdSend is true
     expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
+  });
+
+  // ── 1회성 CWD 전파 (issue #293) ──
+
+  it("follows a force sync-cwd event even when cwdReceive is off", async () => {
+    // 평소 수신을 꺼둔 file explorer 도 force 1회 전파에는 따라와야 한다.
+    render(<FileExplorerView {...defaultProps} cwdReceive={false} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    act(() => {
+      syncCwdCallback?.({
+        path: "/home/user/forced",
+        terminalId: "terminal-source",
+        groupId: "ws-1",
+        targets: [],
+        force: true,
+      });
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/home/user/forced");
+  });
+
+  it("ignores a non-force sync-cwd event (handled by terminal-cwd-changed path)", async () => {
+    render(<FileExplorerView {...defaultProps} cwdReceive={false} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    act(() => {
+      syncCwdCallback?.({
+        path: "/home/user/normal",
+        terminalId: "terminal-source",
+        groupId: "ws-1",
+        targets: [],
+        force: false,
+      });
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("ignores a force sync-cwd event from a different sync group", async () => {
+    render(<FileExplorerView {...defaultProps} cwdReceive={false} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    act(() => {
+      syncCwdCallback?.({
+        path: "/home/user/elsewhere",
+        terminalId: "terminal-source",
+        groupId: "other-group",
+        targets: [],
+        force: true,
+      });
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a force sync-cwd as source when propagate is requested", async () => {
+    render(<FileExplorerView {...defaultProps} paneId="pane-fe" />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(handleLxMessage).mockClear();
+
+    // 컨트롤 바 버튼이 호출하는 것과 동일한 요청.
+    act(() => {
+      useCwdPropagateStore.getState().requestPropagate("pane-fe");
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(handleLxMessage).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(vi.mocked(handleLxMessage).mock.calls[0][0] as string);
+    expect(payload).toMatchObject({
+      action: "sync-cwd",
+      path: "/home/user",
+      terminal_id: "file-explorer-test-1",
+      group_id: "ws-1",
+      force: true,
+    });
   });
 
   it("falls back to home directory when no CWD available (#274)", async () => {

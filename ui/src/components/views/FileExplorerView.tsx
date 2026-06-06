@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 import {
   clipboardWriteText,
   listDirectory,
   getHomeDirectory,
   statPath,
   onTerminalCwdChanged,
+  onSyncCwd,
   handleLxMessage,
   type DirEntry,
 } from "@/lib/tauri-api";
@@ -36,6 +38,7 @@ export interface FileExplorerViewProps {
 
 export function FileExplorerView({
   instanceId,
+  paneId,
   syncGroup,
   cwdSend = true,
   cwdReceive = true,
@@ -190,28 +193,78 @@ export function FileExplorerView({
     }
   }, [canGoForward, historyIndex, history, refreshListing, cwdSend, syncGroup, instanceId]);
 
+  // --- Apply an externally-arrived CWD (sync group follow) ---
+  const applyExternalCwd = useCallback(
+    (cwd: string) => {
+      if (cwd === currentCwdRef.current) return;
+      setCurrentCwd(cwd);
+      refreshListing(cwd);
+      setHistory((prev) => [...prev.slice(0, historyIndexRef.current + 1), cwd]);
+      setHistoryIndex((prev) => prev + 1);
+    },
+    [refreshListing],
+  );
+
   // --- Listen for CWD changes from syncGroup terminals ---
+  //
+  // 두 이벤트를 항상 등록한다(cwdReceive 와 무관, issue #293):
+  //  1) terminal-cwd-changed — 일반 OSC cwd 변경. cwdReceive on + 소스 cwdSend 일 때만 따라옴.
+  //  2) sync-cwd(force) — 컨트롤 패널 "1회 전파" 버튼. cwdReceive 가 off 여도 force 면 따라옴.
+  // 리스너를 항상 등록해야 평소 동기화를 꺼둔 file explorer 도 force 1회 전파를 받는다.
   useEffect(() => {
-    if (!cwdReceive || !syncGroup) return;
+    if (!syncGroup) return;
     let cancelled = false;
-    const promise = onTerminalCwdChanged((data) => {
+
+    const normalPromise = onTerminalCwdChanged((data) => {
       if (cancelled) return;
-      // Skip if source terminal has cwdSend disabled
-      if (data.cwdSend === false) return;
-      // Check if the changed terminal belongs to our syncGroup
+      // 일반 경로 게이트: 수신 비활성이거나 소스 cwdSend off 면 무시.
+      if (!cwdReceive || data.cwdSend === false) return;
+      // 변경된 터미널이 우리 syncGroup 소속인지 확인.
       const terminal = useTerminalStore.getState().instances.find((t) => t.id === data.terminalId);
       if (!terminal || terminal.syncGroup !== syncGroup) return;
-      if (data.cwd === currentCwdRef.current) return;
-      setCurrentCwd(data.cwd);
-      refreshListing(data.cwd);
-      setHistory((prev) => [...prev.slice(0, historyIndexRef.current + 1), data.cwd]);
-      setHistoryIndex((prev) => prev + 1);
+      applyExternalCwd(data.cwd);
     });
+
+    const forcePromise = onSyncCwd((data) => {
+      if (cancelled) return;
+      // force 전파만 처리(일반 전파는 위 terminal-cwd-changed 경로가 담당).
+      if (!data.force) return;
+      // 같은 sync group 의 다른 소스가 보낸 force 전파에만 반응(자기 자신 제외).
+      if (data.groupId !== syncGroup || data.terminalId === instanceId) return;
+      applyExternalCwd(data.path);
+    });
+
     return () => {
       cancelled = true;
-      promise.then((unlisten) => unlisten());
+      normalPromise.then((unlisten) => unlisten());
+      forcePromise.then((unlisten) => unlisten());
     };
-  }, [cwdReceive, syncGroup, refreshListing]);
+  }, [cwdReceive, syncGroup, instanceId, applyExternalCwd]);
+
+  // --- One-shot CWD propagation as a source (issue #293) ---
+  //
+  // file explorer 는 백엔드 PTY 세션이 없어 `propagate_cwd_once` 커맨드를 쓸 수 없다.
+  // 컨트롤 바 버튼이 `cwd-propagate-store` 의 요청 카운터를 올리면, 여기서 현재 cwd 를
+  // force one-shot `sync-cwd` 로 직접 디스패치한다(평소 cwdSend off 여도 1회는 전파).
+  const propagateRequest = useCwdPropagateStore((s) => (paneId ? (s.requests[paneId] ?? 0) : 0));
+  const lastHandledRequestRef = useRef(propagateRequest);
+  useEffect(() => {
+    if (propagateRequest === lastHandledRequestRef.current) return;
+    lastHandledRequestRef.current = propagateRequest;
+    const cwd = currentCwdRef.current;
+    if (!cwd || !syncGroup) return;
+    handleLxMessage(
+      JSON.stringify({
+        action: "sync-cwd",
+        path: cwd,
+        terminal_id: instanceId,
+        group_id: syncGroup,
+        force: true,
+      }),
+    ).catch((err) => {
+      console.warn(`[propagateCwdOnce] ${instanceId} force 1회 전파 실패:`, err);
+    });
+  }, [propagateRequest, syncGroup, instanceId]);
 
   // --- Initial listing ---
   useEffect(() => {
