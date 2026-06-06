@@ -27,6 +27,33 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
+/**
+ * Install a ResizeObserver stub that reports a fixed content-box size, so the
+ * size-adaptive behavior (#298) can be exercised in jsdom. Returns a restore fn.
+ */
+function mockResizeObserverSize(width: number, height: number): () => void {
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    private cb: ResizeObserverCallback;
+    constructor(cb: ResizeObserverCallback) {
+      this.cb = cb;
+    }
+    observe(target: Element) {
+      setTimeout(() => {
+        this.cb(
+          [{ target, contentRect: { width, height } } as unknown as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      }, 0);
+    }
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  return () => {
+    globalThis.ResizeObserver = original;
+  };
+}
+
 describe("EmptyView", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
@@ -127,28 +154,7 @@ describe("EmptyView", () => {
 
   it("hides the guidance header when the pane is too short (issue #298)", async () => {
     // Report a content-box height below the compact threshold so the header drops.
-    const original = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private cb: ResizeObserverCallback;
-      constructor(cb: ResizeObserverCallback) {
-        this.cb = cb;
-      }
-      observe(target: Element) {
-        setTimeout(() => {
-          this.cb(
-            [
-              {
-                target,
-                contentRect: { width: 150, height: 100 },
-              } as unknown as ResizeObserverEntry,
-            ],
-            this as unknown as ResizeObserver,
-          );
-        }, 0);
-      }
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+    const restore = mockResizeObserverSize(400, 100);
     try {
       render(<EmptyView />);
       // Option list stays visible — only the guidance is dropped.
@@ -158,7 +164,25 @@ describe("EmptyView", () => {
         expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
       });
     } finally {
-      globalThis.ResizeObserver = original;
+      restore();
+    }
+  });
+
+  it("drops card chrome and hint when the pane is too narrow (issue #298)", async () => {
+    // Narrow but tall: cards shed their category tag + drag handle and the
+    // header hint is hidden, but the title and the option list stay visible.
+    const restore = mockResizeObserverSize(120, 600);
+    try {
+      render(<EmptyView />);
+      expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryAllByText("⠿")).toHaveLength(0);
+        expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
+      });
+      // Title still shown because the pane is tall enough.
+      expect(screen.getByText("Select a view")).toBeInTheDocument();
+    } finally {
+      restore();
     }
   });
 
