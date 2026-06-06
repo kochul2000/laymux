@@ -27,15 +27,20 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 // Mock TerminalView to capture props
-const terminalViewProps: { syncGroup?: string; profile?: string }[] = [];
+const terminalViewProps: { syncGroup?: string; profile?: string; instanceId?: string }[] = [];
 vi.mock("./TerminalView", () => ({
   TerminalView: (props: { instanceId: string; profile: string; syncGroup: string }) => {
-    terminalViewProps.push({ syncGroup: props.syncGroup, profile: props.profile });
+    terminalViewProps.push({
+      syncGroup: props.syncGroup,
+      profile: props.profile,
+      instanceId: props.instanceId,
+    });
     return (
       <div
         data-testid="mock-terminal"
         data-syncgroup={props.syncGroup}
         data-profile={props.profile}
+        data-instanceid={props.instanceId}
       />
     );
   },
@@ -238,5 +243,21 @@ describe("ViewRenderer", () => {
     // The mock captures syncGroup; we mainly assert that the component
     // rendered without creating a new instance by checking testid is still present
     expect(screen.getByTestId("mock-terminal")).toBe(terminal);
+  });
+
+  it("paneId 가 빈 문자열이면 fallback id 로 폴백한다 (빈 instanceId 방지)", () => {
+    render(
+      <ViewRenderer
+        viewType="TerminalView"
+        viewConfig={{ type: "TerminalView" }}
+        workspaceName="Default"
+        paneId=""
+      />,
+    );
+    const terminal = screen.getByTestId("mock-terminal");
+    const instanceId = terminal.getAttribute("data-instanceid");
+    // "terminal-" 처럼 식별자가 빈 id 가 만들어지면 안 된다.
+    expect(instanceId).not.toBe("terminal-");
+    expect(instanceId).toMatch(/^terminal-.+/);
   });
 });

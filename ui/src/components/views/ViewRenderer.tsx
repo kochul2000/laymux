@@ -48,7 +48,7 @@ function TerminalViewWithSyncCwd({
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = getInstanceId("TerminalView", paneId ?? fallbackId);
+  const instanceId = getInstanceId("TerminalView", paneId || fallbackId);
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
   const lastClaudeSession = (viewConfig?.lastClaudeSession as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
@@ -104,7 +104,7 @@ function FileExplorerViewWithSyncCwd({
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = getInstanceId("FileExplorerView", paneId ?? fallbackId);
+  const instanceId = getInstanceId("FileExplorerView", paneId || fallbackId);
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
 
   // Use file explorer's shellProfile setting, or fall back to defaultProfile
