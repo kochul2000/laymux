@@ -1055,20 +1055,42 @@ pub fn propagate_cwd_once(
 /// - 세션 없음 → `Err`
 /// - 세션은 있으나 CWD 가 없거나 빈 문자열 → `Ok(None)` (전파 no-op)
 /// - 그 외 → `Ok(Some((cwd, sync_group)))`
+///
+/// P2(issue #293): sync group 은 `session.config.sync_group` 이 아니라 멤버십의
+/// 권위 소스인 `state.sync_groups` 에서 현재 그룹을 조회한다. `update_terminal_sync_group`
+/// 은 `state.sync_groups` membership 만 옮기고 `session.config.sync_group` 은 갱신하지
+/// 않으므로, config 를 읽으면 런타임에 그룹이 바뀐 터미널이 stale 한 옛 그룹으로
+/// 전파되거나 no-op 이 된다. 권위 소스를 단일화(sync_groups 조회)해 stale 위험을 없앤다.
+///
+/// 락 순서: `terminals`(1) → `sync_groups`(8) (state.rs Lock ordering 준수).
 fn resolve_propagate_source(
     state: &AppState,
     terminal_id: &str,
 ) -> Result<Option<(String, String)>, String> {
-    let terminals = state.terminals.lock_or_err()?;
-    let session = terminals
-        .get(terminal_id)
-        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
-    let sync_group = session.config.sync_group.clone();
-    Ok(session
-        .cwd
-        .clone()
-        .filter(|c| !c.is_empty())
-        .map(|cwd| (cwd, sync_group)))
+    let cwd = {
+        let terminals = state.terminals.lock_or_err()?;
+        let session = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
+        session.cwd.clone().filter(|c| !c.is_empty())
+    };
+
+    let Some(cwd) = cwd else {
+        return Ok(None);
+    };
+
+    // 현재 멤버십 기준으로 이 terminal 이 속한 그룹을 찾는다(권위 소스).
+    // 그룹에 속하지 않으면 빈 문자열 — do_sync_cwd 가 group_id 로 받아 no-op 대상이 된다.
+    let sync_group = {
+        let groups = state.sync_groups.lock_or_err()?;
+        groups
+            .iter()
+            .find(|(_, g)| g.terminal_ids.iter().any(|id| id == terminal_id))
+            .map(|(name, _)| name.clone())
+            .unwrap_or_default()
+    };
+
+    Ok(Some((cwd, sync_group)))
 }
 
 #[tauri::command]
@@ -1257,20 +1279,83 @@ mod tests {
 
     #[test]
     fn resolve_propagate_source_returns_cwd_and_group() {
+        // 그룹은 권위 소스인 state.sync_groups 멤버십에서 해석한다(P2).
         let state = AppState::new();
         {
             let mut terminals = state.terminals.lock().unwrap();
+            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+            session.cwd = Some("/home/user/project".into());
+            terminals.insert("t1".into(), session);
+        }
+        {
+            let mut groups = state.sync_groups.lock().unwrap();
+            let mut group = crate::terminal::SyncGroup::new("ws-1".into());
+            group.add_terminal("t1".into());
+            groups.insert("ws-1".into(), group);
+        }
+        assert_eq!(
+            resolve_propagate_source(&state, "t1").unwrap(),
+            Some(("/home/user/project".into(), "ws-1".into()))
+        );
+    }
+
+    #[test]
+    fn resolve_propagate_source_empty_group_when_not_in_any_group() {
+        // 어떤 그룹에도 속하지 않은 터미널 → 그룹은 빈 문자열(do_sync_cwd no-op 대상).
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+            session.cwd = Some("/home/user/project".into());
+            terminals.insert("t1".into(), session);
+        }
+        assert_eq!(
+            resolve_propagate_source(&state, "t1").unwrap(),
+            Some(("/home/user/project".into(), String::new()))
+        );
+    }
+
+    #[test]
+    fn resolve_propagate_source_uses_current_group_after_change() {
+        // P2 회귀(issue #293): update_terminal_sync_group 으로 런타임에 그룹을 바꾸면
+        // resolve_propagate_source 는 stale 한 config 가 아니라 새 멤버십(state.sync_groups)
+        // 기준으로 새 그룹을 해석해야 한다. update_terminal_sync_group 은 session.config.sync_group
+        // 을 갱신하지 않으므로, config 를 읽던 옛 구현은 여기서 옛 그룹으로 잘못 해석했다.
+        let state = std::sync::Arc::new(AppState::new());
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            // 초기 config.sync_group 은 old-group 으로 둬, config 와 멤버십이 어긋난 상황을 만든다.
             let config = TerminalConfig {
-                sync_group: "ws-1".into(),
+                sync_group: "old-group".into(),
                 ..Default::default()
             };
             let mut session = TerminalSession::new("t1".into(), config);
             session.cwd = Some("/home/user/project".into());
             terminals.insert("t1".into(), session);
         }
+        {
+            let mut groups = state.sync_groups.lock().unwrap();
+            let mut group = crate::terminal::SyncGroup::new("old-group".into());
+            group.add_terminal("t1".into());
+            groups.insert("old-group".into(), group);
+        }
+
+        // 런타임에 new-group 으로 이동.
+        {
+            let mut groups = state.sync_groups.lock().unwrap();
+            if let Some(g) = groups.get_mut("old-group") {
+                g.remove_terminal("t1");
+            }
+            groups.retain(|_, g| !g.terminal_ids.is_empty());
+            let mut new_group = crate::terminal::SyncGroup::new("new-group".into());
+            new_group.add_terminal("t1".into());
+            groups.insert("new-group".into(), new_group);
+        }
+
+        // config.sync_group 은 여전히 old-group 이지만, 권위 소스는 new-group.
         assert_eq!(
             resolve_propagate_source(&state, "t1").unwrap(),
-            Some(("/home/user/project".into(), "ws-1".into()))
+            Some(("/home/user/project".into(), "new-group".into()))
         );
     }
 

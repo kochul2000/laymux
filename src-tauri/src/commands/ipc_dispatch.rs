@@ -236,19 +236,29 @@ pub fn do_sync_cwd(
         mark_propagated(state, &target_terminals)?;
     }
 
-    for tid in &receiving_targets {
+    // 상태 갱신·이벤트 대상은 `receiving_targets`(busy 포함)가 아니라 `idle_targets` 로
+    // 한정한다. busy(Running/TUI)로 `filter_targets_not_busy` 에서 제외된 대상은 실제 cd 를
+    // 받지 못했으므로 목적 CWD 에 있지 않다. 그런데도 backend `session.cwd` 와 프론트
+    // store 를 목적 CWD 로 갱신하면, 그 대상이 나중에 idle 이 된 뒤 같은 one-shot 을 다시
+    // 눌러도 `filter_targets_needing_cd` 가 "이미 동일 CWD"로 보고 cd 를 영구히 건너뛴다
+    // (issue #293, force 경로에서 cwd_receive=off 대상에 바로 재현됨).
+    // `idle_targets` = 실제 cd 된 `target_terminals` + 이미 같은 cwd 라 skip 된 것들이며,
+    // 둘 다 목적 CWD 에 있음이 보장된다. busy 대상(`receiving_targets - idle_targets`)은
+    // 상태 갱신·이벤트에서 제외해 다음 재시도가 차단되지 않게 한다.
+    for tid in &idle_targets {
         update_terminal_cwd(state, tid, &normalized_path);
     }
 
     // `force`(issue #293): file explorer/viewer 처럼 평소 동기화를 꺼둔 프론트 view 가
     // 이 1회성 전파에는 따라오도록, 프론트 리스너가 게이트를 우회할 수 있게 force 를 싣는다.
+    // targets 는 실제 도착이 보장된 idle_targets 만 — busy 대상을 도착으로 표기하지 않는다.
     let _ = app.emit(
         EVENT_SYNC_CWD,
         serde_json::json!({
             "path": normalized_path,
             "terminalId": terminal_id,
             "groupId": group_id,
-            "targets": receiving_targets,
+            "targets": idle_targets,
             "force": force,
         }),
     );
@@ -1995,6 +2005,81 @@ mod tests {
         assert!(
             forced.contains(&"t2".to_string()),
             "force path includes cwd_receive=off targets"
+        );
+    }
+
+    #[test]
+    fn busy_target_excluded_from_state_update_and_not_permanently_blocked() {
+        // 회귀(issue #293, 2차 P1): busy(Running) 대상은 cd 를 받지 못했으므로
+        // 상태 갱신(update_terminal_cwd)·이벤트 targets 에서 제외돼야 한다. 옛 구현은
+        // receiving_targets(busy 포함)로 session.cwd 를 목적 CWD 로 갱신해, 그 대상이
+        // idle 이 된 뒤 같은 경로로 재시도해도 filter_targets_needing_cd 가 "이미 동일
+        // CWD"로 보고 cd 를 영구히 건너뛰었다.
+        //
+        // do_sync_cwd 는 AppHandle 이 필요해 직접 호출 곤란하므로, do_sync_cwd 가 쓰는
+        // 동일한 헬퍼 합성(filter_targets_not_busy → 상태 갱신 대상 = idle_targets,
+        // filter_targets_needing_cd → 실제 cd 대상)을 그대로 재현해 검증한다.
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            // t2: idle (CWD 없음)
+            terminals.insert(
+                "t2".into(),
+                TerminalSession::new("t2".into(), TerminalConfig::default()),
+            );
+            // t3: 처음엔 busy, CWD 없음
+            terminals.insert(
+                "t3".into(),
+                TerminalSession::new("t3".into(), TerminalConfig::default()),
+            );
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            // t2: 프롬프트(idle)
+            let mut buf2 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf2.push(b"\x1b]133;D;0\x07prompt$ ");
+            buffers.insert("t2".into(), buf2);
+            // t3: 명령 실행 중(busy)
+            let mut buf3 = crate::output_buffer::TerminalOutputBuffer::default();
+            buf3.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
+            buffers.insert("t3".into(), buf3);
+        }
+
+        let receiving_targets: Vec<String> = vec!["t2".into(), "t3".into()];
+        let (idle_targets, _) = filter_targets_not_busy(
+            &state,
+            &receiving_targets,
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+        // busy t3 는 idle_targets 에서 빠진다 → 상태 갱신/이벤트 대상에서 제외.
+        assert_eq!(idle_targets, vec!["t2".to_string()]);
+        assert!(
+            !idle_targets.contains(&"t3".to_string()),
+            "busy 대상은 도착 집합(상태 갱신/이벤트)에서 제외돼야 한다"
+        );
+
+        // 상태 갱신은 idle_targets 에만 적용(do_sync_cwd 의 루프와 동일).
+        for tid in &idle_targets {
+            update_terminal_cwd(&state, tid, "/home/user/project");
+        }
+        // busy t3 의 session.cwd 는 갱신되지 않았다 — 영구 차단의 원인이 사라졌다.
+        {
+            let terminals = state.terminals.lock().unwrap();
+            assert_eq!(
+                terminals.get("t3").and_then(|s| s.cwd.clone()),
+                None,
+                "busy 대상의 session.cwd 는 도착하지 않았으므로 갱신되면 안 된다"
+            );
+        }
+
+        // 이제 t3 가 idle 이 되어 같은 경로로 재시도하면, cwd 가 stale 하게 갱신되지
+        // 않았으므로 filter_targets_needing_cd 가 t3 를 실제 cd 대상으로 포함한다.
+        let retry_targets: Vec<String> = vec!["t3".into()];
+        let needing_cd = filter_targets_needing_cd(&state, &retry_targets, "/home/user/project");
+        assert_eq!(
+            needing_cd,
+            vec!["t3".to_string()],
+            "이전에 busy 로 걸러진 대상은 idle 재시도 시 영구 차단되지 않고 cd 가 적용돼야 한다"
         );
     }
 
