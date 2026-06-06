@@ -9,6 +9,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
+import { propagateCwdOnce } from "@/lib/tauri-api";
 
 export interface GridPane {
   id: string;
@@ -188,6 +189,15 @@ export function PaneGrid({
                         onSetPaneView(pane.id, { ...pane.view, cwdReceive: !current });
                       }
                     : undefined,
+                // 1회성 CWD 전파 (issue #293). 백엔드 terminal_id 는 ViewRenderer 의
+                // instanceId 규칙과 동일하게 view 타입별 prefix + paneId 로 구성한다.
+                onPropagateCwdOnce: hasCwdView
+                  ? () => {
+                      const prefix =
+                        pane.view.type === "TerminalView" ? "terminal" : "file-explorer";
+                      propagateCwdOnce(`${prefix}-${pane.id}`).catch(() => {});
+                    }
+                  : undefined,
               }}
             >
               <ViewRenderer

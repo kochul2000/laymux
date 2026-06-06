@@ -28,6 +28,8 @@ export interface PaneControlBarActions {
   onChangeView?: (config: ViewInstanceConfig) => void;
   onToggleCwdSend?: () => void;
   onToggleCwdReceive?: () => void;
+  /** 1회성 CWD 전파 (issue #293). 현재 CWD 를 sync group 에 한 번 밀어넣는다. */
+  onPropagateCwdOnce?: () => void;
 }
 
 interface PaneControlBarProps {
@@ -298,6 +300,33 @@ function BarContent({
                 </BarBtn>
               );
             })()}
+
+          {/* 1회성 CWD 전파 (issue #293): 현재 CWD 를 sync group 에 한 번 밀어넣는다. */}
+          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+            actions.onPropagateCwdOnce && (
+              <BarBtn
+                testId="pane-control-cwd-propagate-once"
+                onClick={actions.onPropagateCwdOnce}
+                title="Propagate CWD once"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 2v6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <path
+                    d="M4 5l3-3 3 3Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                    fill="currentColor"
+                  />
+                  <path
+                    d="M3 9.5a4 4 0 1 0 8 0"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </BarBtn>
+            )}
 
           {actions.onSplitH && (
             <BarBtn

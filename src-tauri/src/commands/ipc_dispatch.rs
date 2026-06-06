@@ -55,6 +55,7 @@ fn handle_lx_message_dispatch(
             &path,
             all,
             target_group.as_deref(),
+            false,
         ),
         LxMessage::SyncBranch {
             branch,
@@ -126,6 +127,13 @@ fn handle_lx_message_dispatch(
 // ── Public inner functions — callable from both LxMessage dispatch and PTY callback ──
 
 /// Sync CWD across terminal group. Handles propagation guard, target filtering, and cd writing.
+///
+/// `force` (issue #293): 사용자가 컨트롤 패널의 "현재 CWD 1회 전파" 버튼을
+/// 눌렀을 때 true. 자동 OSC 전파와 달리 명시적 사용자 의도이므로 소스 측
+/// 게이트(전파 루프 가드·소스 activity 게이트·`cwd_send` off·대상 `cwd_receive` off)를
+/// 모두 우회한다. 단, 대상이 명령 실행 중/TUI 앱이면 cd 주입이 그 입력을
+/// 오염시키므로 `filter_targets_not_busy` 게이트는 force 여부와 무관하게 유지한다.
+#[allow(clippy::too_many_arguments)]
 pub fn do_sync_cwd(
     state: &AppState,
     app: &AppHandle,
@@ -134,10 +142,11 @@ pub fn do_sync_cwd(
     path: &str,
     all: bool,
     target_group: Option<&str>,
+    force: bool,
 ) -> Result<LxResponse, String> {
     cleanup_stale_propagations(state);
 
-    if is_propagated(state, terminal_id)? {
+    if !force && is_propagated(state, terminal_id)? {
         return Ok(LxResponse::ok(Some(format!(
             "sync-cwd {} suppressed (propagated)",
             path
@@ -150,7 +159,10 @@ pub fn do_sync_cwd(
     // OR while a non-interactive command is mid-execution does not represent a
     // user-intended `cd`, so we must not push it to peers or mark the local
     // session.cwd.
-    {
+    //
+    // force 경로(issue #293)는 사용자가 직접 누른 1회성 전파이므로 이 게이트를
+    // 건너뛴다.
+    if !force {
         let buffers = state.output_buffers.lock_or_err()?;
         if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
             tracing::debug!(
@@ -176,23 +188,32 @@ pub fn do_sync_cwd(
 
     // Check if source terminal has cwd_send disabled — if so, skip group propagation
     // but keep the local CWD update above (the terminal's own CWD should still be tracked).
-    let source_cwd_send = {
-        let terminals = state.terminals.lock_or_err()?;
-        terminals
-            .get(terminal_id)
-            .map(|s| s.cwd_send)
-            .unwrap_or(true)
-    };
-    if !source_cwd_send {
-        return Ok(LxResponse::ok(Some(format!(
-            "sync-cwd {} suppressed (cwd_send disabled)",
-            normalized_path
-        ))));
+    // force 경로는 cwd_send off 여도 사용자가 명시적으로 1회 전파한 것이므로 무시한다.
+    if !force {
+        let source_cwd_send = {
+            let terminals = state.terminals.lock_or_err()?;
+            terminals
+                .get(terminal_id)
+                .map(|s| s.cwd_send)
+                .unwrap_or(true)
+        };
+        if !source_cwd_send {
+            return Ok(LxResponse::ok(Some(format!(
+                "sync-cwd {} suppressed (cwd_send disabled)",
+                normalized_path
+            ))));
+        }
     }
 
     let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
 
-    let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
+    // force 경로는 대상의 cwd_receive off 여도 전파한다 — file explorer/viewer 처럼
+    // 평소 동기화를 끄고 있다가 필요할 때만 1회 따라오게 하는 것이 이 기능의 목적.
+    let receiving_targets = if force {
+        all_targets.clone()
+    } else {
+        filter_targets_cwd_receive(state, &all_targets)
+    };
 
     let settings = crate::settings::load_settings();
     let (idle_targets, claude_ids) =

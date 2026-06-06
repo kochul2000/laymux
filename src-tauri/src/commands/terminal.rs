@@ -1017,6 +1017,60 @@ pub fn set_terminal_cwd_receive(
     Ok(())
 }
 
+/// 1회성 CWD 전파 (issue #293).
+///
+/// 컨트롤 패널의 "현재 CWD 1회 전파" 버튼이 호출한다. 소스 터미널의 현재
+/// `session.cwd` 와 sync group 을 읽어 `do_sync_cwd(force=true)` 로 그룹에 한 번
+/// 밀어넣는다. 지속 동기화(cwd_send/cwd_receive 토글)와 달리, 평소 동기화를 꺼둔
+/// file explorer/viewer 도 이 순간의 CWD 로 따라오게 만드는 것이 목적이다.
+///
+/// 소스 터미널에 CWD 가 아직 없으면(예: OSC 7 미발행 셸) 전파할 것이 없으므로
+/// no-op 으로 Ok 를 돌려준다.
+#[tauri::command]
+pub fn propagate_cwd_once(
+    terminal_id: String,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let Some((cwd, sync_group)) = resolve_propagate_source(&state, &terminal_id)? else {
+        // 전파할 CWD 가 없음 — 사용자에게 에러를 던질 필요는 없다.
+        return Ok(());
+    };
+
+    super::ipc_dispatch::do_sync_cwd(
+        &state,
+        &app,
+        &terminal_id,
+        &sync_group,
+        &cwd,
+        false,
+        None,
+        true,
+    )
+    .map(|_| ())
+}
+
+/// `propagate_cwd_once` 의 소스 해석 단계만 분리한 순수 헬퍼 (AppHandle 불필요).
+///
+/// - 세션 없음 → `Err`
+/// - 세션은 있으나 CWD 가 없거나 빈 문자열 → `Ok(None)` (전파 no-op)
+/// - 그 외 → `Ok(Some((cwd, sync_group)))`
+fn resolve_propagate_source(
+    state: &AppState,
+    terminal_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    let terminals = state.terminals.lock_or_err()?;
+    let session = terminals
+        .get(terminal_id)
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
+    let sync_group = session.config.sync_group.clone();
+    Ok(session
+        .cwd
+        .clone()
+        .filter(|c| !c.is_empty())
+        .map(|cwd| (cwd, sync_group)))
+}
+
 #[tauri::command]
 pub fn update_terminal_sync_group(
     terminal_id: String,
@@ -1076,6 +1130,7 @@ fn dispatch_osc_action(
                 &event.data,
                 false,
                 None,
+                false,
             );
         }
         OscAction::SyncBranch => {
@@ -1154,6 +1209,59 @@ mod tests {
 
     fn test_session() -> TerminalSession {
         TerminalSession::new("t1".into(), TerminalConfig::default())
+    }
+
+    // ── resolve_propagate_source (issue #293) ──
+
+    #[test]
+    fn resolve_propagate_source_errors_for_unknown_terminal() {
+        let state = AppState::new();
+        assert!(resolve_propagate_source(&state, "missing").is_err());
+    }
+
+    #[test]
+    fn resolve_propagate_source_noop_when_cwd_absent() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            // CWD 가 한 번도 갱신되지 않은 갓 생성된 세션
+            terminals.insert(
+                "t1".into(),
+                TerminalSession::new("t1".into(), TerminalConfig::default()),
+            );
+        }
+        assert_eq!(resolve_propagate_source(&state, "t1").unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_propagate_source_noop_when_cwd_empty() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+            session.cwd = Some(String::new());
+            terminals.insert("t1".into(), session);
+        }
+        assert_eq!(resolve_propagate_source(&state, "t1").unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_propagate_source_returns_cwd_and_group() {
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            let config = TerminalConfig {
+                sync_group: "ws-1".into(),
+                ..Default::default()
+            };
+            let mut session = TerminalSession::new("t1".into(), config);
+            session.cwd = Some("/home/user/project".into());
+            terminals.insert("t1".into(), session);
+        }
+        assert_eq!(
+            resolve_propagate_source(&state, "t1").unwrap(),
+            Some(("/home/user/project".into(), "ws-1".into()))
+        );
     }
 
     // ── resolve_claude_detected ──

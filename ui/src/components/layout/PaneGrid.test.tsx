@@ -8,6 +8,17 @@ vi.mock("@/components/views/TerminalView", () => ({
   ),
 }));
 
+// 1회성 CWD 전파 버튼이 호출하는 백엔드 invoke 를 stub 한다 (issue #293).
+// 나머지 tauri-api 함수(FileExplorerView 등이 마운트 시 사용)는 실제 구현을 유지한다.
+const propagateCwdOnceMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/tauri-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tauri-api")>();
+  return {
+    ...actual,
+    propagateCwdOnce: (terminalId: string) => propagateCwdOnceMock(terminalId),
+  };
+});
+
 import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -261,5 +272,44 @@ describe("PaneGrid", () => {
       "pane-x",
       expect.objectContaining({ cwdSend: true }),
     );
+  });
+
+  // 1회성 CWD 전파 (issue #293)
+  it("propagates CWD once with the terminal instanceId on click", () => {
+    propagateCwdOnceMock.mockClear();
+    const onePane: GridPane[] = [
+      {
+        id: "pane-x",
+        view: { type: "TerminalView", profile: "PowerShell" },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(<PaneGrid {...defaultProps} panes={onePane} onSetPaneView={vi.fn()} />);
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    fireEvent.click(screen.getByTestId("pane-control-cwd-propagate-once"));
+    // ViewRenderer 의 TerminalView instanceId 규칙(`terminal-${paneId}`)과 일치해야 한다.
+    expect(propagateCwdOnceMock).toHaveBeenCalledTimes(1);
+    expect(propagateCwdOnceMock).toHaveBeenCalledWith("terminal-pane-x");
+  });
+
+  it("propagates CWD once with the file-explorer instanceId on click", () => {
+    propagateCwdOnceMock.mockClear();
+    const onePane: GridPane[] = [
+      {
+        id: "pane-fe",
+        view: { type: "FileExplorerView" },
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+      },
+    ];
+    render(<PaneGrid {...defaultProps} panes={onePane} onSetPaneView={vi.fn()} />);
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    fireEvent.click(screen.getByTestId("pane-control-cwd-propagate-once"));
+    expect(propagateCwdOnceMock).toHaveBeenCalledWith("file-explorer-pane-fe");
   });
 });
