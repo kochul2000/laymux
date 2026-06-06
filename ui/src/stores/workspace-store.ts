@@ -214,7 +214,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     if (victim) {
       const overrides = useOverridesStore.getState();
-      for (const p of victim.panes) overrides.clearAll(p.id);
+      const cwdPropagate = useCwdPropagateStore.getState();
+      for (const p of victim.panes) {
+        overrides.clearAll(p.id);
+        // 워크스페이스 삭제도 다중 pane 제거 경로이므로 1회성 CWD 전파 요청
+        // 버스를 정리한다(issue #296 P3). removePane/removeDockPane 와 동일 계약.
+        cwdPropagate.clear(p.id);
+      }
     }
   },
 

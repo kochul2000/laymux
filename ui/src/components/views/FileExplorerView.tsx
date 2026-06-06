@@ -269,7 +269,13 @@ export function FileExplorerView({
     ).catch((err) => {
       console.warn(`[propagateCwdOnce] ${instanceId} force 1회 전파 실패:`, err);
     });
-  }, [propagateRequest, syncGroup, instanceId]);
+    // currentCwd(state)를 deps 에 포함하여 cwd 가 비어 있다 채워지는 순간 effect 가
+    // 재실행되도록 한다(issue #296 P1). 마운트 직후 syncGroup 만 준비되고 cwd 는
+    // home/초기 listing 으로 비동기 로딩 중일 때 누른 클릭은 위 가드에서 보존되며,
+    // setCurrentCwd 로 cwd 가 채워지면 여기서 자동으로 1회 dispatch 된다.
+    // 일반 navigation 은 propagateRequest 를 올리지 않으므로 lastHandledRequestRef
+    // 게이트(252줄)가 no-op 으로 막아 매 cwd 변경마다 발사되지 않는다.
+  }, [propagateRequest, syncGroup, instanceId, currentCwd]);
 
   // --- Initial listing ---
   useEffect(() => {

@@ -513,6 +513,82 @@ describe("FileExplorerView", () => {
     });
   });
 
+  it("dispatches a propagate request that was clicked before cwd resolved (#296 P1)", async () => {
+    // 마운트 직후 syncGroup 은 준비됐지만 cwd 만 home 으로 비동기 로딩 중인 흔한 상황.
+    // 이때 누른 클릭은 가드에서 보존되며, cwd 가 채워지면 자동으로 1회 dispatch 돼야 한다.
+    // home 해소 시점을 제어하기 위해 deferred promise 를 쓴다.
+    let resolveHome: ((value: string) => void) | null = null;
+    vi.mocked(getHomeDirectory).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveHome = resolve;
+        }),
+    );
+
+    // lastCwd 없음 + syncGroup 의 cwd 보유 터미널 없음 → cwd 는 home 로딩 대기 상태.
+    render(<FileExplorerView {...defaultProps} paneId="pane-fe" syncGroup="ws-1" lastCwd="" />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(handleLxMessage).mockClear();
+
+    // cwd 가 아직 비어 있을 때 버튼 클릭.
+    act(() => {
+      useCwdPropagateStore.getState().requestPropagate("pane-fe");
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    // cwd 미확정이므로 dispatch 되지 않아야 한다(가드가 ref advance 보다 앞).
+    expect(handleLxMessage).not.toHaveBeenCalled();
+
+    // 이제 home 이 해소된다 → setCurrentCwd → effect 재실행(currentCwd dep) → 자동 재시도.
+    await act(async () => {
+      resolveHome?.("/home/fallback");
+      await vi.runAllTimersAsync();
+    });
+
+    expect(handleLxMessage).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(vi.mocked(handleLxMessage).mock.calls[0][0] as string);
+    expect(payload).toMatchObject({
+      action: "sync-cwd",
+      path: "/home/fallback",
+      terminal_id: "file-explorer-test-1",
+      group_id: "ws-1",
+      force: true,
+    });
+  });
+
+  it("does not dispatch a propagate on plain navigation cwd changes (#296 P1)", async () => {
+    // currentCwd 가 deps 에 추가됐어도, 정상 navigation(propagateRequest 미증가)은
+    // lastHandledRequestRef 게이트가 막아 dispatch 되지 않아야 한다.
+    mockListDir(mockDirEntries);
+    render(
+      <FileExplorerView {...defaultProps} paneId="pane-fe" syncGroup="ws-1" lastCwd="/home/user" />,
+    );
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(handleLxMessage).mockClear();
+
+    // 하위 디렉터리로 navigation(더블클릭) → currentCwd 변경. item-1 은 "subdir"(디렉터리).
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-1"));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // navigation 은 전파 요청을 올리지 않으므로 force sync-cwd 가 발사되면 안 된다.
+    const propagateCalls = vi.mocked(handleLxMessage).mock.calls.filter((c) => {
+      try {
+        const p = JSON.parse(c[0] as string);
+        return p.action === "sync-cwd" && p.force === true;
+      } catch {
+        return false;
+      }
+    });
+    expect(propagateCalls).toHaveLength(0);
+  });
+
   it("falls back to home directory when no CWD available (#274)", async () => {
     // No lastCwd, no syncGroup terminal with cwd, cwdReceive off:
     // explorer must NOT be stuck at "..." / "Empty directory" — it falls back to home.
