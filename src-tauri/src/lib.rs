@@ -152,6 +152,7 @@ pub fn run() {
             commands::clipboard_write_text,
             commands::set_terminal_cwd_send,
             commands::set_terminal_cwd_receive,
+            commands::propagate_cwd_once,
             commands::update_terminal_sync_group,
             commands::save_terminal_output_cache,
             commands::load_terminal_output_cache,

@@ -900,6 +900,7 @@ fn ide_message_sync_cwd_all_variants() {
         group_id: "g1".into(),
         all: false,
         target_group: None,
+        force: false,
     };
 
     // All terminals
@@ -909,6 +910,7 @@ fn ide_message_sync_cwd_all_variants() {
         group_id: "g1".into(),
         all: true,
         target_group: None,
+        force: false,
     };
 
     // Specific target group
@@ -918,6 +920,7 @@ fn ide_message_sync_cwd_all_variants() {
         group_id: "g1".into(),
         all: false,
         target_group: Some("other-group".into()),
+        force: false,
     };
 
     for msg in [&msg1, &msg2, &msg3] {
@@ -948,6 +951,7 @@ fn ide_message_sync_cwd_with_special_paths() {
             group_id: "g1".into(),
             all: false,
             target_group: None,
+            force: false,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: LxMessage = serde_json::from_str(&json).unwrap();

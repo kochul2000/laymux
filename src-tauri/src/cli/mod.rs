@@ -16,6 +16,10 @@ pub enum LxMessage {
         all: bool,
         #[serde(default)]
         target_group: Option<String>,
+        /// 1회성 강제 전파(issue #293). file explorer 등 백엔드 세션이 없는 프론트
+        /// view 가 `handleLxMessage` 로 직접 보낼 때 사용. 소스 측 게이트를 우회한다.
+        #[serde(default)]
+        force: bool,
     },
     #[serde(rename = "sync-branch")]
     SyncBranch {
@@ -90,6 +94,7 @@ mod tests {
             group_id: "g1".into(),
             all: false,
             target_group: None,
+            force: false,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"action\":\"sync-cwd\""));
@@ -108,13 +113,27 @@ mod tests {
                 group_id,
                 all,
                 target_group,
+                force,
             } => {
                 assert_eq!(path, "/foo");
                 assert_eq!(terminal_id, "t1");
                 assert_eq!(group_id, "g1");
                 assert!(!all);
                 assert!(target_group.is_none());
+                // force 미지정 → 기본값 false
+                assert!(!force);
             }
+            _ => panic!("Expected SyncCwd"),
+        }
+    }
+
+    #[test]
+    fn deserialize_sync_cwd_message_with_force() {
+        // file explorer 가 보내는 force one-shot 전파(issue #293)가 파싱되는지 확인.
+        let json = r#"{"action":"sync-cwd","path":"/foo","terminal_id":"file-explorer-pane-x","group_id":"g1","force":true}"#;
+        let msg: LxMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            LxMessage::SyncCwd { force, .. } => assert!(force),
             _ => panic!("Expected SyncCwd"),
         }
     }
@@ -202,6 +221,7 @@ mod tests {
                 group_id: "g".into(),
                 all: true,
                 target_group: Some("other".into()),
+                force: false,
             },
             LxMessage::SyncBranch {
                 branch: "main".into(),

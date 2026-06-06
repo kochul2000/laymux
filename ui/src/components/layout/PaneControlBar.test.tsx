@@ -624,4 +624,56 @@ describe("PaneControlBar", () => {
     );
     expect(screen.queryByTestId("pane-control-cwd-send")).not.toBeInTheDocument();
   });
+
+  // 1회성 CWD 전파 버튼 (issue #293)
+  it("shows the propagate-CWD-once button when onPropagateCwdOnce is provided", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-propagate-once");
+    expect(btn.getAttribute("title")).toBe("Propagate CWD once");
+  });
+
+  it("invokes onPropagateCwdOnce exactly once per click (one-shot)", async () => {
+    const onPropagateCwdOnce = vi.fn();
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await userEvent.click(screen.getByTestId("pane-control-cwd-propagate-once"));
+    expect(onPropagateCwdOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the propagate-CWD-once button for FileExplorerView too", () => {
+    render(
+      <PaneControlBar
+        currentView={fileExplorerView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-propagate-once")).toBeInTheDocument();
+  });
+
+  it("hides the propagate-CWD-once button when no onPropagateCwdOnce action provided", () => {
+    render(
+      <PaneControlBar currentView={terminalView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-cwd-propagate-once")).not.toBeInTheDocument();
+  });
 });

@@ -33,6 +33,8 @@ pub fn parse_args(args: &[String]) -> Result<LxMessage, String> {
                 group_id,
                 all,
                 target_group,
+                // `lx` CLI 는 강제 전파를 노출하지 않는다(UI 전용 기능).
+                force: false,
             })
         }
         "sync-branch" => {

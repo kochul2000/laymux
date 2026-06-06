@@ -6,12 +6,14 @@ vi.mock("@/lib/persist-session", () => ({
 
 import { useWorkspaceStore } from "./workspace-store";
 import { useOverridesStore } from "./overrides-store";
+import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { persistSession } from "@/lib/persist-session";
 
 describe("WorkspaceStore", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    useCwdPropagateStore.setState({ requests: {} });
     localStorage.clear();
     vi.clearAllMocks();
   });
@@ -68,6 +70,33 @@ describe("WorkspaceStore", () => {
 
     useWorkspaceStore.getState().removeWorkspace(wsId);
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+  });
+
+  it("clears cwd-propagate requests for each victim pane on removeWorkspace (#296 P3)", () => {
+    const { addWorkspace, layouts } = useWorkspaceStore.getState();
+    addWorkspace("ToRemove", layouts[0].id);
+    const wsId = useWorkspaceStore.getState().workspaces[1].id;
+
+    // 삭제 대상 워크스페이스를 활성화한 뒤 split 으로 다중 pane 을 만든다.
+    useWorkspaceStore.getState().setActiveWorkspace(wsId);
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    const victimPanes = useWorkspaceStore.getState().workspaces.find((w) => w.id === wsId)!.panes;
+    expect(victimPanes).toHaveLength(2);
+    const [paneA, paneB] = victimPanes;
+
+    // 각 victim pane 에 전파 요청을 쌓는다 + 생존 워크스페이스 pane 1개.
+    const survivorPaneId = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    useCwdPropagateStore.getState().requestPropagate(paneA.id);
+    useCwdPropagateStore.getState().requestPropagate(paneB.id);
+    useCwdPropagateStore.getState().requestPropagate(survivorPaneId);
+
+    useWorkspaceStore.getState().removeWorkspace(wsId);
+
+    // victim 의 두 pane 요청 모두 정리.
+    expect(useCwdPropagateStore.getState().requests[paneA.id]).toBeUndefined();
+    expect(useCwdPropagateStore.getState().requests[paneB.id]).toBeUndefined();
+    // 생존 pane 의 요청은 건드리지 않음.
+    expect(useCwdPropagateStore.getState().requests[survivorPaneId]).toBe(1);
   });
 
   it("does not remove last workspace", () => {
@@ -149,6 +178,21 @@ describe("WorkspaceStore", () => {
       expect(useOverridesStore.getState().getPaneOverride(paneB.id)?.controlBarMode).toBe(
         "minimized",
       );
+    });
+
+    it("clears cwd-propagate requests for the removed pane (#296 P3-a)", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+      const [paneA, paneB] = panes;
+      useCwdPropagateStore.getState().requestPropagate(paneA.id);
+      useCwdPropagateStore.getState().requestPropagate(paneB.id);
+
+      // Remove pane A (index 0).
+      useWorkspaceStore.getState().removePane(0);
+
+      expect(useCwdPropagateStore.getState().requests[paneA.id]).toBeUndefined();
+      // paneB의 요청은 건드리지 않음.
+      expect(useCwdPropagateStore.getState().requests[paneB.id]).toBe(1);
     });
   });
 

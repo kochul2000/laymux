@@ -2,6 +2,7 @@ import { useId, useRef, useEffect } from "react";
 import type { ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore, FALLBACK_PROFILE, type TerminalLocation } from "@/stores/settings-store";
 import { resolveSyncCwd } from "@/lib/sync-cwd-config";
+import { getInstanceId } from "@/lib/view-instance-id";
 import { EmptyView, type EmptyViewContext } from "./EmptyView";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
 import { TerminalView } from "./TerminalView";
@@ -47,7 +48,7 @@ function TerminalViewWithSyncCwd({
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = paneId ? `terminal-${paneId}` : `terminal-${fallbackId}`;
+  const instanceId = getInstanceId("TerminalView", paneId || fallbackId);
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
   const lastClaudeSession = (viewConfig?.lastClaudeSession as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
@@ -103,7 +104,7 @@ function FileExplorerViewWithSyncCwd({
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
   const effectiveSyncGroup = configSyncGroup || workspaceId || "";
-  const instanceId = paneId ? `file-explorer-${paneId}` : `file-explorer-${fallbackId}`;
+  const instanceId = getInstanceId("FileExplorerView", paneId || fallbackId);
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
 
   // Use file explorer's shellProfile setting, or fall back to defaultProfile

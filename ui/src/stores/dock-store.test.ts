@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useDockStore } from "./dock-store";
+import { useCwdPropagateStore } from "./cwd-propagate-store";
 
 describe("DockStore", () => {
   beforeEach(() => {
     useDockStore.setState(useDockStore.getInitialState());
+    useCwdPropagateStore.setState({ requests: {} });
   });
 
   it("initializes with 4 docks", () => {
@@ -100,6 +102,20 @@ describe("DockStore", () => {
     const updated = useDockStore.getState().getDock("left")!;
     expect(updated.panes).toHaveLength(1);
     expect(updated.panes[0]).toMatchObject({ x: 0, y: 0, w: 1, h: 1 });
+  });
+
+  it("removeDockPane clears cwd-propagate requests for the removed pane (#296 P3-a)", () => {
+    useDockStore.getState().splitDockPane("left", "horizontal");
+    const left = useDockStore.getState().getDock("left")!;
+    const [paneA, paneB] = left.panes;
+    useCwdPropagateStore.getState().requestPropagate(paneA.id);
+    useCwdPropagateStore.getState().requestPropagate(paneB.id);
+
+    useDockStore.getState().removeDockPane("left", paneB.id);
+
+    expect(useCwdPropagateStore.getState().requests[paneB.id]).toBeUndefined();
+    // 남은 페인의 요청은 건드리지 않음.
+    expect(useCwdPropagateStore.getState().requests[paneA.id]).toBe(1);
   });
 
   it("setDockPaneView changes a pane's view", () => {

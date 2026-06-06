@@ -471,6 +471,15 @@ export async function setTerminalCwdReceive(terminalId: string, receive: boolean
   return invoke("set_terminal_cwd_receive", { terminalId, receive });
 }
 
+/**
+ * 1회성 CWD 전파 (issue #293). 해당 터미널의 현재 CWD 를 sync group 에 한 번 밀어넣는다.
+ * 지속 동기화 토글(cwdSend/cwdReceive)과 무관하게, 평소 동기화를 꺼둔 file explorer/viewer 도
+ * 이 순간의 CWD 로 따라오게 만든다. 전파할 CWD 가 없으면 백엔드에서 no-op 으로 처리된다.
+ */
+export async function propagateCwdOnce(terminalId: string): Promise<void> {
+  return invoke("propagate_cwd_once", { terminalId });
+}
+
 /** Move a terminal to a different sync group in the backend. */
 export async function updateTerminalSyncGroup(terminalId: string, newGroup: string): Promise<void> {
   return invoke("update_terminal_sync_group", { terminalId, newGroup });
@@ -497,13 +506,20 @@ export function onTerminalOutput(
   });
 }
 
-/** Listen for sync-cwd events from the backend. */
+/**
+ * Listen for sync-cwd events from the backend.
+ *
+ * `force`(issue #293): 컨트롤 패널의 "1회 전파" 버튼이 `propagate_cwd_once`(force=true)
+ * 로 트리거한 전파에는 true 가 실린다. 평소 동기화를 꺼둔 file explorer 가 이 1회 전파에는
+ * 따라오도록 프론트 게이트를 우회하는 데 사용한다.
+ */
 export function onSyncCwd(
   callback: (data: {
     path: string;
     terminalId: string;
     groupId: string;
     targets: string[];
+    force?: boolean;
   }) => void,
 ): Promise<UnlistenFn> {
   return listen("sync-cwd", (event) => {
@@ -513,6 +529,7 @@ export function onSyncCwd(
         terminalId: string;
         groupId: string;
         targets: string[];
+        force?: boolean;
       },
     );
   });
