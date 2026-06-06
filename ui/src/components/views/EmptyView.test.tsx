@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EmptyView } from "./EmptyView";
@@ -123,6 +123,43 @@ describe("EmptyView", () => {
 
     await user.click(screen.getByTestId("empty-view-memo"));
     expect(onSelect).toHaveBeenCalledWith({ type: "MemoView" });
+  });
+
+  it("hides the guidance header when the pane is too short (issue #298)", async () => {
+    // Report a content-box height below the compact threshold so the header drops.
+    const original = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private cb: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb;
+      }
+      observe(target: Element) {
+        setTimeout(() => {
+          this.cb(
+            [
+              {
+                target,
+                contentRect: { width: 150, height: 100 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      render(<EmptyView />);
+      // Option list stays visible — only the guidance is dropped.
+      expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText("Select a view")).not.toBeInTheDocument();
+        expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
+      });
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
   });
 
   it("does not clip top content when overflowing (issue #298)", () => {

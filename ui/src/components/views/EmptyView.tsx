@@ -1,6 +1,14 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useContainerSize } from "@/hooks/useContainerSize";
+
+/**
+ * Content-box height (px) below which the "Select a view" guidance header is
+ * hidden. When the pane is this short every vertical pixel matters, so we drop
+ * the title + hint and give the space to the option list instead. See #298.
+ */
+const COMPACT_HEADER_HIDE_HEIGHT = 220;
 
 export type EmptyViewContext = "pane" | "dock";
 
@@ -192,6 +200,12 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
   const setViewOrder = useSettingsStore((s) => s.setViewOrder);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
+  // When the pane is too short, hide the guidance header to free up room for
+  // the option list. contentRect height excludes the container padding, so the
+  // threshold is stable regardless of what we render. See #298.
+  const { h: contentHeight } = useContainerSize(containerRef);
+  const hideHeader = contentHeight > 0 && contentHeight < COMPACT_HEADER_HIDE_HEIGHT;
+
   // Grab DOM focus when this pane becomes focused (e.g. via Alt+Arrow navigation)
   useEffect(() => {
     if (isFocused) {
@@ -290,15 +304,20 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
           but collapses to 0 on overflow so the top stays scroll-reachable
           (justify-center would clip the top instead). See issue #298. */}
       <div className="my-auto flex w-full flex-col items-center gap-3">
-        {/* Header */}
-        <div className="mb-2 text-center">
-          <p className="text-sm font-medium" style={{ color: "var(--text-primary)", opacity: 0.7 }}>
-            Select a view
-          </p>
-          <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
-            Press number key to quick-select · Drag to reorder
-          </p>
-        </div>
+        {/* Header — hidden when the pane is too short (see #298) */}
+        {!hideHeader && (
+          <div className="mb-2 text-center">
+            <p
+              className="text-sm font-medium"
+              style={{ color: "var(--text-primary)", opacity: 0.7 }}
+            >
+              Select a view
+            </p>
+            <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
+              Press number key to quick-select · Drag to reorder
+            </p>
+          </div>
+        )}
 
         {/* Options list */}
         <div className="flex w-full max-w-[240px] flex-col gap-1">
