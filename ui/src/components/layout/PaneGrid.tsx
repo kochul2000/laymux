@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnce } from "@/lib/tauri-api";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
+import { getInstanceId } from "@/lib/view-instance-id";
 
 export interface GridPane {
   id: string;
@@ -192,7 +193,8 @@ export function PaneGrid({
                     : undefined,
                 // 1회성 CWD 전파 (issue #293).
                 // - TerminalView: 백엔드 PTY 세션이 있으므로 `propagate_cwd_once`(force) 커맨드를
-                //   호출한다. terminal_id 는 ViewRenderer 의 instanceId 규칙(`terminal-${paneId}`)과 일치.
+                //   호출한다. terminal_id 는 ViewRenderer 와 동일한 `getInstanceId` 헬퍼로 만들어
+                //   instanceId 규칙이 어긋나 `Session not found` 가 나는 일을 막는다.
                 // - FileExplorerView: 백엔드 세션이 없어 커맨드가 `Session not found` 로 실패하므로,
                 //   cwd 를 아는 view 자신이 force one-shot `sync-cwd` 를 디스패치하도록 요청 버스로 위임한다.
                 onPropagateCwdOnce: hasCwdView
@@ -201,8 +203,9 @@ export function PaneGrid({
                         useCwdPropagateStore.getState().requestPropagate(pane.id);
                         return;
                       }
-                      propagateCwdOnce(`terminal-${pane.id}`).catch((err) => {
-                        console.warn(`[propagateCwdOnce] terminal-${pane.id} 1회 전파 실패:`, err);
+                      const instanceId = getInstanceId(pane.view.type, pane.id);
+                      propagateCwdOnce(instanceId).catch((err) => {
+                        console.warn(`[propagateCwdOnce] ${instanceId} 1회 전파 실패:`, err);
                       });
                     }
                   : undefined,

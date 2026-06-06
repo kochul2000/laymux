@@ -147,63 +147,19 @@ pub fn do_sync_cwd(
 ) -> Result<LxResponse, String> {
     cleanup_stale_propagations(state);
 
-    if !force && is_propagated(state, terminal_id)? {
-        return Ok(LxResponse::ok(Some(format!(
-            "sync-cwd {} suppressed (propagated)",
-            path
-        ))));
-    }
-
-    // Issue #215: Skip propagation unless the source terminal is sitting at a
-    // clean shell prompt. OSC 7 emitted during an interactive TUI app (Codex,
-    // Claude Code, vim, ...) — e.g. by PowerShell's prompt function re-rendering —
-    // OR while a non-interactive command is mid-execution does not represent a
-    // user-intended `cd`, so we must not push it to peers or mark the local
-    // session.cwd.
-    //
-    // force 경로(issue #293)는 사용자가 직접 누른 1회성 전파이므로 이 게이트를
-    // 건너뛴다.
-    if !force {
-        let buffers = state.output_buffers.lock_or_err()?;
-        if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
-            tracing::debug!(
-                terminal_id,
-                path,
-                "sync-cwd suppressed: source terminal has non-shell activity"
-            );
-            return Ok(LxResponse::ok(Some(format!(
-                "sync-cwd {} suppressed (source activity != shell)",
-                path
-            ))));
-        }
-    }
-
     let normalized_path = path_utils::normalize_wsl_path(path);
 
-    // NOTE: We intentionally do NOT skip when the source terminal's CWD
-    // matches normalized_path. The backend PTY callback (proactive CWD
-    // detection) may have already updated session.cwd before this IPC
-    // arrives, so a naive "unchanged" check would suppress every
-    // propagation. Target-side dedup is handled by filter_targets_needing_cd.
-    update_terminal_cwd(state, terminal_id, &normalized_path);
-
-    // Check if source terminal has cwd_send disabled — if so, skip group propagation
-    // but keep the local CWD update above (the terminal's own CWD should still be tracked).
-    // force 경로는 cwd_send off 여도 사용자가 명시적으로 1회 전파한 것이므로 무시한다.
-    if !force {
-        let source_cwd_send = {
-            let terminals = state.terminals.lock_or_err()?;
-            terminals
-                .get(terminal_id)
-                .map(|s| s.cwd_send)
-                .unwrap_or(true)
-        };
-        if !source_cwd_send {
-            return Ok(LxResponse::ok(Some(format!(
-                "sync-cwd {} suppressed (cwd_send disabled)",
-                normalized_path
-            ))));
-        }
+    // ── 소스 측 게이트 단일 결정점 (issue #293) ──
+    // 소스 터미널이 전파 자격이 있는지 판단하는 모든 게이트를 한곳(evaluate_source_gates)에
+    // 모은다. force=true(사용자가 컨트롤 패널에서 직접 누른 1회성 전파)이면 그 함수가
+    // 소스 측 게이트(에코 루프 가드·소스 activity·cwd_send off)를 통째로 우회한다.
+    // 새 소스 측 안전 게이트는 반드시 그 함수 안에 추가해야 force 정책이 네 곳에
+    // 분산되지 않는다. 대상 측 게이트(filter_targets_not_busy)는 force 와 무관하게
+    // 항상 유지되므로 여기서 다루지 않는다(아래 참고).
+    if let Some(suppressed) =
+        evaluate_source_gates(state, terminal_id, path, &normalized_path, force)?
+    {
+        return Ok(suppressed);
     }
 
     let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
@@ -581,6 +537,87 @@ fn build_sync_cd_command(converted_path: &str, profile: &str, is_claude: bool) -
     }
 }
 
+/// 소스 측 sync-cwd 게이트를 한곳에서 평가하는 단일 결정점 (issue #293).
+///
+/// 반환값:
+/// - Ok(None)  → 모든 게이트 통과. 호출부는 전파를 계속 진행한다.
+/// - Ok(Some(resp)) → 어느 게이트가 전파를 막음. 호출부는 그 응답을 그대로 반환한다.
+///
+/// `force=true`(사용자가 컨트롤 패널에서 직접 누른 1회성 전파)이면 아래 소스 측
+/// 게이트를 **통째로** 우회한다. 자동 OSC 전파와 달리 명시적 사용자 의도이기 때문이다.
+/// 앞으로 새 소스 측 안전 게이트를 추가할 때는 반드시 이 함수 안에만 넣어야 force
+/// 우회 정책이 여러 곳으로 분산되지 않는다.
+///
+/// 주의: 대상 측 `filter_targets_not_busy` 게이트(대상이 명령 실행 중/TUI 앱이면 cd
+/// 주입이 입력 버퍼를 오염시키는 것을 막음)는 **force 와 무관하게 항상** 유지돼야 하므로
+/// 이 함수에 두지 않는다. 대상 cwd_receive 필터 우회는 do_sync_cwd 본문에서 처리한다.
+///
+/// local CWD 갱신 순서는 기존 동작과 동일하게 보존한다:
+/// - 에코 루프 가드·소스 activity 게이트는 local session.cwd 갱신 **전에** 차단한다
+///   (issue #215: 비-셸 activity 중의 OSC 7 로 local cwd 를 오염시키지 않기 위함).
+/// - cwd_send off 게이트는 local session.cwd 갱신 **후에** 차단한다(터미널 자신의
+///   CWD 추적은 유지하되 그룹 전파만 막음).
+fn evaluate_source_gates(
+    state: &AppState,
+    terminal_id: &str,
+    path: &str,
+    normalized_path: &str,
+    force: bool,
+) -> Result<Option<LxResponse>, String> {
+    if !force {
+        // 1) 에코 루프 가드: 방금 전파받은 터미널이 되울린 OSC 는 무시한다.
+        if is_propagated(state, terminal_id)? {
+            return Ok(Some(LxResponse::ok(Some(format!(
+                "sync-cwd {} suppressed (propagated)",
+                path
+            )))));
+        }
+
+        // 2) 소스 activity 게이트 (issue #215): 소스가 깨끗한 셸 프롬프트에 있을 때만
+        // 전파한다. 인터랙티브 TUI(Codex/Claude/vim …)나 명령 실행 중에 나온 OSC 7 은
+        // 사용자가 의도한 cd 가 아니므로 피어에 밀거나 local session.cwd 를 갱신하지 않는다.
+        {
+            let buffers = state.output_buffers.lock_or_err()?;
+            if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
+                tracing::debug!(
+                    terminal_id,
+                    path,
+                    "sync-cwd suppressed: source terminal has non-shell activity"
+                );
+                return Ok(Some(LxResponse::ok(Some(format!(
+                    "sync-cwd {} suppressed (source activity != shell)",
+                    path
+                )))));
+            }
+        }
+    }
+
+    // NOTE: 소스 CWD 가 normalized_path 와 같아도 의도적으로 스킵하지 않는다. 백엔드
+    // PTY 콜백(능동 CWD 감지)이 이 IPC 도착 전에 이미 session.cwd 를 갱신했을 수 있어,
+    // 단순 "unchanged" 체크는 모든 전파를 막아버린다. 대상 측 dedup 은
+    // filter_targets_needing_cd 가 담당한다.
+    update_terminal_cwd(state, terminal_id, normalized_path);
+
+    if !force {
+        // 3) cwd_send off 게이트: 위에서 local CWD 는 갱신했으니 터미널 자신의 추적은
+        // 유지하되, 그룹 전파만 건너뛴다.
+        let source_cwd_send = {
+            let terminals = state.terminals.lock_or_err()?;
+            terminals
+                .get(terminal_id)
+                .map(|s| s.cwd_send)
+                .unwrap_or(true)
+        };
+        if !source_cwd_send {
+            return Ok(Some(LxResponse::ok(Some(format!(
+                "sync-cwd {} suppressed (cwd_send disabled)",
+                normalized_path
+            )))));
+        }
+    }
+
+    Ok(None)
+}
 // --- Propagation guard helpers ---
 
 /// Decide whether the source terminal's current state permits sync-cwd propagation.
