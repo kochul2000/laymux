@@ -283,39 +283,44 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       ref={containerRef}
       tabIndex={-1}
       data-testid="empty-view"
-      className="empty-view-scroll flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 outline-none"
+      className="empty-view-scroll flex h-full flex-col items-center overflow-y-auto p-6 outline-none"
       style={{ color: "var(--text-secondary)" }}
     >
-      {/* Header */}
-      <div className="mb-2 text-center">
-        <p className="text-sm font-medium" style={{ color: "var(--text-primary)", opacity: 0.7 }}>
-          Select a view
-        </p>
-        <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
-          Press number key to quick-select · Drag to reorder
-        </p>
-      </div>
+      {/* Content wrapper: my-auto centers vertically when there is spare room,
+          but collapses to 0 on overflow so the top stays scroll-reachable
+          (justify-center would clip the top instead). See issue #298. */}
+      <div className="my-auto flex w-full flex-col items-center gap-3">
+        {/* Header */}
+        <div className="mb-2 text-center">
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)", opacity: 0.7 }}>
+            Select a view
+          </p>
+          <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
+            Press number key to quick-select · Drag to reorder
+          </p>
+        </div>
 
-      {/* Options list */}
-      <div className="flex w-full max-w-[240px] flex-col gap-1">
-        {options.map((opt, i) => (
-          <EmptyViewCard
-            key={opt.key}
-            option={opt}
-            index={i}
-            hovered={hoveredIdx === i}
-            dragging={dragIdx === i}
-            dropPosition={
-              dropInfo && dropInfo.index === i && dragIdx !== i ? dropInfo.position : null
-            }
-            onSelect={() => handleSelect(i)}
-            onHover={(entering) => setHoveredIdx(entering ? i : null)}
-            onDragStart={() => handleDragStart(i)}
-            onDragOver={(e) => handleDragOver(e, i)}
-            onDragEnd={handleDragEnd}
-            onDrop={handleDrop}
-          />
-        ))}
+        {/* Options list */}
+        <div className="flex w-full max-w-[240px] flex-col gap-1">
+          {options.map((opt, i) => (
+            <EmptyViewCard
+              key={opt.key}
+              option={opt}
+              index={i}
+              hovered={hoveredIdx === i}
+              dragging={dragIdx === i}
+              dropPosition={
+                dropInfo && dropInfo.index === i && dragIdx !== i ? dropInfo.position : null
+              }
+              onSelect={() => handleSelect(i)}
+              onHover={(entering) => setHoveredIdx(entering ? i : null)}
+              onDragStart={() => handleDragStart(i)}
+              onDragOver={(e) => handleDragOver(e, i)}
+              onDragEnd={handleDragEnd}
+              onDrop={handleDrop}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -125,6 +125,23 @@ describe("EmptyView", () => {
     expect(onSelect).toHaveBeenCalledWith({ type: "MemoView" });
   });
 
+  it("does not clip top content when overflowing (issue #298)", () => {
+    // The scroll container must NOT use justify-center: combined with
+    // overflow-y-auto it pushes the top of tall content above the scroll
+    // origin, making the first items unreachable. Centering is done by an
+    // inner my-auto wrapper that collapses to 0 on overflow instead.
+    render(<EmptyView />);
+    const container = screen.getByTestId("empty-view");
+    expect(container.className).not.toContain("justify-center");
+    expect(container.className).toContain("overflow-y-auto");
+
+    // Header and options live inside a my-auto wrapper.
+    const header = screen.getByText("Select a view");
+    const wrapper = header.closest(".my-auto");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper).toContainElement(screen.getByTestId("empty-view-memo"));
+  });
+
   it("respects stored viewOrder", () => {
     // Set custom order: memo first
     useSettingsStore.setState({ viewOrder: ["memo", "settings", "ws-selector"] });
