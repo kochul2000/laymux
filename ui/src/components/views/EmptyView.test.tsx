@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EmptyView } from "./EmptyView";
@@ -26,6 +26,33 @@ vi.mock("@/lib/tauri-api", () => ({
   getGitBranch: vi.fn().mockResolvedValue(null),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
 }));
+
+/**
+ * Install a ResizeObserver stub that reports a fixed content-box size, so the
+ * size-adaptive behavior (#298) can be exercised in jsdom. Returns a restore fn.
+ */
+function mockResizeObserverSize(width: number, height: number): () => void {
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    private cb: ResizeObserverCallback;
+    constructor(cb: ResizeObserverCallback) {
+      this.cb = cb;
+    }
+    observe(target: Element) {
+      setTimeout(() => {
+        this.cb(
+          [{ target, contentRect: { width, height } } as unknown as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      }, 0);
+    }
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  return () => {
+    globalThis.ResizeObserver = original;
+  };
+}
 
 describe("EmptyView", () => {
   beforeEach(() => {
@@ -123,6 +150,67 @@ describe("EmptyView", () => {
 
     await user.click(screen.getByTestId("empty-view-memo"));
     expect(onSelect).toHaveBeenCalledWith({ type: "MemoView" });
+  });
+
+  it("hides the guidance header when the pane is too short (issue #298)", async () => {
+    // Report a content-box height below the compact threshold so the header drops.
+    const restore = mockResizeObserverSize(400, 100);
+    try {
+      render(<EmptyView />);
+      // Option list stays visible — only the guidance is dropped.
+      expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText("Select a view")).not.toBeInTheDocument();
+        expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("drops card chrome and hint when the pane is too narrow (issue #298)", async () => {
+    // Narrow but tall: cards shed their category tag + drag handle and the
+    // header hint is hidden, but the title and the option list stay visible.
+    const restore = mockResizeObserverSize(120, 600);
+    try {
+      render(<EmptyView />);
+      expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryAllByText("⠿")).toHaveLength(0);
+        expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
+      });
+      // Title still shown because the pane is tall enough.
+      expect(screen.getByText("Select a view")).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("gives each option label min-w-0 so truncate works on the flex child (issue #298)", () => {
+    // jsdom does not lay out, so guard the class contract instead: a flex child
+    // needs min-w-0 for `truncate` to clip rather than overflow the card.
+    render(<EmptyView />);
+    const button = screen.getByTestId("empty-view-memo");
+    const label = within(button).getByText("Memo");
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
+  });
+
+  it("does not clip top content when overflowing (issue #298)", () => {
+    // The scroll container must NOT use justify-center: combined with
+    // overflow-y-auto it pushes the top of tall content above the scroll
+    // origin, making the first items unreachable. Centering is done by an
+    // inner my-auto wrapper that collapses to 0 on overflow instead.
+    render(<EmptyView />);
+    const container = screen.getByTestId("empty-view");
+    expect(container.className).not.toContain("justify-center");
+    expect(container.className).toContain("overflow-y-auto");
+
+    // Header and options live inside a my-auto wrapper.
+    const header = screen.getByText("Select a view");
+    const wrapper = header.closest(".my-auto");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper).toContainElement(screen.getByTestId("empty-view-memo"));
   });
 
   it("respects stored viewOrder", () => {

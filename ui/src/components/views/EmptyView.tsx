@@ -1,6 +1,22 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useContainerSize } from "@/hooks/useContainerSize";
+
+/**
+ * Content-box height (px) below which the "Select a view" guidance header is
+ * hidden. When the pane is this short every vertical pixel matters, so we drop
+ * the title + hint and give the space to the option list instead. See #298.
+ */
+const COMPACT_HEADER_HIDE_HEIGHT = 220;
+
+/**
+ * Content-box width (px) below which option cards drop their secondary chrome
+ * (category tag, drag handle) and the header hint. At narrow widths these wrap
+ * onto extra lines and overflow the card, so we collapse to a clean single-line
+ * label + shortcut layout instead. See #298.
+ */
+const NARROW_WIDTH_THRESHOLD = 170;
 
 export type EmptyViewContext = "pane" | "dock";
 
@@ -24,6 +40,7 @@ function EmptyViewCard({
   hovered,
   dragging,
   dropPosition,
+  narrow,
   onSelect,
   onHover,
   onDragStart,
@@ -36,6 +53,7 @@ function EmptyViewCard({
   hovered: boolean;
   dragging: boolean;
   dropPosition: "top" | "bottom" | null;
+  narrow: boolean;
   onSelect: () => void;
   onHover: (entering: boolean) => void;
   onDragStart: () => void;
@@ -83,29 +101,37 @@ function EmptyViewCard({
           {shortcutNum <= 9 ? shortcutNum : ""}
         </span>
 
-        {/* Label */}
-        <span className="flex-1 text-xs font-medium">{option.label}</span>
+        {/* Label — min-w-0 is required for truncate to work on a flex child,
+            otherwise the default min-width:auto keeps the nowrap label at its
+            intrinsic width and it overflows the card instead of clipping. */}
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{option.label}</span>
 
-        {/* Category tag */}
-        <span
-          className="shrink-0 text-[9px] uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.4 }}
-        >
-          {option.category}
-        </span>
+        {/* Category tag + drag handle drop out at narrow widths (see #298) —
+            they wrap and overflow the card, crowding out the label. */}
+        {!narrow && (
+          <>
+            {/* Category tag */}
+            <span
+              className="shrink-0 text-[9px] uppercase tracking-wider"
+              style={{ color: "var(--text-secondary)", opacity: 0.4 }}
+            >
+              {option.category}
+            </span>
 
-        {/* Drag handle — right edge */}
-        <span
-          className="shrink-0 pl-2 pr-0.5 text-[10px]"
-          style={{
-            color: "var(--text-secondary)",
-            opacity: 0.25,
-            cursor: "grab",
-            userSelect: "none",
-          }}
-        >
-          ⠿
-        </span>
+            {/* Drag handle — right edge */}
+            <span
+              className="shrink-0 pl-2 pr-0.5 text-[10px]"
+              style={{
+                color: "var(--text-secondary)",
+                opacity: 0.25,
+                cursor: "grab",
+                userSelect: "none",
+              }}
+            >
+              ⠿
+            </span>
+          </>
+        )}
       </button>
     </div>
   );
@@ -191,6 +217,15 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
   const viewOrder = useSettingsStore((s) => s.viewOrder) ?? [];
   const setViewOrder = useSettingsStore((s) => s.setViewOrder);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  // Adapt to the pane size. contentRect excludes the container padding, so both
+  // thresholds stay stable regardless of what we render. See #298.
+  //  - too short  → drop the guidance header to free vertical room
+  //  - too narrow → cards drop their category tag + drag handle, and the header
+  //                 hint is hidden (they otherwise wrap and overflow)
+  const { w: contentWidth, h: contentHeight } = useContainerSize(containerRef);
+  const hideHeader = contentHeight > 0 && contentHeight < COMPACT_HEADER_HIDE_HEIGHT;
+  const narrow = contentWidth > 0 && contentWidth < NARROW_WIDTH_THRESHOLD;
 
   // Grab DOM focus when this pane becomes focused (e.g. via Alt+Arrow navigation)
   useEffect(() => {
@@ -283,39 +318,52 @@ export function EmptyView({ onSelectView, context: _context = "pane", isFocused 
       ref={containerRef}
       tabIndex={-1}
       data-testid="empty-view"
-      className="empty-view-scroll flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 outline-none"
+      className="empty-view-scroll flex h-full flex-col items-center overflow-y-auto p-6 outline-none"
       style={{ color: "var(--text-secondary)" }}
     >
-      {/* Header */}
-      <div className="mb-2 text-center">
-        <p className="text-sm font-medium" style={{ color: "var(--text-primary)", opacity: 0.7 }}>
-          Select a view
-        </p>
-        <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
-          Press number key to quick-select · Drag to reorder
-        </p>
-      </div>
+      {/* Content wrapper: my-auto centers vertically when there is spare room,
+          but collapses to 0 on overflow so the top stays scroll-reachable
+          (justify-center would clip the top instead). See issue #298. */}
+      <div className="my-auto flex w-full flex-col items-center gap-3">
+        {/* Header — hidden when the pane is too short (see #298) */}
+        {!hideHeader && (
+          <div className="mb-2 text-center">
+            <p
+              className="text-sm font-medium"
+              style={{ color: "var(--text-primary)", opacity: 0.7 }}
+            >
+              Select a view
+            </p>
+            {!narrow && (
+              <p className="mt-0.5 text-[10px]" style={{ opacity: 0.4 }}>
+                Press number key to quick-select · Drag to reorder
+              </p>
+            )}
+          </div>
+        )}
 
-      {/* Options list */}
-      <div className="flex w-full max-w-[240px] flex-col gap-1">
-        {options.map((opt, i) => (
-          <EmptyViewCard
-            key={opt.key}
-            option={opt}
-            index={i}
-            hovered={hoveredIdx === i}
-            dragging={dragIdx === i}
-            dropPosition={
-              dropInfo && dropInfo.index === i && dragIdx !== i ? dropInfo.position : null
-            }
-            onSelect={() => handleSelect(i)}
-            onHover={(entering) => setHoveredIdx(entering ? i : null)}
-            onDragStart={() => handleDragStart(i)}
-            onDragOver={(e) => handleDragOver(e, i)}
-            onDragEnd={handleDragEnd}
-            onDrop={handleDrop}
-          />
-        ))}
+        {/* Options list */}
+        <div className="flex w-full max-w-[240px] flex-col gap-1">
+          {options.map((opt, i) => (
+            <EmptyViewCard
+              key={opt.key}
+              option={opt}
+              index={i}
+              hovered={hoveredIdx === i}
+              dragging={dragIdx === i}
+              narrow={narrow}
+              dropPosition={
+                dropInfo && dropInfo.index === i && dragIdx !== i ? dropInfo.position : null
+              }
+              onSelect={() => handleSelect(i)}
+              onHover={(entering) => setHoveredIdx(entering ? i : null)}
+              onDragStart={() => handleDragStart(i)}
+              onDragOver={(e) => handleDragOver(e, i)}
+              onDragEnd={handleDragEnd}
+              onDrop={handleDrop}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
