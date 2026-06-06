@@ -178,43 +178,67 @@ pub fn do_sync_cwd(
 
     let target_terminals = filter_targets_needing_cd(state, &idle_targets, &normalized_path);
 
-    if !target_terminals.is_empty() {
+    // 실제로 새 cd 를 주입한 대상만 반환받는다. PTY 핸들 부재·경로 변환 실패로 조용히
+    // 스킵된 대상은 여기서 제외된다(issue #296 P1).
+    let written = if target_terminals.is_empty() {
+        Vec::new()
+    } else {
         write_cd_to_group_terminals(
             state,
             &target_terminals,
             terminal_id,
             &normalized_path,
             &claude_ids,
-        )?;
+        )?
+    };
+
+    // 도착이 보장된 대상(`arrived`)의 정의 (issue #296 P1):
+    //   arrived = written ∪ already_at_cwd
+    // - `written`            : 실제로 cd 를 주입(write 성공)한 대상 = 새로 목적 CWD 로 이동.
+    // - `already_at_cwd`     : `filter_targets_needing_cd` 가 "이미 같은 cwd"라 제외한 대상
+    //                          = `idle_targets - target_terminals`. 새 cd 는 안 보냈지만
+    //                          이미 그 경로에 있으므로 도착 상태.
+    // 옛 구현은 `idle_targets` 전체를 도착으로 표기했는데, 이는 "idle 이면 cd 가 항상
+    // 도착한다"는 잘못된 전제였다. PTY 핸들이 없거나(예: file-explorer-* 백엔드 세션 없음)
+    // 경로 변환이 불가능한(file explorer 의 순수 Linux `/home/...` → distro 미상 PowerShell)
+    // 대상은 idle 이어도 실제 cd 가 나가지 않는다. 그런 대상을 도착으로 오기록하면
+    // 그 대상이 같은 경로로 재시도해도 `filter_targets_needing_cd` 가 "이미 동일 CWD"로 보고
+    // cd 를 영구히 건너뛴다. busy(Running/TUI)로 `filter_targets_not_busy` 에서 제외된 대상도
+    // 마찬가지로 도착이 아니므로 애초에 `idle_targets` 에 들지 않아 자동 제외된다.
+    let written_set: std::collections::HashSet<&String> = written.iter().collect();
+    let target_set: std::collections::HashSet<&String> = target_terminals.iter().collect();
+    let arrived: Vec<String> = idle_targets
+        .iter()
+        .filter(|id| {
+            // written(실제 주입) 또는 already_at_cwd(idle 인데 target_terminals 에 없음).
+            written_set.contains(*id) || !target_set.contains(*id)
+        })
+        .cloned()
+        .collect();
+
+    // 에코 가드(mark_propagated)는 실제로 새 cd 를 주입한 `written` 에만 필요하다.
+    // already_at_cwd 는 새 명령을 안 보냈으므로 에코될 것이 없다.
+    if !written.is_empty() {
+        mark_propagated(state, &written)?;
     }
 
-    if !target_terminals.is_empty() {
-        mark_propagated(state, &target_terminals)?;
-    }
-
-    // 상태 갱신·이벤트 대상은 `receiving_targets`(busy 포함)가 아니라 `idle_targets` 로
-    // 한정한다. busy(Running/TUI)로 `filter_targets_not_busy` 에서 제외된 대상은 실제 cd 를
-    // 받지 못했으므로 목적 CWD 에 있지 않다. 그런데도 backend `session.cwd` 와 프론트
-    // store 를 목적 CWD 로 갱신하면, 그 대상이 나중에 idle 이 된 뒤 같은 one-shot 을 다시
-    // 눌러도 `filter_targets_needing_cd` 가 "이미 동일 CWD"로 보고 cd 를 영구히 건너뛴다
-    // (issue #293, force 경로에서 cwd_receive=off 대상에 바로 재현됨).
-    // `idle_targets` = 실제 cd 된 `target_terminals` + 이미 같은 cwd 라 skip 된 것들이며,
-    // 둘 다 목적 CWD 에 있음이 보장된다. busy 대상(`receiving_targets - idle_targets`)은
-    // 상태 갱신·이벤트에서 제외해 다음 재시도가 차단되지 않게 한다.
-    for tid in &idle_targets {
+    // backend `session.cwd` 갱신은 도착이 보장된 `arrived` 에만 적용한다. 변환실패/PTY부재로
+    // cd 가 안 나간 대상을 갱신하면 재시도가 영구 차단된다(위 주석 참조).
+    for tid in &arrived {
         update_terminal_cwd(state, tid, &normalized_path);
     }
 
     // `force`(issue #293): file explorer/viewer 처럼 평소 동기화를 꺼둔 프론트 view 가
     // 이 1회성 전파에는 따라오도록, 프론트 리스너가 게이트를 우회할 수 있게 force 를 싣는다.
-    // targets 는 실제 도착이 보장된 idle_targets 만 — busy 대상을 도착으로 표기하지 않는다.
+    // targets 는 실제 도착이 보장된 `arrived`(written ∪ already_at_cwd)만 — busy·변환실패·
+    // PTY부재 대상은 도착으로 표기하지 않는다(issue #296 P1).
     let _ = app.emit(
         EVENT_SYNC_CWD,
         serde_json::json!({
             "path": normalized_path,
             "terminalId": terminal_id,
             "groupId": group_id,
-            "targets": idle_targets,
+            "targets": arrived,
             "force": force,
         }),
     );
@@ -479,13 +503,24 @@ fn write_to_group_terminals(
 /// propagated cd command, because Claude Code accepts `! <command>` for inline shell execution.
 /// The `claude_ids` set is produced by `filter_targets_not_busy` so we avoid re-scanning
 /// the output buffers.
+///
+/// **실제 cd write 에 성공한 대상 ID 만 반환한다(issue #296 P1).** 다음 두 경우는
+/// 조용히 스킵되며 반환 집합에서 제외된다:
+/// 1. PTY 핸들이 없는 대상(`ptys.get(id)` == None).
+/// 2. 대상 프로파일로 경로 변환이 불가능한 경우(예: file explorer 의 순수 Linux
+///    `/home/...` 경로 → distro 미상의 PowerShell 대상). distro 를 프론트에서 넘기는
+///    enhancement 는 이번 범위 밖(TODO).
+///
+/// 반환 집합은 호출부(`do_sync_cwd`)가 "실제로 새 `cd` 를 주입한 대상(`written`)"으로
+/// 사용한다. 변환 실패/PTY 부재 대상을 도착으로 오기록하면 `filter_targets_needing_cd`
+/// 가 그 대상을 "이미 동일 CWD"로 보고 재시도를 영구 차단하기 때문이다.
 fn write_cd_to_group_terminals(
     state: &AppState,
     target_ids: &[String],
     source_id: &str,
     path: &str,
     claude_ids: &std::collections::HashSet<String>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = path_utils::find_wsl_distro(state, source_id);
 
@@ -493,6 +528,7 @@ fn write_cd_to_group_terminals(
 
     let terminals = state.terminals.lock_or_err()?;
 
+    let mut written = Vec::new();
     for id in target_ids {
         if let Some(handle) = ptys.get(id) {
             let profile = terminals
@@ -501,6 +537,7 @@ fn write_cd_to_group_terminals(
                 .unwrap_or("WSL");
 
             // Convert path for the target profile; skip if not convertible
+            // (변환 불가 → 미주입 → 도착 집합 제외 → 재시도 가능).
             let converted = match path_utils::convert_path_for_target_with_distro(
                 path,
                 profile,
@@ -511,11 +548,14 @@ fn write_cd_to_group_terminals(
             };
 
             let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(id));
-            let _ = handle.write(cmd.as_bytes());
+            // write 가 실패하면 실제 주입이 안 된 것이므로 도착 집합에 넣지 않는다.
+            if handle.write(cmd.as_bytes()).is_ok() {
+                written.push(id.clone());
+            }
         }
     }
 
-    Ok(())
+    Ok(written)
 }
 
 /// Build the command string to write to a terminal for sync-cwd.
@@ -2117,6 +2157,121 @@ mod tests {
             needing_cd,
             vec!["t3".to_string()],
             "이전에 busy 로 걸러진 대상은 idle 재시도 시 영구 차단되지 않고 cd 가 적용돼야 한다"
+        );
+    }
+
+    /// do_sync_cwd 의 arrived 계산을 단위 테스트에서 그대로 재현하는 헬퍼.
+    /// arrived = written ∪ already_at_cwd, 단 idle_targets 안에서만.
+    fn compute_arrived(
+        idle_targets: &[String],
+        target_terminals: &[String],
+        written: &[String],
+    ) -> Vec<String> {
+        let written_set: std::collections::HashSet<&String> = written.iter().collect();
+        let target_set: std::collections::HashSet<&String> = target_terminals.iter().collect();
+        idle_targets
+            .iter()
+            .filter(|id| written_set.contains(*id) || !target_set.contains(*id))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn convert_failure_or_pty_absent_target_excluded_and_retryable() {
+        // 회귀(issue #296 P1): 경로 변환 실패 또는 PTY 핸들 부재로 실제 cd 가 안 나간
+        // 대상은 ① 도착 집합(arrived = 상태 갱신/EVENT_SYNC_CWD.targets)·mark_propagated 에서
+        // 제외되고 ② 이후 재시도가 영구 차단되지 않아야 한다.
+        //
+        // 시나리오: file explorer(WSL/순수 Linux 경로) → PowerShell 대상.
+        // - distro 미상이라 convert_path_for_target_with_distro("/home/...", "PowerShell", None)
+        //   == None → write_cd_to_group_terminals 가 continue → written 에서 제외.
+        // - 추가로 어떤 대상도 PTY 핸들을 등록하지 않으므로(테스트 환경) write 자체가 일어나지
+        //   않아 written 은 항상 빈 집합이다(PTY 부재 경로도 동시 검증).
+        let state = AppState::new();
+        {
+            let mut terminals = state.terminals.lock().unwrap();
+            // ps: PowerShell idle 대상, CWD 없음 → cd 가 필요하지만 변환/PTY 없어 미주입.
+            let mut ps = TerminalSession::new("ps".into(), TerminalConfig::default());
+            ps.config.profile = "PowerShell".into();
+            terminals.insert("ps".into(), ps);
+            // at: 이미 목적 CWD 에 있는 idle 대상 → already_at_cwd, cd 불필요.
+            let mut at = TerminalSession::new("at".into(), TerminalConfig::default());
+            at.cwd = Some("/home/user/project".into());
+            terminals.insert("at".into(), at);
+        }
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            for id in ["ps", "at"] {
+                let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
+                buf.push(b"\x1b]133;D;0\x07prompt$ "); // idle 프롬프트
+                buffers.insert(id.into(), buf);
+            }
+        }
+
+        let normalized = "/home/user/project";
+        // source_id 는 백엔드 세션이 없는 file-explorer-* (find_wsl_distro → None).
+        let source_id = "file-explorer-pane1";
+
+        let receiving_targets: Vec<String> = vec!["ps".into(), "at".into()];
+        let (idle_targets, claude_ids) = filter_targets_not_busy(
+            &state,
+            &receiving_targets,
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+        // 둘 다 idle 이므로 idle_targets 에 포함.
+        assert_eq!(idle_targets, vec!["ps".to_string(), "at".to_string()]);
+
+        // at 은 이미 동일 CWD 라 needing_cd 에서 제외, ps 만 cd 대상.
+        let target_terminals = filter_targets_needing_cd(&state, &idle_targets, normalized);
+        assert_eq!(target_terminals, vec!["ps".to_string()]);
+
+        // 실제 write: 변환 불가(distro None) + PTY 부재 → written 비어 있음.
+        let written = write_cd_to_group_terminals(
+            &state,
+            &target_terminals,
+            source_id,
+            normalized,
+            &claude_ids,
+        )
+        .unwrap();
+        assert!(
+            written.is_empty(),
+            "변환 실패/PTY 부재 대상은 written 에 포함되면 안 된다"
+        );
+
+        // arrived = written(∅) ∪ already_at_cwd({at}) = {at}. ps 는 제외.
+        let arrived = compute_arrived(&idle_targets, &target_terminals, &written);
+        assert_eq!(
+            arrived,
+            vec!["at".to_string()],
+            "도착 집합은 이미 동일 CWD 인 at 만 포함하고, 미주입 ps 는 제외해야 한다"
+        );
+        assert!(
+            !arrived.contains(&"ps".to_string()),
+            "변환 실패/PTY 부재 대상은 도착 집합(상태 갱신/이벤트)에서 제외돼야 한다"
+        );
+
+        // 상태 갱신은 arrived 에만 적용(do_sync_cwd 와 동일).
+        for tid in &arrived {
+            update_terminal_cwd(&state, tid, normalized);
+        }
+        // ps 의 session.cwd 는 갱신되지 않았다 → 영구 차단의 원인 없음.
+        {
+            let terminals = state.terminals.lock().unwrap();
+            assert_eq!(
+                terminals.get("ps").and_then(|s| s.cwd.clone()),
+                None,
+                "미주입 대상의 session.cwd 는 갱신되면 안 된다"
+            );
+        }
+
+        // 재시도 가능성: ps 의 cwd 가 stale 하게 갱신되지 않았으므로, (변환 가능 조건이
+        // 충족되면) filter_targets_needing_cd 가 ps 를 다시 cd 대상으로 포함한다.
+        let retry_needing = filter_targets_needing_cd(&state, &["ps".into()], normalized);
+        assert_eq!(
+            retry_needing,
+            vec!["ps".to_string()],
+            "미주입 대상은 재시도 시 영구 차단되지 않고 cd 대상으로 다시 잡혀야 한다"
         );
     }
 

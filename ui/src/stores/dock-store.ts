@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "./types";
 import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
+import { useCwdPropagateStore } from "./cwd-propagate-store";
 
 export const DOCK_MIN_SIZE = 100;
 export const DOCK_MAX_SIZE = 600;
@@ -249,7 +250,11 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
         return { ...d, panes: result, activeView: newActive };
       }),
     }));
-    if (removed) useOverridesStore.getState().clearAll(paneId);
+    if (removed) {
+      useOverridesStore.getState().clearAll(paneId);
+      // 1회성 CWD 전파 요청 버스 정리(issue #296 P3-a).
+      useCwdPropagateStore.getState().clear(paneId);
+    }
   },
 
   setDockPaneView: (position, paneId, view) => {

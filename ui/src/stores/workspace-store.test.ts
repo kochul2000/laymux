@@ -6,12 +6,14 @@ vi.mock("@/lib/persist-session", () => ({
 
 import { useWorkspaceStore } from "./workspace-store";
 import { useOverridesStore } from "./overrides-store";
+import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { persistSession } from "@/lib/persist-session";
 
 describe("WorkspaceStore", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    useCwdPropagateStore.setState({ requests: {} });
     localStorage.clear();
     vi.clearAllMocks();
   });
@@ -149,6 +151,21 @@ describe("WorkspaceStore", () => {
       expect(useOverridesStore.getState().getPaneOverride(paneB.id)?.controlBarMode).toBe(
         "minimized",
       );
+    });
+
+    it("clears cwd-propagate requests for the removed pane (#296 P3-a)", () => {
+      useWorkspaceStore.getState().splitPane(0, "horizontal");
+      const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+      const [paneA, paneB] = panes;
+      useCwdPropagateStore.getState().requestPropagate(paneA.id);
+      useCwdPropagateStore.getState().requestPropagate(paneB.id);
+
+      // Remove pane A (index 0).
+      useWorkspaceStore.getState().removePane(0);
+
+      expect(useCwdPropagateStore.getState().requests[paneA.id]).toBeUndefined();
+      // paneB의 요청은 건드리지 않음.
+      expect(useCwdPropagateStore.getState().requests[paneB.id]).toBe(1);
     });
   });
 

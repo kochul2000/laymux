@@ -3,6 +3,7 @@ import type { Layout, LayoutPane, Workspace, WorkspacePane, ViewInstanceConfig }
 import { persistSession } from "@/lib/persist-session";
 import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
+import { useCwdPropagateStore } from "./cwd-propagate-store";
 
 /** Convert a workspace pane to a layout pane (preserving view config). */
 function toLayoutPane(p: WorkspacePane): LayoutPane {
@@ -296,7 +297,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: result } : w)),
     }));
 
-    if (removedPaneId) useOverridesStore.getState().clearAll(removedPaneId);
+    if (removedPaneId) {
+      useOverridesStore.getState().clearAll(removedPaneId);
+      // 1회성 CWD 전파 요청 버스 정리(issue #296 P3-a): 제거된 페인의 요청 카운터가
+      // 누적되지 않도록 비운다.
+      useCwdPropagateStore.getState().clear(removedPaneId);
+    }
   },
 
   resizePane: (paneIndex, delta) => {

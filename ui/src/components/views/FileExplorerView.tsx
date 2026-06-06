@@ -250,9 +250,14 @@ export function FileExplorerView({
   const lastHandledRequestRef = useRef(propagateRequest);
   useEffect(() => {
     if (propagateRequest === lastHandledRequestRef.current) return;
-    lastHandledRequestRef.current = propagateRequest;
     const cwd = currentCwdRef.current;
+    // 준비 전(cwd/syncGroup 미확정) 클릭은 ref 를 advance 하지 않고 그대로 둔다(issue #296 P3-b).
+    // ref 를 가드보다 먼저 올리면 이 클릭이 소비된 것으로 표기돼, 이후 syncGroup 이
+    // 채워져 effect 가 재실행돼도 동일 카운터라 재발사되지 않아 클릭이 영영 유실된다.
+    // advance 를 가드 통과 뒤(실제 dispatch 직전)로 두면, 준비되는 즉시 자동 재시도된다.
     if (!cwd || !syncGroup) return;
+    // 가드 통과 — 이 클릭은 이제 처리되므로 advance 하여 동일 클릭 중복 dispatch 를 막는다.
+    lastHandledRequestRef.current = propagateRequest;
     handleLxMessage(
       JSON.stringify({
         action: "sync-cwd",

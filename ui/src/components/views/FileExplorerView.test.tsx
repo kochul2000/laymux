@@ -474,6 +474,45 @@ describe("FileExplorerView", () => {
     });
   });
 
+  it("retries a propagate request that was clicked before syncGroup was ready (#296 P3-b)", async () => {
+    // 준비 전(syncGroup 미확정) 클릭은 유실되지 않고, syncGroup 이 채워지면 자동 재시도돼야 한다.
+    const { rerender } = render(
+      <FileExplorerView {...defaultProps} paneId="pane-fe" syncGroup="" lastCwd="/home/user" />,
+    );
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(handleLxMessage).mockClear();
+
+    // syncGroup 이 아직 비어 있을 때 버튼 클릭.
+    act(() => {
+      useCwdPropagateStore.getState().requestPropagate("pane-fe");
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    // 준비 전이므로 dispatch 되지 않아야 한다(가드가 ref advance 보다 앞).
+    expect(handleLxMessage).not.toHaveBeenCalled();
+
+    // 이제 syncGroup 이 채워진다 → effect 재실행 → 동일 클릭이 자동 재시도된다.
+    rerender(
+      <FileExplorerView {...defaultProps} paneId="pane-fe" syncGroup="ws-1" lastCwd="/home/user" />,
+    );
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(handleLxMessage).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(vi.mocked(handleLxMessage).mock.calls[0][0] as string);
+    expect(payload).toMatchObject({
+      action: "sync-cwd",
+      path: "/home/user",
+      terminal_id: "file-explorer-test-1",
+      group_id: "ws-1",
+      force: true,
+    });
+  });
+
   it("falls back to home directory when no CWD available (#274)", async () => {
     // No lastCwd, no syncGroup terminal with cwd, cwdReceive off:
     // explorer must NOT be stuck at "..." / "Empty directory" — it falls back to home.
