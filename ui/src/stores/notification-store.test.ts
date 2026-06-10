@@ -58,6 +58,39 @@ describe("NotificationStore", () => {
     expect(ws2Notif.readAt).toBeNull();
   });
 
+  it("markTerminalAsRead marks only the given terminal's unread alerts", () => {
+    const { addNotification } = useNotificationStore.getState();
+    // ws-x is not the active workspace, so nothing auto-dismisses on add.
+    addNotification({ terminalId: "terminal-a", workspaceId: "ws-x", message: "a1" });
+    addNotification({ terminalId: "terminal-a", workspaceId: "ws-x", message: "a2" });
+    addNotification({ terminalId: "terminal-b", workspaceId: "ws-x", message: "b1" });
+
+    useNotificationStore.getState().markTerminalAsRead("terminal-a");
+    const notifs = useNotificationStore.getState().notifications;
+
+    expect(
+      notifs.filter((n) => n.terminalId === "terminal-a").every((n) => n.readAt !== null),
+    ).toBe(true);
+    expect(notifs.find((n) => n.terminalId === "terminal-b")!.readAt).toBeNull();
+  });
+
+  it("markTerminalAsRead preserves requiresAction alerts", () => {
+    const { addNotification } = useNotificationStore.getState();
+    addNotification({
+      terminalId: "terminal-a",
+      workspaceId: "ws-x",
+      message: "modal",
+      requiresAction: true,
+    });
+    addNotification({ terminalId: "terminal-a", workspaceId: "ws-x", message: "done" });
+
+    useNotificationStore.getState().markTerminalAsRead("terminal-a");
+    const notifs = useNotificationStore.getState().notifications;
+
+    expect(notifs.find((n) => n.message === "modal")?.readAt).toBeNull();
+    expect(notifs.find((n) => n.message === "done")?.readAt).not.toBeNull();
+  });
+
   it("counts unread notifications per workspace", () => {
     const { addNotification } = useNotificationStore.getState();
     addNotification({ terminalId: "t1", workspaceId: "ws-1", message: "a" });
@@ -319,6 +352,14 @@ describe("NotificationStore", () => {
   });
 
   describe("auto-dismiss for active workspace", () => {
+    beforeEach(() => {
+      // This block mutates settings/grid/workspace state — reset all of them so
+      // mode and focus don't leak between tests.
+      useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+      useGridStore.setState(useGridStore.getInitialState());
+      useSettingsStore.setState(useSettingsStore.getInitialState());
+    });
+
     it("marks notification as read immediately when added to the active workspace in workspace dismiss mode", () => {
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
 
@@ -363,8 +404,12 @@ describe("NotificationStore", () => {
       expect(notifs[0].readAt).toBeNull();
     });
 
-    it("auto-dismisses in paneFocus mode when a pane is focused", () => {
-      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+    it("auto-dismisses only the focused pane's alert in paneFocus mode", () => {
+      // paneFocus 모드는 워크스페이스 전체가 아니라 "포커스된 그 pane"의 알림만
+      // 해제해야 한다 (ADR 0010).
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+      const focusedPaneId = ws.panes[0].id;
       useSettingsStore.setState({
         convenience: {
           ...useSettingsStore.getState().convenience,
@@ -373,14 +418,22 @@ describe("NotificationStore", () => {
       });
       useGridStore.setState({ focusedPaneIndex: 0 });
 
+      // 포커스된 pane 의 터미널에서 온 알림 → 즉시 해제.
       useNotificationStore.getState().addNotification({
-        terminalId: "t1",
-        workspaceId: activeWsId,
-        message: "shell started",
+        terminalId: `terminal-${focusedPaneId}`,
+        workspaceId: ws.id,
+        message: "focused pane done",
+      });
+      // 다른 pane 의 터미널에서 온 알림 → unread 유지.
+      useNotificationStore.getState().addNotification({
+        terminalId: "terminal-other-pane",
+        workspaceId: ws.id,
+        message: "other pane done",
       });
 
       const notifs = useNotificationStore.getState().notifications;
-      expect(notifs[0].readAt).not.toBeNull();
+      expect(notifs.find((n) => n.message === "focused pane done")?.readAt).not.toBeNull();
+      expect(notifs.find((n) => n.message === "other pane done")?.readAt).toBeNull();
     });
 
     it("does NOT auto-dismiss requiresAction alerts even on the active workspace", () => {

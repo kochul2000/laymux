@@ -39,3 +39,16 @@ export function getInstanceId(viewType: ViewType, id: string): string {
   }
   return `${prefix}-${id}`;
 }
+
+/**
+ * pane 의 현재 view 기준 instanceId(= 알림의 `terminalId`)를 반환한다. instanceId
+ * 개념이 없는 view(memo 등)면 `null`.
+ *
+ * `getInstanceId` 와 달리 throw 하지 않는다 — 호출부(알림 해제)가 "이 pane 은
+ * 대상이 아님"을 null 로 자연스럽게 처리할 수 있도록. `${prefix}-${id}` 규약을
+ * 손으로 조립하는 지점이 여러 곳에 흩어지지 않게 이 헬퍼로 모은다.
+ */
+export function getPaneInstanceId(pane: { id: string; view: { type: ViewType } }): string | null {
+  const prefix = getInstanceIdPrefix(pane.view.type);
+  return prefix ? `${prefix}-${pane.id}` : null;
+}

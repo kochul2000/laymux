@@ -15,11 +15,14 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useNotificationStore } from "@/stores/notification-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useNotificationStore.setState(useNotificationStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       convenience: { ...s.convenience, defaultControlBarMode: "hover" },
@@ -193,6 +196,10 @@ describe("WorkspaceArea", () => {
 
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
+
+  // 알림 해제(진입/포커스 시)는 AppLayout 의 자동 해제 effect 가 SoT 이므로
+  // AppLayout.test.tsx 에서 검증한다 (ADR 0010, issue #302). WorkspaceArea 의
+  // onPaneFocus 는 포커스 기록만 담당한다.
 
   it("does not mount panes for never-visited workspaces", () => {
     // Setup: create a second workspace (not yet activated)

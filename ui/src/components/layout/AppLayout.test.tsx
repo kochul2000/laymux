@@ -22,12 +22,17 @@ vi.mock("@/lib/tauri-api", () => ({
   markClaudeTerminal: vi.fn().mockResolvedValue(false),
 }));
 
+vi.mock("@/components/views/TerminalView", () => ({
+  TerminalView: () => <div data-testid="mock-terminal">Terminal Mock</div>,
+}));
+
 import { AppLayout } from "./AppLayout";
 import { useDockStore } from "@/stores/dock-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useGridStore } from "@/stores/grid-store";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -36,6 +41,7 @@ describe("AppLayout", () => {
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
   });
 
   it("renders left dock and workspace area by default", () => {
@@ -183,5 +189,73 @@ describe("AppLayout", () => {
 
     expect(screen.getByText("Active WS notification")).toBeInTheDocument();
     expect(screen.queryByText("Other WS notification")).not.toBeInTheDocument();
+  });
+
+  // --- Notification auto-dismiss on focus/entry (ADR 0010, issue #302) ---
+  //
+  // 해제는 입력 종류가 아니라 프로그램의 진입/포커스 동작 자체가 트리거다.
+  // AppLayout 의 두 effect 가 그 SoT 이며, 모드에 따라 해제 단위가 다르다.
+
+  it("workspace mode: clears active-workspace alerts on entry (issue #302)", () => {
+    const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, notificationDismiss: "workspace" },
+    }));
+    // 비활성 시점에 도착해 unread 로 남아 있던 알림을 흉내낸다(강제 unread).
+    const n = useNotificationStore.getState().addNotification({
+      terminalId: "terminal-x",
+      workspaceId: wsId,
+      message: "build done",
+    });
+    useNotificationStore.setState((s) => ({
+      notifications: s.notifications.map((x) => (x.id === n.id ? { ...x, readAt: null } : x)),
+    }));
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(1);
+
+    render(<AppLayout />);
+
+    // 워크스페이스 진입(마운트) 시 자동 해제 effect 가 전체를 읽음 처리.
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(0);
+  });
+
+  it("paneFocus mode: focusing a pane clears only that pane's alerts", () => {
+    // 같은 워크스페이스에 터미널 pane 2개.
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    useWorkspaceStore.getState().setPaneView(1, { type: "TerminalView" });
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const wsId = ws.id;
+    const pane0 = ws.panes[0].id;
+    const pane1 = ws.panes[1].id;
+
+    useSettingsStore.setState((s) => ({
+      convenience: { ...s.convenience, notificationDismiss: "paneFocus" },
+    }));
+    useGridStore.setState({ focusedPaneIndex: null });
+
+    // 포커스가 없으니 두 알림 모두 unread 로 남는다.
+    useNotificationStore.getState().addNotification({
+      terminalId: `terminal-${pane0}`,
+      workspaceId: wsId,
+      message: "p0 done",
+    });
+    useNotificationStore.getState().addNotification({
+      terminalId: `terminal-${pane1}`,
+      workspaceId: wsId,
+      message: "p1 done",
+    });
+
+    render(<AppLayout />);
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(2);
+
+    // pane 0 포커스 → pane 0 알림만 해제, pane 1 은 유지.
+    act(() => {
+      useGridStore.setState({ focusedPaneIndex: 0 });
+    });
+
+    const notifs = useNotificationStore.getState().notifications;
+    expect(notifs.find((nf) => nf.message === "p0 done")?.readAt).not.toBeNull();
+    expect(notifs.find((nf) => nf.message === "p1 done")?.readAt).toBeNull();
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(1);
   });
 });

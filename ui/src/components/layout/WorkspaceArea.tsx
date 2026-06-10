@@ -58,6 +58,8 @@ export function WorkspaceArea() {
               isActive && focusedPaneIndex === idxOf(paneId) && focusedDock === null
             }
             onPaneFocus={(paneId) => {
+              // 포커스 변경만 기록한다. 알림 해제는 focusedPaneIndex 변화를 감지하는
+              // AppLayout 의 자동 해제 effect 가 입력 종류와 무관하게 처리한다 (ADR 0010).
               setFocusedPane(idxOf(paneId));
               useDockStore.getState().setFocusedDock(null);
             }}
