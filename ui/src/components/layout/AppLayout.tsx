@@ -13,7 +13,7 @@ import { NotificationPanel } from "@/components/views/NotificationPanel";
 import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
 import { FileViewerOverlay } from "./FileViewerOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { getInstanceIdPrefix } from "@/lib/view-instance-id";
+import { getPaneInstanceId } from "@/lib/view-instance-id";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
@@ -202,9 +202,8 @@ export function AppLayout() {
       return;
     }
     const pane = useWorkspaceStore.getState().getActiveWorkspace()?.panes[focusedPaneIndex];
-    if (!pane) return;
-    const prefix = getInstanceIdPrefix(pane.view.type);
-    if (prefix) markTerminalAsRead(`${prefix}-${pane.id}`);
+    const instanceId = pane && getPaneInstanceId(pane);
+    if (instanceId) markTerminalAsRead(instanceId);
   }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markTerminalAsRead]);
 
   const top = docks.find((d) => d.position === "top");
