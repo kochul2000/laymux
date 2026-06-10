@@ -103,27 +103,67 @@ export function smartRemoveIndent(text: string): string {
 }
 
 /**
- * Detect if the entire text (when all whitespace is removed) forms a single URL,
- * AND every internal whitespace run looks like terminal padding / wrap leftover
- * rather than natural-language word separation. If both hold, return the
- * whitespace-stripped form. Otherwise return the input unchanged.
+ * Rejoin a URL token that terminal / TUI wrapping split across lines, dropping
+ * each continuation line's leading indent.
+ *
+ * Why this is needed beyond the whole-text-is-a-URL collapse below: full-screen
+ * TUIs (e.g. Claude Code's input box) render a long line with their OWN layout
+ * — a constant left indent on every continuation row, broken with explicit
+ * cursor moves rather than terminal auto-wrap. xterm therefore stores those
+ * rows as separate, non-`isWrapped` lines, so `getSelection()` joins them with
+ * newlines and keeps the indent. The result is a command like
+ *   `gws --scopes "https://a.com/x,https://a.com/y,..."`
+ * coming back with newlines + 2-space gaps wedged inside the URLs. Such a
+ * selection is not a single URL, so it never reached the collapse path.
+ *
+ * A line break is treated as a wrap artefact (removed, continuation indent
+ * stripped) only when ALL of these hold, which keeps prose and bare URL lists
+ * intact:
+ *   - the text so far ends inside a URL run — its trailing whitespace-free
+ *     segment contains an `http(s)://` scheme;
+ *   - the continuation (after indent strip) is a single whitespace-free token —
+ *     prose like `hello world` has internal spaces and is left alone;
+ *   - the continuation does NOT itself start a new scheme — `https://b.com` on
+ *     its own line is a separate URL, not a wrapped tail.
+ */
+function mergeWrappedUrlLines(text: string): string {
+  if (!/\r?\n/.test(text)) return text;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+
+  let result = lines[0];
+  for (let i = 1; i < lines.length; i++) {
+    const continuation = lines[i].replace(/^[ \t]+/, "");
+    const tail = /\S*$/.exec(result)?.[0] ?? "";
+    const isWrappedUrlTail =
+      continuation.length > 0 &&
+      /^\S+$/.test(continuation) &&
+      !/^https?:\/\//.test(continuation) &&
+      /https?:\/\//.test(tail);
+    result += isWrappedUrlTail ? continuation : eol + lines[i];
+  }
+  return result;
+}
+
+/**
+ * Repair URLs broken by terminal / TUI line wrapping.
+ *
+ * Two passes:
+ *   1. `mergeWrappedUrlLines` rejoins a URL token split across lines (the TUI
+ *      input-box case above) while preserving prose and bare URL lists.
+ *   2. If, after merging, the whole text (with all whitespace removed) forms a
+ *      single URL AND every internal whitespace run looks like terminal padding
+ *      / wrap leftover, return the whitespace-stripped form. A lone ASCII space
+ *      between tokens is treated as prose and preserved, so inputs like
+ *        "https://x.com hello world"   (single-line URL + prose)
+ *        "https://x.com\nhello world"  (URL on line 1, prose on line 2)
+ *      survive intact. The shapes that collapse:
+ *        a. Multi-line URL split by terminal hard-wrap.
+ *        b. Multi-line URL with leading indent + trailing buffer-pad per line.
+ *        c. Single-line URL where an upstream paste target stripped newlines but
+ *           left leading-indent + trailing-pad as ≥2-char internal gaps, or tabs.
  *
  * "Padding-like" run = contains a newline / CR / tab, or is ≥2 ASCII spaces.
- * A lone ASCII space between tokens is treated as prose and preserved, so
- * inputs like
- *
- *     "https://x.com hello world"            (single-line URL + prose)
- *     "https://x.com\nhello world"           (URL on line 1, prose on line 2)
- *
- * survive intact on both copy and paste paths. The shapes that DO collapse:
- *
- *     1. Multi-line URL split by terminal hard-wrap (the newline run is the
- *        only whitespace, possibly fused with indent/pad spaces around it).
- *     2. Multi-line URL with leading indent + trailing buffer-pad on each line.
- *     3. Single-line URL where an upstream paste target stripped newlines but
- *        left leading-indent + trailing-pad as ≥2-char internal gaps, or
- *        tabs.
- *
  * URLs forbid raw whitespace, so collapsing is safe once we have decided the
  * input is URL-shaped and the gaps look like artefacts.
  *
@@ -134,17 +174,19 @@ export function smartRemoveIndent(text: string): string {
 export function smartRemoveLineBreak(text: string): string {
   if (!text) return text;
 
-  const joined = text.replace(/\s+/g, "");
-  if (!/^https?:\/\/\S+$/.test(joined)) return text;
+  const merged = mergeWrappedUrlLines(text);
+
+  const joined = merged.replace(/\s+/g, "");
+  if (!/^https?:\/\/\S+$/.test(joined)) return merged;
 
   // Only collapse when every internal whitespace run looks like terminal
   // padding / wrap leftover. A lone ASCII space is the prose signature.
-  const trimmed = text.replace(/^\s+/, "").replace(/\s+$/, "");
+  const trimmed = merged.replace(/^\s+/, "").replace(/\s+$/, "");
   const internalRuns = trimmed.match(/\s+/g) ?? [];
   const allRunsLookLikePadding = internalRuns.every(
     (run) => run.length >= 2 || /[\t\r\n]/.test(run),
   );
-  if (!allRunsLookLikePadding) return text;
+  if (!allRunsLookLikePadding) return merged;
 
   return joined;
 }

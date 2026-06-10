@@ -229,6 +229,52 @@ describe("smartRemoveLineBreak", () => {
     const input = "https://example.com\nis a great site";
     expect(smartRemoveLineBreak(input)).toBe("https://example.com\nis a great site");
   });
+
+  it("명령 안에 박힌 URL이 줄바꿈으로 쪼개져도 명령 구조는 보존하며 URL만 복원한다", () => {
+    // 셸 prefix 'curl "' 의 single space 는 명령 문법이므로 보존하고,
+    // 따옴표 안 URL이 wrap 으로 쪼개진 부분만 이어붙인다 (전체가 URL이 아니므로
+    // Phase2 collapse 는 발동하지 않는다).
+    const input = 'curl "https://example.com/very/long/pa\n  th?x=1"';
+    expect(smartRemoveLineBreak(input)).toBe('curl "https://example.com/very/long/path?x=1"');
+  });
+
+  it("Claude Code TUI 입력창처럼 들여쓰기된 연속 줄로 쪼개진 URL 목록을 명령 안에서 복원한다", () => {
+    // dev 재현(cols 118): Claude Code 의 ! bash 입력창은 긴 줄을 자체 레이아웃으로
+    // 그려서 연속 줄을 isWrapped=false + 2칸 들여쓰기로 만든다. getSelection 은 이를
+    // 개행으로 분리하고 들여쓰기를 남긴다. 명령 prefix 의 single space 는 보존하고
+    // URL 토큰을 쪼갠 wrap 만 이어붙여야 한다.
+    const input =
+      '!  gws auth login --scopes "openid,email,profile,https://www.googleapis.com/auth/userinfo.email,https://www.googleap\n' +
+      "  is.com/auth/userinfo.profile,https://www.googleapis.com/auth/calendar,https://www.googleapis.com/auth/cloud-platfo\n" +
+      "  rm,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth\n" +
+      "  /gmail.modify,https://www.googleapis.com/auth/presentations,https://www.googleapis.com/auth/pubsub,https://www.goo\n" +
+      "  gleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/tasks,https://www.googleapis.com/auth/script.project\n" +
+      '  s,https://www.googleapis.com/auth/script.deployments,https://www.googleapis.com/auth/script.processes"';
+    const expected =
+      '!  gws auth login --scopes "openid,email,profile,' +
+      "https://www.googleapis.com/auth/userinfo.email," +
+      "https://www.googleapis.com/auth/userinfo.profile," +
+      "https://www.googleapis.com/auth/calendar," +
+      "https://www.googleapis.com/auth/cloud-platform," +
+      "https://www.googleapis.com/auth/documents," +
+      "https://www.googleapis.com/auth/drive," +
+      "https://www.googleapis.com/auth/gmail.modify," +
+      "https://www.googleapis.com/auth/presentations," +
+      "https://www.googleapis.com/auth/pubsub," +
+      "https://www.googleapis.com/auth/spreadsheets," +
+      "https://www.googleapis.com/auth/tasks," +
+      "https://www.googleapis.com/auth/script.projects," +
+      "https://www.googleapis.com/auth/script.deployments," +
+      'https://www.googleapis.com/auth/script.processes"';
+    expect(smartRemoveLineBreak(input)).toBe(expected);
+  });
+
+  it("스킴으로 시작하는 연속 줄(별도 URL/줄바꿈 직후 URL)은 이전 토큰에 강제로 붙이지 않는다", () => {
+    // 줄바꿈 직후 https:// 로 시작하면 wrap 된 URL 꼬리가 아니라 새 URL 이므로
+    // 앞 prose 토큰에 이어붙이지 않는다. (prose 가 섞여 Phase2 collapse 도 미발동)
+    const input = "see this:\n  https://example.com/a";
+    expect(smartRemoveLineBreak(input)).toBe("see this:\n  https://example.com/a");
+  });
 });
 
 // ============================================================
@@ -538,6 +584,25 @@ describe("prepareSelectionForCopy", () => {
       smartRemoveLineBreak: true,
     });
     expect(result).toBe("hello\nworld");
+  });
+
+  it("명령(첫 줄 들여쓰기 0) 안의 wrap 된 URL 목록을 copy 파이프라인 전체에서 복원한다", () => {
+    // 첫 줄 들여쓰기가 0이라 smartRemoveIndent 의 공통 최소 인덴트는 0 → 미작동.
+    // 따라서 연속 줄의 2칸 들여쓰기는 smartRemoveLineBreak 의 wrap 복원이 직접 벗겨야 한다.
+    // (xterm getSelection 은 TUI 연속 줄을 개행 + 들여쓰기 + trailing pad 로 만든다.)
+    const raw =
+      'gws --scopes "https://api.example.com/auth/aaa,https://api.exam   \n' +
+      '  ple.com/auth/bbb,https://api.example.com/auth/ccc"            \n' +
+      "                                                                 \n";
+    const expected =
+      'gws --scopes "https://api.example.com/auth/aaa,' +
+      "https://api.example.com/auth/bbb," +
+      'https://api.example.com/auth/ccc"';
+    const result = prepareSelectionForCopy(raw, {
+      smartRemoveIndent: true,
+      smartRemoveLineBreak: true,
+    });
+    expect(result).toBe(expected);
   });
 });
 
