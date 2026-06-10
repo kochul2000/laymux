@@ -3,6 +3,8 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useNotificationStore } from "@/stores/notification-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { PaneGrid } from "./PaneGrid";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
@@ -60,6 +62,14 @@ export function WorkspaceArea() {
             onPaneFocus={(paneId) => {
               setFocusedPane(idxOf(paneId));
               useDockStore.getState().setFocusedDock(null);
+              // 알림 해제 기준은 "사용자 입력 종류"(마우스 vs 화살표)가 아니라
+              // "프로그램의 진입/포커스 동작 자체"다 (ADR 0010, issue #302).
+              // 마우스 클릭으로 pane 에 진입하는 이 경로도 화살표 진입과 동일하게
+              // 해당 워크스페이스 알림을 읽음 처리한다. manual 모드만 예외이며,
+              // requiresAction 알림은 markWorkspaceAsRead 가 보존한다.
+              if (useSettingsStore.getState().convenience.notificationDismiss !== "manual") {
+                useNotificationStore.getState().markWorkspaceAsRead(ws.id);
+              }
             }}
             onSetPaneView={
               isActive ? (paneId, config) => setPaneView(idxOf(paneId), config) : undefined
