@@ -7,7 +7,7 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
-import { useOverridesStore } from "@/stores/overrides-store";
+import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
@@ -1017,7 +1017,7 @@ export function TerminalView({
       const currentFont = useSettingsStore
         .getState()
         .resolveFont(profile, overrides.getViewOverride(paneId));
-      const newSize = Math.max(6, Math.min(72, currentFont.size + delta));
+      const newSize = Math.max(FONT_ZOOM_MIN, Math.min(FONT_ZOOM_MAX, currentFont.size + delta));
       if (newSize !== currentFont.size) {
         overrides.setViewOverride(paneId, { fontSize: newSize });
       }

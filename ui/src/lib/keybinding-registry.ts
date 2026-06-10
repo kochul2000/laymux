@@ -118,6 +118,25 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     defaultKeys: "Ctrl+0",
     group: "Terminal",
   },
+  // -- Memo --
+  {
+    id: "memo.zoomIn",
+    label: "메모 폰트 확대 (view 인스턴스 오버라이드)",
+    defaultKeys: "Ctrl+=",
+    group: "Memo",
+  },
+  {
+    id: "memo.zoomOut",
+    label: "메모 폰트 축소 (view 인스턴스 오버라이드)",
+    defaultKeys: "Ctrl+-",
+    group: "Memo",
+  },
+  {
+    id: "memo.zoomReset",
+    label: "메모 폰트 기본값으로 복귀",
+    defaultKeys: "Ctrl+0",
+    group: "Memo",
+  },
   // -- Issue Reporter --
   {
     id: "issueReporter.submit",

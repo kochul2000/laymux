@@ -212,7 +212,7 @@ export function ViewRenderer({
       const memoKey = paneId ? `memo-${paneId}` : `memo-${fallbackId}`;
       return (
         <div data-testid="view-memo" className="h-full">
-          <MemoView memoKey={memoKey} isFocused={isFocused} />
+          <MemoView memoKey={memoKey} paneId={paneId ?? fallbackId} isFocused={isFocused} />
         </div>
       );
     }

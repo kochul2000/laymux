@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
+import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { splitParagraphs } from "@/lib/memo-paragraphs";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
@@ -10,10 +12,12 @@ const DEBOUNCE_MS = 300;
 
 interface MemoViewProps {
   memoKey: string;
+  /** View-instance key for per-pane font-zoom overrides (localStorage). */
+  paneId?: string;
   isFocused?: boolean;
 }
 
-export function MemoView({ memoKey, isFocused }: MemoViewProps) {
+export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,9 +88,30 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
     return splitParagraphs(text, memo.paragraphCopy.minBlankLines);
   }, [text, memo.paragraphCopy.enabled, memo.paragraphCopy.minBlankLines]);
 
-  const effectiveFontSize = memo.fontSize || appFont.size;
+  // Per-view font zoom (Ctrl +/-/0) lives in overrides-store (localStorage),
+  // mirroring TerminalView so a transient zoom never pollutes settings.json.
+  const overrideFontSize = useOverridesStore((s) =>
+    paneId ? s.viewOverrides[paneId]?.fontSize : undefined,
+  );
+
+  const baseFontSize = memo.fontSize || appFont.size;
+  const effectiveFontSize = overrideFontSize ?? baseFontSize;
   const effectiveFontFamily = memo.fontFamily || appFont.face;
   const effectiveFontWeight = memo.fontWeight || appFont.weight;
+
+  // Adjust the view-instance font zoom (zoomIn/zoomOut shared). no-op without paneId.
+  const adjustZoom = useCallback(
+    (delta: number) => {
+      if (!paneId) return;
+      const overrides = useOverridesStore.getState();
+      const current = overrides.viewOverrides[paneId]?.fontSize ?? (memo.fontSize || appFont.size);
+      const next = Math.max(FONT_ZOOM_MIN, Math.min(FONT_ZOOM_MAX, current + delta));
+      if (next !== current) {
+        overrides.setViewOverride(paneId, { fontSize: next });
+      }
+    },
+    [paneId, memo.fontSize, appFont.size],
+  );
 
   // Lazy copy on select: remember selected text, copy on deselect / blur / Ctrl+C
   const pendingCopyRef = useRef<string | null>(null);
@@ -227,6 +252,24 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // 폰트 줌: view 인스턴스 오버라이드에만 기록 (settings.json 불변).
+      if (matchesKeybinding(e, "memo.zoomIn")) {
+        e.preventDefault();
+        adjustZoom(+1);
+        return;
+      }
+      if (matchesKeybinding(e, "memo.zoomOut")) {
+        e.preventDefault();
+        adjustZoom(-1);
+        return;
+      }
+      if (matchesKeybinding(e, "memo.zoomReset")) {
+        e.preventDefault();
+        // paneId가 없으면 줌 오버라이드를 쓰지 않으므로 reset도 no-op (지울 대상 없음).
+        if (paneId) useOverridesStore.getState().clearViewOverride(paneId);
+        return;
+      }
+
       if (e.key !== "Tab") return;
       e.preventDefault();
 
@@ -360,7 +403,7 @@ export function MemoView({ memoKey, isFocused }: MemoViewProps) {
         }
       }
     },
-    [applyTextChange, indent],
+    [applyTextChange, indent, adjustZoom, paneId],
   );
 
   return (
