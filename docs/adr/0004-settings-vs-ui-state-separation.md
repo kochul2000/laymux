@@ -13,7 +13,7 @@
 **구성은 `settings.json`, UI 상태는 localStorage** 로 엄격히 분리하고, 그 사이에 두 개의 일급 오버라이드 공간을 둔다.
 
 - `paneOverrides` — 레이아웃 **슬롯**에 귀속(예: `controlBarMode`). 슬롯 안 view 가 바뀌어도 유지.
-- `viewOverrides` — 슬롯 **콘텐츠(view)**에 귀속(예: TerminalView `fontSize`). view 타입이 바뀌면 자동 리셋.
+- `viewOverrides` — 슬롯 **콘텐츠(view)**에 귀속(예: TerminalView·MemoView `fontSize` 줌). view 타입이 바뀌면 자동 리셋.
 - 둘 다 `useOverridesStore` 에서 관리. 해석 우선순위: `profileDefaults → profile → paneOverrides → viewOverrides`.
 
 ## Consequences

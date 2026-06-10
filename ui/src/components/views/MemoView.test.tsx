@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MemoView } from "./MemoView";
 import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
@@ -557,6 +558,80 @@ describe("MemoView", () => {
       });
       const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
       expect(textarea.style.fontSize).toBe("13px");
+    });
+  });
+
+  describe("font zoom (Ctrl +/-/0)", () => {
+    async function setupZoom(paneId = "pane-zoom") {
+      useOverridesStore.setState({ viewOverrides: {} });
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontSize: 13 },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("");
+      render(<MemoView memoKey="memo-zoom" paneId={paneId} />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      return screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+    }
+
+    it("Ctrl+= zooms in by 1px and records a view override", async () => {
+      const textarea = await setupZoom();
+      expect(textarea.style.fontSize).toBe("13px");
+
+      fireEvent.keyDown(textarea, { key: "=", ctrlKey: true });
+      expect(textarea.style.fontSize).toBe("14px");
+      expect(useOverridesStore.getState().viewOverrides["pane-zoom"]?.fontSize).toBe(14);
+    });
+
+    it("Ctrl+- zooms out by 1px", async () => {
+      const textarea = await setupZoom();
+      fireEvent.keyDown(textarea, { key: "-", ctrlKey: true });
+      expect(textarea.style.fontSize).toBe("12px");
+      expect(useOverridesStore.getState().viewOverrides["pane-zoom"]?.fontSize).toBe(12);
+    });
+
+    it("Ctrl+0 resets to the base font size (clears override)", async () => {
+      const textarea = await setupZoom();
+      fireEvent.keyDown(textarea, { key: "=", ctrlKey: true });
+      fireEvent.keyDown(textarea, { key: "=", ctrlKey: true });
+      expect(textarea.style.fontSize).toBe("15px");
+
+      fireEvent.keyDown(textarea, { key: "0", ctrlKey: true });
+      expect(textarea.style.fontSize).toBe("13px");
+      expect(useOverridesStore.getState().viewOverrides["pane-zoom"]).toBeUndefined();
+    });
+
+    it("clamps zoom-out at the minimum font size", async () => {
+      useOverridesStore.setState({ viewOverrides: { "pane-min": { fontSize: 6 } } });
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontSize: 13 },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("");
+      render(<MemoView memoKey="memo-min" paneId="pane-min" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("6px");
+
+      fireEvent.keyDown(textarea, { key: "-", ctrlKey: true });
+      expect(textarea.style.fontSize).toBe("6px");
+      expect(useOverridesStore.getState().viewOverrides["pane-min"]?.fontSize).toBe(6);
+    });
+
+    it("override font size takes precedence over memo.fontSize", async () => {
+      useOverridesStore.setState({ viewOverrides: { "pane-ov": { fontSize: 22 } } });
+      useSettingsStore.setState({
+        memo: { ...useSettingsStore.getState().memo, fontSize: 13 },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("");
+      render(<MemoView memoKey="memo-ov" paneId="pane-ov" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      expect(textarea.style.fontSize).toBe("22px");
     });
   });
 });

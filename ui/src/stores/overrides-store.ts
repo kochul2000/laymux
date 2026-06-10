@@ -24,7 +24,7 @@ export interface PaneOverrides {
 }
 
 export interface ViewOverrides {
-  /** TerminalView: Ctrl+Wheel로 조정된 폰트 크기. */
+  /** TerminalView·MemoView: Ctrl+Wheel / Ctrl +,-,0 으로 조정된 폰트 크기. */
   fontSize?: number;
 }
 
