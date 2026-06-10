@@ -123,8 +123,20 @@ export function smartRemoveIndent(text: string): string {
  *     segment contains an `http(s)://` scheme;
  *   - the continuation (after indent strip) is a single whitespace-free token —
  *     prose like `hello world` has internal spaces and is left alone;
+ *   - the continuation contains a URL-structural char (`/ : ? = & % # @`) — a
+ *     plain prose word like `Thanks` after a URL line is NOT a wrapped tail, so
+ *     `See https://x.com/page\nThanks` is left alone. `.` and `,` are excluded
+ *     because they are common in prose. Limitation: a URL wrapped mid-segment
+ *     onto a purely alphanumeric tail (`...com/pa` + `th`) is not merged here —
+ *     when the whole selection is one URL, the Phase-2 collapse still repairs
+ *     it; embedded in a command it stays broken. This favours leaving a visible
+ *     break over silently gluing prose, which corrupts text unrecoverably.
  *   - the continuation does NOT itself start a new scheme — `https://b.com` on
  *     its own line is a separate URL, not a wrapped tail.
+ *
+ * `tail` and `continuation` are computed with trailing pad stripped so the
+ * decision holds on the paste path too, where smartRemoveLineBreak runs without
+ * a prior trimSelectionTrailingWhitespace.
  */
 function mergeWrappedUrlLines(text: string): string {
   if (!/\r?\n/.test(text)) return text;
@@ -133,14 +145,20 @@ function mergeWrappedUrlLines(text: string): string {
 
   let result = lines[0];
   for (let i = 1; i < lines.length; i++) {
-    const continuation = lines[i].replace(/^[ \t]+/, "");
-    const tail = /\S*$/.exec(result)?.[0] ?? "";
+    const continuation = lines[i].replace(/^[ \t]+/, "").replace(/[ \t]+$/, "");
+    const resultTrimmedEnd = result.replace(/[ \t]+$/, "");
+    const tail = /\S*$/.exec(resultTrimmedEnd)?.[0] ?? "";
     const isWrappedUrlTail =
       continuation.length > 0 &&
       /^\S+$/.test(continuation) &&
+      /[/:?=&%#@]/.test(continuation) &&
       !/^https?:\/\//.test(continuation) &&
       /https?:\/\//.test(tail);
-    result += isWrappedUrlTail ? continuation : eol + lines[i];
+    if (isWrappedUrlTail) {
+      result = resultTrimmedEnd + continuation;
+    } else {
+      result += eol + lines[i];
+    }
   }
   return result;
 }

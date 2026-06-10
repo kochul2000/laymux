@@ -275,6 +275,20 @@ describe("smartRemoveLineBreak", () => {
     const input = "see this:\n  https://example.com/a";
     expect(smartRemoveLineBreak(input)).toBe("see this:\n  https://example.com/a");
   });
+
+  it("URL 줄 다음에 단일 단어 산문이 와도 글루하지 않는다 (false-positive 가드, PR #303 리뷰)", () => {
+    // continuation 'Thanks' 는 단일 무공백 토큰이지만 URL-구조문자(/:?=&%#@)가 없는
+    // 평문 단어 → wrap 꼬리가 아니다. '...page' 에 붙여 'pageThanks' 가 되면 안 된다.
+    const input = "See https://example.com/page\nThanks";
+    expect(smartRemoveLineBreak(input)).toBe("See https://example.com/page\nThanks");
+  });
+
+  it("줄 끝 pad 가 남아 있어도 명령 안 wrap URL 을 병합한다 (paste 경로 견고성, PR #303 리뷰)", () => {
+    // applyPasteTextTransforms 는 trimSelectionTrailingWhitespace 없이 호출되므로
+    // 줄 끝 pad 가 남을 수 있다. tail/continuation 계산이 이를 견뎌야 한다.
+    const input = 'curl "https://example.com/very/long/pa   \n  th?x=1"   ';
+    expect(smartRemoveLineBreak(input)).toBe('curl "https://example.com/very/long/path?x=1"');
+  });
 });
 
 // ============================================================
