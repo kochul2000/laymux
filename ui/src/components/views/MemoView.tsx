@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { loadMemo, saveMemo, clipboardWriteText } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useOverridesStore } from "@/stores/overrides-store";
+import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { splitParagraphs } from "@/lib/memo-paragraphs";
 import { ViewShell } from "@/components/ui/ViewShell";
@@ -9,10 +9,6 @@ import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
 
 const DEBOUNCE_MS = 300;
-
-/** Font-zoom clamp — keep in lockstep with TerminalView's adjustZoom bounds. */
-const MIN_FONT_SIZE = 6;
-const MAX_FONT_SIZE = 72;
 
 interface MemoViewProps {
   memoKey: string;
@@ -109,7 +105,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
       if (!paneId) return;
       const overrides = useOverridesStore.getState();
       const current = overrides.viewOverrides[paneId]?.fontSize ?? (memo.fontSize || appFont.size);
-      const next = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, current + delta));
+      const next = Math.max(FONT_ZOOM_MIN, Math.min(FONT_ZOOM_MAX, current + delta));
       if (next !== current) {
         overrides.setViewOverride(paneId, { fontSize: next });
       }
@@ -269,6 +265,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
       }
       if (matchesKeybinding(e, "memo.zoomReset")) {
         e.preventDefault();
+        // paneId가 없으면 줌 오버라이드를 쓰지 않으므로 reset도 no-op (지울 대상 없음).
         if (paneId) useOverridesStore.getState().clearViewOverride(paneId);
         return;
       }

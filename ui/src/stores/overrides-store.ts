@@ -19,6 +19,13 @@ import type { ControlBarMode } from "./settings-store";
 export const PANE_OVERRIDES_KEY = "laymux-pane-overrides";
 export const VIEW_OVERRIDES_KEY = "laymux-view-overrides";
 
+/**
+ * 폰트 줌(Ctrl +,-,0 / Ctrl+Wheel) 클램프 범위 — 단일 출처.
+ * `fontSize` 오버라이드를 소비하는 모든 뷰(TerminalView·MemoView)가 공유한다.
+ */
+export const FONT_ZOOM_MIN = 6;
+export const FONT_ZOOM_MAX = 72;
+
 export interface PaneOverrides {
   controlBarMode?: ControlBarMode;
 }
