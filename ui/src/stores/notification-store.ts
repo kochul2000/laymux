@@ -4,8 +4,25 @@ import { create } from "zustand";
 import { useWorkspaceStore } from "./workspace-store";
 import { useSettingsStore } from "./settings-store";
 import { useGridStore } from "./grid-store";
+import { getInstanceIdPrefix } from "@/lib/view-instance-id";
 
 export type NotificationLevel = "info" | "error" | "warning" | "success";
+
+/**
+ * 현재 포커스된 pane 의 instanceId(= 알림의 `terminalId`)를 계산한다. 포커스된
+ * pane 이 없거나 instanceId 개념이 없는 view(memo 등)면 null.
+ *
+ * paneFocus 해제 모드에서 "이 알림이 지금 포커스된 그 pane 것인가?"를 판정하는
+ * 데 쓴다 — 알림의 `terminalId` 와 직접 비교 가능한 형태로 돌려준다.
+ */
+function focusedPaneInstanceId(): string | null {
+  const idx = useGridStore.getState().focusedPaneIndex;
+  if (idx === null) return null;
+  const pane = useWorkspaceStore.getState().getActiveWorkspace()?.panes[idx];
+  if (!pane) return null;
+  const prefix = getInstanceIdPrefix(pane.view.type);
+  return prefix ? `${prefix}-${pane.id}` : null;
+}
 
 export interface Notification {
   id: string;
@@ -39,6 +56,12 @@ interface NotificationStoreState {
     requiresAction?: boolean;
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
+  /**
+   * Mark every unread (non-requiresAction) alert for a single terminal/view
+   * instance as read. Used by the "paneFocus" dismiss policy so focusing one
+   * pane clears only that pane's alerts, not the whole workspace.
+   */
+  markTerminalAsRead: (terminalId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
   /** Remove notifications by ID. Returns the number of notifications actually removed. */
   removeNotifications: (ids: string[]) => number;
@@ -66,11 +89,16 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     // permission modal). The default policy auto-clears alerts whose
     // workspace happens to be active right now, which would hide the
     // badge before the user could see it.
+    //
+    // Dismiss granularity matches the mode (ADR 0010):
+    //   - "workspace": entering the workspace clears all its alerts.
+    //   - "paneFocus": only the *focused pane's* alerts clear, so a new alert
+    //     for pane B stays unread while pane A is focused.
     const shouldAutoDismiss =
       !requiresAction &&
       workspaceId === activeWsId &&
       (dismissMode === "workspace" ||
-        (dismissMode === "paneFocus" && useGridStore.getState().focusedPaneIndex !== null));
+        (dismissMode === "paneFocus" && focusedPaneInstanceId() === terminalId));
 
     const notification: Notification = {
       id: `notif-${++notifId}`,
@@ -101,6 +129,23 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
           : n,
       ),
     }));
+  },
+
+  markTerminalAsRead: (terminalId) => {
+    const now = Date.now();
+    set((state) => {
+      let changed = false;
+      const notifications = state.notifications.map((n) => {
+        // requiresAction alerts are preserved here too — they only clear via
+        // explicit click or when the originator resolves the state.
+        if (n.terminalId === terminalId && n.readAt === null && !n.requiresAction) {
+          changed = true;
+          return { ...n, readAt: now };
+        }
+        return n;
+      });
+      return changed ? { notifications } : state;
+    });
   },
 
   markNotificationsAsRead: (ids) => {

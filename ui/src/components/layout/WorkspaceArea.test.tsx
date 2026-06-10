@@ -197,74 +197,9 @@ describe("WorkspaceArea", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(1);
   });
 
-  // -- Notification dismiss on focus entry (issue #302) --
-  //
-  // 알림 해제 기준은 입력 종류(마우스/화살표)가 아니라 프로그램의 진입/포커스
-  // 동작 자체다. 마우스 클릭 진입도 화살표 진입과 동일하게 해제되어야 한다.
-
-  it("marks workspace notifications read on mouse-click pane entry (issue #302)", () => {
-    const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
-    // workspace 모드: 같은 워크스페이스 내 pane 클릭으로는 activeWorkspaceId가
-    // 바뀌지 않아 기존 AppLayout effect 만으로는 해제되지 않던 회귀 케이스.
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, notificationDismiss: "workspace" },
-    }));
-    const notif = useNotificationStore.getState().addNotification({
-      terminalId: "t1",
-      workspaceId: activeWsId,
-      message: "build done",
-    });
-    // addNotification 자체의 자동 해제와 무관하게 unread 상태로 시작하도록 강제.
-    useNotificationStore.setState((s) => ({
-      notifications: s.notifications.map((n) => (n.id === notif.id ? { ...n, readAt: null } : n)),
-    }));
-    expect(useNotificationStore.getState().getUnreadCount(activeWsId)).toBe(1);
-
-    render(<WorkspaceArea />);
-    fireEvent.mouseDown(screen.getByTestId("workspace-pane-0"));
-
-    expect(useNotificationStore.getState().getUnreadCount(activeWsId)).toBe(0);
-  });
-
-  it("does NOT dismiss on mouse-click entry in manual mode (issue #302)", () => {
-    const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, notificationDismiss: "manual" },
-    }));
-    const notif = useNotificationStore.getState().addNotification({
-      terminalId: "t1",
-      workspaceId: activeWsId,
-      message: "build done",
-    });
-    useNotificationStore.setState((s) => ({
-      notifications: s.notifications.map((n) => (n.id === notif.id ? { ...n, readAt: null } : n)),
-    }));
-
-    render(<WorkspaceArea />);
-    fireEvent.mouseDown(screen.getByTestId("workspace-pane-0"));
-
-    // manual 모드에서는 진입만으로 해제되지 않는다 (사용자가 명시 해제해야 함).
-    expect(useNotificationStore.getState().getUnreadCount(activeWsId)).toBe(1);
-  });
-
-  it("preserves requiresAction alerts on mouse-click entry (issue #302)", () => {
-    const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
-    useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, notificationDismiss: "workspace" },
-    }));
-    useNotificationStore.getState().addNotification({
-      terminalId: "t1",
-      workspaceId: activeWsId,
-      message: "Claude is waiting for your input",
-      requiresAction: true,
-    });
-
-    render(<WorkspaceArea />);
-    fireEvent.mouseDown(screen.getByTestId("workspace-pane-0"));
-
-    // requiresAction 알림은 진입만으로 해제되지 않는다.
-    expect(useNotificationStore.getState().getUnreadCount(activeWsId)).toBe(1);
-  });
+  // 알림 해제(진입/포커스 시)는 AppLayout 의 자동 해제 effect 가 SoT 이므로
+  // AppLayout.test.tsx 에서 검증한다 (ADR 0010, issue #302). WorkspaceArea 의
+  // onPaneFocus 는 포커스 기록만 담당한다.
 
   it("does not mount panes for never-visited workspaces", () => {
     // Setup: create a second workspace (not yet activated)

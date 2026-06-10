@@ -13,6 +13,7 @@ import { NotificationPanel } from "@/components/views/NotificationPanel";
 import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
 import { FileViewerOverlay } from "./FileViewerOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { getInstanceIdPrefix } from "@/lib/view-instance-id";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
@@ -171,31 +172,40 @@ export function AppLayout() {
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
   const notificationDismiss = useSettingsStore((s) => s.convenience.notificationDismiss);
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
+  const markTerminalAsRead = useNotificationStore((s) => s.markTerminalAsRead);
   const unreadCount = useNotificationStore(
     (s) =>
       s.notifications.filter((n) => n.workspaceId === activeWorkspaceId && n.readAt === null)
         .length,
   );
 
-  // Auto-dismiss notifications based on setting
-  // "workspace": mark as read whenever active workspace has unread notifications
-  // "paneFocus": mark as read when a pane is focused in the active workspace
+  // Auto-dismiss on focus/entry — the SoT for the notificationDismiss policy
+  // (ADR 0010). The trigger is the program's focus/entry action, not the input
+  // device: mouse click and arrow-key navigation both funnel through
+  // activeWorkspaceId / focusedPaneIndex, so one place covers every entry path.
+  //
+  // "workspace": entering or refocusing any pane in the active workspace clears
+  // the whole workspace. focusedPaneIndex is a dependency so a same-workspace
+  // pane click/arrow-move re-runs it (issue #302) — activeWorkspaceId alone
+  // wouldn't change.
   useEffect(() => {
     if (notificationDismiss === "workspace" && activeWorkspaceId && unreadCount > 0) {
       markWorkspaceAsRead(activeWorkspaceId);
     }
-  }, [notificationDismiss, activeWorkspaceId, unreadCount, markWorkspaceAsRead]);
-
-  useEffect(() => {
-    if (
-      notificationDismiss === "paneFocus" &&
-      activeWorkspaceId &&
-      focusedPaneIndex !== null &&
-      unreadCount > 0
-    ) {
-      markWorkspaceAsRead(activeWorkspaceId);
-    }
   }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markWorkspaceAsRead]);
+
+  // "paneFocus": focusing a pane clears only *that pane's* alerts, not the whole
+  // workspace. The model tracks alerts per terminal instance (Notification.terminalId),
+  // so we resolve the focused pane's instanceId and clear just its alerts.
+  useEffect(() => {
+    if (notificationDismiss !== "paneFocus" || !activeWorkspaceId || focusedPaneIndex === null) {
+      return;
+    }
+    const pane = useWorkspaceStore.getState().getActiveWorkspace()?.panes[focusedPaneIndex];
+    if (!pane) return;
+    const prefix = getInstanceIdPrefix(pane.view.type);
+    if (prefix) markTerminalAsRead(`${prefix}-${pane.id}`);
+  }, [notificationDismiss, activeWorkspaceId, focusedPaneIndex, unreadCount, markTerminalAsRead]);
 
   const top = docks.find((d) => d.position === "top");
   const bottom = docks.find((d) => d.position === "bottom");
