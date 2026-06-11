@@ -9,6 +9,7 @@ import {
   detectClaudeInputPendingFromOutput,
   detectNewClaudeInputPendingPrompt,
   shouldDismissClaudeInputPendingFromOutput,
+  detectClaudeRecapFromOutput,
 } from "./activity-detection";
 
 describe("detectActivityFromTitle", () => {
@@ -302,6 +303,80 @@ describe("shouldDismissClaudeInputPendingFromOutput", () => {
     // that the modal has been answered.
     const withBraille = "answer 1\n" + "❯ context line\n" + "⠋ Thinking…\n";
     expect(shouldDismissClaudeInputPendingFromOutput(withBraille)).toBe(true);
+  });
+});
+
+describe("detectClaudeRecapFromOutput", () => {
+  // Claude Code's recap feature prints a one-line session summary into the
+  // scrollback when the user returns to an unfocused session. The signature is
+  // `※ recap: <summary> (disable recaps in /config)` where `※` is U+203B
+  // (REFERENCE MARK). The summary is wrapped across several alt-screen rows via
+  // CUP cursor escapes and indented with leading spaces, so the detector must
+  // run on stripAnsi-normalised text (CUP→\n, CUF→space) and then collapse the
+  // whitespace runs back into one line. The two ground-truth summaries below
+  // were captured from real production sessions.
+  const realRecapPr =
+    "PR #102(모델 catalog 배포 wiring을 BEDROCK_MODEL_ID→LLM_MODELS로 통일) 리뷰를 끝내 PR에 직접 게시했고, approve 권장 결론에 nit 2건만 남았습니다. 다음: nit 1번(죽은 LLM_PROVIDER 주석 제거)을 이 PR에서 처리할지 결정.";
+  const realRecapMail =
+    "케이바이오 강경윤 대표께 혈압 임상(GB-VLP-02) eCRF 진행상황 문의 메일 초안을 Gmail에 생성 완료했습니다. 초안 내용과 CC(이가영, 고예희, 곽미애)를 확인하신 후 발송하시면 됩니다.";
+
+  it("extracts a plain-text recap with the (disable recaps in /config) hint", () => {
+    expect(detectClaudeRecapFromOutput(`※ recap: ${realRecapPr} (disable recaps in /config)`)).toBe(
+      realRecapPr,
+    );
+    expect(
+      detectClaudeRecapFromOutput(`※ recap: ${realRecapMail} (disable recaps in /config)`),
+    ).toBe(realRecapMail);
+  });
+
+  it("extracts a recap rendered with CUP/CUF/SGR alt-screen escapes", () => {
+    // Real recap output is painted in alt-screen mode: the summary is coloured
+    // with SGR (`\x1b[38;5;246m`), each wrapped continuation row is placed with
+    // CUP (`\x1b[58;97H`) and indented either by literal spaces or a CUF run
+    // (`\x1b[1C`). stripAnsi turns CUP into '\n' and CUF(N) into N spaces, so
+    // the wrapped fragments arrive as separate whitespace-prefixed lines; the
+    // detector's `\s+`→' ' collapse must reassemble them into the original
+    // single-line summary.
+    const altScreenRecap =
+      "\x1b[38;5;246m※ recap: 케이바이오 강경윤 대표께 혈압 임상(GB-VLP-02) eCRF 진행상황" +
+      "\x1b[58;97H\x1b[1C문의 메일 초안을 Gmail에 생성 완료했습니다. 초안 내용과 CC(이가영," +
+      "\x1b[59;97H\x1b[1C고예희, 곽미애)를 확인하신 후 발송하시면 됩니다." +
+      "\x1b[60;97H (disable recaps in /config)\x1b[m";
+    expect(detectClaudeRecapFromOutput(altScreenRecap)).toBe(realRecapMail);
+  });
+
+  it("extracts the summary when the hint is absent and a box-drawing line follows", () => {
+    // When the `(disable recaps in /config)` hint is not emitted, the summary
+    // ends at the next horizontal box-drawing rule (`─` U+2500 run) Claude
+    // draws beneath the recap. Only the summary text must survive.
+    expect(detectClaudeRecapFromOutput(`※ recap: ${realRecapPr}\n` + "─".repeat(40) + "\n")).toBe(
+      realRecapPr,
+    );
+  });
+
+  it("returns undefined for ordinary output (no false positives)", () => {
+    expect(detectClaudeRecapFromOutput("PS C:\\Users> git status\r\n")).toBeUndefined();
+    // The literal word "recap" without the U+203B reference mark must not match.
+    expect(
+      detectClaudeRecapFromOutput("Here is a recap: we finished the migration.\r\n"),
+    ).toBeUndefined();
+  });
+
+  it("returns the latest recap when several have accumulated in the buffer", () => {
+    const buffer =
+      `※ recap: ${realRecapPr} (disable recaps in /config)\n` +
+      "...later session activity...\n" +
+      `※ recap: ${realRecapMail} (disable recaps in /config)\n`;
+    expect(detectClaudeRecapFromOutput(buffer)).toBe(realRecapMail);
+  });
+
+  it("does not surface a recap that is still streaming (no terminator yet)", () => {
+    // The detector requires an explicit terminator — the `(disable recaps in
+    // /config)` hint or a box-drawing rule. A recap whose marker + partial
+    // body have arrived but whose terminator has not yet been painted must
+    // return undefined, so a half-drawn summary never flickers onto the status
+    // line before being replaced by the complete text one frame later.
+    expect(detectClaudeRecapFromOutput(`※ recap: ${realRecapPr}`)).toBeUndefined();
   });
 });
 

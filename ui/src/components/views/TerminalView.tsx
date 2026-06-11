@@ -53,6 +53,7 @@ import {
   detectNewCodexInputPendingPrompt,
   detectCodexStatusMessageFromOutput,
   detectNewClaudeInputPendingPrompt,
+  detectClaudeRecapFromOutput,
   isCodexFooterStatusLine,
   detectActivityFromTitle,
   detectActivityFromCommand,
@@ -1344,6 +1345,26 @@ export function TerminalView({
           // (the 16 KB window still holds the answered modal frame).
           // The next genuine modal will refill the buffer naturally.
           claudeDetectionBuffer = "";
+        }
+
+        // Claude Code recap surfacing — mirror of the Codex conversation
+        // message dedup above (`nextCodexMessage && current.activityMessage
+        // !== nextCodexMessage`). When the user returns to an unfocused
+        // session Claude prints `※ recap: … (disable recaps in /config)` into
+        // the scrollback; detectClaudeRecapFromOutput pulls the freshest one
+        // out of the 16 KB detection buffer (it reuses stripAnsi to undo the
+        // alt-screen CUP/CUF wrapping). Surface it through activityMessage so
+        // ClaudeActivityHandler.computeStatusMessage renders it on the
+        // `bullet` path — the same channel Codex replies flow through. Never
+        // overwrite a live input-pending modal: while CLAUDE_INPUT_PENDING_MARKER
+        // is set the user must answer the modal, so the recap waits.
+        if (current.activityMessage !== CLAUDE_INPUT_PENDING_MARKER) {
+          const claudeRecap = detectClaudeRecapFromOutput(claudeDetectionBuffer);
+          if (claudeRecap && current.activityMessage !== claudeRecap) {
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              activityMessage: claudeRecap,
+            });
+          }
         }
       }
 

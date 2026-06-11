@@ -29,6 +29,34 @@ const CLAUDE_NUMBERED_OPTION = /(?:^|[\s\u2502|])\d+\.\s+\S/gm;
 const CLAUDE_NORMAL_INPUT_PROMPT = /\u2570\u2500\u276f(?:\s|$)/;
 const CLAUDE_SELECTION_ARROW = "\u276f";
 
+/** U+203B REFERENCE MARK \u2014 the glyph Claude Code prefixes every recap line with. */
+const CLAUDE_RECAP_REFERENCE_MARK = "\u203b";
+
+/**
+ * Matches a Claude Code recap block in stripAnsi-normalised text.
+ *
+ * Claude renders the recap as `\u203b recap: <one-line summary> (disable recaps
+ * in /config)`. The summary is wrapped across several alt-screen rows via CUP
+ * cursor escapes and indented with CUF/space runs, so this regex is meant to
+ * run AFTER `stripAnsi` has converted CUP\u2192`\n` and CUF(N)\u2192N spaces \u2014 the
+ * wrapped fragments then arrive as ordinary whitespace-separated text that the
+ * `[\s\S]*?` body re-joins. The summary terminates at whichever comes first:
+ * the `(disable recaps in /config)` hint (present in most builds), a
+ * box-drawing rule (`\u2500{3,}`) Claude draws beneath the recap. There is deliberately NO end-of-input
+ * fallback: a recap still streaming in (terminator not yet in the buffer)
+ * would otherwise match its partial body up to `$` and briefly surface a
+ * truncated summary that flips to the full text a frame later. Gating on a
+ * real terminator means only a COMPLETE recap is ever returned, and the lazy
+ * body stops each recap at its own terminator so a later recap in the same
+ * buffer is never swallowed. The `g` flag lets the caller pick the LAST match
+ * so a buffer that has accumulated several recaps surfaces only the freshest
+ * one.
+ */
+const CLAUDE_RECAP_PATTERN = new RegExp(
+  `${CLAUDE_RECAP_REFERENCE_MARK}\\s*recap:\\s*([\\s\\S]*?)(?:\\(disable recaps in /config\\)|\u2500{3,})`,
+  "g",
+);
+
 /**
  * Size of the rolling window used to scan for a Claude permission modal.
  * Claude renders the modal in alt-screen mode and redraws the entire frame
@@ -159,6 +187,40 @@ export function shouldDismissClaudeInputPendingFromOutput(text: string): boolean
   if (CLAUDE_NORMAL_INPUT_PROMPT.test(plain)) return true;
   if (!plain.includes(CLAUDE_SELECTION_ARROW)) return true;
   return !detectClaudeInputPendingFromOutput(plain);
+}
+
+/**
+ * Extracts the latest Claude Code recap summary from a rolling output window,
+ * or `undefined` when none is present.
+ *
+ * Claude's recap feature prints `※ recap: <one-line summary> (disable recaps
+ * in /config)` into the scrollback when the user returns to an unfocused
+ * session (or runs `/recap`). The summary is drawn in alt-screen mode and
+ * wrapped across several rows: continuation rows are placed with CUP
+ * (`\x1b[<row>;<col>H`) and indented with CUF (`\x1b[<n>C`) / literal spaces.
+ * A plain SGR-only strip would leave those fragments concatenated with no
+ * separators, so this MUST reuse the module's `stripAnsi` (CUP→`\n`,
+ * CUF(N)→N spaces) before matching — the same conversion the modal detector
+ * depends on. After matching, the captured body's whitespace runs (including
+ * the synthesised newlines/indents) are collapsed back into the original
+ * single-line summary.
+ *
+ * The buffer can hold several stacked recaps (one per return-to-session), so
+ * the global pattern is walked to completion and the LAST capture wins.
+ */
+export function detectClaudeRecapFromOutput(text: string): string | undefined {
+  const plain = stripAnsi(text);
+  CLAUDE_RECAP_PATTERN.lastIndex = 0;
+  let lastSummary: string | undefined;
+  for (
+    let match = CLAUDE_RECAP_PATTERN.exec(plain);
+    match;
+    match = CLAUDE_RECAP_PATTERN.exec(plain)
+  ) {
+    const summary = match[1].replace(/\s+/g, " ").trim();
+    if (summary) lastSummary = summary;
+  }
+  return lastSummary;
 }
 
 /** Known interactive apps without dedicated provider handlers. */
