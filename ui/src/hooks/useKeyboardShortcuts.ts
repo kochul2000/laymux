@@ -20,13 +20,41 @@ const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowDown: "down",
 };
 
-/** Switch workspace and focus the first pane (clear dock focus). */
+/**
+ * Switch workspace and (by default) hand focus to a workspace pane.
+ *
+ * #311: When a dock is focused and the user changes workspace by arrow, the
+ * dock would keep visual focus while no pane was focused. The fix is to always
+ * re-focus a pane on switch — falling back to pane 0 when there is no valid
+ * reference. The `convenience.dockArrowFocusPane` setting (default true) lets
+ * users opt out: when false, an active dock focus is preserved (memo-style).
+ */
 function switchWorkspace(id: string) {
+  const wasDockFocused = useDockStore.getState().focusedDock !== null;
+  const focusPane = useSettingsStore.getState().convenience.dockArrowFocusPane;
+
   useWorkspaceStore.getState().setActiveWorkspace(id);
+
+  // Opt-out (dockArrowFocusPane=false): when the dock was the focus source,
+  // preserve dock focus across the switch (memo-style). When already in the
+  // grid, fall through to pane focusing.
+  if (!focusPane && wasDockFocused) return;
+
   useDockStore.getState().setFocusedDock(null);
   const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
-  if (focusedPaneIndex === null) {
+  // Always end with a focused pane. When the dock was focused the grid index is
+  // null → focus pane 0. When already in the grid, keep the current pane unless
+  // there is no valid reference (null) → fall back to pane 0.
+  if (wasDockFocused || focusedPaneIndex === null) {
     setFocusedPane(0);
+    return;
+  }
+  // grid→grid: the global focusedPaneIndex is retained across switches, so a
+  // larger index can fall outside a smaller target workspace. Clamp to the last
+  // pane so we always stay on a valid, focused pane (#311 review).
+  const paneCount = useWorkspaceStore.getState().getActiveWorkspace()?.panes.length ?? 0;
+  if (paneCount > 0 && focusedPaneIndex > paneCount - 1) {
+    setFocusedPane(paneCount - 1);
   }
 }
 

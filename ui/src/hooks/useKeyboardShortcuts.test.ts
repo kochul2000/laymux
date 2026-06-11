@@ -181,6 +181,83 @@ describe("useKeyboardShortcuts", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
+  // --- #311: workspace switch always focuses a pane (dockArrowFocusPane default true) ---
+  it("workspace switch focuses a pane even when a stale pane index remains (#311)", () => {
+    // Repro: dock is focused, but grid still holds a stale focusedPaneIndex
+    // from the previous workspace. The old guard (only set when null) left the
+    // dock visually focused with no pane focus. Now it must always re-focus.
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useDockStore.getState().setFocusedDock("left");
+    useGridStore.setState({ focusedPaneIndex: 3 });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    // No prior valid pane reference → fall back to first pane (index 0).
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("workspace switch keeps dock focus when dockArrowFocusPane is false (#311)", () => {
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, dockArrowFocusPane: false },
+    });
+    useDockStore.getState().setFocusedDock("left");
+    useGridStore.setState({ focusedPaneIndex: null });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+
+    // Workspace switched, but dock focus is preserved (memo-style behavior).
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+  });
+
+  it("grid→grid switch clamps a stale pane index to the smaller target workspace (#311 review)", () => {
+    // Default workspace has multiple panes; WS2 (default-layout) has a single
+    // pane. In the grid (no dock focus) with a stale index past the target's
+    // range, the switch must clamp to the last valid pane — not leave it
+    // out of range — so the user always lands on a focused pane.
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace("ws-default");
+    useDockStore.getState().setFocusedDock(null);
+    useGridStore.setState({ focusedPaneIndex: 2 });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    // WS2 has 1 pane → index clamped to 0 (last valid), still focused.
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("workspace switch focuses pane when dockArrowFocusPane is false but no dock is focused (#311)", () => {
+    // dockArrowFocusPane only governs the dock→pane handoff. When the user was
+    // already in the workspace (no dock focus), switching must still focus a pane.
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: { ...useSettingsStore.getState().convenience, dockArrowFocusPane: false },
+    });
+    useDockStore.getState().setFocusedDock(null);
+    useGridStore.setState({ focusedPaneIndex: null });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
   // --- Ctrl+Shift+B: sidebar toggle ---
   it("Ctrl+Shift+B toggles left dock sidebar", () => {
     renderHook(() => useKeyboardShortcuts());
