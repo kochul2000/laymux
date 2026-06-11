@@ -1581,6 +1581,34 @@ function ConvenienceSection() {
             </label>
           </div>
         </div>
+
+        {/* Dock Arrow Focus Pane toggle (#311) */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Workspace Switch Focus
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              화살표로 워크스페이스 이동 시 Dock에서 Pane으로 포커스 자동 이동
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="dock-arrow-focus-pane-toggle"
+                type="checkbox"
+                checked={convenience.dockArrowFocusPane}
+                onChange={(e) => updateConvenience({ dockArrowFocusPane: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.dockArrowFocusPane ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
       </div>
     </div>
   );

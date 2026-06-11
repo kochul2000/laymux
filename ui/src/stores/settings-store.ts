@@ -84,6 +84,12 @@ export interface ConvenienceSettings {
   dockPersistState: boolean;
   /** Allow Alt+Arrow to navigate into/out of dock areas. */
   dockArrowNav: boolean;
+  /**
+   * When switching workspaces by keyboard arrow (Ctrl+Alt+Arrow) while a dock
+   * is focused, automatically hand focus to a workspace pane. When false, dock
+   * focus is preserved across the switch (memo-style). Default: true. See #311.
+   */
+  dockArrowFocusPane: boolean;
   /** Strip common leading whitespace when pasting. */
   smartRemoveIndent: boolean;
   /** Rejoin URLs split across lines when pasting. */
@@ -779,6 +785,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     scrollbarStyle: "overlay" as const,
     dockPersistState: true,
     dockArrowNav: true,
+    dockArrowFocusPane: true,
     smartRemoveIndent: true,
     smartRemoveLineBreak: true,
     smartLinkJoin: true,
@@ -1008,6 +1015,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           scrollbarStyle: "overlay" as const,
           dockPersistState: true,
           dockArrowNav: true,
+          dockArrowFocusPane: true,
           smartRemoveIndent: true,
           smartRemoveLineBreak: true,
           smartLinkJoin: true,
