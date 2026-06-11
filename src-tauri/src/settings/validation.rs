@@ -320,6 +320,20 @@ const MIN_PANE_DIM: f64 = 0.01;
 /// Tolerance for floating-point comparison to avoid false positives (e.g. 0.3+0.7 = 1.0000000000000002).
 const BOUNDS_EPSILON: f64 = 1e-9;
 
+/// Snap values within epsilon of the [0, 1] boundary back onto it.
+/// Resize arithmetic can leave fp noise like 1.0000000000000009 — silently
+/// absorbing it avoids spurious "out of range" warnings on every load.
+fn snap_to_unit(v: &mut f64) {
+    if !v.is_finite() {
+        return;
+    }
+    if *v > 1.0 && *v <= 1.0 + BOUNDS_EPSILON {
+        *v = 1.0;
+    } else if *v < 0.0 && *v >= -BOUNDS_EPSILON {
+        *v = 0.0;
+    }
+}
+
 fn is_valid_ratio(v: f64) -> bool {
     v.is_finite() && (0.0..=1.0).contains(&v)
 }
@@ -367,6 +381,11 @@ fn normalize_pane_bounds(
     pane_path: &str,
     warnings: &mut Vec<ValidationWarning>,
 ) {
+    snap_to_unit(x);
+    snap_to_unit(y);
+    snap_to_unit(w);
+    snap_to_unit(h);
+
     if !is_valid_ratio(*x) {
         let old = *x;
         *x = clamp_ratio(*x);
@@ -593,6 +612,34 @@ mod tests {
         // Should NOT be modified — epsilon tolerance absorbs fp noise
         assert_eq!(pane.w, 0.7);
         assert!(!warnings.iter().any(|w| w.message.contains("범위를 초과")));
+    }
+
+    #[test]
+    fn pane_dimension_with_fp_noise_above_1_is_silently_snapped() {
+        // 리사이즈 연산 누적으로 h가 1.0000000000000009처럼 1을 미세하게 초과할 수 있다.
+        // 경고 없이 1.0으로 스냅되어야 한다.
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].h = 1.0 + 9e-16;
+        settings.workspaces[0].panes[0].w = 1.0 + 9e-16;
+        settings.workspaces[0].panes[0].x = -9e-16;
+        settings.workspaces[0].panes[0].y = -9e-16;
+        let warnings = validate_and_repair(&mut settings);
+        let pane = &settings.workspaces[0].panes[0];
+        assert_eq!(pane.x, 0.0);
+        assert_eq!(pane.y, 0.0);
+        assert_eq!(pane.w, 1.0);
+        assert_eq!(pane.h, 1.0);
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn pane_dimension_beyond_epsilon_still_warns() {
+        // epsilon(1e-9)을 넘는 초과는 여전히 경고와 함께 수정되어야 한다.
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].h = 1.001;
+        let warnings = validate_and_repair(&mut settings);
+        assert_eq!(settings.workspaces[0].panes[0].h, 1.0);
+        assert!(warnings.iter().any(|w| w.path.contains(".h") && w.repaired));
     }
 
     #[test]
