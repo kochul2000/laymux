@@ -179,6 +179,25 @@ fn classify(child_pid: Option<u32>, snapshot: &[ProcessEntry]) -> PtyAppLiveness
     }
 }
 
+/// Whether a title-derived `exited` signal for `app` must be neutralized
+/// because the process tree shows that same app still alive under the PTY
+/// (ADR-0009 false-exit suppression). The title state machines
+/// (`process_claude_title` / `process_codex_title`) report `exited` for any
+/// title that no longer looks like the app — but a transient non-app title
+/// (a subprocess's OSC title, a path-like prompt, Codex's bare cwd-basename
+/// idle title — #297) is not an exit while the process is alive. The process
+/// tree is ground truth, so this returns `true` only on `Running(app)`.
+///
+/// Pure so the load-bearing decision is unit-testable without a live PTY: the
+/// PTY callback feeds it the state machine's `exited` flag and a fresh
+/// `interactive_app_in_pty_fresh` verdict. CRUCIAL for #297: a `NoneAlive`
+/// (process genuinely gone) or `Unknown` (no PID / snapshot miss) verdict does
+/// NOT suppress — a real exit flows through, and when the tree cannot see the
+/// process the title signal is honored rather than wrongly pinning a dead pane.
+pub fn suppresses_false_exit(app: &str, liveness: PtyAppLiveness) -> bool {
+    matches!(liveness, PtyAppLiveness::Running(alive) if alive == app)
+}
+
 /// The liveness oracle: whether `claude`/`codex` is alive under the PTY backing
 /// `terminal_id` (`Running`), or the process tree authoritatively says nothing
 /// is (`NoneAlive`), or there is no signal (`Unknown`).
@@ -474,6 +493,45 @@ mod tests {
         // "Claude Code" banner still sitting in the recent buffer.
         let snapshot = vec![entry(100, 1, "pwsh.exe"), entry(200, 100, "git.exe")];
         assert_eq!(classify(Some(100), &snapshot), PtyAppLiveness::NoneAlive);
+    }
+
+    // ── suppresses_false_exit: the load-bearing #297 decision ──
+
+    #[test]
+    fn suppress_exit_when_same_app_still_alive() {
+        // Codex's bare cwd-basename idle title ("kochul") makes
+        // `process_codex_title` report `exited`, but the process tree still
+        // sees codex — the exit must be suppressed so the pane stays Codex.
+        // This is exactly what keeps #297 from regressing.
+        assert!(suppresses_false_exit(
+            "Codex",
+            PtyAppLiveness::Running("Codex")
+        ));
+        assert!(suppresses_false_exit(
+            "Claude",
+            PtyAppLiveness::Running("Claude")
+        ));
+    }
+
+    #[test]
+    fn no_suppress_when_different_app_alive() {
+        // A different live app is not "this app still running" — let the
+        // exit through so a Claude→Codex handover reclassifies correctly.
+        assert!(!suppresses_false_exit(
+            "Codex",
+            PtyAppLiveness::Running("Claude")
+        ));
+    }
+
+    #[test]
+    fn no_suppress_on_genuine_exit_or_unknown() {
+        // NoneAlive = process genuinely gone → real exit flows through.
+        // Unknown = no PID / snapshot miss → honor the title signal rather
+        // than wrongly pinning a possibly-dead pane (#297 fallback path).
+        assert!(!suppresses_false_exit("Codex", PtyAppLiveness::NoneAlive));
+        assert!(!suppresses_false_exit("Claude", PtyAppLiveness::NoneAlive));
+        assert!(!suppresses_false_exit("Codex", PtyAppLiveness::Unknown));
+        assert!(!suppresses_false_exit("Claude", PtyAppLiveness::Unknown));
     }
 
     #[test]
