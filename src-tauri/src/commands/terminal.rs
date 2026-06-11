@@ -326,12 +326,12 @@ pub fn create_terminal_session(
                 // "task completed" notification fires. The genuine exit (process
                 // gone) flows through unchanged.
                 if cr.exited
-                    && matches!(
+                    && crate::process_tree::suppresses_false_exit(
+                        "Claude",
                         crate::process_tree::interactive_app_in_pty_fresh(
                             &state_for_pty,
                             &terminal_id,
                         ),
-                        crate::process_tree::PtyAppLiveness::Running("Claude")
                     )
                 {
                     cr.exited = false;
@@ -499,12 +499,12 @@ pub fn create_terminal_session(
                 // a non-Codex title while the `codex` process is still alive
                 // under this PTY is a transient title, not an exit.
                 if cr_codex.exited
-                    && matches!(
+                    && crate::process_tree::suppresses_false_exit(
+                        "Codex",
                         crate::process_tree::interactive_app_in_pty_fresh(
                             &state_for_pty,
                             &terminal_id,
                         ),
-                        crate::process_tree::PtyAppLiveness::Running("Codex")
                     )
                 {
                     cr_codex.exited = false;
