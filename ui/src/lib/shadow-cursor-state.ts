@@ -264,6 +264,32 @@ export function applyDectcemShowToShadowCursor(
 }
 
 /**
+ * Should the overlay repaint be held at its previous painted position
+ * while a post-frame cursor park is pending? (See `parkPending` on
+ * `ShadowCursorState` for the rationale.)
+ *
+ * Two states take precedence over the freeze:
+ *
+ * - **Composition preview** — the IME caret must track the preview
+ *   text immediately; holding it at a stale position breaks visual
+ *   feedback mid-composition.
+ * - **Sustained DECTCEM hide** — when a DEC 2026 frame ends with the
+ *   cursor hidden (`?25l` … `?2026l` with no matching show), the app
+ *   wants no visible cursor at all. Freezing would keep the previously
+ *   *visible* overlay on screen for up to the settle window,
+ *   contradicting the app's explicit hide. The hidden state must reach
+ *   paint (and hide the overlay) without waiting for the park.
+ */
+export function shouldFreezeOverlayForPark(
+  state: Pick<ShadowCursorState, "parkPending" | "isCursorHidden">,
+  compositionPreviewActive: boolean,
+): boolean {
+  if (compositionPreviewActive) return false;
+  if (state.isCursorHidden) return false;
+  return state.parkPending;
+}
+
+/**
  * Applied when the post-frame settle window expires without a cursor
  * park arriving. The at-reset fallback position (already in
  * `cursorX/AbsY`) becomes the best available estimate, so overlay

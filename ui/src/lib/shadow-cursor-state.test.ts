@@ -17,6 +17,7 @@ import {
   computeUseShadowCursor,
   getShadowSyncEligibility,
   isOverlayCaretActivity,
+  shouldFreezeOverlayForPark,
   type ShadowCursorState,
 } from "./shadow-cursor-state";
 
@@ -430,6 +431,47 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       expect(applyDectcemHideToShadowCursor(baseState, activity)).toBe(baseState);
       expect(applyDectcemShowToShadowCursor(baseState, activity, 9, 9, false)).toBe(baseState);
     }
+  });
+
+  it("frame ending hidden (?25l … ?2026l with no show): hide wins over the park freeze", () => {
+    // Review regression (PR #313): when a DEC 2026 frame hides the
+    // cursor and ends without a matching `?25h`, both `parkPending`
+    // and `isCursorHidden` are true. The park freeze must NOT swallow
+    // the repaint — the previously *visible* overlay would otherwise
+    // stay on screen for up to the settle window, contradicting the
+    // app's explicit hide. Sustained hide must reach paint immediately.
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026SetToShadowCursor(state, codex, 2, 106);
+    state = applyDectcemHideToShadowCursor(state, codex);
+    // Frame flushes with the cursor still hidden — no `?25h` arrived.
+    state = applyDec2026ResetToShadowCursor(state, codex, 44, 108);
+    expect(state.parkPending).toBe(true);
+    expect(state.isCursorHidden).toBe(true);
+    // The freeze must yield so the hidden state can hide the overlay.
+    expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
+    // Once the (late) park shows the cursor again, freeze stays off
+    // because the park itself cleared parkPending.
+    state = applyDectcemShowToShadowCursor(state, codex, 2, 106, false);
+    expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
+  });
+
+  it("shouldFreezeOverlayForPark truth table", () => {
+    // Freezes only in the plain park-pending case.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: false }, false)).toBe(
+      true,
+    );
+    // No park pending → nothing to freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: false, isCursorHidden: false }, false)).toBe(
+      false,
+    );
+    // Sustained DECTCEM hide takes precedence over the freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: true }, false)).toBe(
+      false,
+    );
+    // Composition preview takes precedence over the freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: false }, true)).toBe(
+      false,
+    );
   });
 
   it("leaving the TUI clears parkPending and hidden state", () => {

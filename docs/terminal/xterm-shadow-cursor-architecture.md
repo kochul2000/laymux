@@ -182,6 +182,10 @@ terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
   안 보내는 TUI 도 최악 50ms 지연으로 수렴 — 커서 블링크 주기보다 짧아 체감 불가.
 - **지속적 `?25l` 동안 overlay 캐럿 숨김**: 한 청크 안의 일시적 hide/show 쌍은 rAF coalescing
   으로 화면에 도달하지 않으므로, 화면에 보이는 효과는 앱이 의도한 지속 숨김뿐이다.
+  **숨김은 park 동결보다 우선한다** — 프레임이 `?25l` 상태로 끝나면(`?25h` 없이 `?2026l`)
+  `parkPending` 동결이 repaint 를 삼키지 않고 숨김이 즉시 화면에 반영되어야 한다. 그렇지
+  않으면 직전의 *보이는* overlay 가 settle 윈도 동안 잔존해 앱의 명시적 hide 와 모순된다
+  (`shouldFreezeOverlayForPark` 참조).
 
 순수 전이는 `ui/src/lib/shadow-cursor-state.ts`(`applyDectcemShow/Hide`,
 `applyParkSettleTimeout`), 트레이스 리플레이 테스트는 `shadow-cursor-state.test.ts` 참조.

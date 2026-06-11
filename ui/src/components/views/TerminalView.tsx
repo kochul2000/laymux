@@ -45,6 +45,7 @@ import {
   applyParkSettleTimeoutToShadowCursor,
   getShadowSyncEligibility,
   isOverlayCaretActivity,
+  shouldFreezeOverlayForPark,
   type ShadowCursorState,
 } from "@/lib/shadow-cursor-state";
 
@@ -619,9 +620,12 @@ export function TerminalView({
       // cursor park arrives ~15 ms later as `?25l` CUP `?25h`). Keep
       // the overlay at its previous painted position instead of
       // repainting with an estimate that may sit on the footer row.
-      // Composition preview bypasses the freeze — the IME caret must
-      // track the preview text immediately.
-      if (shadowCursorRef.current.parkPending && !compositionPreviewRef.current.active) {
+      // Composition preview and sustained DECTCEM hide bypass the
+      // freeze — see `shouldFreezeOverlayForPark` for why each must
+      // reach paint immediately.
+      if (
+        shouldFreezeOverlayForPark(shadowCursorRef.current, compositionPreviewRef.current.active)
+      ) {
         trace("overlay-frozen", { reason: "park-pending" });
         return;
       }
