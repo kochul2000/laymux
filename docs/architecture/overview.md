@@ -128,7 +128,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 
 | 필드 | 타입 | 적용 view | 설명 |
 |---|---|---|---|
-| `fontSize` | `number` | `TerminalView` | 키바인딩 `terminal.zoomIn` (기본 `Ctrl+=`) / `terminal.zoomOut` (기본 `Ctrl+-`) 로 조정되는 폰트 크기. `terminal.zoomReset` (기본 `Ctrl+0`) 은 이 override를 제거해 프로파일 기본값으로 복귀. `profile → profileDefaults` 체인으로 해석된 face/weight는 유지하고 `size`만 덮어쓴다. 범위 6–72. |
+| `fontSize` | `number` | `TerminalView` · `MemoView` | 줌 키바인딩으로 조정되는 폰트 크기. TerminalView 는 `terminal.zoomIn/zoomOut/zoomReset`, MemoView 는 `memo.zoomIn/zoomOut/zoomReset` (둘 다 기본 `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, 포커스된 view 타입에 따라 분기). `zoomReset` 은 override 를 제거해 기본값 체인으로 복귀 — TerminalView 는 `profile → profileDefaults` 폰트의 `size` 만 덮어쓰고(face/weight 유지), MemoView 는 `settings.memo.fontSize → appFont.size` 체인 위에 덮어쓴다. 범위 6–72. |
 
 #### 생명주기
 
@@ -147,7 +147,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 2. 설정 UI에도 기본값이 있는가? → 있으면 해석 체인에 기본값 경로를 둔다 (`settings → override`).
 3. View 타입 전환 시 초기화돼야 하는가? → 그렇다면 `ViewOverrides` 쪽.
 
-`ViewOverrides`에 추가하는 필드는 특정 view 타입에만 의미 있을 수 있다. 현재는 TerminalView의 `fontSize`만 있지만, 향후 MemoView용 필드 등이 추가돼도 동일 슬롯에 공존한다 — view 타입이 바뀌면 전부 리셋되므로 충돌 없음.
+`ViewOverrides`에 추가하는 필드는 특정 view 타입에만 의미 있을 수 있다. 현재 필드는 `fontSize` 하나이며 TerminalView·MemoView 가 각자의 기본값 체인 위에서 공유한다. 향후 view 전용 필드가 추가돼도 동일 슬롯에 공존한다 — view 타입이 바뀌면 전부 리셋되므로 충돌 없음.
 
 ### 4.3 settings.json 예시
 
@@ -191,6 +191,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | `TerminalView` | 자유 | WSL / PowerShell 실행 |
 | `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장 |
 | `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. Rust `list_directory`로 디렉터리 나열, 편집 가능한 주소창(경로 직접 입력/붙여넣기 → `stat_path`로 검증 후 디렉터리 이동 또는 파일이면 부모 이동+통합 뷰어 open, #278), 파일 뷰어(텍스트/이미지/터미널) 지원 |
+| `IssueReporterView` | 자유 | GitHub 이슈 리포터. 제출은 `issueReporter.submit` 키바인딩(기본 `Ctrl+Enter`) |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |
 
 ### 6.2 EmptyView

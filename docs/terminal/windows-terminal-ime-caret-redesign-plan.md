@@ -1,5 +1,13 @@
 # Windows Terminal IME Caret Redesign Plan
 
+> **현황 (2026-06-11, 부분 구현).** Phase 1–2 에 해당하는 composition preview 분리는 진행됐다 —
+> `ui/src/lib/ime-composition-controller.ts` 와 `compositionPreviewRef` 가 도입됨 (커밋 14386bd).
+> Phase 3–5(composition 중 키 게이팅, shadow cursor 축소, CSS/native caret 정책 재정비)는 미실행이며,
+> `shadowCursorRef` 기반 shadow cursor 모델이 여전히 현행이다. 커서/플리커 작업의 정본은
+> [ADR-0008](../adr/0008-shell-cursor-shadow-cursor.md) 이 가리키는 research 3종이고, 이 문서는
+> IME caret 소유권 분리 작업을 재개할 때의 설계 기준선으로 유지한다.
+> (계획 브랜치 `redesign-wt-ime-caret-model` 은 origin 에 존재.)
+
 ## Goal
 
 Replace the current PR 207 shadow-cursor design with a Windows Terminal style model.
