@@ -1,9 +1,18 @@
 //! Codex (OpenAI Codex CLI) terminal activity detection.
 //!
 //! Mirror of `claude_activity` for Codex sessions, intentionally simpler:
-//! Codex does not expose a working/idle distinction in its title (it cycles
-//! a Braille spinner during work and reverts to "OpenAI Codex" at idle), so
-//! the state machine only tracks entry and exit.
+//! Codex does not expose a working/idle distinction in its title, so the
+//! state machine only tracks entry and exit.
+//!
+//! Title shape (observed on Windows codex.exe, #297): the "OpenAI Codex"
+//! literal appears only in the startup banner. After that the title is
+//! "<braille spinner> <cwd basename>" while working (e.g. "⠏ laymux") and
+//! the BARE cwd basename ("laymux") at the idle prompt. A bare basename
+//! carries no Codex-specific signal and is indistinguishable from a shell
+//! prompt — so `process_codex_title` reports it as an exit. The pane stays
+//! classified as Codex across that idle title only because the PTY callback
+//! suppresses the false exit while the `codex` process is alive in the
+//! process tree (ADR-0009).
 //!
 //! Like `claude_activity`, this module has no side effects — it analyzes
 //! title strings and returns structured results. The PTY callback owns
@@ -153,6 +162,31 @@ mod tests {
     #[test]
     fn process_exit_on_empty_title_after_codex() {
         let r = process_codex_title("", true);
+        assert!(r.exited);
+    }
+
+    #[test]
+    fn process_exit_on_bare_cwd_basename_idle_title() {
+        // Regression for #297 (codex not recognized on Windows). The
+        // Windows codex.exe sets its OSC 0/2 title to "<braille> <cwd
+        // basename>" while working (e.g. "\u{280F} laymux") and to the
+        // BARE cwd basename ("laymux", "kochul", …) at its idle prompt —
+        // it never emits the "OpenAI Codex" literal in the title after
+        // startup. A bare basename is neither the banner nor a Braille
+        // frame, so `is_codex_title` rejects it and this reports `exited`
+        // — exactly as a real shell-prompt title would.
+        //
+        // That is *intentional*: the title alone genuinely cannot tell a
+        // codex idle prompt apart from a shell showing the same dir name.
+        // The pane stays classified as Codex only because the PTY
+        // callback suppresses this false exit when the `codex` process is
+        // still alive in the process tree (ADR-0009 false-exit
+        // suppression in `commands::terminal`). This test pins the
+        // trigger so nobody "fixes" `is_codex_title` to swallow bare
+        // titles (which would wrongly keep dead codex panes pinned) and
+        // documents why the process-tree authority is load-bearing here.
+        let r = process_codex_title("laymux", true);
+        assert!(!r.entered);
         assert!(r.exited);
     }
 
