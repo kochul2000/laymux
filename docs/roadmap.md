@@ -17,7 +17,9 @@
 - [x] **MCP Resources** — 구독형 read-only 상태 노출 (issue #202)
 - [x] **세션 영속 / 캐시** — 출력·CWD 복원, 안정 pane ID, 숨김 터미널 자동 종료(#269)
 - [x] **Pane 식별자 3종** — terminalId / paneIndex / paneNumber, 번호 주소 지정 + 배지 복사 ([ADR-0007](./adr/0007-pane-identifier-trio.md), #256·#276)
+- [x] **인터랙티브 앱 인식(liveness)** — 프로세스 트리 권위 + false-exit 억제 + 마운트 동기화 ([ADR-0009](./adr/0009-process-tree-interactive-app-liveness.md), #234·#237·#239)
 - [x] **통합 파일 뷰어** — FileExplorerView + 텍스트/이미지/터미널 뷰어, MCP `show_image`(#277·#278·#279·#287)
+- [x] **알림 해제 모델** — 입력 수단이 아닌 진입/포커스 동작 기준, notificationDismiss 모드별 해제 단위 ([ADR-0010](./adr/0010-notification-dismiss-on-program-focus-entry.md), #302)
 
 ## 다음 / 검토 중
 
