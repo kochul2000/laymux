@@ -369,6 +369,15 @@ describe("detectClaudeRecapFromOutput", () => {
       `※ recap: ${realRecapMail} (disable recaps in /config)\n`;
     expect(detectClaudeRecapFromOutput(buffer)).toBe(realRecapMail);
   });
+
+  it("does not surface a recap that is still streaming (no terminator yet)", () => {
+    // The detector requires an explicit terminator — the `(disable recaps in
+    // /config)` hint or a box-drawing rule. A recap whose marker + partial
+    // body have arrived but whose terminator has not yet been painted must
+    // return undefined, so a half-drawn summary never flickers onto the status
+    // line before being replaced by the complete text one frame later.
+    expect(detectClaudeRecapFromOutput(`※ recap: ${realRecapPr}`)).toBeUndefined();
+  });
 });
 
 describe("detectNewCodexInputPendingPrompt", () => {

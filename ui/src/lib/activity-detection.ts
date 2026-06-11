@@ -42,12 +42,18 @@ const CLAUDE_RECAP_REFERENCE_MARK = "\u203b";
  * wrapped fragments then arrive as ordinary whitespace-separated text that the
  * `[\s\S]*?` body re-joins. The summary terminates at whichever comes first:
  * the `(disable recaps in /config)` hint (present in most builds), a
- * box-drawing rule (`\u2500{3,}`) Claude draws beneath the recap, or end-of-input.
- * The `g` flag lets the caller pick the LAST match so a buffer that has
- * accumulated several recaps surfaces only the freshest one.
+ * box-drawing rule (`\u2500{3,}`) Claude draws beneath the recap. There is deliberately NO end-of-input
+ * fallback: a recap still streaming in (terminator not yet in the buffer)
+ * would otherwise match its partial body up to `$` and briefly surface a
+ * truncated summary that flips to the full text a frame later. Gating on a
+ * real terminator means only a COMPLETE recap is ever returned, and the lazy
+ * body stops each recap at its own terminator so a later recap in the same
+ * buffer is never swallowed. The `g` flag lets the caller pick the LAST match
+ * so a buffer that has accumulated several recaps surfaces only the freshest
+ * one.
  */
 const CLAUDE_RECAP_PATTERN = new RegExp(
-  `${CLAUDE_RECAP_REFERENCE_MARK}\\s*recap:\\s*([\\s\\S]*?)(?:\\(disable recaps in /config\\)|\u2500{3,}|$)`,
+  `${CLAUDE_RECAP_REFERENCE_MARK}\\s*recap:\\s*([\\s\\S]*?)(?:\\(disable recaps in /config\\)|\u2500{3,})`,
   "g",
 );
 
