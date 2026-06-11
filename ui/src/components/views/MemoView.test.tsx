@@ -394,6 +394,42 @@ describe("MemoView", () => {
       fireEvent.mouseDown(textareas[1], { bubbles: true });
       expect(clipboardWriteText).toHaveBeenCalledWith("aaa");
     });
+
+    // Issue #307: drag-select ending outside the pane. The pointer is
+    // pressed inside the textarea, dragged out (over a neighbouring pane
+    // or the window chrome), and released there. No blur, no mousedown
+    // outside, and the selection never collapses, so the lazy-copy model
+    // would otherwise leave the pending text unflushed until some later
+    // interaction. A pointerdown→window-pointerup watcher flushes it on
+    // release so the copy lands the moment the drag ends.
+    it("issue #307: drag-select released outside the pane flushes to clipboard", async () => {
+      const textarea = await setupCopyOnSelect("pane-307-drag-outside");
+      // Drag started inside the textarea.
+      fireEvent.pointerDown(textarea);
+      // Pending stored during the drag; nothing copied yet.
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+      // Release happens outside the textarea — pointerup fires on window,
+      // textarea keeps focus, selection stays put.
+      fireEvent.pointerUp(window);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
+
+    it("issue #307: window pointerup without a preceding pointerdown does not copy", async () => {
+      // Guard: a stray pointerup elsewhere on the page must not flush.
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      render(<MemoView memoKey="pane-307-guard" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      vi.mocked(clipboardWriteText).mockClear();
+      // No selection / no pointerdown in the textarea.
+      fireEvent.pointerUp(window);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
   });
 
   describe("Tab/Shift+Tab indent", () => {

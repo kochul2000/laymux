@@ -162,6 +162,20 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
     discardPendingCopy();
   }, [discardPendingCopy]);
 
+  // Issue #307: drag-select ending outside the pane. When the user presses
+  // inside the textarea and drags the pointer out (over a neighbouring pane
+  // or the window chrome) before releasing, the textarea keeps focus, no
+  // mousedown-outside fires, and the selection never collapses — so the
+  // lazy-copy model would leave the pending text unflushed until some later
+  // interaction. Pair pointerdown on the textarea with a one-shot window
+  // pointerup so the pending copy flushes the moment the drag ends, wherever
+  // it ends. Mirrors the TerminalView #230 watcher. `flushPendingCopy` no-ops
+  // when there's nothing pending, so a plain click (no selection) is harmless.
+  const handlePointerDown = useCallback(() => {
+    const onWindowPointerUp = () => flushPendingCopy();
+    window.addEventListener("pointerup", onWindowPointerUp, { once: true });
+  }, [flushPendingCopy]);
+
   // Flush pending copy when focus leaves memo: window blur (external app)
   // or click outside textarea (dock/sidebar/other pane)
   useEffect(() => {
@@ -418,6 +432,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           onClick={handleClick}
+          onPointerDown={handlePointerDown}
           className="h-full w-full resize-none border-none outline-none"
           style={{
             background: "var(--bg-base)",
