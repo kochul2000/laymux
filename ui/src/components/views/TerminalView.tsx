@@ -1110,11 +1110,22 @@ export function TerminalView({
     // ends — gets a final chance to flush the selection to the clipboard.
     // `runTerminalCopy` still gates on `hasSelection()`, so click-without-
     // drag is a no-op.
+    //
+    // The one-shot watcher is tracked so it can be torn down on cleanup: if
+    // this terminal unmounts mid-drag (before pointerup fires) the listener
+    // would otherwise linger on window and run a copy against a disposed
+    // terminal on some later, unrelated release. We also drop any prior
+    // watcher when a fresh pointerdown arrives without an intervening
+    // pointerup (missed/cancelled release).
+    let pointerUpWatcher: (() => void) | null = null;
     const handlePointerDown = () => {
+      if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       const onWindowPointerUp = () => {
+        pointerUpWatcher = null;
         if (!useSettingsStore.getState().convenience.copyOnSelect) return;
         runTerminalCopy(terminal);
       };
+      pointerUpWatcher = onWindowPointerUp;
       window.addEventListener("pointerup", onWindowPointerUp, { once: true });
     };
     outerEl?.addEventListener("pointerdown", handlePointerDown);
@@ -1716,6 +1727,7 @@ export function TerminalView({
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
+      if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();
       wrapperRef.current?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
