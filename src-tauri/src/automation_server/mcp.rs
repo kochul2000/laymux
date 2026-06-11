@@ -462,6 +462,15 @@ impl McpHandler {
     }
 
     /// Prepare terminal input: apply escape sequences and optional Enter (CR).
+    ///
+    /// Issue #314: 제출(`enter=true`) 시에는 후행 개행을 단일 CR로 정규화한다.
+    /// 클라이언트가 보낸 `data`가 이미 `\n`/`\r\n`/`\r`로 끝나는 경우(예:
+    /// `escape=true` + `"ls\\n"`, 또는 멀티라인 텍스트의 마지막 줄), 그대로 CR을
+    /// 덧붙이면 `...\n\r` 같은 시퀀스가 생긴다. Windows ConPTY/PSReadLine에서
+    /// 후행 LF는 입력 버퍼에 줄바꿈만 삽입하고 명령을 제출하지 않으므로,
+    /// "엔터가 줄바꿈되고 마는" 현상이 발생한다. 따라서 후행 개행을 제거한 뒤
+    /// 제출용 CR 하나만 붙인다. 내부(중간) 개행은 멀티라인 입력 의도를 위해
+    /// 보존한다. `enter=false`면 사용자가 보낸 개행을 손대지 않는다.
     fn prepare_input(data: &str, escape: bool, enter: bool) -> String {
         let mut result = if escape {
             super::helpers::unescape_terminal_input(data)
@@ -469,6 +478,9 @@ impl McpHandler {
             data.to_string()
         };
         if enter {
+            while result.ends_with('\n') || result.ends_with('\r') {
+                result.pop();
+            }
             result.push('\r');
         }
         result
@@ -2838,6 +2850,60 @@ mod tests {
     fn prepare_input_enter_false_does_not_append_cr() {
         let out = McpHandler::prepare_input("ls", false, false);
         assert_eq!(out, "ls");
+    }
+
+    // ── Issue #314: Windows PowerShell 줄바꿈-제출 버그 ──────────────
+    // enter=true일 때 data 끝에 이미 개행(\n / \r\n / \r)이 있으면 그대로
+    // CR을 덧붙여 `...\n\r` 같은 시퀀스가 만들어졌다. Windows ConPTY/PSReadLine
+    // 에서 후행 LF는 입력 버퍼에 줄바꿈만 삽입하고 제출되지 않아 명령이
+    // "줄바꿈되고 마는" 현상이 발생했다. enter 제출 시 후행 개행을 단일 CR로
+    // 정규화한다.
+
+    #[test]
+    fn prepare_input_strips_trailing_lf_before_enter() {
+        // escape=true로 변환된 후행 LF가 그대로 남아 \n\r 가 되면 안 된다.
+        let out = McpHandler::prepare_input("ls\n", false, true);
+        assert_eq!(out, "ls\r");
+    }
+
+    #[test]
+    fn prepare_input_strips_trailing_crlf_before_enter() {
+        let out = McpHandler::prepare_input("ls\r\n", false, true);
+        assert_eq!(out, "ls\r");
+    }
+
+    #[test]
+    fn prepare_input_does_not_double_cr_when_data_ends_with_cr() {
+        let out = McpHandler::prepare_input("ls\r", false, true);
+        assert_eq!(out, "ls\r");
+    }
+
+    #[test]
+    fn prepare_input_strips_trailing_lf_from_escaped_data() {
+        // 클라이언트가 escape=true + data="ls\\n" 를 보내면 unescape 후 "ls\n"
+        // → enter 제출 시 단일 CR로 정규화되어야 한다.
+        let out = McpHandler::prepare_input(r"ls\n", true, true);
+        assert_eq!(out, "ls\r");
+    }
+
+    #[test]
+    fn prepare_input_preserves_internal_newlines_with_enter() {
+        // 멀티라인 내용의 내부 개행은 보존하고 후행 개행만 단일 CR로 정규화.
+        let out = McpHandler::prepare_input("line1\nline2\n", false, true);
+        assert_eq!(out, "line1\nline2\r");
+    }
+
+    #[test]
+    fn prepare_input_keeps_trailing_newline_when_enter_false() {
+        // enter=false면 사용자가 보낸 후행 개행을 그대로 둔다(제출 의도 없음).
+        let out = McpHandler::prepare_input("ls\n", false, false);
+        assert_eq!(out, "ls\n");
+    }
+
+    #[test]
+    fn prepare_input_empty_data_with_enter_is_single_cr() {
+        let out = McpHandler::prepare_input("", false, true);
+        assert_eq!(out, "\r");
     }
 
     #[test]

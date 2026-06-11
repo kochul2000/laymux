@@ -353,6 +353,9 @@ pub struct McpHandler {
 #[tool_router]
 impl McpHandler {
     // 공용 헬퍼: 입력 준비 (escape + enter)
+    // enter=true 제출 시 후행 개행(\n/\r\n/\r)을 단일 CR로 정규화한다. data가
+    // 이미 개행으로 끝나면 `...\n\r`가 생겨 Windows ConPTY/PSReadLine에서
+    // 줄바꿈만 되고 제출이 안 되는 버그(#314)를 막기 위함. 내부 개행은 보존.
     fn prepare_input(data: &str, escape: bool, enter: bool) -> String { ... }
     // 공용 헬퍼: PTY 쓰기
     fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> { ... }
