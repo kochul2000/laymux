@@ -1512,6 +1512,14 @@ export function TerminalView({
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
+      // NOTE: this raw-text scan is a *secondary* signal — it can miss
+      // sequences split across write-chunk boundaries, so it only sets
+      // the coarse flags it needs (isAltBufferActive, input phase).
+      // The authoritative alt-buffer transition is the CSI `?1049h`
+      // parser hook, which fires synchronously on the same bytes and
+      // also performs the park cleanup (`parkPending = false`,
+      // `clearParkSettleTimer()`). Don't add cleanup here; extend the
+      // CSI handler instead.
       const enterAlt =
         text.includes("\x1b[?1049h") || text.includes("\x1b[?47h") || text.includes("\x1b[?1047h");
       const leaveAlt =

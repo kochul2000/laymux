@@ -291,6 +291,14 @@ export function applyDectcemShowToShadowCursor(
  *   *visible* overlay on screen for up to the settle window,
  *   contradicting the app's explicit hide. The hidden state must reach
  *   paint (and hide the overlay) without waiting for the park.
+ *
+ * `isAltBufferActive` is deliberately NOT an input: alt-buffer entry
+ * is handled by the CSI `?1049h` parser hook, which *synchronously*
+ * clears `parkPending` (and the settle timer) before any paint can
+ * run — so by the time this predicate is consulted, an alt-buffer
+ * state never has a pending park to freeze on. If that invariant is
+ * ever relaxed (e.g. alt entry stops clearing `parkPending`), this
+ * function must learn the alt-buffer dimension too.
  */
 export function shouldFreezeOverlayForPark(
   state: Pick<ShadowCursorState, "parkPending" | "isCursorHidden">,
