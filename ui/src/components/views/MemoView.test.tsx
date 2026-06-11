@@ -430,6 +430,33 @@ describe("MemoView", () => {
       fireEvent.pointerUp(window);
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
+
+    it("issue #307: unmount mid-drag tears down the one-shot pointerup watcher", async () => {
+      // A pointerdown registers a one-shot window pointerup watcher. If the
+      // memo unmounts before the release fires (pane closed mid-drag), the
+      // watcher must be removed — otherwise it lingers on window and flushes
+      // against a stale ref on the next, unrelated release.
+      useSettingsStore.setState({
+        ...useSettingsStore.getState(),
+        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
+      });
+      vi.mocked(loadMemo).mockResolvedValue("hello world");
+      const { unmount } = render(<MemoView memoKey="pane-307-unmount" />);
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
+      textarea.focus();
+      textarea.setSelectionRange(0, 5); // select "hello" → pending stored
+      fireEvent(document, new Event("selectionchange"));
+      fireEvent.pointerDown(textarea);
+      vi.mocked(clipboardWriteText).mockClear();
+
+      // Pane closes mid-drag, then a later release fires on window.
+      unmount();
+      fireEvent.pointerUp(window);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
   });
 
   describe("Tab/Shift+Tab indent", () => {

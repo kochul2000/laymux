@@ -171,10 +171,33 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   // pointerup so the pending copy flushes the moment the drag ends, wherever
   // it ends. Mirrors the TerminalView #230 watcher. `flushPendingCopy` no-ops
   // when there's nothing pending, so a plain click (no selection) is harmless.
+  //
+  // The watcher is tracked in a ref so it can be torn down: if the component
+  // unmounts mid-drag (before pointerup fires) the one-shot listener would
+  // otherwise linger on window and flush against a stale ref on some later,
+  // unrelated release. We also drop any prior watcher when a fresh pointerdown
+  // arrives without an intervening pointerup (e.g. a missed/cancelled release).
+  const pointerUpWatcherRef = useRef<(() => void) | null>(null);
   const handlePointerDown = useCallback(() => {
-    const onWindowPointerUp = () => flushPendingCopy();
+    if (pointerUpWatcherRef.current) {
+      window.removeEventListener("pointerup", pointerUpWatcherRef.current);
+    }
+    const onWindowPointerUp = () => {
+      pointerUpWatcherRef.current = null;
+      flushPendingCopy();
+    };
+    pointerUpWatcherRef.current = onWindowPointerUp;
     window.addEventListener("pointerup", onWindowPointerUp, { once: true });
   }, [flushPendingCopy]);
+
+  useEffect(() => {
+    return () => {
+      if (pointerUpWatcherRef.current) {
+        window.removeEventListener("pointerup", pointerUpWatcherRef.current);
+        pointerUpWatcherRef.current = null;
+      }
+    };
+  }, []);
 
   // Flush pending copy when focus leaves memo: window blur (external app)
   // or click outside textarea (dock/sidebar/other pane)
