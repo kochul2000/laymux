@@ -426,6 +426,45 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     expect(applyParkSettleTimeoutToShadowCursor(baseState)).toBe(baseState);
   });
 
+  it("alt-buffer ?25h is never a park (review regression: editor inside Codex)", () => {
+    // Review regression (PR #313): a full-screen app on the alternate
+    // buffer (editor/pager launched while the activity is still Codex)
+    // sends `?25h` out-of-frame, then exits via `?1049l`. Storing its
+    // alt-buffer coordinates as an authoritative park would leave
+    // `hasSyncFramePosition` pointing at garbage back on the normal
+    // buffer, and the row-mismatch sync gate would pin the overlay
+    // there until the next park.
+    // Mirrors the TerminalView `?1049h` branch: alt entry clears the
+    // sync-frame position and pending park state.
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: 2,
+      cursorAbsY: 106,
+      isAltBufferActive: true,
+      hasSyncFramePosition: false,
+    };
+    state = applyDectcemHideToShadowCursor(state, codex);
+    // Alt app shows the cursor at its own coordinates, out-of-frame.
+    state = applyDectcemShowToShadowCursor(state, codex, 77, 9999, false);
+    // Visibility cleared, but nothing parked: position and sync-frame
+    // ownership untouched.
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.cursorX).toBe(2);
+    expect(state.cursorAbsY).toBe(106);
+    expect(state.hasSyncFramePosition).toBe(false);
+    // Back on the normal buffer the shadow is uninitialized, so the
+    // regular sync path may reseed from the buffer cursor — the gate
+    // that previously caused the pin must not engage.
+    state = { ...state, isAltBufferActive: false };
+    expect(
+      getShadowSyncEligibility(state, {
+        bufferAbsY: 120,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("eligible");
+  });
+
   it("DECTCEM transitions are no-ops outside an overlay-caret activity", () => {
     for (const activity of [shell, claude, undefined]) {
       expect(applyDectcemHideToShadowCursor(baseState, activity)).toBe(baseState);

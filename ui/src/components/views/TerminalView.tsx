@@ -964,7 +964,11 @@ export function TerminalView({
           );
           if (next !== prev) {
             Object.assign(shadowCursorRef.current, next);
-            if (!syncActive) {
+            // A park happened only when the transition actually stored
+            // the position — alt-buffer and in-frame shows clear the
+            // visibility flag without parking (see
+            // `applyDectcemShowToShadowCursor`).
+            if (!syncActive && !prev.isAltBufferActive) {
               clearParkSettleTimer();
               trace("dectcem-park", {
                 cursorX: next.cursorX,

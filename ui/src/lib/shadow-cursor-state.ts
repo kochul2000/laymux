@@ -218,19 +218,24 @@ export function applyDectcemHideToShadowCursor(
 
 /**
  * Applied when DECTCEM show (`\e[?25h`) fires inside an overlay-caret
- * activity. Two very different meanings depending on DEC 2026 state:
+ * activity. Three very different meanings depending on buffer/frame
+ * state:
  *
  * - **Inside a sync frame** (`syncOutputActive`): the show is the tail
  *   of a repaint — Codex's footer frames end `?25h` with the buffer
  *   cursor still parked on the footer row. The position is untrusted;
  *   only the visibility flag is cleared.
- * - **Outside any sync frame**: this is Codex's cursor *park* — a
- *   deliberate hide–move–show that declares "the visible cursor goes
- *   here". The captured trace (`docs/terminal/cursor-jump-evidence/`)
- *   shows `?25l` CUP `?25h` arriving as its own chunk ~15 ms after each
- *   footer frame. This is the single most authoritative cursor signal
- *   Codex emits, so it overwrites the shadow position unconditionally
- *   (no row-equality gate) and clears `parkPending`.
+ * - **Inside the alternate buffer** (`isAltBufferActive`): the show
+ *   belongs to a full-screen app whose coordinates are meaningless in
+ *   the normal buffer. Visibility only — never a park.
+ * - **Outside any sync frame, normal buffer**: this is Codex's cursor
+ *   *park* — a deliberate hide–move–show that declares "the visible
+ *   cursor goes here". The captured trace
+ *   (`docs/terminal/cursor-jump-evidence/`) shows `?25l` CUP `?25h`
+ *   arriving as its own chunk ~15 ms after each footer frame. This is
+ *   the single most authoritative cursor signal Codex emits, so it
+ *   overwrites the shadow position unconditionally (no row-equality
+ *   gate) and clears `parkPending`.
  *
  * Like `applyDec2026ResetToShadowCursor`, the park clears stale OSC 133
  * shell flags so a Codex-after-shell session can't fall through to the
@@ -244,7 +249,14 @@ export function applyDectcemShowToShadowCursor(
   syncOutputActive: boolean,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
-  if (syncOutputActive) {
+  // Inside a sync frame the show is a repaint tail; inside the
+  // alternate buffer it belongs to a full-screen app (editor, pager)
+  // whose coordinates mean nothing to the normal-buffer shadow cursor.
+  // Storing an alt-buffer position as a park would leave
+  // `hasSyncFramePosition` pointing at garbage after `?1049l`, and the
+  // row-mismatch sync gate would then pin the overlay there until the
+  // next park. Both cases: visibility only, never the position.
+  if (syncOutputActive || state.isAltBufferActive) {
     if (!state.isCursorHidden) return state;
     return { ...state, isCursorHidden: false };
   }

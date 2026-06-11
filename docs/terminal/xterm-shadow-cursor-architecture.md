@@ -175,6 +175,11 @@ terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
 });
 ```
 
+단, **alt buffer 활성 중의 `?25h`도 park 가 아니다** — 전체화면 앱(에디터·페이저)의 좌표는
+normal buffer 의 shadow cursor 에 무의미하며, park 로 저장하면 `?1049l` 복귀 후
+`hasSyncFramePosition` 이 쓰레기 좌표를 가리킨 채 row-mismatch 게이트가 재동기화를 막아
+overlay 가 고착된다. sync frame 안과 마찬가지로 visibility 플래그만 갱신한다.
+
 보조 규칙 2가지:
 
 - **`?2026l` 직후 overlay 동결(`parkPending`)**: at-reset 위치는 폴백 추정치일 뿐이므로 주차가
