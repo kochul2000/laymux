@@ -219,6 +219,26 @@ describe("useKeyboardShortcuts", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBeNull();
   });
 
+  it("grid→grid switch clamps a stale pane index to the smaller target workspace (#311 review)", () => {
+    // Default workspace has multiple panes; WS2 (default-layout) has a single
+    // pane. In the grid (no dock focus) with a stale index past the target's
+    // range, the switch must clamp to the last valid pane — not leave it
+    // out of range — so the user always lands on a focused pane.
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace("ws-default");
+    useDockStore.getState().setFocusedDock(null);
+    useGridStore.setState({ focusedPaneIndex: 2 });
+
+    renderHook(() => useKeyboardShortcuts());
+
+    fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    // WS2 has 1 pane → index clamped to 0 (last valid), still focused.
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
   it("workspace switch focuses pane when dockArrowFocusPane is false but no dock is focused (#311)", () => {
     // dockArrowFocusPane only governs the dock→pane handoff. When the user was
     // already in the workspace (no dock focus), switching must still focus a pane.

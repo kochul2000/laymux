@@ -47,6 +47,14 @@ function switchWorkspace(id: string) {
   // there is no valid reference (null) → fall back to pane 0.
   if (wasDockFocused || focusedPaneIndex === null) {
     setFocusedPane(0);
+    return;
+  }
+  // grid→grid: the global focusedPaneIndex is retained across switches, so a
+  // larger index can fall outside a smaller target workspace. Clamp to the last
+  // pane so we always stay on a valid, focused pane (#311 review).
+  const paneCount = useWorkspaceStore.getState().getActiveWorkspace()?.panes.length ?? 0;
+  if (paneCount > 0 && focusedPaneIndex > paneCount - 1) {
+    setFocusedPane(paneCount - 1);
   }
 }
 
