@@ -33,6 +33,25 @@ export interface ShadowCursorState {
    */
   frameSavedCursorX?: number;
   frameSavedCursorAbsY?: number;
+  /**
+   * DECTCEM (`\e[?25l/h`) visibility as the app last requested it.
+   * While hidden, the overlay caret must not be drawn — the app is
+   * mid-repaint (transient, within one chunk) or deliberately hiding
+   * the cursor (sustained, e.g. while streaming).
+   */
+  isCursorHidden: boolean;
+  /**
+   * True between a DEC 2026 frame flush and the cursor "park" that
+   * Codex sends shortly after (`\e[?25l` + CUP + `\e[?25h` outside any
+   * sync frame). While pending, the overlay keeps its previous painted
+   * position: the at-reset shadow position is only a fallback estimate
+   * and repainting with it is what produced visible footer jumps. The
+   * park (authoritative) or a settle timeout (fallback) clears this.
+   *
+   * See `docs/terminal/cursor-jump-evidence/` — the captured trace
+   * shows the park chunk arriving ~15 ms after the frame flush.
+   */
+  parkPending: boolean;
   hasPromptBoundary: boolean;
   hasSyncFramePosition: boolean;
   isInputPhase: boolean;
@@ -61,9 +80,7 @@ export type ShadowSyncEligibility =
  * by contrast, leaves the native cursor parked at footer repaint
  * positions — those are the cases the overlay exists for.
  */
-export function isOverlayCaretActivity(
-  activity: TerminalActivityInfo | undefined,
-): boolean {
+export function isOverlayCaretActivity(activity: TerminalActivityInfo | undefined): boolean {
   return activity?.type === "interactiveApp" && activity.name === "Codex";
 }
 
@@ -175,7 +192,87 @@ export function applyDec2026ResetToShadowCursor(
     hasSyncFramePosition: true,
     frameSavedCursorX: undefined,
     frameSavedCursorAbsY: undefined,
+    // The at-reset position above is a fallback estimate. Codex parks
+    // the real input cursor in a follow-up chunk (`?25l` CUP `?25h`
+    // outside the frame) — hold overlay repaints until that park or a
+    // settle timeout. See `applyDectcemShowToShadowCursor`.
+    parkPending: true,
   };
+}
+
+/**
+ * Applied when DECTCEM hide (`\e[?25l`) fires inside an overlay-caret
+ * activity. Marks the cursor as app-hidden; the overlay mirrors this.
+ * Transient hide/show pairs inside a single chunk never reach paint
+ * (overlay updates are rAF-coalesced), so only sustained hides — the
+ * ones the app actually wants the user to see — take effect visually.
+ */
+export function applyDectcemHideToShadowCursor(
+  state: ShadowCursorState,
+  activity: TerminalActivityInfo | undefined,
+): ShadowCursorState {
+  if (!isOverlayCaretActivity(activity)) return state;
+  if (state.isCursorHidden) return state;
+  return { ...state, isCursorHidden: true };
+}
+
+/**
+ * Applied when DECTCEM show (`\e[?25h`) fires inside an overlay-caret
+ * activity. Two very different meanings depending on DEC 2026 state:
+ *
+ * - **Inside a sync frame** (`syncOutputActive`): the show is the tail
+ *   of a repaint — Codex's footer frames end `?25h` with the buffer
+ *   cursor still parked on the footer row. The position is untrusted;
+ *   only the visibility flag is cleared.
+ * - **Outside any sync frame**: this is Codex's cursor *park* — a
+ *   deliberate hide–move–show that declares "the visible cursor goes
+ *   here". The captured trace (`docs/terminal/cursor-jump-evidence/`)
+ *   shows `?25l` CUP `?25h` arriving as its own chunk ~15 ms after each
+ *   footer frame. This is the single most authoritative cursor signal
+ *   Codex emits, so it overwrites the shadow position unconditionally
+ *   (no row-equality gate) and clears `parkPending`.
+ *
+ * Like `applyDec2026ResetToShadowCursor`, the park clears stale OSC 133
+ * shell flags so a Codex-after-shell session can't fall through to the
+ * live buffer cursor.
+ */
+export function applyDectcemShowToShadowCursor(
+  state: ShadowCursorState,
+  activity: TerminalActivityInfo | undefined,
+  bufferCursorX: number,
+  bufferCursorAbsY: number,
+  syncOutputActive: boolean,
+): ShadowCursorState {
+  if (!isOverlayCaretActivity(activity)) return state;
+  if (syncOutputActive) {
+    if (!state.isCursorHidden) return state;
+    return { ...state, isCursorHidden: false };
+  }
+  return {
+    ...state,
+    isCursorHidden: false,
+    cursorX: bufferCursorX,
+    cursorAbsY: bufferCursorAbsY,
+    hasSyncFramePosition: true,
+    hasPromptBoundary: false,
+    isInputPhase: false,
+    isRepaintInProgress: false,
+    parkPending: false,
+    frameSavedCursorX: undefined,
+    frameSavedCursorAbsY: undefined,
+  };
+}
+
+/**
+ * Applied when the post-frame settle window expires without a cursor
+ * park arriving. The at-reset fallback position (already in
+ * `cursorX/AbsY`) becomes the best available estimate, so overlay
+ * repaints resume. Worst case the caret moves ~one settle window late
+ * instead of jumping to the footer and back.
+ */
+export function applyParkSettleTimeoutToShadowCursor(state: ShadowCursorState): ShadowCursorState {
+  if (!state.parkPending) return state;
+  return { ...state, parkPending: false };
 }
 
 /**
@@ -185,13 +282,13 @@ export function applyDec2026ResetToShadowCursor(
  * by DEC 2026 resets, so we clear it; from now on the returning shell's
  * OSC 133 prompt boundaries should drive the overlay.
  */
-export function applyActivityLeftTuiToShadowCursor(
-  state: ShadowCursorState,
-): ShadowCursorState {
+export function applyActivityLeftTuiToShadowCursor(state: ShadowCursorState): ShadowCursorState {
   return {
     ...state,
     hasSyncFramePosition: false,
     frameSavedCursorX: undefined,
     frameSavedCursorAbsY: undefined,
+    parkPending: false,
+    isCursorHidden: false,
   };
 }

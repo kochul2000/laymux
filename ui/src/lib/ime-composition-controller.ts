@@ -457,6 +457,13 @@ type VisualCaretOwnerInput = {
   syncOutputActive: boolean;
   isAltBufferActive: boolean;
   compositionActive: boolean;
+  /**
+   * DECTCEM (`\e[?25l`) hidden state as the app last requested it.
+   * A sustained hide means the app does not want a visible cursor —
+   * the overlay caret must mirror that. Composition preview wins over
+   * this (the IME caret tracks the preview text the user is typing).
+   */
+  cursorHidden: boolean;
   hasSyncFramePosition: boolean;
   hasPromptBoundary: boolean;
   isInputPhase: boolean;
@@ -474,6 +481,9 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   }
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  if (input.cursorHidden) {
+    return "hidden";
   }
   if (input.hasSyncFramePosition) {
     return "sync-frame";

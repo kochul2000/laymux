@@ -2,13 +2,13 @@
 
 터미널 동작에 대한 research/참조 문서.
 
-## 정본 3종 — cursor/flicker ([ADR-0008](../adr/0008-shell-cursor-shadow-cursor.md))
+## 정본 3종 — cursor/flicker ([ADR-0008](../adr/0008-shell-cursor-shadow-cursor.md), [ADR-0011](../adr/0011-dectcem-cursor-park-fifth-layer.md))
 
-커서·overlay caret·IME/composition·플리커·DECSET 2026 관련 변경 전 반드시 읽는다.
+커서·overlay caret·IME/composition·플리커·DECSET 2026·DECTCEM 관련 변경 전 반드시 읽는다.
 **통상 구현 작업 중에는 수정하지 않는다** (사용자가 명시적으로 문서 개정을 요청할 때만).
 
 - [`fix-flicker.md`](./fix-flicker.md) — cursor/flicker/shadow-cursor 작업 진입점 (필수 워크플로 체크리스트).
-- [`xterm-shadow-cursor-architecture.md`](./xterm-shadow-cursor-architecture.md) — 4-layer shadow cursor 전략 상세 research.
+- [`xterm-shadow-cursor-architecture.md`](./xterm-shadow-cursor-architecture.md) — 5-layer shadow cursor 전략 상세 research (DECTCEM 커서 주차 포함).
 - [`xterm-cursor-repaint-analysis.md`](./xterm-cursor-repaint-analysis.md) — TUI repaint 중 cursorX/Y 가 footer 로 drift 하는 원인 심층 분석 (DECSET 2026, CSI s/u, overlay 동기화).
 
 ## 기타 참조

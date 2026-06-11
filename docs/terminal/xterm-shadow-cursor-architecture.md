@@ -1,4 +1,7 @@
-# xterm.js 섀도 커서 아키텍처 — 리페인트에서 입력 커서를 지키는 4-레이어 전략
+# xterm.js 섀도 커서 아키텍처 — 리페인트에서 입력 커서를 지키는 5-레이어 전략
+
+> 2026-06-11 개정([ADR-0011](../adr/0011-dectcem-cursor-park-fifth-layer.md)): DECTCEM 커서 주차(park)를
+> 5번째 레이어로 추가. 실측 근거는 `cursor-jump-evidence/` 참조.
 
 **xterm.js는 "입력 커서"와 "애플리케이션 커서"를 구분하지 않는다.** 버퍼당 커서는 하나뿐이다. Codex·Claude Code처럼 상태 footer를 자주 리페인트하는 CLI에서 `buffer.active.cursorX/Y`는 마지막 이스케이프 시퀀스가 도착한 위치 — footer 끝 — 를 가리킨다. 해결책은 VS Code 터미널이 실제로 쓰는 **"섀도 커서(shadow cursor)" 아키텍처**다.
 
@@ -135,6 +138,53 @@ terminal.buffer.onBufferChange((buf) => {
 ```
 
 Claude Code의 최신 접근(`CLAUDE_CODE_NO_FLICKER=1`)은 아예 얼터네이트 스크린으로 전환해 전체 화면을 직접 제어한다. 이 경우 커서 정체성 문제 자체가 사라진다.
+
+---
+
+### 접근 5.5 — DECTCEM 커서 주차(park) 추적 — Codex류 TUI 의 최우선 신호
+
+ratatui 기반 TUI(Codex 등)는 프레임을 그릴 때 `?25l`(hide)로 시작해 `?25h`(show)로 끝내고,
+**프레임 flush 직후 별도 청크로 `?25l` + CUP + `?25h`(hide–move–show)를 보내 보이는 커서를
+입력 위치에 "주차"** 한다. 실측 트레이스(`cursor-jump-evidence/codex-footer-frame.log`):
+
+```
+청크 A (footer 프레임): ?2026h … ?25l 지우기×4 ?25h ?2026l   ← 커서는 footer 행에 둔 채 종료
+청크 B (~15ms 후):      ?25l [24;3H ?25h                      ← 그리기 없이 hide–move–show: 주차
+```
+
+DEC 2026 프레임의 양 끝점은 둘 다 신뢰할 수 없는 스냅샷 시점이다 — post-frame 은 footer 에
+주차된 채(청크 A)이고, pre-frame 은 타이핑·composer 행 이동·연속 프레임에서 옛/오염된 위치다.
+반면 **프레임 밖에서 온 `?25h`는 앱이 "보이는 커서는 여기"라고 선언하는 가장 권위 있는 신호**다.
+
+구현 규칙:
+
+```typescript
+terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+  if (params.includes(25)) {
+    if (syncOutputActive) {
+      // 프레임 안의 show = 리페인트 꼬리. 위치 신뢰 금지, visibility만 갱신.
+      state.isCursorHidden = false;
+    } else {
+      // ★ 프레임 밖의 show = 커서 주차. 행 일치 게이트 없이 무조건 기록.
+      state.cursorX    = buf.cursorX;
+      state.cursorAbsY = buf.baseY + buf.cursorY;
+      state.parkPending = false;   // 동결 해제
+    }
+  }
+  return false;
+});
+```
+
+보조 규칙 2가지:
+
+- **`?2026l` 직후 overlay 동결(`parkPending`)**: at-reset 위치는 폴백 추정치일 뿐이므로 주차가
+  도착할 때까지(settle 타임아웃 50ms 한도) overlay 를 마지막으로 그린 위치에 고정한다. 주차를
+  안 보내는 TUI 도 최악 50ms 지연으로 수렴 — 커서 블링크 주기보다 짧아 체감 불가.
+- **지속적 `?25l` 동안 overlay 캐럿 숨김**: 한 청크 안의 일시적 hide/show 쌍은 rAF coalescing
+  으로 화면에 도달하지 않으므로, 화면에 보이는 효과는 앱이 의도한 지속 숨김뿐이다.
+
+순수 전이는 `ui/src/lib/shadow-cursor-state.ts`(`applyDectcemShow/Hide`,
+`applyParkSettleTimeout`), 트레이스 리플레이 테스트는 `shadow-cursor-state.test.ts` 참조.
 
 ---
 
@@ -307,9 +357,10 @@ export class ShadowInputCursor {
 | 순위 | 신호 | 신뢰도 | 필요 조건 |
 |------|------|--------|---------|
 | 1 | **OSC 133 B 마커** | 최고 | CLI/셸이 시퀀스를 내보내야 함 |
-| 2 | **DECRC 이후 커서 위치** | 높음 | CLI가 save/restore 패턴 사용 |
-| 3 | **Mode 2026 ESU 이후 커서** | 높음 | CLI가 Mode 2026 사용 |
-| 4 | **onWriteParsed 폴백** | 중간 | 리페인트 미감지 시 최선 추정 |
+| 2 | **프레임 밖 DECTCEM `?25h` (커서 주차)** | 최고 | TUI가 hide–move–show 주차 패턴 사용 (ratatui/Codex) |
+| 3 | **DECRC 이후 커서 위치** | 높음 | CLI가 save/restore 패턴 사용 |
+| 4 | **Mode 2026 ESU 이후 커서 (pre-frame 스냅샷 폴백)** | 중간 | CLI가 Mode 2026 사용. 주차가 안 올 때의 settle 폴백 |
+| 5 | **onWriteParsed 폴백** | 중간 | 리페인트 미감지 시 최선 추정 |
 
 ---
 
@@ -323,9 +374,9 @@ export class ShadowInputCursor {
 
 ## 결론
 
-**단일 API로는 해결 불가능하다.** 4-레이어 조합이 정답이다.
+**단일 API로는 해결 불가능하다.** 5-레이어 조합이 정답이다.
 
-CLI 저자가 통제권을 가진다면 **OSC 133 시퀀스를 몇 줄만 추가하는 것**이 단연 가장 높은 레버리지다 — 즉시 모든 호환 터미널에서 안정적인 커서 추적이 가능해진다. 터미널 레이어에서만 구현해야 한다면 OSC 133 훅 + DECSC/DECRC 인터셉션 + Mode 2026 + `onWriteParsed` 폴백의 조합이 VS Code가 프로덕션에서 검증한 패턴이다.
+CLI 저자가 통제권을 가진다면 **OSC 133 시퀀스를 몇 줄만 추가하는 것**이 단연 가장 높은 레버리지다 — 즉시 모든 호환 터미널에서 안정적인 커서 추적이 가능해진다. 터미널 레이어에서만 구현해야 한다면 OSC 133 훅 + **DECTCEM 주차 추적** + DECSC/DECRC 인터셉션 + Mode 2026 + `onWriteParsed` 폴백의 조합이다. OSC 133 을 내보내지 않는 Codex류 TUI 에서는 프레임 밖 DECTCEM 주차가 사실상 1순위 신호가 된다.
 
 
 

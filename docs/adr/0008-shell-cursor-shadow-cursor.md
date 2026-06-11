@@ -1,6 +1,6 @@
 # 0008. 터미널 셸 커서/플리커 — shadow cursor 4-layer
 
-- Status: Accepted
+- Status: Accepted — Amended by [0011](0011-dectcem-cursor-park-fifth-layer.md) (DECTCEM 5번째 레이어 추가)
 - Date: 2026-06-03
 - Source: `docs/terminal/` (research 정본), 구 ARCHITECTURE.md §8.4
 

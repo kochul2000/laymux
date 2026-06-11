@@ -51,3 +51,14 @@ export const POST_FRAME_BUFFER_CURSOR = { x: 44, absY: 108 } as const;
  * the user originally reported, not just "some wrong row".
  */
 export const OBSERVED_JUMP_DISPLAY_ROW = 25;
+
+/**
+ * Cursor state at the moment of Codex's cursor *park* — the standalone
+ * `\e[?25l` CUP `\e[?25h` chunk that arrives ~15 ms after the footer
+ * frame (`preview=\u{1b}[?25l\u{1b}[24;3H\u{1b}[?25h` in the log).
+ * CUP 24;3 with baseY=83 puts the buffer cursor at (X=2, absY=106) —
+ * back on the input prompt. This out-of-frame DECTCEM show is the
+ * single authoritative "the visible cursor goes here" signal Codex
+ * emits, and is what the 5th shadow-cursor layer keys on.
+ */
+export const PARK_BUFFER_CURSOR = { x: 2, absY: 106 } as const;
