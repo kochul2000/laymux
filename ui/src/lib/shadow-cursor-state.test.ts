@@ -16,6 +16,7 @@ import {
   applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
   getShadowSyncEligibility,
+  isDectcemShowPark,
   isOverlayCaretActivity,
   shouldFreezeOverlayForPark,
   type ShadowCursorState,
@@ -492,6 +493,17 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     // because the park itself cleared parkPending.
     state = applyDectcemShowToShadowCursor(state, codex, 2, 106, false);
     expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
+  });
+
+  it("isDectcemShowPark truth table — single source for the park decision", () => {
+    // Park only outside a sync frame on the normal buffer. This same
+    // predicate gates both the state transition and TerminalView's
+    // park side effects (settle-timer clear, trace), so they cannot
+    // drift apart.
+    expect(isDectcemShowPark({ isAltBufferActive: false }, false)).toBe(true);
+    expect(isDectcemShowPark({ isAltBufferActive: false }, true)).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true }, false)).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true }, true)).toBe(false);
   });
 
   it("shouldFreezeOverlayForPark truth table", () => {

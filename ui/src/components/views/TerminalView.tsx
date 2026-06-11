@@ -44,6 +44,7 @@ import {
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
   getShadowSyncEligibility,
+  isDectcemShowPark,
   isOverlayCaretActivity,
   shouldFreezeOverlayForPark,
   type ShadowCursorState,
@@ -929,6 +930,12 @@ export function TerminalView({
         parkSettleTimer = undefined;
       }
     };
+    // NOTE: each DEC 2026 flush restarts this timer, so a TUI that
+    // streams frames at < PARK_SETTLE_TIMEOUT_MS intervals *without*
+    // ever parking would keep the overlay frozen indefinitely. Codex
+    // parks after every frame (the whole reason this layer exists) and
+    // `isOverlayCaretActivity` is Codex-only, so there is no exposure
+    // today — revisit if another ratatui TUI joins the overlay set.
     const startParkSettleTimer = () => {
       clearParkSettleTimer();
       parkSettleTimer = window.setTimeout(() => {
@@ -946,38 +953,6 @@ export function TerminalView({
     const syncOutputSetDisposable = parser?.registerCsiHandler?.(
       { prefix: "?", final: "h" },
       (params) => {
-        if (hasDecModeParam(params, 25)) {
-          // DECTCEM show. Outside a DEC 2026 frame this is Codex's
-          // cursor *park* (`?25l` CUP `?25h` as its own chunk) — the
-          // authoritative input-cursor position. Inside a frame it's
-          // the untrusted tail of a footer repaint. See
-          // `applyDectcemShowToShadowCursor` for the full rationale.
-          const prev = shadowCursorRef.current;
-          const activeBuffer = terminal.buffer.active as { cursorX?: number };
-          const syncActive = syncOutputActiveRef.current;
-          const next = applyDectcemShowToShadowCursor(
-            prev,
-            activityRef.current,
-            activeBuffer.cursorX ?? 0,
-            getBufferCursorAbsY(terminal),
-            syncActive,
-          );
-          if (next !== prev) {
-            Object.assign(shadowCursorRef.current, next);
-            // A park happened only when the transition actually stored
-            // the position — alt-buffer and in-frame shows clear the
-            // visibility flag without parking (see
-            // `applyDectcemShowToShadowCursor`).
-            if (!syncActive && !prev.isAltBufferActive) {
-              clearParkSettleTimer();
-              trace("dectcem-park", {
-                cursorX: next.cursorX,
-                cursorAbsY: next.cursorAbsY,
-              });
-            }
-            scheduleOverlayCaretUpdate();
-          }
-        }
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
           if (isOverlayCaretActivity(activityRef.current)) {
@@ -1012,6 +987,37 @@ export function TerminalView({
           shadowCursorRef.current.parkPending = false;
           clearParkSettleTimer();
           setInputPhase(false);
+        }
+        // DECTCEM show — processed *after* the mode branches above so a
+        // combined-param CSI (`?2026;25h`, `?1049;25h`) applies its
+        // mode state first and the show is then classified against the
+        // already-updated state (in-frame / alt-buffer shows are
+        // visibility-only). Outside a DEC 2026 frame on the normal
+        // buffer this is Codex's cursor *park* (`?25l` CUP `?25h` as
+        // its own chunk) — the authoritative input-cursor position.
+        // See `applyDectcemShowToShadowCursor` / `isDectcemShowPark`.
+        if (hasDecModeParam(params, 25)) {
+          const prev = shadowCursorRef.current;
+          const activeBuffer = terminal.buffer.active as { cursorX?: number };
+          const syncActive = syncOutputActiveRef.current;
+          const next = applyDectcemShowToShadowCursor(
+            prev,
+            activityRef.current,
+            activeBuffer.cursorX ?? 0,
+            getBufferCursorAbsY(terminal),
+            syncActive,
+          );
+          if (next !== prev) {
+            Object.assign(shadowCursorRef.current, next);
+            if (isDectcemShowPark(prev, syncActive)) {
+              clearParkSettleTimer();
+              trace("dectcem-park", {
+                cursorX: next.cursorX,
+                cursorAbsY: next.cursorAbsY,
+              });
+            }
+            scheduleOverlayCaretUpdate();
+          }
         }
         return false;
       },

@@ -241,6 +241,30 @@ export function applyDectcemHideToShadowCursor(
  * shell flags so a Codex-after-shell session can't fall through to the
  * live buffer cursor.
  */
+/**
+ * Is a DECTCEM show (`\e[?25h`) in this state an authoritative cursor
+ * *park*, as opposed to a visibility-only event? Single source for the
+ * decision — `applyDectcemShowToShadowCursor` uses it to pick the
+ * transition, and `TerminalView.tsx` uses it to gate the park-side
+ * effects (settle-timer clear, `dectcem-park` trace).
+ *
+ * Not a park when:
+ * - **inside a sync frame** — the show is a repaint tail; Codex's
+ *   footer frames end `?25h` with the cursor still on the footer row;
+ * - **inside the alternate buffer** — the show belongs to a
+ *   full-screen app (editor, pager) whose coordinates mean nothing to
+ *   the normal-buffer shadow cursor. Storing an alt-buffer position as
+ *   a park would leave `hasSyncFramePosition` pointing at garbage
+ *   after `?1049l`, and the row-mismatch sync gate would then pin the
+ *   overlay there until the next park.
+ */
+export function isDectcemShowPark(
+  state: Pick<ShadowCursorState, "isAltBufferActive">,
+  syncOutputActive: boolean,
+): boolean {
+  return !syncOutputActive && !state.isAltBufferActive;
+}
+
 export function applyDectcemShowToShadowCursor(
   state: ShadowCursorState,
   activity: TerminalActivityInfo | undefined,
@@ -249,14 +273,8 @@ export function applyDectcemShowToShadowCursor(
   syncOutputActive: boolean,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
-  // Inside a sync frame the show is a repaint tail; inside the
-  // alternate buffer it belongs to a full-screen app (editor, pager)
-  // whose coordinates mean nothing to the normal-buffer shadow cursor.
-  // Storing an alt-buffer position as a park would leave
-  // `hasSyncFramePosition` pointing at garbage after `?1049l`, and the
-  // row-mismatch sync gate would then pin the overlay there until the
-  // next park. Both cases: visibility only, never the position.
-  if (syncOutputActive || state.isAltBufferActive) {
+  // Visibility-only show — see `isDectcemShowPark` for the two cases.
+  if (!isDectcemShowPark(state, syncOutputActive)) {
     if (!state.isCursorHidden) return state;
     return { ...state, isCursorHidden: false };
   }
