@@ -453,7 +453,9 @@ impl McpHandler {
         }
     }
 
-    /// Get or create a per-terminal lock for execute_command serialization.
+    /// Get or create a per-terminal lock serializing execute_command and
+    /// write_input (so a split body+CR sequence is not interleaved by another
+    /// concurrent write/exec to the same terminal — #314).
     async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
         let mut map = self.exec_locks.lock().await;
         map.entry(terminal_id.to_string())
@@ -498,9 +500,28 @@ impl McpHandler {
         result
     }
 
-    /// 터미널에 입력을 보낸다. 본문 텍스트를 먼저 write 하고, `enter=true`면
-    /// 짧은 지연 후 제출용 CR(`\r`)을 **별도 write**로 보낸다(#314 — Codex paste
-    /// 오인 방지, [`Self::ENTER_CR_DELAY_MS`] 참조). 총 전송 바이트 수를 반환한다.
+    /// 입력을 보낼 때 PTY로 순서대로 write 할 바이트 청크 목록을 계획한다.
+    /// 본문(비어 있지 않으면)과 제출용 CR(`enter=true`)을 **분리된 청크**로 나눠
+    /// 반환한다 — `write_input`이 청크 사이에 지연을 넣어 Codex paste 오인을
+    /// 막는다(#314). 순수 함수라 호출 패턴(본문+CR / CR만 / 본문만 / 둘 다 없음)을
+    /// 단위 테스트로 고정한다.
+    fn plan_input_writes(data: &str, escape: bool, enter: bool) -> Vec<Vec<u8>> {
+        let body = Self::prepare_input_body(data, escape, enter);
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        if !body.is_empty() {
+            chunks.push(body.into_bytes());
+        }
+        if enter {
+            chunks.push(b"\r".to_vec());
+        }
+        chunks
+    }
+
+    /// 터미널에 입력을 보낸다. 본문 텍스트와 제출용 CR을 **분리된 write**로 보내며,
+    /// 청크 사이에 [`Self::ENTER_CR_DELAY_MS`] 지연을 둔다(#314 — Codex paste 오인
+    /// 방지). 같은 터미널에 대한 write/execute 는 per-terminal 락으로 직렬화하여,
+    /// 분리된 body+CR 시퀀스 사이에 다른 호출이 끼어들어 `bodyA bodyB \r \r` 처럼
+    /// 인터리브되는 것을 막는다. 총 전송 바이트 수를 반환한다.
     async fn write_input(
         &self,
         terminal_id: &str,
@@ -508,17 +529,19 @@ impl McpHandler {
         escape: bool,
         enter: bool,
     ) -> Result<usize, CallToolResult> {
-        let body = Self::prepare_input_body(data, escape, enter);
+        let chunks = Self::plan_input_writes(data, escape, enter);
+        // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
+        // per-terminal 락으로 직렬화한다.
+        let lock = self.terminal_exec_lock(terminal_id).await;
+        let _guard = lock.lock().await;
         let mut total = 0usize;
-        if !body.is_empty() {
-            total += self.write_pty(terminal_id, body.as_bytes())?;
-        }
-        if enter {
-            // 본문이 있을 때만 지연 — lone CR(빈 본문)은 곧바로 보낸다.
-            if total > 0 {
+        for (i, chunk) in chunks.iter().enumerate() {
+            // 청크(=본문 다음의 CR) 앞에만 지연을 둔다. lone CR/본문만일 때는
+            // 청크가 하나뿐이라 지연이 발생하지 않는다.
+            if i > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(Self::ENTER_CR_DELAY_MS)).await;
             }
-            total += self.write_pty(terminal_id, b"\r")?;
+            total += self.write_pty(terminal_id, chunk)?;
         }
         Ok(total)
     }
@@ -2945,6 +2968,45 @@ mod tests {
         // 빈 본문 — 제출 CR만 별도로 전송된다(lone CR).
         let out = McpHandler::prepare_input_body("", false, true);
         assert_eq!(out, "");
+    }
+
+    // ── Issue #314: write_input 의 PTY write 시퀀스 계획 ──────────────
+    // 본문과 제출 CR을 분리된 청크로 보내 Codex paste 오인을 막는다. 아래는
+    // write_input 이 실제로 보낼 청크 순서/개수를 순수 함수로 고정한 것이다.
+
+    #[test]
+    fn plan_input_writes_submit_splits_body_then_cr() {
+        // 평문 제출: 본문 1청크 + CR 1청크 (분리 전송).
+        let chunks = McpHandler::plan_input_writes("echo hi", false, true);
+        assert_eq!(chunks, vec![b"echo hi".to_vec(), b"\r".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_lone_cr_is_single_chunk() {
+        // 빈 본문 + enter: CR 청크 하나뿐 → write_input 에서 지연 없이 전송.
+        let chunks = McpHandler::plan_input_writes("", false, true);
+        assert_eq!(chunks, vec![b"\r".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_no_enter_has_no_cr_chunk() {
+        // enter=false: 본문만, CR 청크 없음.
+        let chunks = McpHandler::plan_input_writes("ls", false, false);
+        assert_eq!(chunks, vec![b"ls".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_empty_no_enter_is_empty() {
+        // 본문도 없고 enter도 없으면 write 가 0회.
+        let chunks = McpHandler::plan_input_writes("", false, false);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn plan_input_writes_strips_trailing_newline_keeps_internal() {
+        // 후행 개행 제거 + 내부 개행 보존, 그리고 CR은 분리된 청크.
+        let chunks = McpHandler::plan_input_writes("a\nb\n", false, true);
+        assert_eq!(chunks, vec![b"a\nb".to_vec(), b"\r".to_vec()]);
     }
 
     #[test]
