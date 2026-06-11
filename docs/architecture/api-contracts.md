@@ -374,8 +374,17 @@ pub struct McpHandler {
 
 #[tool_router]
 impl McpHandler {
-    // 공용 헬퍼: 입력 준비 (escape + enter)
-    fn prepare_input(data: &str, escape: bool, enter: bool) -> String { ... }
+    // 공용 헬퍼: 입력 본문 준비 (escape 변환 + enter 시 후행 개행 제거).
+    // 제출용 CR은 포함하지 않는다 — write_input이 별도 write로 보낸다(#314).
+    // 후행 개행을 제거하는 이유: 남으면 별도 CR과 합쳐져 `...\n\r`가 되어
+    // Windows ConPTY/PSReadLine에서 줄바꿈만 되고 제출 안 됨. 내부 개행은 보존.
+    fn prepare_input_body(data: &str, escape: bool, enter: bool) -> String { ... }
+    // 공용 헬퍼: 입력 전송 — 본문 write 후, enter면 ENTER_CR_DELAY_MS(300ms)
+    // 지연 뒤 제출용 CR(\r)을 별도 write. Codex TUI는 텍스트+CR을 한 번에 받으면
+    // paste로 간주해 CR을 줄바꿈 처리하므로, CR을 분리해 보내야 Enter로 제출된다
+    // (#314). WSL PTY는 ~40ms로도 됐으나 Windows ConPTY는 더 큰 간격이 필요.
+    async fn write_input(&self, terminal_id: &str, data: &str, escape: bool, enter: bool)
+        -> Result<usize, CallToolResult> { ... }
     // 공용 헬퍼: PTY 쓰기
     fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> { ... }
 
@@ -388,8 +397,7 @@ impl McpHandler {
     // AppState 직접 접근 패턴: PTY 입력
     #[tool]
     async fn write_to_terminal(&self, p: WriteTerminalParam) -> Result<CallToolResult, ErrorData> {
-        let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        self.write_pty(&p.terminal_id, data.as_bytes())...
+        self.write_input(&p.terminal_id, &p.data, p.escape, p.enter).await...
     }
 }
 ```

@@ -453,7 +453,9 @@ impl McpHandler {
         }
     }
 
-    /// Get or create a per-terminal lock for execute_command serialization.
+    /// Get or create a per-terminal lock serializing execute_command and
+    /// write_input (so a split body+CR sequence is not interleaved by another
+    /// concurrent write/exec to the same terminal — #314).
     async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
         let mut map = self.exec_locks.lock().await;
         map.entry(terminal_id.to_string())
@@ -461,17 +463,87 @@ impl McpHandler {
             .clone()
     }
 
-    /// Prepare terminal input: apply escape sequences and optional Enter (CR).
-    fn prepare_input(data: &str, escape: bool, enter: bool) -> String {
+    /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
+    ///
+    /// Issue #314: Codex TUI는 paste-burst 감지를 한다 — 짧은 시간 창 안에 여러
+    /// 바이트(텍스트+CR)가 한꺼번에 도착하면 붙여넣기로 간주해 CR을 컴포저 내
+    /// 줄바꿈으로 처리하고 제출하지 않는다. CR을 그 시간 창보다 큰 간격을 두고
+    /// 별도 write로 보내면 독립된 Enter 키 입력으로 인식된다.
+    ///
+    /// 검증(실측): WSL PTY는 ~40ms 분리로도 제출됐으나, Windows ConPTY는 입력
+    /// 전달을 더 크게 묶어 ~200ms 미만에서는 두 write가 codex의 burst 창 안에
+    /// 합쳐졌다(제출 실패). 양 환경 모두 안전하도록 여유 마진을 둔다. 셸/
+    /// PowerShell/Claude Code 에는 무해하다(추가 지연만 발생).
+    const ENTER_CR_DELAY_MS: u64 = 300;
+
+    /// 입력 본문(타이핑될 텍스트)을 준비한다 — 제출용 CR은 포함하지 않는다.
+    /// CR은 `write_input`이 별도 write로 보낸다([`Self::ENTER_CR_DELAY_MS`] 참조).
+    ///
+    /// Issue #314: 제출(`enter=true`) 시에는 후행 개행을 제거해 정규화한다.
+    /// 클라이언트가 보낸 `data`가 이미 `\n`/`\r\n`/`\r`로 끝나는 경우(예:
+    /// `escape=true` + `"ls\\n"`, 또는 멀티라인 텍스트의 마지막 줄), 후행 개행이
+    /// 남으면 별도 CR과 합쳐져 `...\n\r` 가 되어 Windows ConPTY/PSReadLine에서
+    /// 줄바꿈만 삽입하고 제출되지 않는다. 따라서 후행 개행을 제거한다. 내부(중간)
+    /// 개행은 멀티라인 입력 의도를 위해 보존한다. `enter=false`면 사용자가 보낸
+    /// 개행을 손대지 않는다.
+    fn prepare_input_body(data: &str, escape: bool, enter: bool) -> String {
         let mut result = if escape {
             super::helpers::unescape_terminal_input(data)
         } else {
             data.to_string()
         };
         if enter {
-            result.push('\r');
+            while result.ends_with('\n') || result.ends_with('\r') {
+                result.pop();
+            }
         }
         result
+    }
+
+    /// 입력을 보낼 때 PTY로 순서대로 write 할 바이트 청크 목록을 계획한다.
+    /// 본문(비어 있지 않으면)과 제출용 CR(`enter=true`)을 **분리된 청크**로 나눠
+    /// 반환한다 — `write_input`이 청크 사이에 지연을 넣어 Codex paste 오인을
+    /// 막는다(#314). 순수 함수라 호출 패턴(본문+CR / CR만 / 본문만 / 둘 다 없음)을
+    /// 단위 테스트로 고정한다.
+    fn plan_input_writes(data: &str, escape: bool, enter: bool) -> Vec<Vec<u8>> {
+        let body = Self::prepare_input_body(data, escape, enter);
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        if !body.is_empty() {
+            chunks.push(body.into_bytes());
+        }
+        if enter {
+            chunks.push(b"\r".to_vec());
+        }
+        chunks
+    }
+
+    /// 터미널에 입력을 보낸다. 본문 텍스트와 제출용 CR을 **분리된 write**로 보내며,
+    /// 청크 사이에 [`Self::ENTER_CR_DELAY_MS`] 지연을 둔다(#314 — Codex paste 오인
+    /// 방지). 같은 터미널에 대한 write/execute 는 per-terminal 락으로 직렬화하여,
+    /// 분리된 body+CR 시퀀스 사이에 다른 호출이 끼어들어 `bodyA bodyB \r \r` 처럼
+    /// 인터리브되는 것을 막는다. 총 전송 바이트 수를 반환한다.
+    async fn write_input(
+        &self,
+        terminal_id: &str,
+        data: &str,
+        escape: bool,
+        enter: bool,
+    ) -> Result<usize, CallToolResult> {
+        let chunks = Self::plan_input_writes(data, escape, enter);
+        // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
+        // per-terminal 락으로 직렬화한다.
+        let lock = self.terminal_exec_lock(terminal_id).await;
+        let _guard = lock.lock().await;
+        let mut total = 0usize;
+        for (i, chunk) in chunks.iter().enumerate() {
+            // 청크(=본문 다음의 CR) 앞에만 지연을 둔다. lone CR/본문만일 때는
+            // 청크가 하나뿐이라 지연이 발생하지 않는다.
+            if i > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(Self::ENTER_CR_DELAY_MS)).await;
+            }
+            total += self.write_pty(terminal_id, chunk)?;
+        }
+        Ok(total)
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -999,8 +1071,10 @@ impl McpHandler {
             Ok(id) => id,
             Err(e) => return Ok(e),
         };
-        let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        match self.write_pty(&terminal_id, data.as_bytes()) {
+        match self
+            .write_input(&terminal_id, &p.data, p.escape, p.enter)
+            .await
+        {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
@@ -1050,8 +1124,10 @@ impl McpHandler {
         };
 
         // 2. Write to the neighbor
-        let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        match self.write_pty(&target_id, data.as_bytes()) {
+        match self
+            .write_input(&target_id, &p.data, p.escape, p.enter)
+            .await
+        {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
@@ -2828,16 +2904,109 @@ mod tests {
     }
 
     #[test]
-    fn prepare_input_default_flags_submit_plain_text() {
-        // 기본 플래그 조합(escape=false, enter=true)에서 평문 뒤에 CR이 붙는지 확인.
-        let out = McpHandler::prepare_input("ls", false, true);
-        assert_eq!(out, "ls\r");
+    fn prepare_input_body_default_flags_keeps_plain_text() {
+        // 본문에는 CR이 붙지 않는다 — 제출 CR은 write_input이 별도로 보낸다.
+        let out = McpHandler::prepare_input_body("ls", false, true);
+        assert_eq!(out, "ls");
     }
 
     #[test]
-    fn prepare_input_enter_false_does_not_append_cr() {
-        let out = McpHandler::prepare_input("ls", false, false);
+    fn prepare_input_body_enter_false_keeps_plain_text() {
+        let out = McpHandler::prepare_input_body("ls", false, false);
         assert_eq!(out, "ls");
+    }
+
+    // ── Issue #314: TUI 줄바꿈-제출 버그 ───────────────────────────────
+    // (1) Windows ConPTY/PSReadLine: enter=true 시 data 끝에 개행이 남아
+    //     별도 CR과 합쳐져 `...\n\r` 가 되면 줄바꿈만 삽입되고 제출되지 않는다.
+    //     → 본문에서 후행 개행을 제거한다.
+    // (2) Codex TUI: 텍스트+CR을 한 번의 write로 보내면 붙여넣기로 간주해 CR을
+    //     줄바꿈 처리한다. → write_input이 본문과 CR을 분리해 보낸다(ENTER_CR_DELAY_MS).
+    // 아래 테스트는 (1)의 본문 정규화를 검증한다.
+
+    #[test]
+    fn prepare_input_body_strips_trailing_lf_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\n", false, true);
+        assert_eq!(out, "ls");
+    }
+
+    #[test]
+    fn prepare_input_body_strips_trailing_crlf_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\r\n", false, true);
+        assert_eq!(out, "ls");
+    }
+
+    #[test]
+    fn prepare_input_body_strips_trailing_cr_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\r", false, true);
+        assert_eq!(out, "ls");
+    }
+
+    #[test]
+    fn prepare_input_body_strips_trailing_lf_from_escaped_data() {
+        // escape=true + data="ls\\n" → unescape 후 "ls\n" → 후행 개행 제거.
+        let out = McpHandler::prepare_input_body(r"ls\n", true, true);
+        assert_eq!(out, "ls");
+    }
+
+    #[test]
+    fn prepare_input_body_preserves_internal_newlines_with_enter() {
+        // 멀티라인 내용의 내부 개행은 보존하고 후행 개행만 제거한다.
+        let out = McpHandler::prepare_input_body("line1\nline2\n", false, true);
+        assert_eq!(out, "line1\nline2");
+    }
+
+    #[test]
+    fn prepare_input_body_keeps_trailing_newline_when_enter_false() {
+        // enter=false면 사용자가 보낸 후행 개행을 그대로 둔다(제출 의도 없음).
+        let out = McpHandler::prepare_input_body("ls\n", false, false);
+        assert_eq!(out, "ls\n");
+    }
+
+    #[test]
+    fn prepare_input_body_empty_data_with_enter_is_empty() {
+        // 빈 본문 — 제출 CR만 별도로 전송된다(lone CR).
+        let out = McpHandler::prepare_input_body("", false, true);
+        assert_eq!(out, "");
+    }
+
+    // ── Issue #314: write_input 의 PTY write 시퀀스 계획 ──────────────
+    // 본문과 제출 CR을 분리된 청크로 보내 Codex paste 오인을 막는다. 아래는
+    // write_input 이 실제로 보낼 청크 순서/개수를 순수 함수로 고정한 것이다.
+
+    #[test]
+    fn plan_input_writes_submit_splits_body_then_cr() {
+        // 평문 제출: 본문 1청크 + CR 1청크 (분리 전송).
+        let chunks = McpHandler::plan_input_writes("echo hi", false, true);
+        assert_eq!(chunks, vec![b"echo hi".to_vec(), b"\r".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_lone_cr_is_single_chunk() {
+        // 빈 본문 + enter: CR 청크 하나뿐 → write_input 에서 지연 없이 전송.
+        let chunks = McpHandler::plan_input_writes("", false, true);
+        assert_eq!(chunks, vec![b"\r".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_no_enter_has_no_cr_chunk() {
+        // enter=false: 본문만, CR 청크 없음.
+        let chunks = McpHandler::plan_input_writes("ls", false, false);
+        assert_eq!(chunks, vec![b"ls".to_vec()]);
+    }
+
+    #[test]
+    fn plan_input_writes_empty_no_enter_is_empty() {
+        // 본문도 없고 enter도 없으면 write 가 0회.
+        let chunks = McpHandler::plan_input_writes("", false, false);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn plan_input_writes_strips_trailing_newline_keeps_internal() {
+        // 후행 개행 제거 + 내부 개행 보존, 그리고 CR은 분리된 청크.
+        let chunks = McpHandler::plan_input_writes("a\nb\n", false, true);
+        assert_eq!(chunks, vec![b"a\nb".to_vec(), b"\r".to_vec()]);
     }
 
     #[test]
