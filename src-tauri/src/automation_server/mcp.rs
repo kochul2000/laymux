@@ -461,17 +461,30 @@ impl McpHandler {
             .clone()
     }
 
-    /// Prepare terminal input: apply escape sequences and optional Enter (CR).
+    /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
     ///
-    /// Issue #314: 제출(`enter=true`) 시에는 후행 개행을 단일 CR로 정규화한다.
+    /// Issue #314: Codex TUI는 paste-burst 감지를 한다 — 짧은 시간 창 안에 여러
+    /// 바이트(텍스트+CR)가 한꺼번에 도착하면 붙여넣기로 간주해 CR을 컴포저 내
+    /// 줄바꿈으로 처리하고 제출하지 않는다. CR을 그 시간 창보다 큰 간격을 두고
+    /// 별도 write로 보내면 독립된 Enter 키 입력으로 인식된다.
+    ///
+    /// 검증(실측): WSL PTY는 ~40ms 분리로도 제출됐으나, Windows ConPTY는 입력
+    /// 전달을 더 크게 묶어 ~200ms 미만에서는 두 write가 codex의 burst 창 안에
+    /// 합쳐졌다(제출 실패). 양 환경 모두 안전하도록 여유 마진을 둔다. 셸/
+    /// PowerShell/Claude Code 에는 무해하다(추가 지연만 발생).
+    const ENTER_CR_DELAY_MS: u64 = 300;
+
+    /// 입력 본문(타이핑될 텍스트)을 준비한다 — 제출용 CR은 포함하지 않는다.
+    /// CR은 `write_input`이 별도 write로 보낸다([`Self::ENTER_CR_DELAY_MS`] 참조).
+    ///
+    /// Issue #314: 제출(`enter=true`) 시에는 후행 개행을 제거해 정규화한다.
     /// 클라이언트가 보낸 `data`가 이미 `\n`/`\r\n`/`\r`로 끝나는 경우(예:
-    /// `escape=true` + `"ls\\n"`, 또는 멀티라인 텍스트의 마지막 줄), 그대로 CR을
-    /// 덧붙이면 `...\n\r` 같은 시퀀스가 생긴다. Windows ConPTY/PSReadLine에서
-    /// 후행 LF는 입력 버퍼에 줄바꿈만 삽입하고 명령을 제출하지 않으므로,
-    /// "엔터가 줄바꿈되고 마는" 현상이 발생한다. 따라서 후행 개행을 제거한 뒤
-    /// 제출용 CR 하나만 붙인다. 내부(중간) 개행은 멀티라인 입력 의도를 위해
-    /// 보존한다. `enter=false`면 사용자가 보낸 개행을 손대지 않는다.
-    fn prepare_input(data: &str, escape: bool, enter: bool) -> String {
+    /// `escape=true` + `"ls\\n"`, 또는 멀티라인 텍스트의 마지막 줄), 후행 개행이
+    /// 남으면 별도 CR과 합쳐져 `...\n\r` 가 되어 Windows ConPTY/PSReadLine에서
+    /// 줄바꿈만 삽입하고 제출되지 않는다. 따라서 후행 개행을 제거한다. 내부(중간)
+    /// 개행은 멀티라인 입력 의도를 위해 보존한다. `enter=false`면 사용자가 보낸
+    /// 개행을 손대지 않는다.
+    fn prepare_input_body(data: &str, escape: bool, enter: bool) -> String {
         let mut result = if escape {
             super::helpers::unescape_terminal_input(data)
         } else {
@@ -481,9 +494,33 @@ impl McpHandler {
             while result.ends_with('\n') || result.ends_with('\r') {
                 result.pop();
             }
-            result.push('\r');
         }
         result
+    }
+
+    /// 터미널에 입력을 보낸다. 본문 텍스트를 먼저 write 하고, `enter=true`면
+    /// 짧은 지연 후 제출용 CR(`\r`)을 **별도 write**로 보낸다(#314 — Codex paste
+    /// 오인 방지, [`Self::ENTER_CR_DELAY_MS`] 참조). 총 전송 바이트 수를 반환한다.
+    async fn write_input(
+        &self,
+        terminal_id: &str,
+        data: &str,
+        escape: bool,
+        enter: bool,
+    ) -> Result<usize, CallToolResult> {
+        let body = Self::prepare_input_body(data, escape, enter);
+        let mut total = 0usize;
+        if !body.is_empty() {
+            total += self.write_pty(terminal_id, body.as_bytes())?;
+        }
+        if enter {
+            // 본문이 있을 때만 지연 — lone CR(빈 본문)은 곧바로 보낸다.
+            if total > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(Self::ENTER_CR_DELAY_MS)).await;
+            }
+            total += self.write_pty(terminal_id, b"\r")?;
+        }
+        Ok(total)
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -1011,8 +1048,10 @@ impl McpHandler {
             Ok(id) => id,
             Err(e) => return Ok(e),
         };
-        let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        match self.write_pty(&terminal_id, data.as_bytes()) {
+        match self
+            .write_input(&terminal_id, &p.data, p.escape, p.enter)
+            .await
+        {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
@@ -1062,8 +1101,10 @@ impl McpHandler {
         };
 
         // 2. Write to the neighbor
-        let data = Self::prepare_input(&p.data, p.escape, p.enter);
-        match self.write_pty(&target_id, data.as_bytes()) {
+        match self
+            .write_input(&target_id, &p.data, p.escape, p.enter)
+            .await
+        {
             Ok(bytes) => Ok(json_result(&json!({
                 "written": true,
                 "bytes": bytes,
@@ -2840,70 +2881,70 @@ mod tests {
     }
 
     #[test]
-    fn prepare_input_default_flags_submit_plain_text() {
-        // 기본 플래그 조합(escape=false, enter=true)에서 평문 뒤에 CR이 붙는지 확인.
-        let out = McpHandler::prepare_input("ls", false, true);
-        assert_eq!(out, "ls\r");
-    }
-
-    #[test]
-    fn prepare_input_enter_false_does_not_append_cr() {
-        let out = McpHandler::prepare_input("ls", false, false);
+    fn prepare_input_body_default_flags_keeps_plain_text() {
+        // 본문에는 CR이 붙지 않는다 — 제출 CR은 write_input이 별도로 보낸다.
+        let out = McpHandler::prepare_input_body("ls", false, true);
         assert_eq!(out, "ls");
     }
 
-    // ── Issue #314: Windows PowerShell 줄바꿈-제출 버그 ──────────────
-    // enter=true일 때 data 끝에 이미 개행(\n / \r\n / \r)이 있으면 그대로
-    // CR을 덧붙여 `...\n\r` 같은 시퀀스가 만들어졌다. Windows ConPTY/PSReadLine
-    // 에서 후행 LF는 입력 버퍼에 줄바꿈만 삽입하고 제출되지 않아 명령이
-    // "줄바꿈되고 마는" 현상이 발생했다. enter 제출 시 후행 개행을 단일 CR로
-    // 정규화한다.
+    #[test]
+    fn prepare_input_body_enter_false_keeps_plain_text() {
+        let out = McpHandler::prepare_input_body("ls", false, false);
+        assert_eq!(out, "ls");
+    }
+
+    // ── Issue #314: TUI 줄바꿈-제출 버그 ───────────────────────────────
+    // (1) Windows ConPTY/PSReadLine: enter=true 시 data 끝에 개행이 남아
+    //     별도 CR과 합쳐져 `...\n\r` 가 되면 줄바꿈만 삽입되고 제출되지 않는다.
+    //     → 본문에서 후행 개행을 제거한다.
+    // (2) Codex TUI: 텍스트+CR을 한 번의 write로 보내면 붙여넣기로 간주해 CR을
+    //     줄바꿈 처리한다. → write_input이 본문과 CR을 분리해 보낸다(ENTER_CR_DELAY_MS).
+    // 아래 테스트는 (1)의 본문 정규화를 검증한다.
 
     #[test]
-    fn prepare_input_strips_trailing_lf_before_enter() {
-        // escape=true로 변환된 후행 LF가 그대로 남아 \n\r 가 되면 안 된다.
-        let out = McpHandler::prepare_input("ls\n", false, true);
-        assert_eq!(out, "ls\r");
+    fn prepare_input_body_strips_trailing_lf_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\n", false, true);
+        assert_eq!(out, "ls");
     }
 
     #[test]
-    fn prepare_input_strips_trailing_crlf_before_enter() {
-        let out = McpHandler::prepare_input("ls\r\n", false, true);
-        assert_eq!(out, "ls\r");
+    fn prepare_input_body_strips_trailing_crlf_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\r\n", false, true);
+        assert_eq!(out, "ls");
     }
 
     #[test]
-    fn prepare_input_does_not_double_cr_when_data_ends_with_cr() {
-        let out = McpHandler::prepare_input("ls\r", false, true);
-        assert_eq!(out, "ls\r");
+    fn prepare_input_body_strips_trailing_cr_before_enter() {
+        let out = McpHandler::prepare_input_body("ls\r", false, true);
+        assert_eq!(out, "ls");
     }
 
     #[test]
-    fn prepare_input_strips_trailing_lf_from_escaped_data() {
-        // 클라이언트가 escape=true + data="ls\\n" 를 보내면 unescape 후 "ls\n"
-        // → enter 제출 시 단일 CR로 정규화되어야 한다.
-        let out = McpHandler::prepare_input(r"ls\n", true, true);
-        assert_eq!(out, "ls\r");
+    fn prepare_input_body_strips_trailing_lf_from_escaped_data() {
+        // escape=true + data="ls\\n" → unescape 후 "ls\n" → 후행 개행 제거.
+        let out = McpHandler::prepare_input_body(r"ls\n", true, true);
+        assert_eq!(out, "ls");
     }
 
     #[test]
-    fn prepare_input_preserves_internal_newlines_with_enter() {
-        // 멀티라인 내용의 내부 개행은 보존하고 후행 개행만 단일 CR로 정규화.
-        let out = McpHandler::prepare_input("line1\nline2\n", false, true);
-        assert_eq!(out, "line1\nline2\r");
+    fn prepare_input_body_preserves_internal_newlines_with_enter() {
+        // 멀티라인 내용의 내부 개행은 보존하고 후행 개행만 제거한다.
+        let out = McpHandler::prepare_input_body("line1\nline2\n", false, true);
+        assert_eq!(out, "line1\nline2");
     }
 
     #[test]
-    fn prepare_input_keeps_trailing_newline_when_enter_false() {
+    fn prepare_input_body_keeps_trailing_newline_when_enter_false() {
         // enter=false면 사용자가 보낸 후행 개행을 그대로 둔다(제출 의도 없음).
-        let out = McpHandler::prepare_input("ls\n", false, false);
+        let out = McpHandler::prepare_input_body("ls\n", false, false);
         assert_eq!(out, "ls\n");
     }
 
     #[test]
-    fn prepare_input_empty_data_with_enter_is_single_cr() {
-        let out = McpHandler::prepare_input("", false, true);
-        assert_eq!(out, "\r");
+    fn prepare_input_body_empty_data_with_enter_is_empty() {
+        // 빈 본문 — 제출 CR만 별도로 전송된다(lone CR).
+        let out = McpHandler::prepare_input_body("", false, true);
+        assert_eq!(out, "");
     }
 
     #[test]
