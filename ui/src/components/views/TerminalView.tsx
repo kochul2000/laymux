@@ -1427,6 +1427,26 @@ export function TerminalView({
               sessionLimitTimer = undefined;
               sessionLimitArmedKey = undefined;
               sessionLimitLastFired = { key: sessionLimit.key, at: Date.now() };
+              // The timer may have been armed hours ago — re-check that the
+              // pane is still running Claude before typing into it. If the
+              // user exited Claude (or another app took over the pane), the
+              // resume text would land in the wrong program.
+              const liveInstance = useTerminalStore
+                .getState()
+                .instances.find((i) => i.id === instanceId);
+              const stillClaude =
+                liveInstance?.activity?.type === "interactiveApp" &&
+                liveInstance.activity.name === "Claude";
+              if (!stillClaude) {
+                useNotificationStore.getState().addNotification({
+                  terminalId: instanceId,
+                  workspaceId: resolveWorkspaceId(instanceId),
+                  message:
+                    "Claude session limit reset — auto-resume skipped (Claude is no longer running in this pane)",
+                  level: "warning",
+                });
+                return;
+              }
               const message =
                 useSettingsStore.getState().claude.sessionLimitResumeMessage || "go on";
               void writeToTerminal(instanceId, message);
