@@ -299,8 +299,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `list_terminals` | bridge_request | 터미널 목록 조회 (워크스페이스 필터) |
 | `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 |
 | `get_terminal` | bridge_request | 단일 터미널 상세 조회 |
-| `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`) |
-| `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축) |
+| `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`). 에이전트 간 메시징은 `reply_to`에 발신자 terminal ID를 주면 표준 회신 푸터를 본문 뒤에 부착 |
+| `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축). `reply_to` 동일 지원 |
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
 | `focus_terminal` | bridge_request | 터미널 포커스 (`terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus`). 인덱스 기반 `focus_pane`과 달리 안정 식별자 기반 |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
