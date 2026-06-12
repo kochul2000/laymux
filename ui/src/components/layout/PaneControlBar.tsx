@@ -64,8 +64,6 @@ const BAR_H = "var(--bar-h)";
 const BTN_H = "var(--btn-h)";
 const BTN_MIN_W = "var(--btn-min-w)";
 const barBg = "var(--bg-surface)";
-// hover 오버레이는 콘텐츠 위에 뜨므로 반투명 토큰 사용 — 아래 내용이 비쳐야 한다 (issue #320)
-const barBgOverlay = "var(--bar-bg-overlay)";
 const borderClr = "var(--border)";
 const sepClr = "var(--separator-bg)";
 
@@ -809,13 +807,11 @@ export function PaneControlBar({
           {!isPinned && !hasViewHeader && mode !== "minimized" && showBar && (
             <div
               data-testid="pane-control-bar"
-              className={`absolute top-0 z-20 flex items-center pr-1 ${
+              className={`pane-hover-bar absolute top-0 z-20 flex items-center pr-1 ${
                 hasLeftContent || narrowBar ? "left-0 right-0 pl-2" : "right-0 pl-0.5"
               }`}
               style={{
                 minHeight: BAR_H,
-                // 반투명 배경 + blur 없음: 컨트롤 바 아래 터미널 내용이 보여야 한다 (issue #320)
-                background: barBgOverlay,
                 borderBottom: `1px solid ${sepClr}`,
                 ...(!hasLeftContent && !narrowBar ? { borderLeft: `1px solid ${sepClr}` } : {}),
                 borderRadius: 0,
