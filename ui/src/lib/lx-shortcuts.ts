@@ -29,7 +29,16 @@ import { DEFAULT_KEYBINDINGS, matchesKeybinding } from "./keybinding-registry";
  * be registered without also deciding its pass-through behavior.
  */
 const PASS_THROUGH_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
-  (d) => d.passThroughTerminal,
+  (d) => d.passThroughTerminal === true,
+).map((d) => d.id);
+
+/**
+ * Actions whose default combo is a bare key the terminal owns (`pane.delete`
+ * = plain Delete): only a rebound combo that includes a modifier passes
+ * through; a modifier-less binding stays with the terminal (PR #338 review).
+ */
+const PASS_THROUGH_WHEN_MODIFIED_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
+  (d) => d.passThroughTerminal === "whenModified",
 ).map((d) => d.id);
 
 /** Terminal-owned actions: their (possibly overridden) combos never pass through. */
@@ -45,5 +54,9 @@ function isShellOwnedCombo(e: KeyboardEvent): boolean {
 export function isLxShortcut(e: KeyboardEvent): boolean {
   if (isShellOwnedCombo(e)) return false;
   if (TERMINAL_OWNED_ACTION_IDS.some((id) => matchesKeybinding(e, id))) return false;
-  return PASS_THROUGH_ACTION_IDS.some((id) => matchesKeybinding(e, id));
+  if (PASS_THROUGH_ACTION_IDS.some((id) => matchesKeybinding(e, id))) return true;
+  return (
+    (e.ctrlKey || e.altKey || e.shiftKey) &&
+    PASS_THROUGH_WHEN_MODIFIED_ACTION_IDS.some((id) => matchesKeybinding(e, id))
+  );
 }

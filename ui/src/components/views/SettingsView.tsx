@@ -2934,9 +2934,14 @@ function KeybindingsSection() {
                       // Wildcard actions (`pane.focus` = "Alt+Arrow") bind all four
                       // directions at once — pressing any arrow during capture keeps
                       // the `Arrow` token instead of narrowing to a single direction.
-                      const str = usesArrowWildcard(def.defaultKeys)
-                        ? coerceArrowWildcard(raw)
-                        : raw;
+                      // Non-arrow captures are rejected outright: the handler derives
+                      // its direction from the pressed arrow, so a non-arrow binding
+                      // could never do anything (PR #338 review).
+                      let str = raw;
+                      if (usesArrowWildcard(def.defaultKeys)) {
+                        str = coerceArrowWildcard(raw);
+                        if (str === raw) return;
+                      }
                       setCapturedKeys(str);
                       // Update the keybinding in draft
                       setDraftKeybindings((prev) =>
