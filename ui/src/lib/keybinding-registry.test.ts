@@ -35,6 +35,14 @@ describe("keybinding-registry", () => {
       expect(DEFAULT_KEYBINDINGS.find((d) => d.id === "issueReporter.submit")).toBeDefined();
     });
 
+    // issue #324: 1회성 CWD 전파 단축키 (Settings UI 에 자동 노출)
+    it("should include pane.propagateCwdOnce with Ctrl+Alt+P default", () => {
+      const def = DEFAULT_KEYBINDINGS.find((d) => d.id === "pane.propagateCwdOnce");
+      expect(def).toBeDefined();
+      expect(def?.defaultKeys).toBe("Ctrl+Alt+P");
+      expect(def?.group).toBe("Pane");
+    });
+
     it("should include terminal.copy / terminal.paste with OS-default combos", () => {
       const copy = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.copy");
       const paste = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste");

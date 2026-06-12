@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
+import { resolveKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
@@ -108,6 +109,37 @@ function BarBtn({
 
 function Sep() {
   return <div className="ui-sep" />;
+}
+
+// ─── Propagate CWD once (issue #293 → #324) ─────────────
+// 우측 컨트롤 묶음이 아니라 좌측(pane 번호 배지 우측)에 정렬된다.
+// 단축키(pane.propagateCwdOnce, 기본 Ctrl+Alt+P)는 useKeyboardShortcuts 가 처리한다.
+function PropagateCwdOnceBtn({ onClick }: { onClick: () => void }) {
+  const keys = resolveKeybinding("pane.propagateCwdOnce");
+  return (
+    <BarBtn
+      testId="pane-control-cwd-propagate-once"
+      onClick={onClick}
+      title={`Propagate CWD once${keys ? ` (${keys})` : ""}`}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M7 2v6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path
+          d="M4 5l3-3 3 3Z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+          fill="currentColor"
+        />
+        <path
+          d="M3 9.5a4 4 0 1 0 8 0"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
+      </svg>
+    </BarBtn>
+  );
 }
 
 function VerticalSep() {
@@ -299,33 +331,6 @@ function BarContent({
                 </BarBtn>
               );
             })()}
-
-          {/* 1회성 CWD 전파 (issue #293): 현재 CWD 를 sync group 에 한 번 밀어넣는다. */}
-          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
-            actions.onPropagateCwdOnce && (
-              <BarBtn
-                testId="pane-control-cwd-propagate-once"
-                onClick={actions.onPropagateCwdOnce}
-                title="Propagate CWD once"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M7 2v6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                  <path
-                    d="M4 5l3-3 3 3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                    fill="currentColor"
-                  />
-                  <path
-                    d="M3 9.5a4 4 0 1 0 8 0"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </BarBtn>
-            )}
 
           {actions.onSplitH && (
             <BarBtn
@@ -681,9 +686,23 @@ export function PaneControlBar({
         : "pane-control-hover";
 
   const hasBarLabel = currentView.type !== "TerminalView" && currentView.type !== "EmptyView";
+
+  // 1회성 CWD 전파 버튼 (issue #293) — 좌측, pane 번호 배지 우측에 정렬 (issue #324).
+  const showPropagateCwd =
+    (currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+    actions.onPropagateCwdOnce != null;
+  const leftPaneControls = useMemo(
+    () =>
+      showPropagateCwd && actions.onPropagateCwdOnce ? (
+        <PropagateCwdOnceBtn onClick={actions.onPropagateCwdOnce} />
+      ) : null,
+    [showPropagateCwd, actions.onPropagateCwdOnce],
+  );
+
   // 자식(TerminalView 등)이 주입한 좌측 콘텐츠가 있으면 기본 BarLabel 대신 사용.
   // 둘 다 없으면 flex-1 스페이서만 렌더하여 pane 컨트롤이 오른쪽 끝에 정렬되도록 한다.
-  const hasLeftContent = hasBarLabel || leftBarContent != null || paneNumber != null;
+  const hasLeftContent =
+    hasBarLabel || leftBarContent != null || paneNumber != null || showPropagateCwd;
 
   const paneControls = useMemo(
     () =>
@@ -720,6 +739,7 @@ export function PaneControlBar({
   const ctxValue = useMemo(
     () => ({
       paneControls,
+      leftPaneControls,
       mode,
       hovered,
       onSetMode: setMode,
@@ -734,6 +754,7 @@ export function PaneControlBar({
     }),
     [
       paneControls,
+      leftPaneControls,
       mode,
       hovered,
       setMode,
@@ -766,6 +787,7 @@ export function PaneControlBar({
               workspaceId={workspaceId}
               workspaceName={workspaceName}
             />
+            {leftPaneControls}
             {hasBarLabel ? (
               <BarLabel viewType={currentView.type} />
             ) : leftBarContent ? (
@@ -822,6 +844,7 @@ export function PaneControlBar({
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
               />
+              {leftPaneControls}
               {hasBarLabel ? (
                 <BarLabel viewType={currentView.type} />
               ) : leftBarContent ? (

@@ -8,6 +8,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
+import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
@@ -109,6 +110,20 @@ export function useKeyboardShortcuts() {
         if (focusedPaneIndex !== null) {
           e.preventDefault();
           useWorkspaceStore.getState().removePane(focusedPaneIndex);
+        }
+        return;
+      }
+
+      // pane.propagateCwdOnce (default Ctrl+Alt+P): 포커스된 pane 의 CWD 를
+      // sync group 에 1회 전파한다 (issue #324). 레지스트리 기반이라 Settings 에서
+      // 재바인딩 가능. 디스패치 로직은 컨트롤 바 버튼과 공유(propagate-cwd-once).
+      if (matchesKeybinding(e, "pane.propagateCwdOnce")) {
+        const ws = useWorkspaceStore.getState().getActiveWorkspace();
+        const { focusedPaneIndex } = useGridStore.getState();
+        const pane = ws && focusedPaneIndex !== null ? ws.panes[focusedPaneIndex] : undefined;
+        if (pane) {
+          e.preventDefault();
+          propagateCwdOnceForPane(pane);
         }
         return;
       }

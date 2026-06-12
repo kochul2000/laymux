@@ -13,7 +13,12 @@ vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
   saveMemo: vi.fn().mockResolvedValue(undefined),
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
 }));
+
+import { propagateCwdOnce } from "@/lib/tauri-api";
+import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
+import type { ViewInstanceConfig } from "@/stores/types";
 
 function fireKey(
   key: string,
@@ -1504,6 +1509,90 @@ describe("useKeyboardShortcuts", () => {
       // ArrowUp from hidden Default (start) should wrap to WS3 (last visible)
       fireKey("ArrowUp", { ctrlKey: true, altKey: true });
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ids[2]);
+    });
+  });
+
+  // --- pane.propagateCwdOnce: 포커스 pane CWD 1회 전파 (issue #324) ---
+  describe("Ctrl+Alt+P: propagate CWD once for the focused pane", () => {
+    function setActivePanes(view: ViewInstanceConfig) {
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view },
+              { id: "pane-b", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            ],
+          },
+        ],
+        activeWorkspaceId: "ws-default",
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(propagateCwdOnce).mockClear();
+      useCwdPropagateStore.setState({ requests: {} });
+    });
+
+    it("propagates the focused TerminalView pane's CWD via the backend command", () => {
+      setActivePanes({ type: "TerminalView", profile: "PowerShell" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("p", { ctrlKey: true, altKey: true });
+
+      expect(propagateCwdOnce).toHaveBeenCalledTimes(1);
+      expect(propagateCwdOnce).toHaveBeenCalledWith("terminal-pane-a");
+    });
+
+    it("routes FileExplorerView panes through the propagate request bus", () => {
+      setActivePanes({ type: "FileExplorerView" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("P", { ctrlKey: true, altKey: true });
+
+      expect(propagateCwdOnce).not.toHaveBeenCalled();
+      expect(useCwdPropagateStore.getState().requests["pane-a"]).toBe(1);
+    });
+
+    it("does nothing when the focused pane has no CWD-capable view", () => {
+      setActivePanes({ type: "MemoView" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("p", { ctrlKey: true, altKey: true });
+
+      expect(propagateCwdOnce).not.toHaveBeenCalled();
+      expect(useCwdPropagateStore.getState().requests).toEqual({});
+    });
+
+    it("does nothing when no pane is focused", () => {
+      setActivePanes({ type: "TerminalView" });
+      useGridStore.getState().setFocusedPane(null);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("p", { ctrlKey: true, altKey: true });
+
+      expect(propagateCwdOnce).not.toHaveBeenCalled();
+    });
+
+    it("respects a user override from settings (rebound key)", () => {
+      setActivePanes({ type: "TerminalView" });
+      useGridStore.getState().setFocusedPane(0);
+      useSettingsStore.setState({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+P" }],
+      } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+      renderHook(() => useKeyboardShortcuts());
+
+      // Old default must no longer match
+      fireKey("p", { ctrlKey: true, altKey: true });
+      expect(propagateCwdOnce).not.toHaveBeenCalled();
+
+      // New combo matches
+      fireKey("P", { ctrlKey: true, shiftKey: true });
+      expect(propagateCwdOnce).toHaveBeenCalledWith("terminal-pane-a");
     });
   });
 });

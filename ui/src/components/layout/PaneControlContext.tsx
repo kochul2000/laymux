@@ -4,6 +4,12 @@ import type { ControlBarMode } from "./PaneControlBar";
 export interface PaneControlContextValue {
   /** BarContent 렌더 결과 (split, delete, view selector 등) */
   paneControls: ReactNode;
+  /**
+   * 좌측(pane 번호 배지 우측)에 정렬되는 pane 컨트롤 (issue #324).
+   * 현재는 "propagate CWD once" 버튼. ViewHeader 를 쓰는 View(FileExplorer 등)는
+   * `paneControls` 와 같은 가시성 조건으로 배지 바로 다음에 렌더해야 한다.
+   */
+  leftPaneControls?: ReactNode;
   /** 현재 컨트롤 바 모드 */
   mode: ControlBarMode;
   /** Pane이 hover 상태인지 */

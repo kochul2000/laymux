@@ -71,6 +71,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
   // -- Pane --
   { id: "pane.focus", label: "Pane 포커스 이동", defaultKeys: "Alt+Arrow", group: "Pane" },
   { id: "pane.delete", label: "Pane 제거 (편집 모드)", defaultKeys: "Delete", group: "Pane" },
+  {
+    id: "pane.propagateCwdOnce",
+    label: "포커스 Pane CWD 1회 전파",
+    defaultKeys: "Ctrl+Alt+P",
+    group: "Pane",
+  },
   // -- UI --
   { id: "sidebar.toggle", label: "사이드바 토글", defaultKeys: "Ctrl+Shift+B", group: "UI" },
   { id: "notifications.toggle", label: "알림 패널 토글", defaultKeys: "Ctrl+Shift+I", group: "UI" },
