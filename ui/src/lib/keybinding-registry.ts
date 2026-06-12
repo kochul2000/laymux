@@ -184,6 +184,9 @@ function normalizeKey(key: string): string {
   return KEY_NORMALIZE[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 }
 
+/** Normalized arrow-key tokens matched by the `Arrow` wildcard (e.g. `pane.focus` = "Alt+Arrow"). */
+const ARROW_WILDCARD_KEYS = new Set(["Up", "Down", "Left", "Right"]);
+
 /**
  * Resolve the effective key combo string for an action (user override > default).
  * Returns undefined if action is not registered.
@@ -225,10 +228,15 @@ export function matchesKeybinding(
   const parsed = parseShortcut(keys);
   const eventKey = normalizeKey(e.key);
 
+  // `Arrow` is a wildcard token matching any of the four arrow keys
+  // (used by directional bindings like `pane.focus` = "Alt+Arrow").
+  const keyMatches =
+    parsed.key === "Arrow" ? ARROW_WILDCARD_KEYS.has(eventKey) : eventKey === parsed.key;
+
   return (
     e.ctrlKey === parsed.ctrl &&
     e.altKey === parsed.alt &&
     e.shiftKey === parsed.shift &&
-    eventKey === parsed.key
+    keyMatches
   );
 }

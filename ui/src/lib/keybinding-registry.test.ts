@@ -156,6 +156,25 @@ describe("keybinding-registry", () => {
       expect(matchesKeybinding(oldCopy, "terminal.copy")).toBe(false);
     });
 
+    it("should match any arrow key for 'Arrow' wildcard bindings (pane.focus)", () => {
+      expect(matchesKeybinding(makeKeyEvent("ArrowLeft", { alt: true }), "pane.focus")).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("ArrowRight", { alt: true }), "pane.focus")).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("ArrowUp", { alt: true }), "pane.focus")).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("ArrowDown", { alt: true }), "pane.focus")).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("a", { alt: true }), "pane.focus")).toBe(false);
+      expect(matchesKeybinding(makeKeyEvent("ArrowLeft"), "pane.focus")).toBe(false);
+    });
+
+    it("should respect 'Arrow' wildcard in user overrides", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.focus", keys: "Ctrl+Alt+Arrow" }],
+      });
+      expect(
+        matchesKeybinding(makeKeyEvent("ArrowLeft", { ctrl: true, alt: true }), "pane.focus"),
+      ).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("ArrowLeft", { alt: true }), "pane.focus")).toBe(false);
+    });
+
     it("should match Ctrl+C / Ctrl+V to terminal.copy / terminal.paste by default", () => {
       const copy = makeKeyEvent("c", { ctrl: true });
       const paste = makeKeyEvent("v", { ctrl: true });
