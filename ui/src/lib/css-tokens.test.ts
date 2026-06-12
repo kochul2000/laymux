@@ -39,6 +39,7 @@ describe("CSS design tokens — hover overlay", () => {
     "--backdrop-light",
     "--backdrop-heavy",
     "--bar-bg-hover",
+    "--bar-bg-overlay",
   ];
 
   it.each(hoverTokens)("defines %s in :root", (token) => {
@@ -133,6 +134,16 @@ describe("CSS utility classes — terminal IME composition", () => {
     expect(cssContent).toMatch(
       /\.terminal-composition-preview\s*\{[^}]*text-underline-offset:\s*2px;/s,
     );
+  });
+});
+
+describe("CSS design tokens — control bar overlay opacity (issue #320)", () => {
+  it("--bar-bg-overlay is semi-transparent (alpha <= 0.75) so content beneath stays visible", () => {
+    const match = cssContent.match(
+      /--bar-bg-overlay\s*:\s*rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/,
+    );
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1])).toBeLessThanOrEqual(0.75);
   });
 });
 

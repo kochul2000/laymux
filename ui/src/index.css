@@ -28,6 +28,8 @@
   --backdrop-heavy: rgba(0, 0, 0, 0.5);
   --hover-bg-subtle: rgba(255, 255, 255, 0.03);
   --bar-bg-hover: rgba(24, 24, 37, 0.96);
+  /* pane 컨트롤 바 hover 오버레이 — 아래 콘텐츠가 비치도록 반투명 (issue #320) */
+  --bar-bg-overlay: rgba(24, 24, 37, 0.6);
 
   /* dimensions */
   --bar-h: 28px;
