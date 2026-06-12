@@ -20,6 +20,7 @@ import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { DEFAULT_KEYBINDINGS } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
+import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
 
@@ -1172,6 +1173,67 @@ function ConvenienceSection() {
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
                 {convenience.smartPaste ? "Enabled" : "Disabled"}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Multi-file paste separator (#325) */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Multi-file Separator
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              여러 파일 붙여넣기 시 경로 사이 구분자
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <select
+              data-testid="paste-path-separator-select"
+              value={convenience.pastePathSeparator}
+              onChange={(e) =>
+                updateConvenience({
+                  pastePathSeparator: e.target.value as PastePathSeparator,
+                })
+              }
+              className={inputCls}
+              style={inputStyle}
+            >
+              <option value="space">Space</option>
+              <option value="newline">Newline</option>
+              <option value="comma">Comma (,)</option>
+              <option value="semicolon">Semicolon (;)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Multi-file paste quote wrapping (#325) */}
+        <div className="mt-3 flex items-start gap-3 py-1">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              Quote File Paths
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="paste-path-quote-toggle"
+                type="checkbox"
+                checked={convenience.pastePathQuote}
+                onChange={(e) => updateConvenience({ pastePathQuote: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {convenience.pastePathQuote ? "Enabled" : "Disabled"}
               </span>
             </label>
           </div>

@@ -25,7 +25,7 @@ import {
   markCodexTerminal,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
-import { transformPasteContent, prepareSelectionForCopy } from "@/lib/smart-text";
+import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
 import { createCursorTracer } from "@/lib/cursor-trace";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
@@ -174,10 +174,20 @@ function runTerminalPaste(terminal: Terminal, profile: string): void {
   smartPaste(conv.pasteImageDir, profile)
     .then((result) => {
       if (result.pasteType === "none" || !result.content) return;
-      const content = transformPasteContent(result.content, result.pasteType, {
-        removeIndent: conv.smartRemoveIndent,
-        removeLineBreak: conv.smartRemoveLineBreak,
-      });
+      // Multiple clipboard files (issue #325): join all resolved paths with
+      // the configured separator, optionally quote-wrapping each path.
+      // `paths` is absent for text pastes and older results — fall back to
+      // the single `content` transform path.
+      const content =
+        result.pasteType === "path" && result.paths && result.paths.length > 0
+          ? formatPastePaths(result.paths, {
+              separator: conv.pastePathSeparator,
+              quote: conv.pastePathQuote,
+            })
+          : transformPasteContent(result.content, result.pasteType, {
+              removeIndent: conv.smartRemoveIndent,
+              removeLineBreak: conv.smartRemoveLineBreak,
+            });
       if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
       terminal.paste(content);
     })

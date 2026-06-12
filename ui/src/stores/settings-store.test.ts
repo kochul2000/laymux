@@ -401,6 +401,29 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(1200);
   });
 
+  it("has default multi-file paste settings (#325)", () => {
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.pastePathSeparator).toBe("space");
+    expect(convenience.pastePathQuote).toBe(false);
+  });
+
+  it("setConvenience updates multi-file paste settings (#325)", () => {
+    useSettingsStore
+      .getState()
+      .setConvenience({ pastePathSeparator: "comma", pastePathQuote: true });
+    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("comma");
+    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(true);
+  });
+
+  it("loadFromSettings fills missing multi-file paste fields with defaults (#325)", () => {
+    useSettingsStore.getState().loadFromSettings({
+      convenience: { smartPaste: false } as any,
+    });
+    const { convenience } = useSettingsStore.getState();
+    expect(convenience.pastePathSeparator).toBe("space");
+    expect(convenience.pastePathQuote).toBe(false);
+  });
+
   it("setConvenience updates smart paste", () => {
     useSettingsStore.getState().setConvenience({ smartPaste: false });
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);

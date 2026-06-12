@@ -2177,6 +2177,76 @@ describe("TerminalView", () => {
     });
   });
 
+  it("pastes multiple file paths joined by the configured separator (default space)", async () => {
+    mockSmartPaste.mockResolvedValue({
+      pasteType: "path",
+      content: "C:\\test\\one.txt",
+      paths: ["C:\\test\\one.txt", "C:\\test\\two.txt"],
+    });
+
+    render(<TerminalView instanceId="t-paste-multi1" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
+
+    await vi.waitFor(() => {
+      expect(mockPaste).toHaveBeenCalledWith("C:\\test\\one.txt C:\\test\\two.txt");
+    });
+  });
+
+  it("pastes multiple file paths with newline separator and quote wrapping from settings", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      convenience: {
+        ...useSettingsStore.getState().convenience,
+        pastePathSeparator: "newline",
+        pastePathQuote: true,
+      },
+    });
+    mockSmartPaste.mockResolvedValue({
+      pasteType: "path",
+      content: "C:\\My Files\\one.txt",
+      paths: ["C:\\My Files\\one.txt", "C:\\test\\two.txt"],
+    });
+
+    render(<TerminalView instanceId="t-paste-multi2" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
+
+    await vi.waitFor(() => {
+      expect(mockPaste).toHaveBeenCalledWith('"C:\\My Files\\one.txt"\n"C:\\test\\two.txt"');
+    });
+  });
+
+  it("falls back to content when path result has no paths array (backward compat)", async () => {
+    mockSmartPaste.mockResolvedValue({ pasteType: "path", content: "C:\\test\\file.png" });
+
+    render(<TerminalView instanceId="t-paste-multi3" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+    });
+
+    const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
+    Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+    capturedKeyHandler!(event);
+
+    await vi.waitFor(() => {
+      expect(mockPaste).toHaveBeenCalledWith("C:\\test\\file.png");
+    });
+  });
+
   it("skips the smart paste pipeline when smartPaste is disabled but still consumes the key", async () => {
     // Override bindings like Ctrl+Shift+V can't rely on the browser's native
     // paste event, so the keybinding handler must always consume the event.

@@ -247,6 +247,19 @@ mod tests {
     }
 
     #[test]
+    fn convenience_multi_file_paste_defaults() {
+        // issue #325: 다중 파일 붙여넣기 설정 기본값
+        let conv = crate::settings::models::ConvenienceSettings::default();
+        assert_eq!(conv.paste_path_separator, "space");
+        assert!(!conv.paste_path_quote);
+        // 구버전 settings.json(필드 없음)도 기본값으로 채워진다
+        let parsed: crate::settings::models::ConvenienceSettings =
+            serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed.paste_path_separator, "space");
+        assert!(!parsed.paste_path_quote);
+    }
+
+    #[test]
     fn serialize_deserialize_round_trip() {
         let settings = Settings::default();
         let json = serde_json::to_string_pretty(&settings).unwrap();
