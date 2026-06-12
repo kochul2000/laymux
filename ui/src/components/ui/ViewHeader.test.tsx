@@ -77,6 +77,31 @@ describe("ViewHeader with PaneControlContext", () => {
     expect(screen.getByText("My View Title")).toBeInTheDocument();
   });
 
+  // issue #324: 좌측(배지 우측) 컨트롤 — propagate CWD once 버튼이 여기로 주입된다.
+  it("renders leftPaneControls next to the badge when controls are shown (issue #324)", () => {
+    const ctx = makeCtx({
+      mode: "pinned",
+      paneNumber: 1,
+      leftPaneControls: <button data-testid="mock-left-controls">L</button>,
+    });
+    renderWithCtx(ctx, <ViewHeader title="term">x</ViewHeader>);
+    const badge = screen.getByTestId("pane-number-badge");
+    const left = screen.getByTestId("mock-left-controls");
+    const right = screen.getByTestId("mock-pane-controls");
+    expect(badge.compareDocumentPosition(left) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hides leftPaneControls when pane controls are hidden (hover + not hovered)", () => {
+    const ctx = makeCtx({
+      mode: "hover",
+      hovered: false,
+      leftPaneControls: <button data-testid="mock-left-controls">L</button>,
+    });
+    renderWithCtx(ctx, <ViewHeader title="term">x</ViewHeader>);
+    expect(screen.queryByTestId("mock-left-controls")).not.toBeInTheDocument();
+  });
+
   it("renders the pane number badge when paneNumber is set", () => {
     const ctx = makeCtx({ paneNumber: 2 });
     renderWithCtx(ctx, <ViewHeader title="term">x</ViewHeader>);

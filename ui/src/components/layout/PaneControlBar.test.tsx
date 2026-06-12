@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -651,7 +651,7 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-control-cwd-send")).not.toBeInTheDocument();
   });
 
-  // 1회성 CWD 전파 버튼 (issue #293)
+  // 1회성 CWD 전파 버튼 (issue #293) — 단축키 힌트 포함 (issue #324)
   it("shows the propagate-CWD-once button when onPropagateCwdOnce is provided", () => {
     render(
       <PaneControlBar
@@ -663,7 +663,71 @@ describe("PaneControlBar", () => {
       </PaneControlBar>,
     );
     const btn = screen.getByTestId("pane-control-cwd-propagate-once");
-    expect(btn.getAttribute("title")).toBe("Propagate CWD once");
+    expect(btn.getAttribute("title")).toBe("Propagate CWD once (Ctrl+Alt+P)");
+  });
+
+  // PR #331 리뷰: Settings 에서 재바인딩하면 툴팁도 즉시 갱신되어야 한다 (구독 기반).
+  it("updates the tooltip when the keybinding is rebound in Settings", async () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-propagate-once");
+    expect(btn.getAttribute("title")).toBe("Propagate CWD once (Ctrl+Alt+P)");
+
+    act(() => {
+      useSettingsStore.setState({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+P" }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pane-control-cwd-propagate-once").getAttribute("title")).toBe(
+        "Propagate CWD once (Ctrl+Shift+P)",
+      );
+    });
+  });
+
+  // issue #324: 버튼은 우측 컨트롤 묶음이 아니라 좌측(pane 배지 우측)에 정렬된다.
+  it("renders the propagate button on the left, right after the pane number badge (issue #324)", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+        paneNumber={2}
+        workspaceId="ws-1"
+        workspaceName="WS"
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const badge = screen.getByTestId("pane-number-badge");
+    const btn = screen.getByTestId("pane-control-cwd-propagate-once");
+    const viewSelect = screen.getByTestId("pane-control-view-select");
+    // DOM 순서: 배지 → 전파 버튼 → (우측) 컨트롤 묶음(view select 등)
+    expect(badge.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(btn.compareDocumentPosition(viewSelect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders the propagate button on the left even without a pane number badge", () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-propagate-once");
+    const viewSelect = screen.getByTestId("pane-control-view-select");
+    expect(btn.compareDocumentPosition(viewSelect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("invokes onPropagateCwdOnce exactly once per click (one-shot)", async () => {

@@ -71,6 +71,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
   // -- Pane --
   { id: "pane.focus", label: "Pane 포커스 이동", defaultKeys: "Alt+Arrow", group: "Pane" },
   { id: "pane.delete", label: "Pane 제거 (편집 모드)", defaultKeys: "Delete", group: "Pane" },
+  {
+    id: "pane.propagateCwdOnce",
+    label: "포커스 Pane CWD 1회 전파",
+    defaultKeys: "Ctrl+Alt+P",
+    group: "Pane",
+  },
   // -- UI --
   { id: "sidebar.toggle", label: "사이드바 토글", defaultKeys: "Ctrl+Shift+B", group: "UI" },
   { id: "notifications.toggle", label: "알림 패널 토글", defaultKeys: "Ctrl+Shift+I", group: "UI" },
@@ -184,6 +190,20 @@ function normalizeKey(key: string): string {
  */
 export function resolveKeybinding(actionId: string): string | undefined {
   const userOverrides = useSettingsStore.getState().keybindings;
+  const override = userOverrides.find((kb) => kb.command === actionId);
+  if (override) return override.keys;
+
+  const def = DEFAULT_KEYBINDINGS.find((d) => d.id === actionId);
+  return def?.defaultKeys;
+}
+
+/**
+ * React hook variant of `resolveKeybinding()`.
+ * Subscribes to the settings store, so components re-render (and tooltips refresh)
+ * when the user rebinds the action in Settings. (PR #331 review)
+ */
+export function useResolvedKeybinding(actionId: string): string | undefined {
+  const userOverrides = useSettingsStore((s) => s.keybindings);
   const override = userOverrides.find((kb) => kb.command === actionId);
   if (override) return override.keys;
 

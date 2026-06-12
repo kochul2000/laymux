@@ -26,10 +26,12 @@ const CTRL_ALT_KEYS = new Set([
   "W",
   "R",
   "D",
+  "P",
   "n",
   "w",
   "r",
   "d",
+  "p",
 ]);
 const ALT_ARROWS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 

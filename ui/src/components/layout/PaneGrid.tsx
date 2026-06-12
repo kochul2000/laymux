@@ -9,9 +9,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
-import { propagateCwdOnce } from "@/lib/tauri-api";
-import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
-import { getInstanceId } from "@/lib/view-instance-id";
+import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 
 export interface GridPane {
   id: string;
@@ -191,22 +189,11 @@ export function PaneGrid({
                         onSetPaneView(pane.id, { ...pane.view, cwdReceive: !current });
                       }
                     : undefined,
-                // 1회성 CWD 전파 (issue #293).
-                // - TerminalView: 백엔드 PTY 세션이 있으므로 `propagate_cwd_once`(force) 커맨드를
-                //   호출한다. terminal_id 는 ViewRenderer 와 동일한 `getInstanceId` 헬퍼로 만들어
-                //   instanceId 규칙이 어긋나 `Session not found` 가 나는 일을 막는다.
-                // - FileExplorerView: 백엔드 세션이 없어 커맨드가 `Session not found` 로 실패하므로,
-                //   cwd 를 아는 view 자신이 force one-shot `sync-cwd` 를 디스패치하도록 요청 버스로 위임한다.
+                // 1회성 CWD 전파 (issue #293). 디스패치 로직은 키바인딩
+                // (`pane.propagateCwdOnce`, issue #324)과 공유하는 propagate-cwd-once 헬퍼에 있다.
                 onPropagateCwdOnce: hasCwdView
                   ? () => {
-                      if (pane.view.type === "FileExplorerView") {
-                        useCwdPropagateStore.getState().requestPropagate(pane.id);
-                        return;
-                      }
-                      const instanceId = getInstanceId(pane.view.type, pane.id);
-                      propagateCwdOnce(instanceId).catch((err) => {
-                        console.warn(`[propagateCwdOnce] ${instanceId} 1회 전파 실패:`, err);
-                      });
+                      propagateCwdOnceForPane(pane);
                     }
                   : undefined,
               }}

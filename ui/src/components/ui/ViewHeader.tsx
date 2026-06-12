@@ -56,6 +56,11 @@ export function ViewHeader({
           workspaceId={ctx?.workspaceId}
           workspaceName={ctx?.workspaceName}
         />
+        {/* 좌측 pane 컨트롤 (issue #324): propagate CWD once 버튼 — 배지 우측, 우측
+            컨트롤 묶음과 같은 가시성 조건 */}
+        {showPaneControls && ctx.leftPaneControls && (
+          <div onClick={(e) => e.stopPropagation()}>{ctx.leftPaneControls}</div>
+        )}
         {title && (
           <span
             style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}

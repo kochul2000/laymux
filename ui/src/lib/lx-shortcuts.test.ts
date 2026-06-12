@@ -123,6 +123,12 @@ describe("isLxShortcut", () => {
     expect(isLxShortcut(makeKeyEvent("d", { ctrlKey: true, altKey: true }))).toBe(true);
   });
 
+  // issue #324: 1회성 CWD 전파 — 터미널 포커스 중에도 document 핸들러로 통과해야 한다
+  it("returns true for Ctrl+Alt+P / Ctrl+Alt+p (propagate CWD once)", () => {
+    expect(isLxShortcut(makeKeyEvent("P", { ctrlKey: true, altKey: true }))).toBe(true);
+    expect(isLxShortcut(makeKeyEvent("p", { ctrlKey: true, altKey: true }))).toBe(true);
+  });
+
   // --- Case-insensitive Ctrl+Shift letter keys ---
   it("returns true for Ctrl+Shift+u (lowercase, jump to unread)", () => {
     expect(isLxShortcut(makeKeyEvent("u", { ctrlKey: true, shiftKey: true }))).toBe(true);
