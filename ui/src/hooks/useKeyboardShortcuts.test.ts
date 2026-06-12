@@ -1890,5 +1890,25 @@ describe("useKeyboardShortcuts", () => {
       fireKey("u", { ctrlKey: true, altKey: true });
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
     });
+
+    it("collision tie-break follows table order: workspace.N beats UI actions (PR #338 review)", () => {
+      // workspace.1 and settings.open rebound to the SAME combo — the
+      // documented contract (pane.* → workspace.* → UI) says workspace.1 wins.
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+      useSettingsStore.setState({
+        keybindings: [
+          { command: "workspace.1", keys: "Ctrl+Shift+9" },
+          { command: "settings.open", keys: "Ctrl+Shift+9" },
+        ],
+      } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("9", { ctrlKey: true, shiftKey: true });
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+      expect(useUiStore.getState().settingsModalOpen).toBe(false);
+    });
   });
 });

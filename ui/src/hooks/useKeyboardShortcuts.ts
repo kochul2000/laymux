@@ -236,6 +236,17 @@ function navigatePaneFocus(e: KeyboardEvent) {
  * Terminal/Memo/Issue Reporter actions are handled inside their focused views,
  * not here.
  */
+// workspace.1 ~ workspace.8: switch workspace by visible display index.
+// Built before SHORTCUT_HANDLERS and spread in place so the dispatch order
+// stays pane.* → workspace.* → UI actions (the documented tie-break contract).
+const WORKSPACE_INDEX_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {};
+for (let n = 1; n <= 8; n++) {
+  WORKSPACE_INDEX_HANDLERS[`workspace.${n}`] = (e) => {
+    e.preventDefault();
+    switchToWorkspaceIndex(n - 1);
+  };
+}
+
 const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   // pane.delete (default: plain Delete): remove focused pane.
   // Skip when a text-editable element has focus (e.g. input, textarea, contentEditable)
@@ -265,7 +276,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)
   "pane.focus": navigatePaneFocus,
 
-  // workspace.1~8 are appended below (index factory).
+  ...WORKSPACE_INDEX_HANDLERS,
 
   // workspace.last: last visible workspace
   "workspace.last": (e) => {
@@ -395,14 +406,6 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   },
 };
 
-// workspace.1 ~ workspace.8: switch workspace by visible display index
-for (let n = 1; n <= 8; n++) {
-  SHORTCUT_HANDLERS[`workspace.${n}`] = (e) => {
-    e.preventDefault();
-    switchToWorkspaceIndex(n - 1);
-  };
-}
-
 const SHORTCUT_ACTION_IDS = Object.keys(SHORTCUT_HANDLERS);
 
 export function useKeyboardShortcuts() {
@@ -411,6 +414,9 @@ export function useKeyboardShortcuts() {
       // Dispatch the first action whose (possibly user-overridden) combo
       // matches. Default combos are collision-free; after rebinding, table
       // order decides ties (pane.* before workspace.* before UI actions).
+      // A match consumes the event even when the handler no-ops (e.g.
+      // pane.delete with a text input focused) — later actions sharing the
+      // same combo never run.
       for (const actionId of SHORTCUT_ACTION_IDS) {
         if (matchesKeybinding(e, actionId)) {
           SHORTCUT_HANDLERS[actionId](e);
