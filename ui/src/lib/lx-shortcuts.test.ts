@@ -220,5 +220,14 @@ describe("isLxShortcut", () => {
       // Old default Alt+Arrow no longer bound → not an IDE shortcut anymore
       expect(isLxShortcut(makeKeyEvent("ArrowLeft", { altKey: true }))).toBe(false);
     });
+
+    it("respects pane.propagateCwdOnce override (document-level Pane action, #324)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+G" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("G", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      // Old default Ctrl+Alt+P no longer bound → must reach the shell
+      expect(isLxShortcut(makeKeyEvent("P", { ctrlKey: true, altKey: true }))).toBe(false);
+    });
   });
 });

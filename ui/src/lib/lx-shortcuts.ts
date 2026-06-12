@@ -22,16 +22,14 @@ import { DEFAULT_KEYBINDINGS, matchesKeybinding } from "./keybinding-registry";
  * Actions dispatched by the document-level handler (useKeyboardShortcuts).
  * These must pass through xterm.js while a terminal is focused.
  *
- * Selected by group: Workspace + UI are document-level, plus `pane.focus`
- * (Alt+Arrow navigation). Intentionally excluded:
- * - Terminal / Memo groups — handled inside the focused view itself.
- * - `pane.delete` (plain Delete) — the terminal must keep receiving Delete.
- * - Issue Reporter — modal-local scope, never active while a terminal is focused.
+ * Membership is declared per-definition via `passThroughTerminal` in the
+ * registry — see the field's doc in `keybinding-registry.ts` for why an
+ * action is or isn't flagged. Deriving the list here (instead of keeping a
+ * parallel group/exception list) means a new document-level shortcut can't
+ * be registered without also deciding its pass-through behavior.
  */
-const PASS_THROUGH_GROUPS = new Set(["Workspace", "UI"]);
-const PASS_THROUGH_EXTRA_IDS = new Set(["pane.focus"]);
 const PASS_THROUGH_ACTION_IDS: readonly string[] = DEFAULT_KEYBINDINGS.filter(
-  (d) => PASS_THROUGH_GROUPS.has(d.group) || PASS_THROUGH_EXTRA_IDS.has(d.id),
+  (d) => d.passThroughTerminal,
 ).map((d) => d.id);
 
 /** Terminal-owned actions: their (possibly overridden) combos never pass through. */
