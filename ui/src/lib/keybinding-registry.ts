@@ -275,15 +275,20 @@ interface ParsedShortcut {
   key: string;
 }
 
+/**
+ * Case-insensitive on modifiers and the key token, so hand-edited
+ * settings.json entries like "ctrl+shift+p" still match. The capture UI
+ * always writes canonical case; this only widens what we accept.
+ */
 function parseShortcut(shortcut: string): ParsedShortcut {
   const parts = shortcut.split("+");
-  const modifiers = new Set(parts.slice(0, -1));
+  const modifiers = new Set(parts.slice(0, -1).map((m) => m.toLowerCase()));
   const key = parts[parts.length - 1] || "";
   return {
-    ctrl: modifiers.has("Ctrl"),
-    alt: modifiers.has("Alt"),
-    shift: modifiers.has("Shift"),
-    key,
+    ctrl: modifiers.has("ctrl"),
+    alt: modifiers.has("alt"),
+    shift: modifiers.has("shift"),
+    key: normalizeKey(key),
   };
 }
 
@@ -293,6 +298,25 @@ function normalizeKey(key: string): string {
 
 /** Normalized arrow-key tokens matched by the `Arrow` wildcard (e.g. `pane.focus` = "Alt+Arrow"). */
 const ARROW_WILDCARD_KEYS = new Set(["Up", "Down", "Left", "Right"]);
+
+/** True if a combo string's key token is the `Arrow` wildcard (any arrow direction). */
+export function usesArrowWildcard(keys: string): boolean {
+  return parseShortcut(keys).key.toLowerCase() === "arrow";
+}
+
+/**
+ * Replace a captured arrow-direction token (e.g. "Ctrl+Alt+Left") with the
+ * `Arrow` wildcard ("Ctrl+Alt+Arrow"). Used by the Settings capture UI when
+ * rebinding a wildcard action like `pane.focus`, so pressing any one arrow
+ * rebinds all four directions instead of narrowing the action to a single one.
+ * Returns the input unchanged when its key token is not an arrow direction.
+ */
+export function coerceArrowWildcard(keys: string): string {
+  const parts = keys.split("+");
+  const last = parts[parts.length - 1] || "";
+  if (!ARROW_WILDCARD_KEYS.has(normalizeKey(last))) return keys;
+  return [...parts.slice(0, -1), "Arrow"].join("+");
+}
 
 /**
  * Resolve the effective key combo string for an action (user override > default).
@@ -337,8 +361,12 @@ export function matchesKeybinding(
 
   // `Arrow` is a wildcard token matching any of the four arrow keys
   // (used by directional bindings like `pane.focus` = "Alt+Arrow").
+  // Key comparison is case-insensitive so hand-edited tokens like "up"
+  // or "pageup" still match their canonical event names.
   const keyMatches =
-    parsed.key === "Arrow" ? ARROW_WILDCARD_KEYS.has(eventKey) : eventKey === parsed.key;
+    parsed.key.toLowerCase() === "arrow"
+      ? ARROW_WILDCARD_KEYS.has(eventKey)
+      : eventKey.toLowerCase() === parsed.key.toLowerCase();
 
   return (
     e.ctrlKey === parsed.ctrl &&

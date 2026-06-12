@@ -11,9 +11,11 @@ vi.mock("@/stores/settings-store", () => {
 
 import {
   DEFAULT_KEYBINDINGS,
+  coerceArrowWildcard,
   matchesKeybinding,
   resolveKeybinding,
   useResolvedKeybinding,
+  usesArrowWildcard,
 } from "./keybinding-registry";
 import { renderHook } from "@testing-library/react";
 
@@ -180,6 +182,44 @@ describe("keybinding-registry", () => {
       const paste = makeKeyEvent("v", { ctrl: true });
       expect(matchesKeybinding(copy, "terminal.copy")).toBe(true);
       expect(matchesKeybinding(paste, "terminal.paste")).toBe(true);
+    });
+
+    // Hand-edited settings.json may use non-canonical case (PR #336 review)
+    it("should match overrides case-insensitively (modifiers and key)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [
+          { command: "workspace.duplicate", keys: "ctrl+shift+p" },
+          { command: "workspace.next", keys: "ctrl+alt+down" },
+          { command: "pane.focus", keys: "alt+arrow" },
+        ],
+      });
+      expect(
+        matchesKeybinding(makeKeyEvent("P", { ctrl: true, shift: true }), "workspace.duplicate"),
+      ).toBe(true);
+      expect(
+        matchesKeybinding(makeKeyEvent("ArrowDown", { ctrl: true, alt: true }), "workspace.next"),
+      ).toBe(true);
+      expect(matchesKeybinding(makeKeyEvent("ArrowLeft", { alt: true }), "pane.focus")).toBe(true);
+    });
+  });
+
+  describe("Arrow wildcard helpers (Settings capture UI)", () => {
+    it("usesArrowWildcard detects the Arrow key token", () => {
+      expect(usesArrowWildcard("Alt+Arrow")).toBe(true);
+      expect(usesArrowWildcard("Ctrl+Alt+Arrow")).toBe(true);
+      expect(usesArrowWildcard("Alt+Left")).toBe(false);
+      expect(usesArrowWildcard("Ctrl+Alt+P")).toBe(false);
+    });
+
+    it("coerceArrowWildcard replaces a direction token with Arrow", () => {
+      expect(coerceArrowWildcard("Ctrl+Alt+Left")).toBe("Ctrl+Alt+Arrow");
+      expect(coerceArrowWildcard("Alt+Up")).toBe("Alt+Arrow");
+      expect(coerceArrowWildcard("ArrowDown")).toBe("Arrow");
+    });
+
+    it("coerceArrowWildcard leaves non-arrow combos unchanged", () => {
+      expect(coerceArrowWildcard("Ctrl+Shift+G")).toBe("Ctrl+Shift+G");
+      expect(coerceArrowWildcard("Ctrl+Alt+P")).toBe("Ctrl+Alt+P");
     });
   });
 });
