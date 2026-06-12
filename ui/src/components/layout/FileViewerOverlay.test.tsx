@@ -116,9 +116,11 @@ describe("FileViewerOverlay", () => {
     const s = useFileViewerStore.getState();
     expect(s.open).toBe(true);
     expect(s.path).toBe("/home/user/note.txt");
-    // The viewer body now renders the loaded file; the input is gone.
+    // The viewer body now renders the loaded file; the address bar stays at the
+    // top showing the loaded path (#327).
     expect(screen.getByTestId("mock-file-viewer")).toBeInTheDocument();
-    expect(screen.queryByTestId("file-viewer-overlay-path-input")).not.toBeInTheDocument();
+    const bar = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    expect(bar.value).toBe("/home/user/note.txt");
   });
 
   it("loads the file when the load button is clicked", () => {
@@ -156,13 +158,88 @@ describe("FileViewerOverlay", () => {
     expect(useFileViewerStore.getState().open).toBe(false);
   });
 
-  it("does not show the inline input once a file is loaded", () => {
+  // --- #327 / #326: persistent address bar ---
+  it("shows the current path in an editable address bar once a file is loaded (#327)", () => {
     act(() => {
       useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
     });
     render(<FileViewerOverlay />);
-    expect(screen.queryByTestId("file-viewer-overlay-path-input")).not.toBeInTheDocument();
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.value).toBe("/home/user/a.txt");
+    // The bar must not steal focus from the loaded viewer (terminal apps etc.).
+    expect(input).not.toHaveFocus();
     expect(screen.getByTestId("mock-file-viewer")).toBeInTheDocument();
+  });
+
+  it("navigates to another file when a new path is typed and Enter is pressed (#326)", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "/home/user/b.txt" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(useFileViewerStore.getState().path).toBe("/home/user/b.txt");
+    expect(screen.getByTestId("mock-file-viewer").getAttribute("data-path")).toBe(
+      "/home/user/b.txt",
+    );
+  });
+
+  it("preserves maximized state when navigating via the address bar", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt", { maximized: true });
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "/home/user/b.txt" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(useFileViewerStore.getState().path).toBe("/home/user/b.txt");
+    expect(useFileViewerStore.getState().maximized).toBe(true);
+  });
+
+  it("keeps the current file and restores the bar when a blank path is submitted", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(useFileViewerStore.getState().path).toBe("/home/user/a.txt");
+    expect(input.value).toBe("/home/user/a.txt");
+  });
+
+  it("Escape inside the address bar reverts the draft without closing the overlay", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: "/tmp/draft.txt" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    // The overlay stays open (Escape was consumed by the bar) and the draft is
+    // reverted to the currently loaded path.
+    expect(useFileViewerStore.getState().open).toBe(true);
+    expect(input.value).toBe("/home/user/a.txt");
+  });
+
+  it("updates the address bar when the path is swapped externally (MCP re-open)", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    const { rerender } = render(<FileViewerOverlay />);
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/b.txt");
+    });
+    rerender(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    expect(input.value).toBe("/home/user/b.txt");
   });
 
   it("forwards a per-path viewer instance id so a new path remounts the viewer terminal", () => {
