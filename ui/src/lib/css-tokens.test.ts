@@ -102,6 +102,18 @@ describe("CSS utility classes — hover", () => {
   });
 });
 
+describe("CSS utility classes — pane hover bar", () => {
+  it("defines .pane-hover-bar with the translucent overlay background", () => {
+    expect(cssContent).toMatch(/\.pane-hover-bar\s*\{[^}]*background:\s*var\(--bar-bg-overlay\);/s);
+  });
+
+  it("restores the opaque background on .pane-hover-bar:hover", () => {
+    expect(cssContent).toMatch(
+      /\.pane-hover-bar:hover\s*\{[^}]*background:\s*var\(--bar-bg-hover\);/s,
+    );
+  });
+});
+
 describe("CSS utility classes — separator", () => {
   it("defines .ui-sep class", () => {
     expect(cssContent).toMatch(/\.ui-sep\s*\{/);

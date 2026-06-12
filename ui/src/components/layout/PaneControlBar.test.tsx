@@ -150,25 +150,28 @@ describe("PaneControlBar", () => {
   });
 
   // -- Overlay transparency (issue #320) --
-  // hover 오버레이 바가 터미널 내용을 가리지 않도록 기본값으로 반투명 처리한다.
+  // hover 오버레이 바는 평소엔 반투명(.pane-hover-bar)이고, 바 자체에 마우스가
+  // 올라가면 CSS :hover 로 불투명 복귀한다. 인라인 background/backdropFilter 를
+  // 쓰면 CSS :hover 가 인라인 스타일을 못 이기므로 클래스로만 스타일링한다.
 
-  it("hover overlay bar uses the semi-transparent overlay token (issue #320)", () => {
+  it("hover overlay bar uses the translucent .pane-hover-bar class (issue #320)", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
         <div>content</div>
       </PaneControlBar>,
     );
     const bar = screen.getByTestId("pane-control-bar");
-    expect(bar.style.background).toBe("var(--bar-bg-overlay)");
+    expect(bar.className).toContain("pane-hover-bar");
   });
 
-  it("hover overlay bar does not blur the content beneath it (issue #320)", () => {
+  it("hover overlay bar has no inline background/blur that would defeat CSS :hover (issue #320)", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
         <div>content</div>
       </PaneControlBar>,
     );
     const bar = screen.getByTestId("pane-control-bar");
+    expect(bar.style.background).toBe("");
     expect(bar.style.backdropFilter).toBe("");
   });
 

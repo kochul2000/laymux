@@ -188,6 +188,17 @@
     margin-bottom: 0;
   }
 
+  /* hover 모드 오버레이 컨트롤 바: 평소엔 반투명(아래 터미널 내용이 비침, issue #320),
+     바 자체에 마우스가 올라가면 조작 대상이므로 불투명으로 복귀 */
+  .pane-hover-bar {
+    background: var(--bar-bg-overlay);
+    transition: background var(--transition-fast);
+  }
+  .pane-hover-bar:hover {
+    background: var(--bar-bg-hover);
+    backdrop-filter: blur(8px);
+  }
+
   /* Toolbar (28px header bar) */
   .ui-toolbar {
     display: flex;
