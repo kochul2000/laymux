@@ -15,6 +15,7 @@ import {
   type SyncCwdDefaults,
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
+import type { PastePathSeparator } from "../lib/smart-text";
 
 export interface FontSettings {
   face: string;
@@ -104,6 +105,10 @@ export interface ConvenienceSettings {
    * See issue #269.
    */
   hiddenAutoCloseSeconds: number;
+  /** Separator between paths when pasting multiple clipboard files. See issue #325. */
+  pastePathSeparator: PastePathSeparator;
+  /** Wrap each pasted file path in double quotes (useful for paths with spaces). See issue #325. */
+  pastePathQuote: boolean;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -791,6 +796,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     smartLinkJoin: true,
     largePasteWarning: true,
     hiddenAutoCloseSeconds: 0,
+    pastePathSeparator: "space" as const,
+    pastePathQuote: false,
   },
   workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: {
@@ -1024,6 +1031,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           smartLinkJoin: true,
           largePasteWarning: true,
           hiddenAutoCloseSeconds: 0,
+          pastePathSeparator: "space" as const,
+          pastePathQuote: false,
           ...(data.convenience as Partial<ConvenienceSettings>),
         }
       : undefined;

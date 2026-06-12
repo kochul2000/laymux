@@ -579,6 +579,17 @@ pub struct ConvenienceSettings {
     /// 0 = disabled (never auto-close). See issue #269.
     #[serde(default)]
     pub hidden_auto_close_seconds: u64,
+    /// Separator token between paths when pasting multiple clipboard files:
+    /// "space" (default) | "newline" | "comma" | "semicolon". See issue #325.
+    #[serde(default = "default_paste_path_separator")]
+    pub paste_path_separator: String,
+    /// Wrap each pasted file path in double quotes (useful for paths with spaces). See issue #325.
+    #[serde(default)]
+    pub paste_path_quote: bool,
+}
+
+fn default_paste_path_separator() -> String {
+    "space".to_string()
 }
 
 impl Default for ConvenienceSettings {
@@ -596,6 +607,8 @@ impl Default for ConvenienceSettings {
             smart_link_join: true,
             large_paste_warning: true,
             hidden_auto_close_seconds: 0,
+            paste_path_separator: default_paste_path_separator(),
+            paste_path_quote: false,
         }
     }
 }

@@ -747,6 +747,13 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 - `Ctrl+C`는 선택 영역이 없을 때만 xterm에 위임해 SIGINT를 그대로 전달한다(선택 상태로만
   판단, 키 조합을 하드코딩하지 않음).
 - 우클릭 경로(`handleContextMenu`)도 같은 헬퍼(`runTerminalPaste`)를 재사용한다.
+- **다중 파일 붙여넣기 (#325):** 클립보드에 파일이 여러 개(CF_HDROP)면 Rust
+  `smart_paste`가 `SmartPasteResult.paths`로 전체 경로 목록(WSL 프로파일이면 경로
+  변환 적용)을 반환하고, 프론트(`formatPastePaths`)가
+  `convenience.pastePathSeparator`("space" 기본 | "newline" | "comma" |
+  "semicolon") 구분자로 연결한다. `convenience.pastePathQuote`가 켜져 있으면 각
+  경로를 큰따옴표로 감싼다(공백 포함 경로 대응). 두 설정 모두 Settings UI
+  Convenience 섹션에 노출된다.
 - 이 예외는 터미널에 한정한다. 파일 탐색기 등 다른 컴포넌트의 copy/paste는 여전히
   시스템 이벤트 전용이다.
 

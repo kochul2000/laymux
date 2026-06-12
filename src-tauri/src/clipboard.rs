@@ -13,7 +13,13 @@ pub struct SmartPasteResult {
     /// "path" if a file/image path was resolved, "none" if no special content.
     pub paste_type: String,
     /// The path string (Windows or WSL format depending on profile), empty if paste_type is "none".
+    /// For multiple clipboard files this is the first path (backward compat).
     pub content: String,
+    /// All resolved file paths when the clipboard holds files (issue #325).
+    /// Empty for text/none results. The frontend joins these with the
+    /// user-configured separator (and optional quote wrapping).
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 /// Image file extensions (case-insensitive match).
@@ -37,6 +43,22 @@ pub fn is_wsl_profile(profile: &str) -> bool {
         || lower.contains("ubuntu")
         || lower.contains("debian")
         || lower.contains("linux")
+}
+
+/// Convert clipboard file paths to the target profile's path format (issue #325).
+/// WSL profiles get `/mnt/<drive>/...` paths; everything else keeps Windows paths.
+pub fn resolve_clipboard_paths(files: &[String], profile: &str) -> Vec<String> {
+    let wsl = is_wsl_profile(profile);
+    files
+        .iter()
+        .map(|f| {
+            if wsl {
+                crate::path_utils::windows_to_wsl_path(f)
+            } else {
+                f.clone()
+            }
+        })
+        .collect()
 }
 
 /// Get the default paste image directory.
@@ -132,17 +154,14 @@ fn dirs_config_path() -> Option<PathBuf> {
 fn smart_paste_platform(image_dir: &str, profile: &str) -> Result<SmartPasteResult, String> {
     use clipboard_win::{formats, get_clipboard};
 
-    // 1. Check for file paths (CF_HDROP)
+    // 1. Check for file paths (CF_HDROP) — all copied files, not just the first (issue #325)
     if let Ok(files) = get_clipboard::<Vec<String>, _>(formats::FileList) {
-        if let Some(first) = files.first() {
-            let path = if is_wsl_profile(profile) {
-                windows_to_wsl_path(first)
-            } else {
-                first.clone()
-            };
+        if !files.is_empty() {
+            let paths = resolve_clipboard_paths(&files, profile);
             return Ok(SmartPasteResult {
                 paste_type: "path".into(),
-                content: path,
+                content: paths[0].clone(),
+                paths,
             });
         }
     }
@@ -162,6 +181,7 @@ fn smart_paste_platform(image_dir: &str, profile: &str) -> Result<SmartPasteResu
                 };
                 return Ok(SmartPasteResult {
                     paste_type: "path".into(),
+                    paths: vec![content.clone()],
                     content,
                 });
             }
@@ -174,6 +194,7 @@ fn smart_paste_platform(image_dir: &str, profile: &str) -> Result<SmartPasteResu
             return Ok(SmartPasteResult {
                 paste_type: "text".into(),
                 content: text,
+                paths: Vec::new(),
             });
         }
     }
@@ -182,6 +203,7 @@ fn smart_paste_platform(image_dir: &str, profile: &str) -> Result<SmartPasteResu
     Ok(SmartPasteResult {
         paste_type: "none".into(),
         content: String::new(),
+        paths: Vec::new(),
     })
 }
 
@@ -191,6 +213,7 @@ fn smart_paste_platform(_image_dir: &str, _profile: &str) -> Result<SmartPasteRe
     Ok(SmartPasteResult {
         paste_type: "none".into(),
         content: String::new(),
+        paths: Vec::new(),
     })
 }
 
@@ -337,6 +360,55 @@ mod tests {
         );
         // UNC or relative path — just replace backslashes
         assert_eq!(windows_to_wsl_path(r"relative\path"), "relative/path");
+    }
+
+    // -- resolve_clipboard_paths (issue #325: 다중 파일 붙여넣기) --
+
+    #[test]
+    fn test_resolve_clipboard_paths_multiple_windows() {
+        let files = vec![r"C:\a\one.txt".to_string(), r"C:\b\two two.txt".to_string()];
+        let paths = resolve_clipboard_paths(&files, "PowerShell");
+        assert_eq!(paths, files);
+    }
+
+    #[test]
+    fn test_resolve_clipboard_paths_multiple_wsl() {
+        let files = vec![r"C:\a\one.txt".to_string(), r"D:\b\two.txt".to_string()];
+        let paths = resolve_clipboard_paths(&files, "WSL");
+        assert_eq!(
+            paths,
+            vec![
+                "/mnt/c/a/one.txt".to_string(),
+                "/mnt/d/b/two.txt".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_resolve_clipboard_paths_empty() {
+        let paths = resolve_clipboard_paths(&[], "PowerShell");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_smart_paste_result_paths_serde_default() {
+        // 구버전 결과(JSON에 paths 없음)도 역직렬화 가능해야 한다 (backward compat)
+        let json = r#"{"pasteType":"path","content":"C:\\a.txt"}"#;
+        let result: SmartPasteResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.paste_type, "path");
+        assert!(result.paths.is_empty());
+    }
+
+    #[test]
+    fn test_smart_paste_result_paths_serialize_camel_case() {
+        let result = SmartPasteResult {
+            paste_type: "path".into(),
+            content: "C:\\a.txt".into(),
+            paths: vec!["C:\\a.txt".into(), "C:\\b.txt".into()],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains(r#""paths":["C:\\a.txt","C:\\b.txt"]"#));
+        assert!(json.contains(r#""pasteType":"path""#));
     }
 
     #[test]

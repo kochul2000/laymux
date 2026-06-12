@@ -737,6 +737,45 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
   });
 
+  it("renders multi-file paste separator select and quote toggle (#325)", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("paste-path-separator-select") as HTMLSelectElement;
+    expect(select.value).toBe("space"); // 기본값
+    const quoteToggle = screen.getByTestId("paste-path-quote-toggle") as HTMLInputElement;
+    expect(quoteToggle.checked).toBe(false); // 기본값
+  });
+
+  it("changing paste path separator updates store after Save (#325)", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    const select = screen.getByTestId("paste-path-separator-select") as HTMLSelectElement;
+    await user.selectOptions(select, "newline");
+
+    // Store unchanged until Save
+    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("space");
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("newline");
+  });
+
+  it("toggling paste path quote updates store after Save (#325)", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("paste-path-quote-toggle"));
+
+    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(false);
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(true);
+  });
+
   it("does NOT update copy on select in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);

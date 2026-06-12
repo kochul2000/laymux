@@ -6,6 +6,7 @@ import {
   transformPasteContent,
   trimSelectionTrailingWhitespace,
   prepareSelectionForCopy,
+  formatPastePaths,
 } from "./smart-text";
 import { RAW_XTERM_SELECTION, WRONG_RESULT, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
 
@@ -703,5 +704,65 @@ describe("smartRemoveIndent vs MemoView Shift+Tab dedent 비교", () => {
     expect(smartRemoveIndent(input)).toBe("line1\n  \nline3");
     // Shift+Tab: 공백 줄의 2sp도 독립적으로 제거
     expect(memoShiftTabDedent(input, 2)).toBe("line1\n\nline3");
+  });
+});
+
+// ============================================================
+// formatPastePaths (issue #325: 다중 파일 경로 붙여넣기)
+// ============================================================
+describe("formatPastePaths", () => {
+  it("기본값(space, quote 끄기): 공백으로 연결", () => {
+    expect(
+      formatPastePaths(["C:\\a\\one.txt", "C:\\a\\two.txt"], { separator: "space", quote: false }),
+    ).toBe("C:\\a\\one.txt C:\\a\\two.txt");
+  });
+
+  it("파일 1개: 구분자 없이 경로 그대로", () => {
+    expect(formatPastePaths(["C:\\a\\one.txt"], { separator: "space", quote: false })).toBe(
+      "C:\\a\\one.txt",
+    );
+  });
+
+  it("newline 구분자: 줄바꿈으로 연결", () => {
+    expect(formatPastePaths(["/mnt/c/a", "/mnt/c/b"], { separator: "newline", quote: false })).toBe(
+      "/mnt/c/a\n/mnt/c/b",
+    );
+  });
+
+  it("comma 구분자: 쉼표로 연결", () => {
+    expect(formatPastePaths(["a.txt", "b.txt"], { separator: "comma", quote: false })).toBe(
+      "a.txt,b.txt",
+    );
+  });
+
+  it("semicolon 구분자: 세미콜론으로 연결", () => {
+    expect(formatPastePaths(["a.txt", "b.txt"], { separator: "semicolon", quote: false })).toBe(
+      "a.txt;b.txt",
+    );
+  });
+
+  it("quote 켜기: 각 경로를 큰따옴표로 감싼다", () => {
+    expect(
+      formatPastePaths(["C:\\My Files\\one.txt", "C:\\b.txt"], { separator: "space", quote: true }),
+    ).toBe('"C:\\My Files\\one.txt" "C:\\b.txt"');
+  });
+
+  it("quote 켜기 + 파일 1개: 한 경로만 감싼다", () => {
+    expect(formatPastePaths(["C:\\My Files\\one.txt"], { separator: "space", quote: true })).toBe(
+      '"C:\\My Files\\one.txt"',
+    );
+  });
+
+  it("빈 배열: 빈 문자열", () => {
+    expect(formatPastePaths([], { separator: "space", quote: false })).toBe("");
+  });
+
+  it("알 수 없는 구분자 토큰은 space로 처리", () => {
+    expect(
+      formatPastePaths(["a", "b"], {
+        separator: "bogus" as unknown as "space",
+        quote: false,
+      }),
+    ).toBe("a b");
   });
 });

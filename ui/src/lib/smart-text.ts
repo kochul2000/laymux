@@ -245,6 +245,40 @@ export function applyPasteTextTransforms(text: string, options: SmartTextOptions
   return smartRemoveLineBreak(normalized);
 }
 
+/**
+ * Separator token for joining multiple pasted file paths (issue #325).
+ * Stored as a token (not the raw char) so settings.json stays readable
+ * and the Settings UI can render a labelled dropdown.
+ */
+export type PastePathSeparator = "space" | "newline" | "comma" | "semicolon";
+
+const PASTE_PATH_SEPARATOR_CHARS: Record<PastePathSeparator, string> = {
+  space: " ",
+  newline: "\n",
+  comma: ",",
+  semicolon: ";",
+};
+
+export interface PastePathOptions {
+  /** Separator token between paths. Unknown tokens fall back to "space". */
+  separator: PastePathSeparator;
+  /** Wrap each path in double quotes (useful for paths containing spaces). */
+  quote: boolean;
+}
+
+/**
+ * Join multiple clipboard file paths into a single paste string.
+ *
+ * Used when the user copies several files in Explorer and pastes them into
+ * a terminal: each resolved path is optionally quote-wrapped, then joined
+ * with the configured separator (default: space).
+ */
+export function formatPastePaths(paths: string[], options: PastePathOptions): string {
+  const sep = PASTE_PATH_SEPARATOR_CHARS[options.separator] ?? " ";
+  const items = options.quote ? paths.map((p) => `"${p}"`) : paths;
+  return items.join(sep);
+}
+
 /** Transform paste result content shared by Ctrl+V and right-click paste. */
 export function transformPasteContent(
   content: string,

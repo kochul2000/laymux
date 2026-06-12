@@ -411,8 +411,10 @@ export interface DockSetting {
 }
 
 export interface SmartPasteResult {
-  pasteType: string; // "path" | "none"
+  pasteType: string; // "path" | "text" | "none"
   content: string;
+  /** All resolved file paths when the clipboard holds files (issue #325). */
+  paths?: string[];
 }
 
 /** Perform smart paste: check clipboard for files/images, return path or "none". */
