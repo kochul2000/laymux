@@ -60,6 +60,10 @@ import {
   detectActivityFromOutput,
   shouldDismissClaudeInputPendingFromOutput,
 } from "@/lib/activity-detection";
+import {
+  detectClaudeSessionLimitFromOutput,
+  computeSessionLimitResumeAt,
+} from "@/lib/claude-session-limit";
 import { useNotificationStore } from "@/stores/notification-store";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { OutputIdleDetector } from "@/lib/output-idle-detector";
@@ -1216,6 +1220,24 @@ export function TerminalView({
     // the user actually answered).
     let claudeDismissalBuffer = "";
     const CLAUDE_DISMISSAL_WINDOW = 4096;
+    // Session-limit auto-resume (issue #312). The banner ("You've hit your
+    // session limit · resets 1:50pm (Asia/Seoul)") lives in the 16 KB
+    // detection buffer and is re-scanned on every chunk, so two guards keep
+    // the resume from double-firing:
+    //   - `sessionLimitArmedKey` — a timer is already pending for this reset
+    //     time; re-detections of the same banner are no-ops.
+    //   - `sessionLimitLastFired` — the resume already fired for this reset
+    //     time; banner residue still in the buffer right after firing would
+    //     otherwise re-arm a timer for the SAME printed time tomorrow.
+    let sessionLimitTimer: ReturnType<typeof setTimeout> | undefined;
+    let sessionLimitSubmitTimer: ReturnType<typeof setTimeout> | undefined;
+    let sessionLimitArmedKey: string | undefined;
+    let sessionLimitLastFired: { key: string; at: number } | undefined;
+    const SESSION_LIMIT_REFIRE_GUARD_MS = 6 * 60 * 60 * 1000;
+    // Claude Code's TUI submits on CR only; \n inserts a soft line break. The
+    // CR is sent as a standalone write after the text has landed in the input
+    // box so long custom messages still submit reliably.
+    const SESSION_LIMIT_SUBMIT_CR_DELAY_MS = 150;
     onTerminalOutput(instanceId, (data) => {
       if (cancelled) return;
       terminal.write(data, () => {
@@ -1374,6 +1396,57 @@ export function TerminalView({
           if (claudeRecap && current.activityMessage !== claudeRecap) {
             useTerminalStore.getState().updateInstanceInfo(instanceId, {
               activityMessage: claudeRecap,
+            });
+          }
+        }
+
+        // Session-limit auto-resume (issue #312): when Claude prints the
+        // limit banner, schedule a resume message for the reset time plus
+        // the configured delay. See the dedupe-state comment above for why
+        // the armed/last-fired guards exist.
+        const sessionLimit = detectClaudeSessionLimitFromOutput(claudeDetectionBuffer);
+        if (sessionLimit) {
+          const claudeSettings = useSettingsStore.getState().claude;
+          const recentlyFired =
+            sessionLimitLastFired !== undefined &&
+            sessionLimitLastFired.key === sessionLimit.key &&
+            Date.now() - sessionLimitLastFired.at < SESSION_LIMIT_REFIRE_GUARD_MS;
+          if (
+            claudeSettings.sessionLimitAutoResume &&
+            sessionLimitArmedKey !== sessionLimit.key &&
+            !recentlyFired
+          ) {
+            const resumeAt = computeSessionLimitResumeAt(
+              sessionLimit,
+              Date.now(),
+              claudeSettings.sessionLimitResumeDelaySeconds ?? 60,
+            );
+            sessionLimitArmedKey = sessionLimit.key;
+            if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
+            sessionLimitTimer = setTimeout(() => {
+              sessionLimitTimer = undefined;
+              sessionLimitArmedKey = undefined;
+              sessionLimitLastFired = { key: sessionLimit.key, at: Date.now() };
+              const message =
+                useSettingsStore.getState().claude.sessionLimitResumeMessage || "go on";
+              void writeToTerminal(instanceId, message);
+              sessionLimitSubmitTimer = setTimeout(() => {
+                void writeToTerminal(instanceId, "\r");
+              }, SESSION_LIMIT_SUBMIT_CR_DELAY_MS);
+              useNotificationStore.getState().addNotification({
+                terminalId: instanceId,
+                workspaceId: resolveWorkspaceId(instanceId),
+                message: `Claude session limit reset — sent "${message}" to resume`,
+                level: "success",
+              });
+            }, resumeAt - Date.now());
+            useNotificationStore.getState().addNotification({
+              terminalId: instanceId,
+              workspaceId: resolveWorkspaceId(instanceId),
+              message: `Claude hit its session limit — auto-resume scheduled for ${new Date(
+                resumeAt,
+              ).toLocaleTimeString()}`,
+              level: "warning",
             });
           }
         }
@@ -1716,6 +1789,8 @@ export function TerminalView({
       cancelled = true;
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
+      if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
+      if (sessionLimitSubmitTimer !== undefined) clearTimeout(sessionLimitSubmitTimer);
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;

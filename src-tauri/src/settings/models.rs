@@ -375,6 +375,17 @@ pub struct ClaudeSettings {
     /// Delimiter between bullet and title when both are shown (default: " · ").
     #[serde(default = "default_status_message_delimiter")]
     pub status_message_delimiter: String,
+    /// Auto-send a resume message after a session-limit reset (default: true).
+    /// See issue #312 — the frontend detects "You've hit your session limit ·
+    /// resets <time>" in the terminal output and schedules the resume write.
+    #[serde(default = "default_session_limit_auto_resume")]
+    pub session_limit_auto_resume: bool,
+    /// Seconds to wait after the reset time before resuming (default: 60).
+    #[serde(default = "default_session_limit_resume_delay_seconds")]
+    pub session_limit_resume_delay_seconds: u64,
+    /// Message sent to resume work after the limit resets (default: "go on").
+    #[serde(default = "default_session_limit_resume_message")]
+    pub session_limit_resume_message: String,
 }
 
 impl Default for ClaudeSettings {
@@ -385,8 +396,23 @@ impl Default for ClaudeSettings {
             session_max_age_hours: 24,
             status_message_mode: ClaudeStatusMessageMode::default(),
             status_message_delimiter: default_status_message_delimiter(),
+            session_limit_auto_resume: true,
+            session_limit_resume_delay_seconds: 60,
+            session_limit_resume_message: default_session_limit_resume_message(),
         }
     }
+}
+
+fn default_session_limit_auto_resume() -> bool {
+    true
+}
+
+fn default_session_limit_resume_delay_seconds() -> u64 {
+    60
+}
+
+fn default_session_limit_resume_message() -> String {
+    "go on".to_string()
 }
 
 fn default_status_message_delimiter() -> String {

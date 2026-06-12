@@ -287,6 +287,37 @@ mod tests {
     }
 
     #[test]
+    fn claude_session_limit_resume_defaults() {
+        // Issue #312: missing fields in an existing settings.json must fall
+        // back to auto-resume enabled, 60s delay, "go on" message.
+        let json = r#"{ "claude": { "syncCwd": "skip" } }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.claude.session_limit_auto_resume);
+        assert_eq!(settings.claude.session_limit_resume_delay_seconds, 60);
+        assert_eq!(settings.claude.session_limit_resume_message, "go on");
+    }
+
+    #[test]
+    fn claude_session_limit_resume_round_trip() {
+        let json = r#"{
+          "claude": {
+            "sessionLimitAutoResume": false,
+            "sessionLimitResumeDelaySeconds": 120,
+            "sessionLimitResumeMessage": "continue"
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(!settings.claude.session_limit_auto_resume);
+        assert_eq!(settings.claude.session_limit_resume_delay_seconds, 120);
+        assert_eq!(settings.claude.session_limit_resume_message, "continue");
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"sessionLimitAutoResume\":false"));
+        assert!(serialized.contains("\"sessionLimitResumeDelaySeconds\":120"));
+        assert!(serialized.contains("\"sessionLimitResumeMessage\":\"continue\""));
+    }
+
+    #[test]
     fn convenience_hidden_auto_close_default_is_disabled() {
         // Default must be 0 (disabled) so existing users see no behavior change.
         let settings = Settings::default();

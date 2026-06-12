@@ -492,6 +492,23 @@ describe("settings-store", () => {
     });
     const { claude } = useSettingsStore.getState();
     expect(claude.syncCwd).toBe("skip");
+    expect(claude.sessionLimitAutoResume).toBe(true);
+    expect(claude.sessionLimitResumeDelaySeconds).toBe(60);
+    expect(claude.sessionLimitResumeMessage).toBe("go on");
+  });
+
+  it("loadFromSettings loads claude session-limit resume settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      claude: {
+        sessionLimitAutoResume: false,
+        sessionLimitResumeDelaySeconds: 120,
+        sessionLimitResumeMessage: "continue",
+      } as any,
+    });
+    const { claude } = useSettingsStore.getState();
+    expect(claude.sessionLimitAutoResume).toBe(false);
+    expect(claude.sessionLimitResumeDelaySeconds).toBe(120);
+    expect(claude.sessionLimitResumeMessage).toBe("continue");
   });
 
   it("loadFromSettings without claude preserves defaults", () => {

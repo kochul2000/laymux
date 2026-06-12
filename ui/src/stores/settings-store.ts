@@ -799,6 +799,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     sessionMaxAgeHours: 24,
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
+    sessionLimitAutoResume: true,
+    sessionLimitResumeDelaySeconds: 60,
+    sessionLimitResumeMessage: "go on",
   },
   codex: {
     statusMessageMode: "bullet-title" as const,
@@ -1043,6 +1046,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           sessionMaxAgeHours: 24,
           statusMessageMode: "bullet-title" as const,
           statusMessageDelimiter: " · ",
+          sessionLimitAutoResume: true,
+          sessionLimitResumeDelaySeconds: 60,
+          sessionLimitResumeMessage: "go on",
           ...(data.claude as Partial<ClaudeSettings>),
         }
       : undefined;
