@@ -86,6 +86,12 @@ struct WriteTerminalParam {
     /// in vim, composing a multi-line prompt). Works regardless of `escape`.
     #[serde(default = "default_true")]
     enter: bool,
+    /// Reply address for agent-to-agent messaging. Pass your own terminal ID
+    /// (from $LX_TERMINAL_ID) and a standardized reply-to footer is appended
+    /// to `data`, instructing the receiving LLM agent to send its result back
+    /// to you via `write_to_terminal`. Only use when the target pane runs an
+    /// LLM agent — the footer would garble input to shells or editors.
+    reply_to: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -103,6 +109,11 @@ struct WriteToNeighborParam {
     /// `false` to type without submitting. See `write_to_terminal` for details.
     #[serde(default = "default_true")]
     enter: bool,
+    /// Reply address for agent-to-agent messaging — typically your own
+    /// `terminal_id`. When set, a standardized reply-to footer is appended to
+    /// `data` so the receiving LLM agent knows where to send its result.
+    /// See `write_to_terminal` for details.
+    reply_to: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -486,12 +497,22 @@ impl McpHandler {
     /// 줄바꿈만 삽입하고 제출되지 않는다. 따라서 후행 개행을 제거한다. 내부(중간)
     /// 개행은 멀티라인 입력 의도를 위해 보존한다. `enter=false`면 사용자가 보낸
     /// 개행을 손대지 않는다.
-    fn prepare_input_body(data: &str, escape: bool, enter: bool) -> String {
+    ///
+    /// `reply_to`가 주어지면(에이전트 간 메시징) 표준 회신 푸터를 본문 끝에
+    /// 부착한다 — 후행 개행 정리보다 먼저 적용되므로 푸터는 본문과 함께
+    /// 한 메시지로 제출된다.
+    fn prepare_input_body(data: &str, escape: bool, enter: bool, reply_to: Option<&str>) -> String {
         let mut result = if escape {
             super::helpers::unescape_terminal_input(data)
         } else {
             data.to_string()
         };
+        if let Some(reply_to) = reply_to.filter(|s| !s.is_empty()) {
+            result.push_str(&format!(
+                "\n\n[reply-to: when done, send your result back by calling the \
+                 mcp__laymux__write_to_terminal tool with terminal_id=\"{reply_to}\"]"
+            ));
+        }
         if enter {
             while result.ends_with('\n') || result.ends_with('\r') {
                 result.pop();
@@ -505,8 +526,13 @@ impl McpHandler {
     /// 반환한다 — `write_input`이 청크 사이에 지연을 넣어 Codex paste 오인을
     /// 막는다(#314). 순수 함수라 호출 패턴(본문+CR / CR만 / 본문만 / 둘 다 없음)을
     /// 단위 테스트로 고정한다.
-    fn plan_input_writes(data: &str, escape: bool, enter: bool) -> Vec<Vec<u8>> {
-        let body = Self::prepare_input_body(data, escape, enter);
+    fn plan_input_writes(
+        data: &str,
+        escape: bool,
+        enter: bool,
+        reply_to: Option<&str>,
+    ) -> Vec<Vec<u8>> {
+        let body = Self::prepare_input_body(data, escape, enter, reply_to);
         let mut chunks: Vec<Vec<u8>> = Vec::new();
         if !body.is_empty() {
             chunks.push(body.into_bytes());
@@ -528,8 +554,9 @@ impl McpHandler {
         data: &str,
         escape: bool,
         enter: bool,
+        reply_to: Option<&str>,
     ) -> Result<usize, CallToolResult> {
-        let chunks = Self::plan_input_writes(data, escape, enter);
+        let chunks = Self::plan_input_writes(data, escape, enter, reply_to);
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
         let lock = self.terminal_exec_lock(terminal_id).await;
@@ -1054,6 +1081,9 @@ impl McpHandler {
     /// Set `escape` to true for C-style sequences: `\\r` for Enter, `\\n` for
     /// newline, `\\u0003` for Ctrl+C. Leave `escape` false for literal text
     /// (preserves backslashes in Windows paths like `C:\\Users`).
+    /// When messaging another LLM agent pane, pass `reply_to` with your own
+    /// terminal ID ($LX_TERMINAL_ID) — a standardized footer is appended
+    /// telling the agent where to send its result back.
     #[tool]
     async fn write_to_terminal(
         &self,
@@ -1072,7 +1102,13 @@ impl McpHandler {
             Err(e) => return Ok(e),
         };
         match self
-            .write_input(&terminal_id, &p.data, p.escape, p.enter)
+            .write_input(
+                &terminal_id,
+                &p.data,
+                p.escape,
+                p.enter,
+                p.reply_to.as_deref(),
+            )
             .await
         {
             Ok(bytes) => Ok(json_result(&json!({
@@ -1125,7 +1161,13 @@ impl McpHandler {
 
         // 2. Write to the neighbor
         match self
-            .write_input(&target_id, &p.data, p.escape, p.enter)
+            .write_input(
+                &target_id,
+                &p.data,
+                p.escape,
+                p.enter,
+                p.reply_to.as_deref(),
+            )
             .await
         {
             Ok(bytes) => Ok(json_result(&json!({
@@ -2093,7 +2135,9 @@ impl ServerHandler for McpHandler {
                  ## Common workflows\n\
                  - Find yourself: echo $LX_TERMINAL_ID (or $env:LX_TERMINAL_ID in PowerShell) → identify_caller\n\
                  - Send command to adjacent pane: identify_caller → use neighbors.right.terminalId → write_to_terminal\n\
-                 - Read another pane's output: list_terminals → read_terminal_output with target terminal_id"
+                 - Read another pane's output: list_terminals → read_terminal_output with target terminal_id\n\
+                 - Message another LLM agent pane and get its result back: write_to_terminal with \
+                 reply_to=$LX_TERMINAL_ID — a standardized footer tells the agent where to reply"
                     .to_string(),
             )
     }
@@ -2906,13 +2950,13 @@ mod tests {
     #[test]
     fn prepare_input_body_default_flags_keeps_plain_text() {
         // 본문에는 CR이 붙지 않는다 — 제출 CR은 write_input이 별도로 보낸다.
-        let out = McpHandler::prepare_input_body("ls", false, true);
+        let out = McpHandler::prepare_input_body("ls", false, true, None);
         assert_eq!(out, "ls");
     }
 
     #[test]
     fn prepare_input_body_enter_false_keeps_plain_text() {
-        let out = McpHandler::prepare_input_body("ls", false, false);
+        let out = McpHandler::prepare_input_body("ls", false, false, None);
         assert_eq!(out, "ls");
     }
 
@@ -2926,48 +2970,89 @@ mod tests {
 
     #[test]
     fn prepare_input_body_strips_trailing_lf_before_enter() {
-        let out = McpHandler::prepare_input_body("ls\n", false, true);
+        let out = McpHandler::prepare_input_body("ls\n", false, true, None);
         assert_eq!(out, "ls");
     }
 
     #[test]
     fn prepare_input_body_strips_trailing_crlf_before_enter() {
-        let out = McpHandler::prepare_input_body("ls\r\n", false, true);
+        let out = McpHandler::prepare_input_body("ls\r\n", false, true, None);
         assert_eq!(out, "ls");
     }
 
     #[test]
     fn prepare_input_body_strips_trailing_cr_before_enter() {
-        let out = McpHandler::prepare_input_body("ls\r", false, true);
+        let out = McpHandler::prepare_input_body("ls\r", false, true, None);
         assert_eq!(out, "ls");
     }
 
     #[test]
     fn prepare_input_body_strips_trailing_lf_from_escaped_data() {
         // escape=true + data="ls\\n" → unescape 후 "ls\n" → 후행 개행 제거.
-        let out = McpHandler::prepare_input_body(r"ls\n", true, true);
+        let out = McpHandler::prepare_input_body(r"ls\n", true, true, None);
         assert_eq!(out, "ls");
     }
 
     #[test]
     fn prepare_input_body_preserves_internal_newlines_with_enter() {
         // 멀티라인 내용의 내부 개행은 보존하고 후행 개행만 제거한다.
-        let out = McpHandler::prepare_input_body("line1\nline2\n", false, true);
+        let out = McpHandler::prepare_input_body("line1\nline2\n", false, true, None);
         assert_eq!(out, "line1\nline2");
     }
 
     #[test]
     fn prepare_input_body_keeps_trailing_newline_when_enter_false() {
         // enter=false면 사용자가 보낸 후행 개행을 그대로 둔다(제출 의도 없음).
-        let out = McpHandler::prepare_input_body("ls\n", false, false);
+        let out = McpHandler::prepare_input_body("ls\n", false, false, None);
         assert_eq!(out, "ls\n");
     }
 
     #[test]
     fn prepare_input_body_empty_data_with_enter_is_empty() {
         // 빈 본문 — 제출 CR만 별도로 전송된다(lone CR).
-        let out = McpHandler::prepare_input_body("", false, true);
+        let out = McpHandler::prepare_input_body("", false, true, None);
         assert_eq!(out, "");
+    }
+
+    // ── 에이전트 간 메시징: reply_to 회신 푸터 ────────────────────────
+
+    #[test]
+    fn prepare_input_body_reply_to_appends_footer() {
+        let out =
+            McpHandler::prepare_input_body("do the task", false, true, Some("terminal-pane-aa"));
+        assert!(out.starts_with("do the task\n\n[reply-to:"));
+        assert!(
+            out.ends_with("terminal_id=\"terminal-pane-aa\"]"),
+            "footer must close the body without trailing newline: {out:?}"
+        );
+    }
+
+    #[test]
+    fn prepare_input_body_empty_reply_to_is_ignored() {
+        let out = McpHandler::prepare_input_body("ls", false, true, Some(""));
+        assert_eq!(out, "ls");
+    }
+
+    #[test]
+    fn prepare_input_body_reply_to_survives_trailing_newline_strip() {
+        // 후행 개행 정리 전에 푸터가 붙으므로, data의 후행 개행은 내부 개행이
+        // 되어 보존되고 푸터는 잘리지 않는다.
+        let out = McpHandler::prepare_input_body("task\n", false, true, Some("t1"));
+        assert!(out.ends_with("terminal_id=\"t1\"]"));
+    }
+
+    #[test]
+    fn write_terminal_param_accepts_reply_to() {
+        let json = r#"{"terminal_id":"t1","data":"hi","reply_to":"terminal-pane-bb"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.reply_to.as_deref(), Some("terminal-pane-bb"));
+    }
+
+    #[test]
+    fn write_to_neighbor_param_accepts_reply_to() {
+        let json = r#"{"terminal_id":"t1","direction":"right","data":"hi","reply_to":"t1"}"#;
+        let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.reply_to.as_deref(), Some("t1"));
     }
 
     // ── Issue #314: write_input 의 PTY write 시퀀스 계획 ──────────────
@@ -2977,35 +3062,35 @@ mod tests {
     #[test]
     fn plan_input_writes_submit_splits_body_then_cr() {
         // 평문 제출: 본문 1청크 + CR 1청크 (분리 전송).
-        let chunks = McpHandler::plan_input_writes("echo hi", false, true);
+        let chunks = McpHandler::plan_input_writes("echo hi", false, true, None);
         assert_eq!(chunks, vec![b"echo hi".to_vec(), b"\r".to_vec()]);
     }
 
     #[test]
     fn plan_input_writes_lone_cr_is_single_chunk() {
         // 빈 본문 + enter: CR 청크 하나뿐 → write_input 에서 지연 없이 전송.
-        let chunks = McpHandler::plan_input_writes("", false, true);
+        let chunks = McpHandler::plan_input_writes("", false, true, None);
         assert_eq!(chunks, vec![b"\r".to_vec()]);
     }
 
     #[test]
     fn plan_input_writes_no_enter_has_no_cr_chunk() {
         // enter=false: 본문만, CR 청크 없음.
-        let chunks = McpHandler::plan_input_writes("ls", false, false);
+        let chunks = McpHandler::plan_input_writes("ls", false, false, None);
         assert_eq!(chunks, vec![b"ls".to_vec()]);
     }
 
     #[test]
     fn plan_input_writes_empty_no_enter_is_empty() {
         // 본문도 없고 enter도 없으면 write 가 0회.
-        let chunks = McpHandler::plan_input_writes("", false, false);
+        let chunks = McpHandler::plan_input_writes("", false, false, None);
         assert!(chunks.is_empty());
     }
 
     #[test]
     fn plan_input_writes_strips_trailing_newline_keeps_internal() {
         // 후행 개행 제거 + 내부 개행 보존, 그리고 CR은 분리된 청크.
-        let chunks = McpHandler::plan_input_writes("a\nb\n", false, true);
+        let chunks = McpHandler::plan_input_writes("a\nb\n", false, true, None);
         assert_eq!(chunks, vec![b"a\nb".to_vec(), b"\r".to_vec()]);
     }
 
