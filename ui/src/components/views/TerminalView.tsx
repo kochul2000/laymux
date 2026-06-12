@@ -391,6 +391,7 @@ export function TerminalView({
     cursorAbsY: 0,
     isCursorHidden: false,
     parkPending: false,
+    isDec2026FrameOpen: false,
     hasPromptBoundary: false,
     hasSyncFramePosition: false,
     isInputPhase: false,
@@ -614,6 +615,11 @@ export function TerminalView({
           syncOutputActive: syncOutputActiveRef.current,
         });
         return;
+      }
+
+      if (!compositionPreviewRef.current.active) {
+        previewEl.style.opacity = "0";
+        previewEl.textContent = "";
       }
 
       // Post-frame settle window: the shadow position right after a DEC
@@ -942,10 +948,10 @@ export function TerminalView({
         parkSettleTimer = undefined;
         const shadowCursor = shadowCursorRef.current;
         if (!shadowCursor.parkPending) return;
-        if (syncOutputActiveRef.current) {
+        if (shadowCursor.isDec2026FrameOpen) {
           // The next DEC 2026 frame is mid-flight. Firing now would
           // consume `parkPending` and schedule a paint that the
-          // sync-output gate hides — a one-frame overlay blink. Defer:
+          // frame gate hides — a one-frame overlay blink. Defer:
           // the frame's own `?2026l` restarts the settle cycle with a
           // fresh snapshot, and re-arming (rather than returning) keeps
           // the fallback alive even if that `?2026l` never arrives.
@@ -995,6 +1001,7 @@ export function TerminalView({
           shadowCursorRef.current.frameSavedCursorX = undefined;
           shadowCursorRef.current.frameSavedCursorAbsY = undefined;
           shadowCursorRef.current.parkPending = false;
+          shadowCursorRef.current.isDec2026FrameOpen = false;
           clearParkSettleTimer();
           setInputPhase(false);
         }
@@ -1009,17 +1016,15 @@ export function TerminalView({
         if (hasDecModeParam(params, 25)) {
           const prev = shadowCursorRef.current;
           const activeBuffer = terminal.buffer.active as { cursorX?: number };
-          const syncActive = syncOutputActiveRef.current;
           const next = applyDectcemShowToShadowCursor(
             prev,
             activityRef.current,
             activeBuffer.cursorX ?? 0,
             getBufferCursorAbsY(terminal),
-            syncActive,
           );
           if (next !== prev) {
             Object.assign(shadowCursorRef.current, next);
-            if (isDectcemShowPark(prev, syncActive)) {
+            if (isDectcemShowPark(prev)) {
               clearParkSettleTimer();
               trace("dectcem-park", {
                 cursorX: next.cursorX,
@@ -1100,7 +1105,13 @@ export function TerminalView({
     const cursorMoveDisposable = terminal.onCursorMove(() => {
       if (compositionPreviewRef.current.active) return;
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive || syncOutputActiveRef.current) return;
+      if (
+        shadowCursor.isAltBufferActive ||
+        shadowCursor.isDec2026FrameOpen ||
+        syncOutputActiveRef.current
+      ) {
+        return;
+      }
       const oscPath =
         shadowCursor.hasPromptBoundary &&
         shadowCursor.isInputPhase &&

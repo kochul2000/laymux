@@ -29,6 +29,7 @@ const baseState: ShadowCursorState = {
   cursorAbsY: 0,
   isCursorHidden: false,
   parkPending: false,
+  isDec2026FrameOpen: false,
   hasPromptBoundary: false,
   hasSyncFramePosition: false,
   isInputPhase: false,
@@ -114,7 +115,7 @@ describe("getShadowSyncEligibility", () => {
     ).toBe("inactive");
   });
 
-  it("rejects repaint, alt-buffer, and sync-output gates distinctly", () => {
+  it("rejects repaint, alt-buffer, parser-frame, and sync-output gates distinctly", () => {
     // hasPromptBoundary must be true alongside isInputPhase to bypass
     // the "never initialized" early-eligible path.
     expect(
@@ -129,6 +130,17 @@ describe("getShadowSyncEligibility", () => {
         { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
       ),
     ).toBe("alt-buffer");
+    expect(
+      getShadowSyncEligibility(
+        {
+          ...baseState,
+          hasPromptBoundary: true,
+          isInputPhase: true,
+          isDec2026FrameOpen: true,
+        },
+        { bufferAbsY: 0, compositionPreviewActive: false, syncOutputActive: false },
+      ),
+    ).toBe("dec-2026-frame-open");
     expect(
       getShadowSyncEligibility(
         { ...baseState, hasPromptBoundary: true, isInputPhase: true },
@@ -318,8 +330,33 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       codex,
       POST_FRAME_BUFFER_CURSOR.x,
       POST_FRAME_BUFFER_CURSOR.absY,
-      /* syncOutputActive */ true,
     );
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.cursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
+  });
+
+  it("keeps an in-frame show visibility-only after xterm's render-mode safety timeout", () => {
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+    expect(state.hasSyncFramePosition).toBe(true);
+    expect(state.isDec2026FrameOpen).toBe(true);
+    state = applyDectcemHideToShadowCursor(state, codex);
+
+    // xterm.js clears synchronizedOutputMode after its safety timeout,
+    // but no DEC 2026 reset has appeared in the byte stream yet.
+    state = applyDectcemShowToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+
     expect(state.isCursorHidden).toBe(false);
     expect(state.cursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
     expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
@@ -351,7 +388,6 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       codex,
       PARK_BUFFER_CURSOR.x,
       PARK_BUFFER_CURSOR.absY,
-      /* syncOutputActive */ false,
     );
     expect(state.parkPending).toBe(false);
     expect(state.isCursorHidden).toBe(false);
@@ -391,7 +427,6 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       codex,
       PARK_BUFFER_CURSOR.x,
       PARK_BUFFER_CURSOR.absY,
-      false,
     );
     expect(state.cursorX).toBe(PARK_BUFFER_CURSOR.x);
     expect(state.cursorAbsY).toBe(PARK_BUFFER_CURSOR.absY);
@@ -405,7 +440,7 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       isInputPhase: true,
       isRepaintInProgress: true,
     };
-    const out = applyDectcemShowToShadowCursor(stale, codex, 5, 40, false);
+    const out = applyDectcemShowToShadowCursor(stale, codex, 5, 40);
     expect(out.hasPromptBoundary).toBe(false);
     expect(out.isInputPhase).toBe(false);
     expect(out.isRepaintInProgress).toBe(false);
@@ -446,7 +481,7 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     };
     state = applyDectcemHideToShadowCursor(state, codex);
     // Alt app shows the cursor at its own coordinates, out-of-frame.
-    state = applyDectcemShowToShadowCursor(state, codex, 77, 9999, false);
+    state = applyDectcemShowToShadowCursor(state, codex, 77, 9999);
     // Visibility cleared, but nothing parked: position and sync-frame
     // ownership untouched.
     expect(state.isCursorHidden).toBe(false);
@@ -469,7 +504,7 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
   it("DECTCEM transitions are no-ops outside an overlay-caret activity", () => {
     for (const activity of [shell, claude, undefined]) {
       expect(applyDectcemHideToShadowCursor(baseState, activity)).toBe(baseState);
-      expect(applyDectcemShowToShadowCursor(baseState, activity, 9, 9, false)).toBe(baseState);
+      expect(applyDectcemShowToShadowCursor(baseState, activity, 9, 9)).toBe(baseState);
     }
   });
 
@@ -491,7 +526,7 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
     // Once the (late) park shows the cursor again, freeze stays off
     // because the park itself cleared parkPending.
-    state = applyDectcemShowToShadowCursor(state, codex, 2, 106, false);
+    state = applyDectcemShowToShadowCursor(state, codex, 2, 106);
     expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
   });
 
@@ -500,10 +535,10 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     // predicate gates both the state transition and TerminalView's
     // park side effects (settle-timer clear, trace), so they cannot
     // drift apart.
-    expect(isDectcemShowPark({ isAltBufferActive: false }, false)).toBe(true);
-    expect(isDectcemShowPark({ isAltBufferActive: false }, true)).toBe(false);
-    expect(isDectcemShowPark({ isAltBufferActive: true }, false)).toBe(false);
-    expect(isDectcemShowPark({ isAltBufferActive: true }, true)).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: false, isDec2026FrameOpen: false })).toBe(true);
+    expect(isDectcemShowPark({ isAltBufferActive: false, isDec2026FrameOpen: true })).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true, isDec2026FrameOpen: false })).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true, isDec2026FrameOpen: true })).toBe(false);
   });
 
   it("shouldFreezeOverlayForPark truth table", () => {

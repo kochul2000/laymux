@@ -52,6 +52,13 @@ export interface ShadowCursorState {
    * shows the park chunk arriving ~15 ms after the frame flush.
    */
   parkPending: boolean;
+  /**
+   * Byte-stream DEC 2026 frame state, driven only by parser set/reset
+   * handlers. This must stay independent from xterm.js
+   * `synchronizedOutputMode`, which may be cleared by xterm's safety
+   * timeout while the application frame is still open.
+   */
+  isDec2026FrameOpen: boolean;
   hasPromptBoundary: boolean;
   hasSyncFramePosition: boolean;
   isInputPhase: boolean;
@@ -62,6 +69,7 @@ export interface ShadowCursorState {
 export type ShadowSyncEligibility =
   | "eligible"
   | "composition-preview-active"
+  | "dec-2026-frame-open"
   | "inactive"
   | "row-mismatch"
   | "repaint-in-progress"
@@ -104,6 +112,7 @@ export function getShadowSyncEligibility(
     | "hasSyncFramePosition"
     | "isRepaintInProgress"
     | "isAltBufferActive"
+    | "isDec2026FrameOpen"
   >,
   options: {
     bufferAbsY?: number;
@@ -112,6 +121,7 @@ export function getShadowSyncEligibility(
   },
 ): ShadowSyncEligibility {
   if (options.compositionPreviewActive) return "composition-preview-active";
+  if (state.isDec2026FrameOpen) return "dec-2026-frame-open";
   // Shadow cursor has never been initialized by any source (no OSC 133 prompt
   // marker, no DEC 2026 sync frame).  This happens for freshly opened terminals
   // (e.g. from empty view) or shells that don't emit OSC 133 (PowerShell).
@@ -149,10 +159,16 @@ export function applyDec2026SetToShadowCursor(
   bufferCursorAbsY: number,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
+  const cursorX = state.hasSyncFramePosition ? state.cursorX : bufferCursorX;
+  const cursorAbsY = state.hasSyncFramePosition ? state.cursorAbsY : bufferCursorAbsY;
   return {
     ...state,
+    cursorX,
+    cursorAbsY,
     frameSavedCursorX: bufferCursorX,
     frameSavedCursorAbsY: bufferCursorAbsY,
+    hasSyncFramePosition: true,
+    isDec2026FrameOpen: true,
   };
 }
 
@@ -192,6 +208,7 @@ export function applyDec2026ResetToShadowCursor(
     hasSyncFramePosition: true,
     frameSavedCursorX: undefined,
     frameSavedCursorAbsY: undefined,
+    isDec2026FrameOpen: false,
     // The at-reset position above is a fallback estimate. Codex parks
     // the real input cursor in a follow-up chunk (`?25l` CUP `?25h`
     // outside the frame) — hold overlay repaints until that park or a
@@ -221,7 +238,7 @@ export function applyDectcemHideToShadowCursor(
  * activity. Three very different meanings depending on buffer/frame
  * state:
  *
- * - **Inside a sync frame** (`syncOutputActive`): the show is the tail
+ * - **Inside a sync frame** (`isDec2026FrameOpen`): the show is the tail
  *   of a repaint — Codex's footer frames end `?25h` with the buffer
  *   cursor still parked on the footer row. The position is untrusted;
  *   only the visibility flag is cleared.
@@ -259,10 +276,9 @@ export function applyDectcemHideToShadowCursor(
  *   overlay there until the next park.
  */
 export function isDectcemShowPark(
-  state: Pick<ShadowCursorState, "isAltBufferActive">,
-  syncOutputActive: boolean,
+  state: Pick<ShadowCursorState, "isAltBufferActive" | "isDec2026FrameOpen">,
 ): boolean {
-  return !syncOutputActive && !state.isAltBufferActive;
+  return !state.isDec2026FrameOpen && !state.isAltBufferActive;
 }
 
 export function applyDectcemShowToShadowCursor(
@@ -270,11 +286,10 @@ export function applyDectcemShowToShadowCursor(
   activity: TerminalActivityInfo | undefined,
   bufferCursorX: number,
   bufferCursorAbsY: number,
-  syncOutputActive: boolean,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
   // Visibility-only show — see `isDectcemShowPark` for the two cases.
-  if (!isDectcemShowPark(state, syncOutputActive)) {
+  if (!isDectcemShowPark(state)) {
     if (!state.isCursorHidden) return state;
     return { ...state, isCursorHidden: false };
   }
@@ -354,5 +369,6 @@ export function applyActivityLeftTuiToShadowCursor(state: ShadowCursorState): Sh
     frameSavedCursorAbsY: undefined,
     parkPending: false,
     isCursorHidden: false,
+    isDec2026FrameOpen: false,
   };
 }
