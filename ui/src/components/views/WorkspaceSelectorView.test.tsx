@@ -1760,6 +1760,57 @@ describe("WorkspaceSelectorView", () => {
       expect(toggle.textContent).toContain("2");
     });
 
+    // -- issue #321: hover quick hide button on workspace items --
+
+    describe("workspace hover quick hide button (issue #321)", () => {
+      it("shows a hide button on hover without entering hide mode", () => {
+        render(<WorkspaceSelectorView />);
+        const item = screen.getByTestId("workspace-item-ws-2");
+        fireEvent.mouseEnter(item);
+        expect(screen.getByTestId("workspace-hide-ws-2")).toBeInTheDocument();
+      });
+
+      it("clicking the hide button hides the workspace immediately (no hide mode)", () => {
+        render(<WorkspaceSelectorView />);
+        const item = screen.getByTestId("workspace-item-ws-2");
+        fireEvent.mouseEnter(item);
+        fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
+
+        expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(true);
+        expect(useUiStore.getState().hideMode).toBe(false);
+        // Non-active hidden workspace collapses right away
+        expect(screen.getByTestId("workspace-item-ws-2").className).toContain(
+          "workspace-item-collapsed",
+        );
+      });
+
+      it("clicking the hide button on a hidden active workspace un-hides it", () => {
+        useUiStore.getState().toggleWorkspaceHidden("ws-1"); // ws-1 is active → stays expanded
+        render(<WorkspaceSelectorView />);
+        const item = screen.getByTestId("workspace-item-ws-1");
+        fireEvent.mouseEnter(item);
+        fireEvent.click(screen.getByTestId("workspace-hide-ws-1"));
+        expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(false);
+      });
+
+      it("hide button click does not select the workspace", () => {
+        render(<WorkspaceSelectorView />);
+        const item = screen.getByTestId("workspace-item-ws-2");
+        fireEvent.mouseEnter(item);
+        fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
+        expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
+      });
+
+      it("is not rendered while hide mode is active (eye buttons take over)", () => {
+        useUiStore.getState().toggleHideMode();
+        render(<WorkspaceSelectorView />);
+        const item = screen.getByTestId("workspace-item-ws-2");
+        fireEvent.mouseEnter(item);
+        expect(screen.queryByTestId("workspace-hide-ws-2")).not.toBeInTheDocument();
+        expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
+      });
+    });
+
     // -- issue #218: duplicate preserves hide state --
 
     it("duplicateWorkspace copies hidden workspace flag onto the duplicate", () => {
