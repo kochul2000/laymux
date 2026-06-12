@@ -757,6 +757,59 @@ describe("TerminalView", () => {
     expect(container).not.toHaveClass("terminal-sync-output-active");
   });
 
+  it("defers the park settle timeout while the next DEC 2026 frame is mid-flight", async () => {
+    // Regression: frame N flushes (`?2026l` → parkPending + settle timer),
+    // no park arrives, and frame N+1 opens (`?2026h`) before the timer
+    // fires. Consuming the timeout mid-frame would schedule a paint that
+    // the sync-output gate hides — a one-frame overlay blink. The timer
+    // must re-arm instead and only fire once the frame closes.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const settleTraces = () =>
+      logSpy.mock.calls.filter(
+        (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
+      );
+    try {
+      render(<TerminalView instanceId="t-park-defer" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+      });
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-park-defer", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      vi.useFakeTimers();
+      // Frame N flush: parkPending set, settle timer armed.
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+      // Frame N+1 opens before the timer fires…
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+      // …so the timeout defers instead of consuming parkPending.
+      expect(settleTraces()).toHaveLength(0);
+
+      // Frame N+1 closes without a park: the settle fallback now fires.
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+      expect(settleTraces().length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
   it("tracks xterm synchronizedOutputMode after terminal.write", async () => {
     render(<TerminalView instanceId="t-sync-write" profile="PowerShell" syncGroup="" />);
 

@@ -670,7 +670,7 @@ export function TerminalView({
       });
       if (caretOwner === "alt-buffer" || caretOwner === "hidden") {
         hideOverlay();
-        trace("overlay-hidden", { reason: caretOwner, shadowCursor, caretOwner });
+        trace("overlay-hidden", { reason: caretOwner, shadowCursor });
         return;
       }
 
@@ -942,6 +942,16 @@ export function TerminalView({
         parkSettleTimer = undefined;
         const shadowCursor = shadowCursorRef.current;
         if (!shadowCursor.parkPending) return;
+        if (syncOutputActiveRef.current) {
+          // The next DEC 2026 frame is mid-flight. Firing now would
+          // consume `parkPending` and schedule a paint that the
+          // sync-output gate hides — a one-frame overlay blink. Defer:
+          // the frame's own `?2026l` restarts the settle cycle with a
+          // fresh snapshot, and re-arming (rather than returning) keeps
+          // the fallback alive even if that `?2026l` never arrives.
+          startParkSettleTimer();
+          return;
+        }
         Object.assign(shadowCursor, applyParkSettleTimeoutToShadowCursor(shadowCursor));
         trace("park-settle-timeout", {
           cursorX: shadowCursor.cursorX,
