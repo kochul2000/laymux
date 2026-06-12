@@ -317,6 +317,27 @@ function WorkspaceItem({
             )}
             {hovered && (
               <>
+                {/* Quick hide/show toggle — same mechanism as hide mode's eye
+                  button, but available directly on hover (issue #321). Not
+                  rendered in hide mode where the left eye button takes over. */}
+                {!hideMode && (
+                  <button
+                    data-testid={`workspace-hide-${ws.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleWsHidden();
+                    }}
+                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100"
+                    style={{
+                      color: isWsHidden ? "var(--yellow)" : "var(--text-secondary)",
+                      background: "transparent",
+                      border: "none",
+                    }}
+                    title={isWsHidden ? "Show workspace" : "Hide workspace"}
+                  >
+                    {isWsHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
+                  </button>
+                )}
                 <button
                   data-testid={`workspace-duplicate-${ws.id}`}
                   onClick={(e) => {
