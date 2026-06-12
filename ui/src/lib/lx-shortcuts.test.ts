@@ -221,6 +221,26 @@ describe("isLxShortcut", () => {
       expect(isLxShortcut(makeKeyEvent("ArrowLeft", { altKey: true }))).toBe(false);
     });
 
+    // PR #338 리뷰 P1: pane.delete — 기본 plain Delete는 터미널 소유지만,
+    // 수식키 콤보로 재바인딩하면 document 핸들러까지 통과해야 한다.
+    it("passes through a rebound modifier combo for pane.delete (PR #338 review P1)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.delete", keys: "Ctrl+Shift+Delete" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("Delete", { ctrlKey: true, shiftKey: true }))).toBe(true);
+    });
+
+    it("keeps the default plain Delete with the terminal (no pass-through)", () => {
+      expect(isLxShortcut(makeKeyEvent("Delete"))).toBe(false);
+    });
+
+    it("keeps a modifier-less pane.delete rebinding with the terminal (e.g. Insert)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.delete", keys: "Insert" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("Insert"))).toBe(false);
+    });
+
     it("respects pane.propagateCwdOnce override (document-level Pane action, #324)", () => {
       mockGetState.mockReturnValue({
         keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+G" }],

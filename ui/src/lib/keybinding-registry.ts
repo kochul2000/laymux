@@ -20,13 +20,18 @@ export interface KeybindingDef {
    * to reach the document-level handler in `useKeyboardShortcuts` while a
    * terminal is focused (consumed by `lx-shortcuts.ts`).
    *
+   * `"whenModified"`: the default combo is a bare key the terminal owns
+   * (`pane.delete` = plain Delete must keep reaching the shell), but a
+   * rebound combo that includes a modifier is an IDE shortcut and passes
+   * through (PR #338 review).
+   *
    * Declared per-definition — not derived from `group` — because the group
    * alone doesn't decide it: `pane.focus`/`pane.propagateCwdOnce` are
    * document-level, but `pane.delete` (plain Delete) must stay with the
    * terminal. Terminal/Memo/Issue Reporter actions are handled inside the
    * focused view itself and never pass through.
    */
-  passThroughTerminal?: boolean;
+  passThroughTerminal?: boolean | "whenModified";
 }
 
 /**
@@ -148,8 +153,15 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Pane",
     passThroughTerminal: true,
   },
-  // pane.delete: 맨 Delete 키 — 터미널이 계속 받아야 하므로 pass-through 금지.
-  { id: "pane.delete", label: "Pane 제거 (편집 모드)", defaultKeys: "Delete", group: "Pane" },
+  // pane.delete: 기본 plain Delete는 터미널이 계속 받아야 하지만,
+  // 수식키 콤보로 재바인딩하면 IDE 단축키로서 pass-through 한다.
+  {
+    id: "pane.delete",
+    label: "Pane 제거 (편집 모드)",
+    defaultKeys: "Delete",
+    group: "Pane",
+    passThroughTerminal: "whenModified",
+  },
   {
     id: "pane.propagateCwdOnce",
     label: "포커스 Pane CWD 1회 전파",
