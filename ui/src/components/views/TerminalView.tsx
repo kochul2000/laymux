@@ -973,14 +973,12 @@ export function TerminalView({
             armParkSettleTimer();
             return;
           }
-          // The frame has stayed open for the whole deferral budget:
-          // its `?2026l` is considered lost (stream stalled mid-frame,
-          // reset dropped with no follow-up frame). Without this cap
-          // the timer would re-arm forever and the overlay would stay
-          // frozen at its last painted position. Declare the frame
-          // stale and fall through to commit the fallback.
-          shadowCursor.isDec2026FrameOpen = false;
-          trace("park-settle-stale-frame", { deferrals: parkSettleDeferrals });
+          // The frame has stayed open for the whole deferral budget.
+          // Release only the post-frame fallback freeze so the overlay
+          // cannot remain stuck forever. The parser frame stays open
+          // until a real `?2026l`; closing it here would make a later
+          // in-frame `?25h` look like an authoritative cursor park.
+          trace("park-settle-open-frame-fallback", { deferrals: parkSettleDeferrals });
         }
         Object.assign(shadowCursor, applyParkSettleTimeoutToShadowCursor(shadowCursor));
         trace("park-settle-timeout", {
@@ -999,25 +997,19 @@ export function TerminalView({
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
-          if (isOverlayCaretActivity(activityRef.current)) {
-            // Snapshot the buffer cursor *before* the frame body runs.
-            // Codex's footer-update frames don't restore the cursor
-            // before sending `\e[?2026l`, so reading the buffer at
-            // reset time lands on the footer row. The pre-frame
-            // snapshot is the cursor as the user actually sees it
-            // (the input prompt position right before the frame
-            // began). See `docs/terminal/cursor-jump-evidence/`.
-            const activeBuffer = terminal.buffer.active as { cursorX?: number };
-            Object.assign(
+          // Open the parser frame even before Codex activity is
+          // classified. The helper snapshots coordinates only for the
+          // overlay activity, but the stream boundary itself is global.
+          const activeBuffer = terminal.buffer.active as { cursorX?: number };
+          Object.assign(
+            shadowCursorRef.current,
+            applyDec2026SetToShadowCursor(
               shadowCursorRef.current,
-              applyDec2026SetToShadowCursor(
-                shadowCursorRef.current,
-                activityRef.current,
-                activeBuffer.cursorX ?? 0,
-                getBufferCursorAbsY(terminal),
-              ),
-            );
-          }
+              activityRef.current,
+              activeBuffer.cursorX ?? 0,
+              getBufferCursorAbsY(terminal),
+            ),
+          );
         }
         if (
           hasDecModeParam(params, 1049) ||
@@ -1078,24 +1070,25 @@ export function TerminalView({
         }
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
-          if (isOverlayCaretActivity(activityRef.current)) {
+          const overlayActivity = isOverlayCaretActivity(activityRef.current);
+          const activeBuffer = terminal.buffer.active as { cursorX?: number };
+          const bufferCursorAbsY = getBufferCursorAbsY(terminal);
+          Object.assign(
+            shadowCursorRef.current,
+            applyDec2026ResetToShadowCursor(
+              shadowCursorRef.current,
+              activityRef.current,
+              activeBuffer.cursorX ?? 0,
+              bufferCursorAbsY,
+            ),
+          );
+          if (overlayActivity) {
             // TUI DEC 2026 frame just flushed → snapshot a *fallback*
             // shadow position (pre-frame save, else buffer cursor).
             // The authoritative position is the cursor park that
             // follows; see `shadow-cursor-state.ts` for why stale
             // OSC 133 flags from a prior shell session must be
             // cleared here.
-            const activeBuffer = terminal.buffer.active as { cursorX?: number };
-            const bufferCursorAbsY = getBufferCursorAbsY(terminal);
-            Object.assign(
-              shadowCursorRef.current,
-              applyDec2026ResetToShadowCursor(
-                shadowCursorRef.current,
-                activityRef.current,
-                activeBuffer.cursorX ?? 0,
-                bufferCursorAbsY,
-              ),
-            );
             // `parkPending` is now set: overlay repaints are frozen at
             // the last painted position until Codex's cursor park
             // arrives (authoritative) or the settle window expires

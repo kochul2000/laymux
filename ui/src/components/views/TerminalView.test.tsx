@@ -843,6 +843,41 @@ describe("TerminalView", () => {
     expect(container).not.toHaveClass("terminal-sync-output-active");
   });
 
+  it("opens the DEC 2026 parser frame before Codex activity is classified", async () => {
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(
+        <TerminalView instanceId="t-frame-before-activity" profile="PowerShell" syncGroup="" />,
+      );
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-frame-before-activity", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
   it("defers the park settle timeout while the next DEC 2026 frame is mid-flight", async () => {
     // Regression: frame N flushes (`?2026l` → parkPending + settle timer),
     // no park arrives, and frame N+1 opens (`?2026h`) before the timer
@@ -906,13 +941,12 @@ describe("TerminalView", () => {
     }
   });
 
-  it("declares a never-closing DEC 2026 frame stale and commits the settle fallback", async () => {
-    // Self-heal: frame N flushes (`?2026l` → parkPending + settle
-    // timer), frame N+1 opens (`?2026h`) and its `?2026l` never arrives
-    // (stream stalled mid-frame). The timer defers while the frame is
-    // open, but after the deferral budget it must declare the frame
-    // stale and commit the fallback instead of re-arming forever with
-    // the overlay frozen.
+  it("releases settle freeze without closing a still-open DEC 2026 parser frame", async () => {
+    // Frame N flushes (`?2026l` → parkPending + settle timer), then
+    // frame N+1 stays open beyond the deferral budget. The fallback may
+    // release its overlay freeze, but only a real `?2026l` may close the
+    // parser frame. Otherwise a later in-frame `?25h` is misclassified
+    // as an authoritative park and can store the footer coordinate.
     localStorage.setItem("laymux:cursor-trace", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const traces = (needle: string) =>
@@ -945,12 +979,23 @@ describe("TerminalView", () => {
       expect(traces("park-settle-timeout")).toHaveLength(0);
 
       // Past the budget (20 deferrals × 50 ms + the initial window) the
-      // frame is declared stale and the fallback commits.
+      // fallback commits, but the parser frame remains open.
       await act(async () => {
         vi.advanceTimersByTime(1000);
       });
-      expect(traces("park-settle-stale-frame").length).toBeGreaterThan(0);
       expect(traces("park-settle-timeout").length).toBeGreaterThan(0);
+      expect(traces("park-settle-stale-frame")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
     } finally {
       vi.useRealTimers();
       logSpy.mockRestore();

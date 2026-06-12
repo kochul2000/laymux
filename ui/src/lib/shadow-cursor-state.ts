@@ -145,12 +145,14 @@ export function getShadowSyncEligibility(
 /**
  * Applied when a DEC 2026 (synchronized output) *set* sequence fires
  * — i.e. an app is about to start a new frame. Inside a TUI overlay
- * activity we snapshot the current buffer cursor; the matching reset
- * will read this snapshot back. See `applyDec2026ResetToShadowCursor`
+ * activity we also snapshot the current buffer cursor; the matching
+ * reset will read this snapshot back. The parser frame itself is
+ * activity-independent because activity classification can arrive
+ * after the opening sequence. See `applyDec2026ResetToShadowCursor`
  * for the rationale (Codex's footer frames don't restore the cursor
  * before the matching `\e[?2026l`).
  *
- * No-op outside an overlay-caret activity.
+ * Outside an overlay-caret activity only the parser frame is opened.
  */
 export function applyDec2026SetToShadowCursor(
   state: ShadowCursorState,
@@ -158,13 +160,15 @@ export function applyDec2026SetToShadowCursor(
   bufferCursorX: number,
   bufferCursorAbsY: number,
 ): ShadowCursorState {
-  if (!isOverlayCaretActivity(activity)) return state;
   // A second `?2026h` while the frame is still open (nested or
   // unbalanced set — e.g. the previous frame's `?2026l` was lost) must
   // not overwrite the pre-frame snapshot: the buffer cursor is now
   // mid-frame (footer row), and committing that snapshot at reset time
   // would reintroduce the footer jump through the fallback path.
   if (state.isDec2026FrameOpen) return state;
+  if (!isOverlayCaretActivity(activity)) {
+    return { ...state, isDec2026FrameOpen: true };
+  }
   const cursorX = state.hasSyncFramePosition ? state.cursorX : bufferCursorX;
   const cursorAbsY = state.hasSyncFramePosition ? state.cursorAbsY : bufferCursorAbsY;
   return {
@@ -186,8 +190,8 @@ export function applyDec2026SetToShadowCursor(
  * footer row at reset time (not on the input row). When no snapshot
  * exists — orphan reset, set lost to a chunk boundary, etc. — we fall
  * back to the live buffer cursor, which is still the best estimate.
- * Outside an overlay-caret activity we return the state unchanged and
- * let the caller schedule the regular OSC 133 sync.
+ * Outside an overlay-caret activity only the parser frame is closed and
+ * the caller schedules the regular OSC 133 sync.
  *
  * Critically, this clears any lingering OSC-133 flags (`hasPromptBoundary`,
  * `isInputPhase`, `isRepaintInProgress`) — those are semantics of a
@@ -201,7 +205,10 @@ export function applyDec2026ResetToShadowCursor(
   bufferCursorX: number,
   bufferCursorAbsY: number,
 ): ShadowCursorState {
-  if (!isOverlayCaretActivity(activity)) return state;
+  if (!isOverlayCaretActivity(activity)) {
+    if (!state.isDec2026FrameOpen) return state;
+    return { ...state, isDec2026FrameOpen: false };
+  }
   const cursorX = state.frameSavedCursorX ?? bufferCursorX;
   const cursorAbsY = state.frameSavedCursorAbsY ?? bufferCursorAbsY;
   return {
@@ -375,6 +382,5 @@ export function applyActivityLeftTuiToShadowCursor(state: ShadowCursorState): Sh
     frameSavedCursorAbsY: undefined,
     parkPending: false,
     isCursorHidden: false,
-    isDec2026FrameOpen: false,
   };
 }

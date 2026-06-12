@@ -281,9 +281,20 @@ describe("Codex footer-frame regression — DEC 2026 set/reset pre-frame snapsho
     expect(state.hasSyncFramePosition).toBe(true);
   });
 
-  it("DEC 2026 set is a no-op outside an overlay-caret activity", () => {
-    const out = applyDec2026SetToShadowCursor(baseState, shell, 2, 106);
-    expect(out).toBe(baseState);
+  it("tracks DEC 2026 parser boundaries before overlay activity is classified", () => {
+    let state = applyDec2026SetToShadowCursor(baseState, shell, 2, 106);
+    expect(state.isDec2026FrameOpen).toBe(true);
+    expect(state.hasSyncFramePosition).toBe(false);
+    expect(state.frameSavedCursorX).toBeUndefined();
+    expect(state.frameSavedCursorAbsY).toBeUndefined();
+
+    state = applyDectcemShowToShadowCursor(state, codex, 44, 108);
+    expect(state.hasSyncFramePosition).toBe(false);
+    expect(state.cursorX).toBe(baseState.cursorX);
+    expect(state.cursorAbsY).toBe(baseState.cursorAbsY);
+
+    state = applyDec2026ResetToShadowCursor(state, shell, 44, 108);
+    expect(state.isDec2026FrameOpen).toBe(false);
   });
 
   it("activity-left-TUI clears any pending pre-frame snapshot too", () => {
@@ -598,11 +609,13 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
       parkPending: true,
       isCursorHidden: true,
       hasSyncFramePosition: true,
+      isDec2026FrameOpen: true,
     };
     const out = applyActivityLeftTuiToShadowCursor(inFlight);
     expect(out.parkPending).toBe(false);
     expect(out.isCursorHidden).toBe(false);
     expect(out.hasSyncFramePosition).toBe(false);
+    expect(out.isDec2026FrameOpen).toBe(true);
   });
 });
 
