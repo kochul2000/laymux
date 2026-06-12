@@ -149,6 +149,29 @@ describe("PaneControlBar", () => {
     expect(compactBar.className).not.toContain("left-0");
   });
 
+  // -- Overlay transparency (issue #320) --
+  // hover 오버레이 바가 터미널 내용을 가리지 않도록 기본값으로 반투명 처리한다.
+
+  it("hover overlay bar uses the semi-transparent overlay token (issue #320)", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const bar = screen.getByTestId("pane-control-bar");
+    expect(bar.style.background).toBe("var(--bar-bg-overlay)");
+  });
+
+  it("hover overlay bar does not blur the content beneath it (issue #320)", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const bar = screen.getByTestId("pane-control-bar");
+    expect(bar.style.backdropFilter).toBe("");
+  });
+
   it("bar contains view selector, split, clear, pin, minimize buttons", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
