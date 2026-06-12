@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import {
+  PARK_BUFFER_CURSOR,
   POST_FRAME_BUFFER_CURSOR,
   PRE_FRAME_BUFFER_CURSOR,
   RAW_TRACE_SLICE,
@@ -10,9 +11,14 @@ import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
   applyDec2026SetToShadowCursor,
+  applyDectcemHideToShadowCursor,
+  applyDectcemShowToShadowCursor,
+  applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
   getShadowSyncEligibility,
+  isDectcemShowPark,
   isOverlayCaretActivity,
+  shouldFreezeOverlayForPark,
   type ShadowCursorState,
 } from "./shadow-cursor-state";
 
@@ -21,6 +27,8 @@ const baseState: ShadowCursorState = {
   commandStartX: 0,
   cursorX: 0,
   cursorAbsY: 0,
+  isCursorHidden: false,
+  parkPending: false,
   hasPromptBoundary: false,
   hasSyncFramePosition: false,
   isInputPhase: false,
@@ -276,6 +284,258 @@ describe("Codex footer-frame regression — DEC 2026 set/reset pre-frame snapsho
     const reset = applyDec2026ResetToShadowCursor(state, codex, 99, 99);
     expect(reset.cursorX).toBe(99);
     expect(reset.cursorAbsY).toBe(99);
+  });
+});
+
+describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => {
+  // Full replay of the two chunks in `docs/terminal/cursor-jump-evidence/`:
+  //
+  //   chunk A (footer frame): ?2026h … ?25l erase×4 ?25h ?2026l
+  //     — ends with the buffer cursor on the FOOTER row and the show
+  //       fired while the sync frame was still open (untrusted tail).
+  //   chunk B (park, ~15 ms later): ?25l [24;3H ?25h
+  //     — hide–move–show outside any frame: the authoritative input
+  //       cursor position.
+
+  it("in-frame ?25h clears hidden but never moves the shadow position", () => {
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: PRE_FRAME_BUFFER_CURSOR.x,
+      cursorAbsY: PRE_FRAME_BUFFER_CURSOR.absY,
+    };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+    state = applyDectcemHideToShadowCursor(state, codex);
+    expect(state.isCursorHidden).toBe(true);
+    // ?25h fires while the DEC 2026 frame is still open, buffer cursor
+    // parked on the footer — position must be ignored.
+    state = applyDectcemShowToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+      /* syncOutputActive */ true,
+    );
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.cursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
+  });
+
+  it("frame flush sets parkPending; the out-of-frame park clears it and wins", () => {
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: PRE_FRAME_BUFFER_CURSOR.x,
+      cursorAbsY: PRE_FRAME_BUFFER_CURSOR.absY,
+    };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+    state = applyDec2026ResetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    expect(state.parkPending).toBe(true);
+    // Chunk B: hide, CUP to the input row, show — outside any frame.
+    state = applyDectcemHideToShadowCursor(state, codex);
+    state = applyDectcemShowToShadowCursor(
+      state,
+      codex,
+      PARK_BUFFER_CURSOR.x,
+      PARK_BUFFER_CURSOR.absY,
+      /* syncOutputActive */ false,
+    );
+    expect(state.parkPending).toBe(false);
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.cursorX).toBe(PARK_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PARK_BUFFER_CURSOR.absY);
+    expect(state.hasSyncFramePosition).toBe(true);
+    expect(computeUseShadowCursor(state)).toBe(true);
+  });
+
+  it("consecutive frames without a park between them: the park still rescues", () => {
+    // Regression for the worst pre-frame-snapshot failure: frame N ends
+    // with the buffer cursor on the footer, frame N+1 begins before any
+    // park — its pre-frame snapshot captures the FOOTER, and the old
+    // row-equality sync gate could never recover (park row ≠ shadow
+    // row → "row-mismatch" skip, stuck on the footer indefinitely).
+    let state: ShadowCursorState = { ...baseState };
+    // Frame N+1 opens with the cursor still parked on the footer.
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    state = applyDec2026ResetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    // Fallback estimate is the footer — but parkPending keeps the
+    // overlay frozen, so nothing is painted there.
+    expect(state.cursorAbsY).toBe(POST_FRAME_BUFFER_CURSOR.absY);
+    expect(state.parkPending).toBe(true);
+    // The park overwrites unconditionally — no row-equality gate.
+    state = applyDectcemShowToShadowCursor(
+      state,
+      codex,
+      PARK_BUFFER_CURSOR.x,
+      PARK_BUFFER_CURSOR.absY,
+      false,
+    );
+    expect(state.cursorX).toBe(PARK_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PARK_BUFFER_CURSOR.absY);
+    expect(state.parkPending).toBe(false);
+  });
+
+  it("an out-of-frame park clears stale OSC 133 shell flags (Codex-after-shell)", () => {
+    const stale: ShadowCursorState = {
+      ...baseState,
+      hasPromptBoundary: true,
+      isInputPhase: true,
+      isRepaintInProgress: true,
+    };
+    const out = applyDectcemShowToShadowCursor(stale, codex, 5, 40, false);
+    expect(out.hasPromptBoundary).toBe(false);
+    expect(out.isInputPhase).toBe(false);
+    expect(out.isRepaintInProgress).toBe(false);
+    expect(out.hasSyncFramePosition).toBe(true);
+  });
+
+  it("settle timeout releases the freeze and keeps the fallback position", () => {
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026ResetToShadowCursor(state, codex, 7, 50);
+    expect(state.parkPending).toBe(true);
+    state = applyParkSettleTimeoutToShadowCursor(state);
+    expect(state.parkPending).toBe(false);
+    // Position untouched: at-reset fallback remains the best estimate.
+    expect(state.cursorX).toBe(7);
+    expect(state.cursorAbsY).toBe(50);
+  });
+
+  it("settle timeout is a no-op when no park is pending", () => {
+    expect(applyParkSettleTimeoutToShadowCursor(baseState)).toBe(baseState);
+  });
+
+  it("alt-buffer ?25h is never a park (review regression: editor inside Codex)", () => {
+    // Review regression (PR #313): a full-screen app on the alternate
+    // buffer (editor/pager launched while the activity is still Codex)
+    // sends `?25h` out-of-frame, then exits via `?1049l`. Storing its
+    // alt-buffer coordinates as an authoritative park would leave
+    // `hasSyncFramePosition` pointing at garbage back on the normal
+    // buffer, and the row-mismatch sync gate would pin the overlay
+    // there until the next park.
+    // Mirrors the TerminalView `?1049h` branch: alt entry clears the
+    // sync-frame position and pending park state.
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: 2,
+      cursorAbsY: 106,
+      isAltBufferActive: true,
+      hasSyncFramePosition: false,
+    };
+    state = applyDectcemHideToShadowCursor(state, codex);
+    // Alt app shows the cursor at its own coordinates, out-of-frame.
+    state = applyDectcemShowToShadowCursor(state, codex, 77, 9999, false);
+    // Visibility cleared, but nothing parked: position and sync-frame
+    // ownership untouched.
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.cursorX).toBe(2);
+    expect(state.cursorAbsY).toBe(106);
+    expect(state.hasSyncFramePosition).toBe(false);
+    // Back on the normal buffer the shadow is uninitialized, so the
+    // regular sync path may reseed from the buffer cursor — the gate
+    // that previously caused the pin must not engage.
+    state = { ...state, isAltBufferActive: false };
+    expect(
+      getShadowSyncEligibility(state, {
+        bufferAbsY: 120,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("eligible");
+  });
+
+  it("DECTCEM transitions are no-ops outside an overlay-caret activity", () => {
+    for (const activity of [shell, claude, undefined]) {
+      expect(applyDectcemHideToShadowCursor(baseState, activity)).toBe(baseState);
+      expect(applyDectcemShowToShadowCursor(baseState, activity, 9, 9, false)).toBe(baseState);
+    }
+  });
+
+  it("frame ending hidden (?25l … ?2026l with no show): hide wins over the park freeze", () => {
+    // Review regression (PR #313): when a DEC 2026 frame hides the
+    // cursor and ends without a matching `?25h`, both `parkPending`
+    // and `isCursorHidden` are true. The park freeze must NOT swallow
+    // the repaint — the previously *visible* overlay would otherwise
+    // stay on screen for up to the settle window, contradicting the
+    // app's explicit hide. Sustained hide must reach paint immediately.
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026SetToShadowCursor(state, codex, 2, 106);
+    state = applyDectcemHideToShadowCursor(state, codex);
+    // Frame flushes with the cursor still hidden — no `?25h` arrived.
+    state = applyDec2026ResetToShadowCursor(state, codex, 44, 108);
+    expect(state.parkPending).toBe(true);
+    expect(state.isCursorHidden).toBe(true);
+    // The freeze must yield so the hidden state can hide the overlay.
+    expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
+    // Once the (late) park shows the cursor again, freeze stays off
+    // because the park itself cleared parkPending.
+    state = applyDectcemShowToShadowCursor(state, codex, 2, 106, false);
+    expect(shouldFreezeOverlayForPark(state, false)).toBe(false);
+  });
+
+  it("isDectcemShowPark truth table — single source for the park decision", () => {
+    // Park only outside a sync frame on the normal buffer. This same
+    // predicate gates both the state transition and TerminalView's
+    // park side effects (settle-timer clear, trace), so they cannot
+    // drift apart.
+    expect(isDectcemShowPark({ isAltBufferActive: false }, false)).toBe(true);
+    expect(isDectcemShowPark({ isAltBufferActive: false }, true)).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true }, false)).toBe(false);
+    expect(isDectcemShowPark({ isAltBufferActive: true }, true)).toBe(false);
+  });
+
+  it("shouldFreezeOverlayForPark truth table", () => {
+    // Freezes only in the plain park-pending case.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: false }, false)).toBe(
+      true,
+    );
+    // No park pending → nothing to freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: false, isCursorHidden: false }, false)).toBe(
+      false,
+    );
+    // Sustained DECTCEM hide takes precedence over the freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: true }, false)).toBe(
+      false,
+    );
+    // Composition preview takes precedence over the freeze.
+    expect(shouldFreezeOverlayForPark({ parkPending: true, isCursorHidden: false }, true)).toBe(
+      false,
+    );
+  });
+
+  it("leaving the TUI clears parkPending and hidden state", () => {
+    const inFlight: ShadowCursorState = {
+      ...baseState,
+      parkPending: true,
+      isCursorHidden: true,
+      hasSyncFramePosition: true,
+    };
+    const out = applyActivityLeftTuiToShadowCursor(inFlight);
+    expect(out.parkPending).toBe(false);
+    expect(out.isCursorHidden).toBe(false);
+    expect(out.hasSyncFramePosition).toBe(false);
   });
 });
 

@@ -21,7 +21,12 @@ Required workflow:
 1. Read `xterm-shadow-cursor-architecture.md` before editing cursor code.
 2. Keep implementation aligned with the documented model:
    - `OSC 133/633` prompt boundaries are the strongest signal.
-   - `DEC 2026` and save/restore handling are supporting signals.
+   - For TUIs that emit no OSC 133 (Codex), the **out-of-frame DECTCEM
+     cursor park** (`?25l` CUP `?25h` outside a DEC 2026 frame) is the
+     authoritative cursor position ([ADR-0011](../adr/0011-dectcem-cursor-park-fifth-layer.md)).
+     An in-frame `?25h` is an untrusted repaint tail.
+   - `DEC 2026` and save/restore handling are supporting signals; the
+     pre-frame snapshot is only a settle-timeout fallback.
    - `onWriteParsed` is the authoritative buffer-sync point.
    - `onCursorMove` must not become the primary source of truth for cursor position during repaint-heavy flows.
 3. Do not edit the research document during routine implementation work unless the user explicitly asks for a docs revision.

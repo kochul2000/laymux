@@ -51,14 +51,12 @@ this same trace mechanism. The remaining problem is independent: the
 snapshot point — the moment of `\e[?2026l` — is not where Codex parks
 its input cursor.
 
-## Hypothesis for the second-stage fix
+## Second-stage fix (implemented): pre-frame snapshot
 
 Codex's footer-update frame leaves the buffer cursor on the footer; the
-intended input cursor is the position the cursor occupied **just before
-the frame began**. So the snapshot we want is the pre-frame cursor, not
-the post-frame cursor.
+position the cursor occupied **just before the frame began** is a far
+better estimate. So:
 
-Concretely:
 - On `\e[?2026h` (frame begin) record the current buffer cursor as the
   candidate input cursor (`frameSavedCursor`).
 - On `\e[?2026l` (frame end) restore the shadow cursor to that saved
@@ -66,8 +64,54 @@ Concretely:
 - Clear the saved snapshot on alt-buffer entry / TUI-leave so it never
   outlives its session.
 
-A targeted regression test that replays the exact pre/post cursor
-positions from this trace lives at
-`ui/src/lib/shadow-cursor-state.test.ts` — search for "Codex footer
-frame" to find the case that reproduces this exact behaviour against
-the pure state-transition helpers.
+This shipped, and the jump in *this exact trace* stopped — but jumps
+kept recurring in the field, because the pre-frame endpoint is also
+unreliable:
+
+- When the user types, the frame redraws the composer with the cursor
+  legitimately advanced — the pre-frame snapshot restores the *old*
+  position (one-frame lag).
+- When frames arrive back-to-back with no cursor reposition between
+  them, frame N leaves the cursor on the footer and frame N+1's
+  pre-frame snapshot captures the **footer**. The row-equality sync
+  gate can then never recover (park row ≠ shadow row → "row-mismatch"
+  skip), pinning the overlay to the footer.
+
+## Third-stage fix (implemented): the cursor park — ADR-0011
+
+Re-reading the bytes shows the authoritative signal was in the trace
+all along. The footer frame's body is
+
+    ?25l  [22;2H[K …erases…  [26;45H[K  ?25h  ?2026l
+
+— DECTCEM hide at frame start, show at frame end *with the cursor
+still on the footer* (a Codex bug upstream: openai/codex#9081 family).
+Then, ~15 ms later, **a standalone chunk**:
+
+    ?25l  [24;3H  ?25h
+
+A pure hide–move–show with no drawing: Codex *parking* the visible
+cursor on the input row. An out-of-frame DECTCEM show is the app
+declaring "the visible cursor goes here" — the single most
+authoritative cursor signal Codex emits.
+
+The fifth shadow-cursor layer keys on this:
+
+1. `?25h` **outside** a DEC 2026 frame → authoritative park: overwrite
+   the shadow position unconditionally (no row-equality gate).
+2. `?25h` **inside** a frame → repaint tail: position untrusted, only
+   the visibility flag clears.
+3. After `?2026l`, freeze overlay repaints (`parkPending`) until the
+   park arrives or a 50 ms settle window expires; the pre-frame
+   snapshot remains the fallback for TUIs that never park. Worst case
+   the caret moves 50 ms late instead of jumping to the footer.
+4. While the app keeps the cursor hidden (sustained `?25l`), the
+   overlay caret hides too. Transient hide/show pairs within one chunk
+   never reach paint (overlay updates are rAF-coalesced).
+
+Pure state transitions: `ui/src/lib/shadow-cursor-state.ts`
+(`applyDectcemShowToShadowCursor`, `applyDectcemHideToShadowCursor`,
+`applyParkSettleTimeoutToShadowCursor`). Regression tests replaying
+this trace — including the consecutive-frames footer-pin case — live
+in `ui/src/lib/shadow-cursor-state.test.ts`, "DECTCEM 5th layer".
+Decision record: `docs/adr/0011-dectcem-cursor-park-fifth-layer.md`.

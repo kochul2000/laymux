@@ -16,6 +16,7 @@ const baseInput = {
   syncOutputActive: false,
   isAltBufferActive: false,
   compositionActive: false,
+  cursorHidden: false,
   hasSyncFramePosition: false,
   hasPromptBoundary: false,
   isInputPhase: false,
@@ -70,6 +71,26 @@ describe("resolveVisualCaretOwner", () => {
         compositionActive: true,
       }),
     ).toBe("hidden");
+  });
+
+  it("hides the caret while the app keeps DECTCEM hidden (sustained ?25l)", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        cursorHidden: true,
+        hasSyncFramePosition: true,
+      }),
+    ).toBe("hidden");
+  });
+
+  it("lets composition preview win over DECTCEM hidden (IME caret must track preview)", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        cursorHidden: true,
+        compositionActive: true,
+      }),
+    ).toBe("composition-preview");
   });
 
   it("uses sync-frame when composition is inactive", () => {
