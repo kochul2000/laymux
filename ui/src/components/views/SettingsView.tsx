@@ -18,7 +18,11 @@ import {
 } from "@/stores/settings-store";
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
-import { DEFAULT_KEYBINDINGS } from "@/lib/keybinding-registry";
+import {
+  DEFAULT_KEYBINDINGS,
+  coerceArrowWildcard,
+  usesArrowWildcard,
+} from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
@@ -2925,8 +2929,14 @@ function KeybindingsSection() {
                     onKeyDown={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      const str = keyEventToString(e.nativeEvent);
-                      if (!str) return;
+                      const raw = keyEventToString(e.nativeEvent);
+                      if (!raw) return;
+                      // Wildcard actions (`pane.focus` = "Alt+Arrow") bind all four
+                      // directions at once — pressing any arrow during capture keeps
+                      // the `Arrow` token instead of narrowing to a single direction.
+                      const str = usesArrowWildcard(def.defaultKeys)
+                        ? coerceArrowWildcard(raw)
+                        : raw;
                       setCapturedKeys(str);
                       // Update the keybinding in draft
                       setDraftKeybindings((prev) =>

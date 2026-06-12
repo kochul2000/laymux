@@ -1,4 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock settings store before importing the module under test.
+// isLxShortcut consults the keybinding registry, which reads user
+// overrides from the settings store (#332/#333).
+const mockGetState = vi.fn();
+vi.mock("@/stores/settings-store", () => ({
+  useSettingsStore: { getState: () => mockGetState() },
+}));
+
 import { isLxShortcut } from "./lx-shortcuts";
 
 function makeKeyEvent(
@@ -9,6 +18,10 @@ function makeKeyEvent(
 }
 
 describe("isLxShortcut", () => {
+  beforeEach(() => {
+    mockGetState.mockReturnValue({ keybindings: [] });
+  });
+
   // Ctrl+Alt+ArrowUp/Down: workspace navigation
   it("returns true for Ctrl+Alt+ArrowUp (previous workspace)", () => {
     expect(isLxShortcut(makeKeyEvent("ArrowUp", { ctrlKey: true, altKey: true }))).toBe(true);
@@ -140,5 +153,81 @@ describe("isLxShortcut", () => {
 
   it("returns true for Ctrl+Shift+i (lowercase, toggle notification panel)", () => {
     expect(isLxShortcut(makeKeyEvent("i", { ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
+  // --- Keybinding registry integration (#332/#333) ---
+  describe("user overrides from keybinding registry", () => {
+    it("passes through the new combo after rebinding (e.g. workspace.duplicate → Ctrl+Shift+P)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "workspace.duplicate", keys: "Ctrl+Shift+P" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("P", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(isLxShortcut(makeKeyEvent("p", { ctrlKey: true, shiftKey: true }))).toBe(true);
+    });
+
+    it("stops swallowing the old default combo after rebinding", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "workspace.duplicate", keys: "Ctrl+Shift+P" }],
+      });
+      // Ctrl+Alt+D is no longer bound to anything → must reach the shell
+      expect(isLxShortcut(makeKeyEvent("D", { ctrlKey: true, altKey: true }))).toBe(false);
+      expect(isLxShortcut(makeKeyEvent("d", { ctrlKey: true, altKey: true }))).toBe(false);
+    });
+
+    it("respects override for workspace navigation keys", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "workspace.next", keys: "Ctrl+Shift+Down" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("ArrowDown", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(isLxShortcut(makeKeyEvent("ArrowDown", { ctrlKey: true, altKey: true }))).toBe(false);
+    });
+
+    it("never passes through Ctrl+single letter/digit even when rebound there (shell territory)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [
+          { command: "workspace.new", keys: "Ctrl+N" },
+          { command: "workspace.1", keys: "Ctrl+1" },
+        ],
+      });
+      expect(isLxShortcut(makeKeyEvent("n", { ctrlKey: true }))).toBe(false);
+      expect(isLxShortcut(makeKeyEvent("1", { ctrlKey: true }))).toBe(false);
+    });
+
+    it("does not pass through terminal-scoped bindings (terminal.copy/paste own their combos)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [
+          // Conflict: terminal.copy and sidebar.toggle both on Ctrl+Shift+C —
+          // the terminal-owned binding wins, so the key must NOT pass through.
+          { command: "terminal.copy", keys: "Ctrl+Shift+C" },
+          { command: "sidebar.toggle", keys: "Ctrl+Shift+C" },
+        ],
+      });
+      expect(isLxShortcut(makeKeyEvent("C", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    });
+
+    it("does not pass through combos bound only to terminal/memo scoped actions", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "terminal.zoomIn", keys: "Ctrl+Shift+=" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("=", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    });
+
+    it("respects pane.focus override while keeping Alt+Arrow wildcard semantics", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.focus", keys: "Ctrl+Alt+Arrow" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("ArrowLeft", { ctrlKey: true, altKey: true }))).toBe(true);
+      // Old default Alt+Arrow no longer bound → not an IDE shortcut anymore
+      expect(isLxShortcut(makeKeyEvent("ArrowLeft", { altKey: true }))).toBe(false);
+    });
+
+    it("respects pane.propagateCwdOnce override (document-level Pane action, #324)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+G" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("G", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      // Old default Ctrl+Alt+P no longer bound → must reach the shell
+      expect(isLxShortcut(makeKeyEvent("P", { ctrlKey: true, altKey: true }))).toBe(false);
+    });
   });
 });
