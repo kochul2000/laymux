@@ -906,6 +906,58 @@ describe("TerminalView", () => {
     }
   });
 
+  it("declares a never-closing DEC 2026 frame stale and commits the settle fallback", async () => {
+    // Self-heal: frame N flushes (`?2026l` → parkPending + settle
+    // timer), frame N+1 opens (`?2026h`) and its `?2026l` never arrives
+    // (stream stalled mid-frame). The timer defers while the frame is
+    // open, but after the deferral budget it must declare the frame
+    // stale and commit the fallback instead of re-arming forever with
+    // the overlay frozen.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(<TerminalView instanceId="t-park-stale" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+      });
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-park-stale", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      vi.useFakeTimers();
+      // Frame N flush: parkPending set, settle timer armed.
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+      // Frame N+1 opens… and its reset never arrives.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+
+      // Within the deferral budget the timeout keeps deferring.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(traces("park-settle-timeout")).toHaveLength(0);
+
+      // Past the budget (20 deferrals × 50 ms + the initial window) the
+      // frame is declared stale and the fallback commits.
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(traces("park-settle-stale-frame").length).toBeGreaterThan(0);
+      expect(traces("park-settle-timeout").length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
   it("keeps DECTCEM show in-frame after xterm synchronized-output safety timeout", async () => {
     render(
       <TerminalView

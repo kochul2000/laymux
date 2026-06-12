@@ -362,6 +362,38 @@ describe("DECTCEM 5th layer — Codex footer frame + cursor park replay", () => 
     expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
   });
 
+  it("a second ?2026h while the frame is open preserves the pre-frame snapshot", () => {
+    // Unbalanced set — the previous frame's `?2026l` was lost, so the
+    // next frame's `?2026h` arrives with the frame flag still up and
+    // the buffer cursor sitting mid-frame on the footer row. The
+    // pre-frame snapshot must survive, or the eventual reset would
+    // commit the footer position through the fallback path.
+    let state: ShadowCursorState = { ...baseState };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    expect(state.frameSavedCursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
+    expect(state.frameSavedCursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
+
+    state = applyDec2026ResetToShadowCursor(
+      state,
+      codex,
+      POST_FRAME_BUFFER_CURSOR.x,
+      POST_FRAME_BUFFER_CURSOR.absY,
+    );
+    expect(state.cursorX).toBe(PRE_FRAME_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PRE_FRAME_BUFFER_CURSOR.absY);
+  });
+
   it("frame flush sets parkPending; the out-of-frame park clears it and wins", () => {
     let state: ShadowCursorState = {
       ...baseState,

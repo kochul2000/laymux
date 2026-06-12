@@ -159,6 +159,12 @@ export function applyDec2026SetToShadowCursor(
   bufferCursorAbsY: number,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
+  // A second `?2026h` while the frame is still open (nested or
+  // unbalanced set — e.g. the previous frame's `?2026l` was lost) must
+  // not overwrite the pre-frame snapshot: the buffer cursor is now
+  // mid-frame (footer row), and committing that snapshot at reset time
+  // would reintroduce the footer jump through the fallback path.
+  if (state.isDec2026FrameOpen) return state;
   const cursorX = state.hasSyncFramePosition ? state.cursorX : bufferCursorX;
   const cursorAbsY = state.hasSyncFramePosition ? state.cursorAbsY : bufferCursorAbsY;
   return {

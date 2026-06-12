@@ -220,6 +220,16 @@ export function _resetWebglStagger(): void {
  */
 const PARK_SETTLE_TIMEOUT_MS = 50;
 
+/**
+ * How many times the settle timeout may defer because a DEC 2026 frame
+ * is still open before the frame is declared stale (its `?2026l` lost
+ * to a chunk boundary or a stalled stream) and the fallback commits
+ * anyway. 20 × 50 ms ≈ 1 s — the same self-heal horizon as xterm's own
+ * synchronized-output safety timeout, which the parser-level frame
+ * flag otherwise lacks.
+ */
+const PARK_SETTLE_MAX_DEFERRALS = 20;
+
 function hasDecModeParam(params: readonly (number | number[])[], mode: number): boolean {
   return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
 }
@@ -617,7 +627,10 @@ export function TerminalView({
         return;
       }
 
-      if (!compositionPreviewRef.current.active) {
+      // Skip when already cleared — assigning `textContent` replaces
+      // child nodes even when the value is unchanged, and this runs on
+      // every rAF paint outside composition.
+      if (!compositionPreviewRef.current.active && previewEl.textContent) {
         previewEl.style.opacity = "0";
         previewEl.textContent = "";
       }
@@ -930,6 +943,7 @@ export function TerminalView({
     });
 
     let parkSettleTimer: number | undefined;
+    let parkSettleDeferrals = 0;
     const clearParkSettleTimer = () => {
       if (parkSettleTimer !== undefined) {
         clearTimeout(parkSettleTimer);
@@ -942,21 +956,31 @@ export function TerminalView({
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
     // today — revisit if another ratatui TUI joins the overlay set.
-    const startParkSettleTimer = () => {
+    const armParkSettleTimer = () => {
       clearParkSettleTimer();
       parkSettleTimer = window.setTimeout(() => {
         parkSettleTimer = undefined;
         const shadowCursor = shadowCursorRef.current;
         if (!shadowCursor.parkPending) return;
         if (shadowCursor.isDec2026FrameOpen) {
-          // The next DEC 2026 frame is mid-flight. Firing now would
-          // consume `parkPending` and schedule a paint that the
-          // frame gate hides — a one-frame overlay blink. Defer:
-          // the frame's own `?2026l` restarts the settle cycle with a
-          // fresh snapshot, and re-arming (rather than returning) keeps
-          // the fallback alive even if that `?2026l` never arrives.
-          startParkSettleTimer();
-          return;
+          if (parkSettleDeferrals < PARK_SETTLE_MAX_DEFERRALS) {
+            // The next DEC 2026 frame is mid-flight. Firing now would
+            // consume `parkPending` and schedule a paint that the
+            // frame gate hides — a one-frame overlay blink. Defer and
+            // let the frame's own `?2026l` restart the settle cycle
+            // with a fresh snapshot.
+            parkSettleDeferrals += 1;
+            armParkSettleTimer();
+            return;
+          }
+          // The frame has stayed open for the whole deferral budget:
+          // its `?2026l` is considered lost (stream stalled mid-frame,
+          // reset dropped with no follow-up frame). Without this cap
+          // the timer would re-arm forever and the overlay would stay
+          // frozen at its last painted position. Declare the frame
+          // stale and fall through to commit the fallback.
+          shadowCursor.isDec2026FrameOpen = false;
+          trace("park-settle-stale-frame", { deferrals: parkSettleDeferrals });
         }
         Object.assign(shadowCursor, applyParkSettleTimeoutToShadowCursor(shadowCursor));
         trace("park-settle-timeout", {
@@ -965,6 +989,10 @@ export function TerminalView({
         });
         scheduleOverlayCaretUpdate();
       }, PARK_SETTLE_TIMEOUT_MS);
+    };
+    const startParkSettleTimer = () => {
+      parkSettleDeferrals = 0;
+      armParkSettleTimer();
     };
     const syncOutputSetDisposable = parser?.registerCsiHandler?.(
       { prefix: "?", final: "h" },
