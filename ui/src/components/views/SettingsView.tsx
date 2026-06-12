@@ -1938,6 +1938,101 @@ function ClaudeSection() {
             </div>
           </div>
         )}
+
+        {/* Session Limit Auto Resume (issue #312) */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              세션 리미트 자동 복귀
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              세션 리미트 해제(resets) 시각이 지나면 복귀 메시지를 자동 전송
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                data-testid="claude-session-limit-auto-resume-toggle"
+                type="checkbox"
+                checked={claude.sessionLimitAutoResume}
+                onChange={(e) => updateClaude({ sessionLimitAutoResume: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {claude.sessionLimitAutoResume ? "사용" : "사용 안함"}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {claude.sessionLimitAutoResume && (
+          <>
+            {/* Session Limit Resume Delay */}
+            <div className="flex items-start gap-3 py-1.5">
+              <div className="w-36 shrink-0 pt-1">
+                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                  복귀 대기 시간
+                </span>
+                <p
+                  className="mt-0.5 text-[11px] leading-tight"
+                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                >
+                  리미트 해제 시각 이후 이 시간만큼 기다렸다가 전송
+                </p>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <FocusInput
+                    data-testid="claude-session-limit-resume-delay-input"
+                    className={inputCls}
+                    type="number"
+                    min={0}
+                    style={{ width: 80 }}
+                    value={claude.sessionLimitResumeDelaySeconds}
+                    onChange={(e) => {
+                      const parsed = parseInt(e.target.value, 10);
+                      updateClaude({
+                        sessionLimitResumeDelaySeconds: Number.isNaN(parsed)
+                          ? 60
+                          : Math.max(0, parsed),
+                      });
+                    }}
+                  />
+                  <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+                    초
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Session Limit Resume Message */}
+            <div className="flex items-start gap-3 py-1.5">
+              <div className="w-36 shrink-0 pt-1">
+                <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                  복귀 문구
+                </span>
+                <p
+                  className="mt-0.5 text-[11px] leading-tight"
+                  style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+                >
+                  리미트 해제 후 Claude Code에 전송할 메시지
+                </p>
+              </div>
+              <div className="min-w-0 flex-1">
+                <FocusInput
+                  data-testid="claude-session-limit-resume-message-input"
+                  className={inputCls}
+                  type="text"
+                  style={{ width: 200 }}
+                  value={claude.sessionLimitResumeMessage}
+                  onChange={(e) => updateClaude({ sessionLimitResumeMessage: e.target.value })}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

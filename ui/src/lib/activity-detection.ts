@@ -100,7 +100,7 @@ const CLAUDE_DETECTION_WINDOW = 16384;
  * pass without this step \u2014 every regression must be guarded by a fixture
  * that includes real CUP/CUF escapes.
  */
-function stripAnsi(text: string): string {
+export function stripAnsi(text: string): string {
   return (
     text
       .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")

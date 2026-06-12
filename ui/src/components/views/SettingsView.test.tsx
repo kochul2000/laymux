@@ -902,6 +902,56 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().claude.syncCwd).toBe("command");
   });
 
+  it("renders claude session-limit auto-resume controls with defaults", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const toggle = screen.getByTestId(
+      "claude-session-limit-auto-resume-toggle",
+    ) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(
+      (screen.getByTestId("claude-session-limit-resume-delay-input") as HTMLInputElement).value,
+    ).toBe("60");
+    expect(
+      (screen.getByTestId("claude-session-limit-resume-message-input") as HTMLInputElement).value,
+    ).toBe("go on");
+  });
+
+  it("changing claude session-limit resume settings updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const messageInput = screen.getByTestId("claude-session-limit-resume-message-input");
+    await user.clear(messageInput);
+    await user.type(messageInput, "continue");
+    const delayInput = screen.getByTestId("claude-session-limit-resume-delay-input");
+    // user.clear() on the number input briefly yields "" which the onChange
+    // handler coerces back to the default 60; replace the value atomically.
+    fireEvent.change(delayInput, { target: { value: "120" } });
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().claude.sessionLimitResumeMessage).toBe("continue");
+    expect(useSettingsStore.getState().claude.sessionLimitResumeDelaySeconds).toBe(120);
+  });
+
+  it("disabling claude session-limit auto-resume hides delay/message inputs", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    await user.click(screen.getByTestId("claude-session-limit-auto-resume-toggle"));
+
+    expect(screen.queryByTestId("claude-session-limit-resume-delay-input")).toBeNull();
+    expect(screen.queryByTestId("claude-session-limit-resume-message-input")).toBeNull();
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().claude.sessionLimitAutoResume).toBe(false);
+  });
+
   it("shows Codex nav button", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("nav-codex")).toBeInTheDocument();

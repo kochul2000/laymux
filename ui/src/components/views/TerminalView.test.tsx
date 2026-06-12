@@ -1190,6 +1190,166 @@ describe("TerminalView", () => {
     expect(useNotificationStore.getState().notifications).toHaveLength(1);
   });
 
+  // Issue #312: Claude Code session-limit banner → schedule auto-resume.
+  // The banner carries a wall-clock reset time; these tests use the current
+  // local minute (inside the recent-past grace window) with delay 0 so the
+  // resume fires immediately without fake timers.
+  function localSessionLimitBanner(): string {
+    const t = new Date();
+    const h = t.getHours();
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    const ampm = h >= 12 ? "pm" : "am";
+    const mm = String(t.getMinutes()).padStart(2, "0");
+    return `⎿  You've hit your session limit · resets ${h12}:${mm}${ampm}\r\n`;
+  }
+
+  it("sends the session-limit resume message after the reset time passes", async () => {
+    useSettingsStore.getState().setClaude({ sessionLimitResumeDelaySeconds: 0 });
+    render(<TerminalView instanceId="t-claude-limit" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-limit", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
+    });
+
+    // A schedule notification is raised immediately.
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.some((n) => n.message.toLowerCase().includes("session limit")),
+    ).toBe(true);
+
+    // The resume message is submitted via CR (\r), not \n — Claude Code's TUI
+    // treats \n as a soft line break.
+    await vi.waitFor(() => {
+      expect(
+        mockWriteToTerminal.mock.calls.some((c) => c[0] === "t-claude-limit" && c[1] === "go on"),
+      ).toBe(true);
+    });
+    await vi.waitFor(() => {
+      expect(
+        mockWriteToTerminal.mock.calls.some((c) => c[0] === "t-claude-limit" && c[1] === "\r"),
+      ).toBe(true);
+    });
+
+    // Re-emitting the same banner (alt-screen redraw residue) must not arm a
+    // second resume for the same reset time.
+    act(() => {
+      onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(mockWriteToTerminal.mock.calls.filter((c) => c[1] === "go on")).toHaveLength(1);
+  });
+
+  it("uses the configured resume message", async () => {
+    useSettingsStore.getState().setClaude({
+      sessionLimitResumeDelaySeconds: 0,
+      sessionLimitResumeMessage: "continue please",
+    });
+    render(<TerminalView instanceId="t-claude-limit-msg" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-limit-msg", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        mockWriteToTerminal.mock.calls.some(
+          (c) => c[0] === "t-claude-limit-msg" && c[1] === "continue please",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("skips the resume send when the pane is no longer running Claude at fire time", async () => {
+    // The timer can be armed hours before it fires; if the user exits Claude
+    // (or starts another app) in the meantime, the resume text must not be
+    // typed into whatever now owns the pane.
+    useSettingsStore.getState().setClaude({ sessionLimitResumeDelaySeconds: 1 });
+    render(<TerminalView instanceId="t-claude-limit-gone" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-limit-gone", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
+    });
+    // Armed while Claude was active; the schedule notification confirms it.
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.some((n) => n.message.includes("auto-resume scheduled")),
+    ).toBe(true);
+
+    // Claude exits before the timer fires.
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-claude-limit-gone", {
+        activity: { type: "shell" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        useNotificationStore
+          .getState()
+          .notifications.some((n) => n.message.includes("auto-resume skipped")),
+      ).toBe(true);
+    });
+    expect(mockWriteToTerminal.mock.calls.some((c) => c[0] === "t-claude-limit-gone")).toBe(false);
+  });
+
+  it("does not auto-resume when sessionLimitAutoResume is disabled", async () => {
+    useSettingsStore.getState().setClaude({
+      sessionLimitAutoResume: false,
+      sessionLimitResumeDelaySeconds: 0,
+    });
+    render(<TerminalView instanceId="t-claude-limit-off" profile="WSL" syncGroup="" />);
+    useTerminalStore.getState().updateInstanceInfo("t-claude-limit-off", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+
+    act(() => {
+      onOutput?.(new TextEncoder().encode(localSessionLimitBanner()));
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(mockWriteToTerminal.mock.calls.some((c) => c[1] === "go on")).toBe(false);
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
+  });
+
   it("clears Claude input-pending marker after the modal is dismissed", async () => {
     render(<TerminalView instanceId="t-claude-prompt-done" profile="WSL" syncGroup="" />);
     useTerminalStore.getState().updateInstanceInfo("t-claude-prompt-done", {

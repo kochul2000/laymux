@@ -172,6 +172,12 @@ export interface ClaudeSettings {
   statusMessageMode: ClaudeStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
   statusMessageDelimiter: string;
+  /** Auto-send a resume message after a session-limit reset (default: true). */
+  sessionLimitAutoResume: boolean;
+  /** Seconds to wait after the reset time before resuming (default: 60). */
+  sessionLimitResumeDelaySeconds: number;
+  /** Message sent to resume work after the limit resets (default: "go on"). */
+  sessionLimitResumeMessage: string;
 }
 
 export interface CodexSettings {
