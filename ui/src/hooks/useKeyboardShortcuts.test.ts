@@ -1578,6 +1578,44 @@ describe("useKeyboardShortcuts", () => {
       expect(propagateCwdOnce).not.toHaveBeenCalled();
     });
 
+    // PR #331 리뷰: no-op(비대상 view)일 때는 preventDefault 를 호출하지 않아
+    // 키 이벤트가 기본 동작/다른 핸들러로 자연스럽게 흘러가야 한다.
+    it("does not preventDefault when the focused pane is a non-CWD view (MemoView)", () => {
+      setActivePanes({ type: "MemoView" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      const ev = new KeyboardEvent("keydown", {
+        key: "p",
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(ev);
+
+      expect(propagateCwdOnce).not.toHaveBeenCalled();
+      expect(ev.defaultPrevented).toBe(false);
+    });
+
+    it("calls preventDefault only when propagation is actually dispatched", () => {
+      setActivePanes({ type: "TerminalView", profile: "PowerShell" });
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      const ev = new KeyboardEvent("keydown", {
+        key: "p",
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(ev);
+
+      expect(propagateCwdOnce).toHaveBeenCalledWith("terminal-pane-a");
+      expect(ev.defaultPrevented).toBe(true);
+    });
+
     it("respects a user override from settings (rebound key)", () => {
       setActivePanes({ type: "TerminalView" });
       useGridStore.getState().setFocusedPane(0);

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
-import { resolveKeybinding } from "@/lib/keybinding-registry";
+import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext } from "./PaneControlContext";
@@ -114,8 +114,10 @@ function Sep() {
 // ─── Propagate CWD once (issue #293 → #324) ─────────────
 // 우측 컨트롤 묶음이 아니라 좌측(pane 번호 배지 우측)에 정렬된다.
 // 단축키(pane.propagateCwdOnce, 기본 Ctrl+Alt+P)는 useKeyboardShortcuts 가 처리한다.
+// 훅으로 settings store 를 구독하므로 재바인딩 시 부모 useMemo 와 무관하게
+// 이 컴포넌트 스스로 리렌더되어 툴팁이 갱신된다 (PR #331 리뷰).
 function PropagateCwdOnceBtn({ onClick }: { onClick: () => void }) {
-  const keys = resolveKeybinding("pane.propagateCwdOnce");
+  const keys = useResolvedKeybinding("pane.propagateCwdOnce");
   return (
     <BarBtn
       testId="pane-control-cwd-propagate-once"

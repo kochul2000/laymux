@@ -198,6 +198,20 @@ export function resolveKeybinding(actionId: string): string | undefined {
 }
 
 /**
+ * React hook variant of `resolveKeybinding()`.
+ * Subscribes to the settings store, so components re-render (and tooltips refresh)
+ * when the user rebinds the action in Settings. (PR #331 review)
+ */
+export function useResolvedKeybinding(actionId: string): string | undefined {
+  const userOverrides = useSettingsStore((s) => s.keybindings);
+  const override = userOverrides.find((kb) => kb.command === actionId);
+  if (override) return override.keys;
+
+  const def = DEFAULT_KEYBINDINGS.find((d) => d.id === actionId);
+  return def?.defaultKeys;
+}
+
+/**
  * Check if a keyboard event matches a registered keybinding action.
  * Respects user overrides from settings.
  */

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -664,6 +664,33 @@ describe("PaneControlBar", () => {
     );
     const btn = screen.getByTestId("pane-control-cwd-propagate-once");
     expect(btn.getAttribute("title")).toBe("Propagate CWD once (Ctrl+Alt+P)");
+  });
+
+  // PR #331 리뷰: Settings 에서 재바인딩하면 툴팁도 즉시 갱신되어야 한다 (구독 기반).
+  it("updates the tooltip when the keybinding is rebound in Settings", async () => {
+    render(
+      <PaneControlBar
+        currentView={terminalView}
+        actions={{ ...defaultActions, onPropagateCwdOnce: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const btn = screen.getByTestId("pane-control-cwd-propagate-once");
+    expect(btn.getAttribute("title")).toBe("Propagate CWD once (Ctrl+Alt+P)");
+
+    act(() => {
+      useSettingsStore.setState({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+P" }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pane-control-cwd-propagate-once").getAttribute("title")).toBe(
+        "Propagate CWD once (Ctrl+Shift+P)",
+      );
+    });
   });
 
   // issue #324: 버튼은 우측 컨트롤 묶음이 아니라 좌측(pane 배지 우측)에 정렬된다.

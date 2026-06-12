@@ -121,9 +121,10 @@ export function useKeyboardShortcuts() {
         const ws = useWorkspaceStore.getState().getActiveWorkspace();
         const { focusedPaneIndex } = useGridStore.getState();
         const pane = ws && focusedPaneIndex !== null ? ws.panes[focusedPaneIndex] : undefined;
-        if (pane) {
+        // 헬퍼가 실제로 전파를 디스패치했을 때만 preventDefault — CWD 없는
+        // view(Memo 등)에서는 no-op 이므로 기본 동작을 막지 않는다 (PR #331 리뷰).
+        if (pane && propagateCwdOnceForPane(pane)) {
           e.preventDefault();
-          propagateCwdOnceForPane(pane);
         }
         return;
       }
