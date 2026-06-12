@@ -381,13 +381,15 @@ fn normalize_pane_bounds(
     pane_path: &str,
     warnings: &mut Vec<ValidationWarning>,
 ) {
+    // Keep pre-snap originals so warnings report the value actually found in the file.
+    let (orig_x, orig_y, orig_w, orig_h) = (*x, *y, *w, *h);
     snap_to_unit(x);
     snap_to_unit(y);
     snap_to_unit(w);
     snap_to_unit(h);
 
     if !is_valid_ratio(*x) {
-        let old = *x;
+        let old = orig_x;
         *x = clamp_ratio(*x);
         warnings.push(ValidationWarning {
             path: format!("{pane_path}.x"),
@@ -399,7 +401,7 @@ fn normalize_pane_bounds(
         });
     }
     if !is_valid_ratio(*y) {
-        let old = *y;
+        let old = orig_y;
         *y = clamp_ratio(*y);
         warnings.push(ValidationWarning {
             path: format!("{pane_path}.y"),
@@ -411,7 +413,7 @@ fn normalize_pane_bounds(
         });
     }
     if !is_valid_dimension(*w) {
-        let old = *w;
+        let old = orig_w;
         *w = clamp_dimension(*w);
         warnings.push(ValidationWarning {
             path: format!("{pane_path}.w"),
@@ -423,7 +425,7 @@ fn normalize_pane_bounds(
         });
     }
     if !is_valid_dimension(*h) {
-        let old = *h;
+        let old = orig_h;
         *h = clamp_dimension(*h);
         warnings.push(ValidationWarning {
             path: format!("{pane_path}.h"),
@@ -615,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn pane_dimension_with_fp_noise_above_1_is_silently_snapped() {
+    fn pane_bounds_fp_noise_is_silently_snapped() {
         // 리사이즈 연산 누적으로 h가 1.0000000000000009처럼 1을 미세하게 초과할 수 있다.
         // 경고 없이 1.0으로 스냅되어야 한다.
         let mut settings = Settings::default();
@@ -640,6 +642,25 @@ mod tests {
         let warnings = validate_and_repair(&mut settings);
         assert_eq!(settings.workspaces[0].panes[0].h, 1.0);
         assert!(warnings.iter().any(|w| w.path.contains(".h") && w.repaired));
+    }
+
+    #[test]
+    fn negative_noise_dimension_warning_reports_original_value() {
+        // w=-9e-16은 0.0으로 스냅된 뒤 dimension 검사(>0)에 걸려 경고가 나간다.
+        // 이때 메시지는 스냅된 0이 아니라 파일에 있던 원본 값을 보여줘야 한다.
+        let mut settings = Settings::default();
+        settings.workspaces[0].panes[0].w = -9e-16;
+        let warnings = validate_and_repair(&mut settings);
+        assert!(settings.workspaces[0].panes[0].w > 0.0);
+        let warning = warnings
+            .iter()
+            .find(|w| w.path.contains(".w"))
+            .expect("w warning expected");
+        assert!(
+            warning.message.contains("-0.0000000000000009"),
+            "message should contain original value: {}",
+            warning.message
+        );
     }
 
     #[test]
