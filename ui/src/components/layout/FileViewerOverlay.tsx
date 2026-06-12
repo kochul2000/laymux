@@ -51,6 +51,10 @@ export function FileViewerOverlay() {
       // on a blank/invalid submit it restores the currently loaded path (or
       // stays empty in prompt mode). On success also release the keyboard so
       // the opened viewer (e.g. a terminal app) gets it.
+      // Note: when the submit changes `path`, the keyed input remounts and these
+      // writes hit the detached old node (harmless — the new node mounts with the
+      // new path, unfocused). They only matter when NO remount happens: a blank /
+      // invalid submit (restore the bar) or re-submitting the same path (blur).
       pathInputRef.current.value = useFileViewerStore.getState().path;
       if (ok) pathInputRef.current.blur();
     }
@@ -89,7 +93,11 @@ export function FileViewerOverlay() {
   useEffect(() => {
     if (!open || isTerminalViewer) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // The address bar consumes Escape (draft revert) with preventDefault +
+      // stopPropagation. stopPropagation alone only works because this listener
+      // is in the bubble phase, so also honor defaultPrevented as a defensive
+      // contract that survives the listener ever moving to capture.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
         closeFileViewer();
       }

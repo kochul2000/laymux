@@ -158,6 +158,19 @@ describe("FileViewerOverlay", () => {
     expect(useFileViewerStore.getState().open).toBe(false);
   });
 
+  it("Escape closes the overlay even when the address bar input is focused in prompt mode", () => {
+    act(() => {
+      useFileViewerStore.getState().openEmptyFileViewer();
+    });
+    render(<FileViewerOverlay />);
+    const input = screen.getByTestId("file-viewer-overlay-path-input") as HTMLInputElement;
+    input.focus();
+    // In prompt mode there is no draft to revert, so the bar's keydown handler
+    // must NOT consume Escape — it bubbles to the global handler and closes.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
   // --- #327 / #326: persistent address bar ---
   it("shows the current path in an editable address bar once a file is loaded (#327)", () => {
     act(() => {
