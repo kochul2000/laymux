@@ -52,6 +52,13 @@ export interface ShadowCursorState {
    * shows the park chunk arriving ~15 ms after the frame flush.
    */
   parkPending: boolean;
+  /**
+   * Byte-stream DEC 2026 frame state, driven only by parser set/reset
+   * handlers. This must stay independent from xterm.js
+   * `synchronizedOutputMode`, which may be cleared by xterm's safety
+   * timeout while the application frame is still open.
+   */
+  isDec2026FrameOpen: boolean;
   hasPromptBoundary: boolean;
   hasSyncFramePosition: boolean;
   isInputPhase: boolean;
@@ -62,6 +69,7 @@ export interface ShadowCursorState {
 export type ShadowSyncEligibility =
   | "eligible"
   | "composition-preview-active"
+  | "dec-2026-frame-open"
   | "inactive"
   | "row-mismatch"
   | "repaint-in-progress"
@@ -104,6 +112,7 @@ export function getShadowSyncEligibility(
     | "hasSyncFramePosition"
     | "isRepaintInProgress"
     | "isAltBufferActive"
+    | "isDec2026FrameOpen"
   >,
   options: {
     bufferAbsY?: number;
@@ -112,6 +121,7 @@ export function getShadowSyncEligibility(
   },
 ): ShadowSyncEligibility {
   if (options.compositionPreviewActive) return "composition-preview-active";
+  if (state.isDec2026FrameOpen) return "dec-2026-frame-open";
   // Shadow cursor has never been initialized by any source (no OSC 133 prompt
   // marker, no DEC 2026 sync frame).  This happens for freshly opened terminals
   // (e.g. from empty view) or shells that don't emit OSC 133 (PowerShell).
@@ -135,12 +145,14 @@ export function getShadowSyncEligibility(
 /**
  * Applied when a DEC 2026 (synchronized output) *set* sequence fires
  * — i.e. an app is about to start a new frame. Inside a TUI overlay
- * activity we snapshot the current buffer cursor; the matching reset
- * will read this snapshot back. See `applyDec2026ResetToShadowCursor`
+ * activity we also snapshot the current buffer cursor; the matching
+ * reset will read this snapshot back. The parser frame itself is
+ * activity-independent because activity classification can arrive
+ * after the opening sequence. See `applyDec2026ResetToShadowCursor`
  * for the rationale (Codex's footer frames don't restore the cursor
  * before the matching `\e[?2026l`).
  *
- * No-op outside an overlay-caret activity.
+ * Outside an overlay-caret activity only the parser frame is opened.
  */
 export function applyDec2026SetToShadowCursor(
   state: ShadowCursorState,
@@ -148,11 +160,25 @@ export function applyDec2026SetToShadowCursor(
   bufferCursorX: number,
   bufferCursorAbsY: number,
 ): ShadowCursorState {
-  if (!isOverlayCaretActivity(activity)) return state;
+  // A second `?2026h` while the frame is still open (nested or
+  // unbalanced set — e.g. the previous frame's `?2026l` was lost) must
+  // not overwrite the pre-frame snapshot: the buffer cursor is now
+  // mid-frame (footer row), and committing that snapshot at reset time
+  // would reintroduce the footer jump through the fallback path.
+  if (state.isDec2026FrameOpen) return state;
+  if (!isOverlayCaretActivity(activity)) {
+    return { ...state, isDec2026FrameOpen: true };
+  }
+  const cursorX = state.hasSyncFramePosition ? state.cursorX : bufferCursorX;
+  const cursorAbsY = state.hasSyncFramePosition ? state.cursorAbsY : bufferCursorAbsY;
   return {
     ...state,
+    cursorX,
+    cursorAbsY,
     frameSavedCursorX: bufferCursorX,
     frameSavedCursorAbsY: bufferCursorAbsY,
+    hasSyncFramePosition: true,
+    isDec2026FrameOpen: true,
   };
 }
 
@@ -164,8 +190,8 @@ export function applyDec2026SetToShadowCursor(
  * footer row at reset time (not on the input row). When no snapshot
  * exists — orphan reset, set lost to a chunk boundary, etc. — we fall
  * back to the live buffer cursor, which is still the best estimate.
- * Outside an overlay-caret activity we return the state unchanged and
- * let the caller schedule the regular OSC 133 sync.
+ * Outside an overlay-caret activity only the parser frame is closed and
+ * the caller schedules the regular OSC 133 sync.
  *
  * Critically, this clears any lingering OSC-133 flags (`hasPromptBoundary`,
  * `isInputPhase`, `isRepaintInProgress`) — those are semantics of a
@@ -179,7 +205,10 @@ export function applyDec2026ResetToShadowCursor(
   bufferCursorX: number,
   bufferCursorAbsY: number,
 ): ShadowCursorState {
-  if (!isOverlayCaretActivity(activity)) return state;
+  if (!isOverlayCaretActivity(activity)) {
+    if (!state.isDec2026FrameOpen) return state;
+    return { ...state, isDec2026FrameOpen: false };
+  }
   const cursorX = state.frameSavedCursorX ?? bufferCursorX;
   const cursorAbsY = state.frameSavedCursorAbsY ?? bufferCursorAbsY;
   return {
@@ -192,6 +221,7 @@ export function applyDec2026ResetToShadowCursor(
     hasSyncFramePosition: true,
     frameSavedCursorX: undefined,
     frameSavedCursorAbsY: undefined,
+    isDec2026FrameOpen: false,
     // The at-reset position above is a fallback estimate. Codex parks
     // the real input cursor in a follow-up chunk (`?25l` CUP `?25h`
     // outside the frame) — hold overlay repaints until that park or a
@@ -221,7 +251,7 @@ export function applyDectcemHideToShadowCursor(
  * activity. Three very different meanings depending on buffer/frame
  * state:
  *
- * - **Inside a sync frame** (`syncOutputActive`): the show is the tail
+ * - **Inside a sync frame** (`isDec2026FrameOpen`): the show is the tail
  *   of a repaint — Codex's footer frames end `?25h` with the buffer
  *   cursor still parked on the footer row. The position is untrusted;
  *   only the visibility flag is cleared.
@@ -259,10 +289,9 @@ export function applyDectcemHideToShadowCursor(
  *   overlay there until the next park.
  */
 export function isDectcemShowPark(
-  state: Pick<ShadowCursorState, "isAltBufferActive">,
-  syncOutputActive: boolean,
+  state: Pick<ShadowCursorState, "isAltBufferActive" | "isDec2026FrameOpen">,
 ): boolean {
-  return !syncOutputActive && !state.isAltBufferActive;
+  return !state.isDec2026FrameOpen && !state.isAltBufferActive;
 }
 
 export function applyDectcemShowToShadowCursor(
@@ -270,11 +299,10 @@ export function applyDectcemShowToShadowCursor(
   activity: TerminalActivityInfo | undefined,
   bufferCursorX: number,
   bufferCursorAbsY: number,
-  syncOutputActive: boolean,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) return state;
   // Visibility-only show — see `isDectcemShowPark` for the two cases.
-  if (!isDectcemShowPark(state, syncOutputActive)) {
+  if (!isDectcemShowPark(state)) {
     if (!state.isCursorHidden) return state;
     return { ...state, isCursorHidden: false };
   }

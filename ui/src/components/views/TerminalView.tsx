@@ -224,6 +224,16 @@ export function _resetWebglStagger(): void {
  */
 const PARK_SETTLE_TIMEOUT_MS = 50;
 
+/**
+ * How many times the settle timeout may defer because a DEC 2026 frame
+ * is still open before the frame is declared stale (its `?2026l` lost
+ * to a chunk boundary or a stalled stream) and the fallback commits
+ * anyway. 20 × 50 ms ≈ 1 s — the same self-heal horizon as xterm's own
+ * synchronized-output safety timeout, which the parser-level frame
+ * flag otherwise lacks.
+ */
+const PARK_SETTLE_MAX_DEFERRALS = 20;
+
 function hasDecModeParam(params: readonly (number | number[])[], mode: number): boolean {
   return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
 }
@@ -395,6 +405,7 @@ export function TerminalView({
     cursorAbsY: 0,
     isCursorHidden: false,
     parkPending: false,
+    isDec2026FrameOpen: false,
     hasPromptBoundary: false,
     hasSyncFramePosition: false,
     isInputPhase: false,
@@ -618,6 +629,14 @@ export function TerminalView({
           syncOutputActive: syncOutputActiveRef.current,
         });
         return;
+      }
+
+      // Skip when already cleared — assigning `textContent` replaces
+      // child nodes even when the value is unchanged, and this runs on
+      // every rAF paint outside composition.
+      if (!compositionPreviewRef.current.active && previewEl.textContent) {
+        previewEl.style.opacity = "0";
+        previewEl.textContent = "";
       }
 
       // Post-frame settle window: the shadow position right after a DEC
@@ -928,6 +947,7 @@ export function TerminalView({
     });
 
     let parkSettleTimer: number | undefined;
+    let parkSettleDeferrals = 0;
     const clearParkSettleTimer = () => {
       if (parkSettleTimer !== undefined) {
         clearTimeout(parkSettleTimer);
@@ -940,21 +960,29 @@ export function TerminalView({
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
     // today — revisit if another ratatui TUI joins the overlay set.
-    const startParkSettleTimer = () => {
+    const armParkSettleTimer = () => {
       clearParkSettleTimer();
       parkSettleTimer = window.setTimeout(() => {
         parkSettleTimer = undefined;
         const shadowCursor = shadowCursorRef.current;
         if (!shadowCursor.parkPending) return;
-        if (syncOutputActiveRef.current) {
-          // The next DEC 2026 frame is mid-flight. Firing now would
-          // consume `parkPending` and schedule a paint that the
-          // sync-output gate hides — a one-frame overlay blink. Defer:
-          // the frame's own `?2026l` restarts the settle cycle with a
-          // fresh snapshot, and re-arming (rather than returning) keeps
-          // the fallback alive even if that `?2026l` never arrives.
-          startParkSettleTimer();
-          return;
+        if (shadowCursor.isDec2026FrameOpen) {
+          if (parkSettleDeferrals < PARK_SETTLE_MAX_DEFERRALS) {
+            // The next DEC 2026 frame is mid-flight. Firing now would
+            // consume `parkPending` and schedule a paint that the
+            // frame gate hides — a one-frame overlay blink. Defer and
+            // let the frame's own `?2026l` restart the settle cycle
+            // with a fresh snapshot.
+            parkSettleDeferrals += 1;
+            armParkSettleTimer();
+            return;
+          }
+          // The frame has stayed open for the whole deferral budget.
+          // Release only the post-frame fallback freeze so the overlay
+          // cannot remain stuck forever. The parser frame stays open
+          // until a real `?2026l`; closing it here would make a later
+          // in-frame `?25h` look like an authoritative cursor park.
+          trace("park-settle-open-frame-fallback", { deferrals: parkSettleDeferrals });
         }
         Object.assign(shadowCursor, applyParkSettleTimeoutToShadowCursor(shadowCursor));
         trace("park-settle-timeout", {
@@ -964,30 +992,28 @@ export function TerminalView({
         scheduleOverlayCaretUpdate();
       }, PARK_SETTLE_TIMEOUT_MS);
     };
+    const startParkSettleTimer = () => {
+      parkSettleDeferrals = 0;
+      armParkSettleTimer();
+    };
     const syncOutputSetDisposable = parser?.registerCsiHandler?.(
       { prefix: "?", final: "h" },
       (params) => {
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(true);
-          if (isOverlayCaretActivity(activityRef.current)) {
-            // Snapshot the buffer cursor *before* the frame body runs.
-            // Codex's footer-update frames don't restore the cursor
-            // before sending `\e[?2026l`, so reading the buffer at
-            // reset time lands on the footer row. The pre-frame
-            // snapshot is the cursor as the user actually sees it
-            // (the input prompt position right before the frame
-            // began). See `docs/terminal/cursor-jump-evidence/`.
-            const activeBuffer = terminal.buffer.active as { cursorX?: number };
-            Object.assign(
+          // Open the parser frame even before Codex activity is
+          // classified. The helper snapshots coordinates only for the
+          // overlay activity, but the stream boundary itself is global.
+          const activeBuffer = terminal.buffer.active as { cursorX?: number };
+          Object.assign(
+            shadowCursorRef.current,
+            applyDec2026SetToShadowCursor(
               shadowCursorRef.current,
-              applyDec2026SetToShadowCursor(
-                shadowCursorRef.current,
-                activityRef.current,
-                activeBuffer.cursorX ?? 0,
-                getBufferCursorAbsY(terminal),
-              ),
-            );
-          }
+              activityRef.current,
+              activeBuffer.cursorX ?? 0,
+              getBufferCursorAbsY(terminal),
+            ),
+          );
         }
         if (
           hasDecModeParam(params, 1049) ||
@@ -999,6 +1025,7 @@ export function TerminalView({
           shadowCursorRef.current.frameSavedCursorX = undefined;
           shadowCursorRef.current.frameSavedCursorAbsY = undefined;
           shadowCursorRef.current.parkPending = false;
+          shadowCursorRef.current.isDec2026FrameOpen = false;
           clearParkSettleTimer();
           setInputPhase(false);
         }
@@ -1013,17 +1040,15 @@ export function TerminalView({
         if (hasDecModeParam(params, 25)) {
           const prev = shadowCursorRef.current;
           const activeBuffer = terminal.buffer.active as { cursorX?: number };
-          const syncActive = syncOutputActiveRef.current;
           const next = applyDectcemShowToShadowCursor(
             prev,
             activityRef.current,
             activeBuffer.cursorX ?? 0,
             getBufferCursorAbsY(terminal),
-            syncActive,
           );
           if (next !== prev) {
             Object.assign(shadowCursorRef.current, next);
-            if (isDectcemShowPark(prev, syncActive)) {
+            if (isDectcemShowPark(prev)) {
               clearParkSettleTimer();
               trace("dectcem-park", {
                 cursorX: next.cursorX,
@@ -1049,24 +1074,25 @@ export function TerminalView({
         }
         if (hasDecModeParam(params, 2026)) {
           setSyncOutputCursorVisibility(false);
-          if (isOverlayCaretActivity(activityRef.current)) {
+          const overlayActivity = isOverlayCaretActivity(activityRef.current);
+          const activeBuffer = terminal.buffer.active as { cursorX?: number };
+          const bufferCursorAbsY = getBufferCursorAbsY(terminal);
+          Object.assign(
+            shadowCursorRef.current,
+            applyDec2026ResetToShadowCursor(
+              shadowCursorRef.current,
+              activityRef.current,
+              activeBuffer.cursorX ?? 0,
+              bufferCursorAbsY,
+            ),
+          );
+          if (overlayActivity) {
             // TUI DEC 2026 frame just flushed → snapshot a *fallback*
             // shadow position (pre-frame save, else buffer cursor).
             // The authoritative position is the cursor park that
             // follows; see `shadow-cursor-state.ts` for why stale
             // OSC 133 flags from a prior shell session must be
             // cleared here.
-            const activeBuffer = terminal.buffer.active as { cursorX?: number };
-            const bufferCursorAbsY = getBufferCursorAbsY(terminal);
-            Object.assign(
-              shadowCursorRef.current,
-              applyDec2026ResetToShadowCursor(
-                shadowCursorRef.current,
-                activityRef.current,
-                activeBuffer.cursorX ?? 0,
-                bufferCursorAbsY,
-              ),
-            );
             // `parkPending` is now set: overlay repaints are frozen at
             // the last painted position until Codex's cursor park
             // arrives (authoritative) or the settle window expires
@@ -1104,7 +1130,13 @@ export function TerminalView({
     const cursorMoveDisposable = terminal.onCursorMove(() => {
       if (compositionPreviewRef.current.active) return;
       const shadowCursor = shadowCursorRef.current;
-      if (shadowCursor.isAltBufferActive || syncOutputActiveRef.current) return;
+      if (
+        shadowCursor.isAltBufferActive ||
+        shadowCursor.isDec2026FrameOpen ||
+        syncOutputActiveRef.current
+      ) {
+        return;
+      }
       const oscPath =
         shadowCursor.hasPromptBoundary &&
         shadowCursor.isInputPhase &&

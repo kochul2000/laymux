@@ -740,6 +740,92 @@ describe("TerminalView", () => {
     });
   });
 
+  it("clears a finished IME preview before park-pending freezes overlay repaint", async () => {
+    render(<TerminalView instanceId="t-ime-park" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-park", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-park");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-park");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\u3131";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("\u3131");
+      expect(preview.style.opacity).toBe("1");
+    });
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+      terminal.buffer.active.cursorX = 44;
+      terminal.buffer.active.cursorY = 20;
+      await csiHandlers.get("?:l")?.([2026]);
+      helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uAC00" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container).not.toHaveClass("terminal-ime-composition-active");
+    const overlayFrame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
+      | FrameRequestCallback
+      | undefined;
+    act(() => {
+      overlayFrame?.(performance.now());
+    });
+
+    expect(preview.style.opacity).toBe("0");
+    expect(preview.textContent).toBe("");
+  });
+
   it("hides the xterm cursor only during synchronized output frames", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 
@@ -755,6 +841,41 @@ describe("TerminalView", () => {
       await csiHandlers.get("?:l")?.([2026]);
     });
     expect(container).not.toHaveClass("terminal-sync-output-active");
+  });
+
+  it("opens the DEC 2026 parser frame before Codex activity is classified", async () => {
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(
+        <TerminalView instanceId="t-frame-before-activity" profile="PowerShell" syncGroup="" />,
+      );
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-frame-before-activity", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
   });
 
   it("defers the park settle timeout while the next DEC 2026 frame is mid-flight", async () => {
@@ -773,7 +894,11 @@ describe("TerminalView", () => {
       render(<TerminalView instanceId="t-park-defer" profile="PowerShell" syncGroup="" />);
       await vi.waitFor(() => {
         expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
       });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-park-defer", {
           activity: { type: "interactiveApp", name: "Codex" },
@@ -788,6 +913,12 @@ describe("TerminalView", () => {
       // Frame N+1 opens before the timer fires…
       await act(async () => {
         await csiHandlers.get("?:h")?.([2026]);
+      });
+      // xterm releases synchronizedOutputMode after its safety timeout,
+      // while the parser frame remains open until the reset sequence.
+      mockModes.synchronizedOutputMode = false;
+      act(() => {
+        onOutput?.(new TextEncoder().encode("long-frame-body"));
       });
       await act(async () => {
         vi.advanceTimersByTime(120);
@@ -808,6 +939,162 @@ describe("TerminalView", () => {
       logSpy.mockRestore();
       localStorage.removeItem("laymux:cursor-trace");
     }
+  });
+
+  it("releases settle freeze without closing a still-open DEC 2026 parser frame", async () => {
+    // Frame N flushes (`?2026l` → parkPending + settle timer), then
+    // frame N+1 stays open beyond the deferral budget. The fallback may
+    // release its overlay freeze, but only a real `?2026l` may close the
+    // parser frame. Otherwise a later in-frame `?25h` is misclassified
+    // as an authoritative park and can store the footer coordinate.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(<TerminalView instanceId="t-park-stale" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+      });
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-park-stale", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      vi.useFakeTimers();
+      // Frame N flush: parkPending set, settle timer armed.
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+      // Frame N+1 opens… and its reset never arrives.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+
+      // Within the deferral budget the timeout keeps deferring.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(traces("park-settle-timeout")).toHaveLength(0);
+
+      // Past the budget (20 deferrals × 50 ms + the initial window) the
+      // fallback commits, but the parser frame remains open.
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(traces("park-settle-timeout").length).toBeGreaterThan(0);
+      expect(traces("park-settle-stale-frame")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
+  it("keeps DECTCEM show in-frame after xterm synchronized-output safety timeout", async () => {
+    render(
+      <TerminalView
+        instanceId="t-sync-timeout-frame"
+        profile="PowerShell"
+        syncGroup=""
+        isFocused
+      />,
+    );
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-sync-timeout-frame", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-sync-timeout-frame");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-sync-timeout-frame");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    terminal.element.appendChild(screenEl);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalled();
+    });
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+    const writeParsedHandler = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    await act(async () => {
+      writeParsedHandler?.();
+    });
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(20px, 80px)");
+    });
+
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+
+    // xterm.js safety timeout releases rendering, but the byte stream
+    // has not delivered DEC 2026 reset yet.
+    mockModes.synchronizedOutputMode = false;
+    act(() => {
+      onOutput?.(new TextEncoder().encode("long-frame-body"));
+    });
+    await vi.waitFor(() => {
+      expect(container).not.toHaveClass("terminal-sync-output-active");
+    });
+
+    terminal.buffer.active.cursorX = 44;
+    terminal.buffer.active.cursorY = 20;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([25]);
+    });
+
+    await vi.waitFor(() => {
+      expect(overlay.style.transform).toBe("translate(20px, 80px)");
+    });
   });
 
   it("tracks xterm synchronizedOutputMode after terminal.write", async () => {
