@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock settings store before importing the module under test
+// Mock settings store before importing the module under test.
+// 훅(useResolvedKeybinding)도 테스트하므로 selector 호출이 가능한 함수형 mock 으로 만든다.
 const mockGetState = vi.fn();
-vi.mock("@/stores/settings-store", () => ({
-  useSettingsStore: { getState: () => mockGetState() },
-}));
+vi.mock("@/stores/settings-store", () => {
+  const useSettingsStore = <T>(selector: (s: unknown) => T): T => selector(mockGetState());
+  useSettingsStore.getState = () => mockGetState();
+  return { useSettingsStore };
+});
 
-import { DEFAULT_KEYBINDINGS, matchesKeybinding, resolveKeybinding } from "./keybinding-registry";
+import {
+  DEFAULT_KEYBINDINGS,
+  matchesKeybinding,
+  resolveKeybinding,
+  useResolvedKeybinding,
+} from "./keybinding-registry";
+import { renderHook } from "@testing-library/react";
 
 function makeKeyEvent(
   key: string,
@@ -65,6 +74,28 @@ describe("keybinding-registry", () => {
 
     it("should return undefined for unknown action", () => {
       expect(resolveKeybinding("unknown.action")).toBeUndefined();
+    });
+  });
+
+  // PR #331 리뷰 1번: 툴팁 등 렌더링에 쓰는 키 콤보는 keybindings 구독 기반 훅으로
+  // 읽어야 재바인딩 시 즉시 갱신된다 (resolveKeybinding 은 getState 1회 읽기).
+  describe("useResolvedKeybinding", () => {
+    it("should return default keys when no override", () => {
+      const { result } = renderHook(() => useResolvedKeybinding("pane.propagateCwdOnce"));
+      expect(result.current).toBe("Ctrl+Alt+P");
+    });
+
+    it("should return user override when present", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.propagateCwdOnce", keys: "Ctrl+Shift+P" }],
+      });
+      const { result } = renderHook(() => useResolvedKeybinding("pane.propagateCwdOnce"));
+      expect(result.current).toBe("Ctrl+Shift+P");
+    });
+
+    it("should return undefined for unknown action", () => {
+      const { result } = renderHook(() => useResolvedKeybinding("unknown.action"));
+      expect(result.current).toBeUndefined();
     });
   });
 
