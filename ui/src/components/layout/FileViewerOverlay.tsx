@@ -25,27 +25,59 @@ export function FileViewerOverlay() {
   const feSettings = useSettingsStore((s) => s.fileExplorer);
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
 
-  // Empty-path "open anywhere" mode (#283): the overlay is open but no file is
-  // loaded yet, so we show an inline path input field at the top instead of a
-  // native window.prompt (unreliable on WebView2, not driveable via the
-  // Automation API). Submitting a non-blank path loads it in the same viewer.
-  // The input is uncontrolled (read via ref on submit) so we don't need to
-  // mirror keystrokes into React state — this also keeps the focus effect free
-  // of setState (react-hooks/set-state-in-effect).
+  // Persistent address bar (#327 / #326): the path input at the top is always
+  // shown. With no file loaded yet ("open anywhere" mode, #283) it starts empty
+  // and autofocused; once a file is open it shows the current path and the user
+  // can type another path + Enter to navigate without closing first (#326).
+  // The input is uncontrolled (read via ref on submit) and keyed by `path`, so
+  // an external path swap (MCP/REST/Explorer) remounts it with the new value —
+  // no keystroke mirroring into React state is needed.
   const promptMode = open && path === "";
   const pathInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus the field each time we (re)enter prompt mode. The conditional render
-  // below swaps the input for the path <span> when prompt mode ends, so each new
-  // prompt session mounts a fresh empty input — no draft reset is needed.
+  // Focus the field each time we (re)enter prompt mode. Once a file is loaded
+  // the bar must NOT steal focus (terminal viewers own the keyboard), so this
+  // only fires for the empty prompt session.
   useEffect(() => {
     if (promptMode) pathInputRef.current?.focus();
   }, [promptMode]);
 
   const submitPath = () => {
-    // openFileViewer normalizes and rejects blank input, so a blank submit
-    // simply keeps the overlay in prompt mode.
-    openFileViewer(pathInputRef.current?.value ?? "");
+    // openFileViewer normalizes and rejects blank input; `maximized` is carried
+    // over so navigating from a maximized viewer stays maximized.
+    const ok = openFileViewer(pathInputRef.current?.value ?? "", { maximized });
+    if (pathInputRef.current) {
+      // Sync the bar with the store: on success this shows the normalized path,
+      // on a blank/invalid submit it restores the currently loaded path (or
+      // stays empty in prompt mode). On success also release the keyboard so
+      // the opened viewer (e.g. a terminal app) gets it.
+      // Note: when the submit changes `path`, the keyed input remounts and these
+      // writes hit the detached old node (harmless — the new node mounts with the
+      // new path, unfocused). They only matter when NO remount happens: a blank /
+      // invalid submit (restore the bar) or re-submitting the same path (blur).
+      pathInputRef.current.value = useFileViewerStore.getState().path;
+      if (ok) pathInputRef.current.blur();
+    }
+  };
+
+  const onPathInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitPath();
+      return;
+    }
+    if (e.key === "Escape" && !promptMode) {
+      // While a file is loaded, Escape in the bar only cancels the draft —
+      // revert to the current path and blur. Consume the event so the global
+      // Escape handler below doesn't also dismiss the overlay. In prompt mode
+      // we let it bubble: there is nothing to revert, so Escape closes.
+      e.preventDefault();
+      e.stopPropagation();
+      if (pathInputRef.current) {
+        pathInputRef.current.value = path;
+        pathInputRef.current.blur();
+      }
+    }
   };
 
   // When the file is shown via an external command (e.g. .txt→vi, video→mpv),
@@ -61,7 +93,11 @@ export function FileViewerOverlay() {
   useEffect(() => {
     if (!open || isTerminalViewer) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // The address bar consumes Escape (draft revert) with preventDefault +
+      // stopPropagation. stopPropagation alone only works because this listener
+      // is in the bubble phase, so also honor defaultPrevented as a defensive
+      // contract that survives the listener ever moving to capture.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
         closeFileViewer();
       }
@@ -106,50 +142,35 @@ export function FileViewerOverlay() {
           className="flex items-center px-3 py-2"
           style={{ borderBottom: "1px solid var(--border)" }}
         >
-          {promptMode ? (
-            <div className="flex flex-1 items-center gap-2">
-              <FocusInput
-                key="file-viewer-path-input"
-                ref={pathInputRef}
-                defaultValue=""
-                autoFocus
-                onKeyDown={(e) => {
-                  // Enter submits; Escape is handled by the global handler below
-                  // so we let it bubble (it closes the overlay).
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    submitPath();
-                  }
-                }}
-                placeholder="Open file (absolute path)…"
-                spellCheck={false}
-                autoComplete="off"
-                aria-label="File path"
-                data-testid="file-viewer-overlay-path-input"
-              />
-              <button
-                type="button"
-                onClick={submitPath}
-                className="hover-bg-strong rounded px-2 py-1 text-xs"
-                style={{
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border)",
-                  cursor: "pointer",
-                }}
-                data-testid="file-viewer-overlay-path-submit"
-              >
-                Load
-              </button>
-            </div>
-          ) : (
-            <span
-              className="flex-1 truncate text-xs"
-              style={{ color: "var(--text-primary)" }}
-              data-testid="file-viewer-overlay-path"
+          <div className="flex flex-1 items-center gap-2">
+            <FocusInput
+              // Keyed by path: an external swap (MCP/REST/Explorer) remounts the
+              // uncontrolled input with the new path as its value.
+              key={`file-viewer-path-input:${path}`}
+              ref={pathInputRef}
+              defaultValue={path}
+              autoFocus={promptMode}
+              onKeyDown={onPathInputKeyDown}
+              placeholder="Open file (absolute path)…"
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="File path"
+              data-testid="file-viewer-overlay-path-input"
+            />
+            <button
+              type="button"
+              onClick={submitPath}
+              className="hover-bg-strong rounded px-2 py-1 text-xs"
+              style={{
+                color: "var(--text-primary)",
+                border: "1px solid var(--border)",
+                cursor: "pointer",
+              }}
+              data-testid="file-viewer-overlay-path-submit"
             >
-              {path}
-            </span>
-          )}
+              Open
+            </button>
+          </div>
           <button
             onClick={toggleMaximized}
             className="hover-bg-strong ml-2 flex h-6 w-6 items-center justify-center rounded text-xs"
