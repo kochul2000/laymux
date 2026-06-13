@@ -218,16 +218,12 @@ describe("persistSession", () => {
       expect(font.weight).toBe("semi-bold");
     });
 
-    it("convenience settings survive round-trip", async () => {
-      useSettingsStore.getState().setConvenience({
-        smartPaste: false,
-        pasteImageDir: "/tmp/img",
-        hoverIdleSeconds: 5,
-        notificationDismiss: "manual",
-        copyOnSelect: false,
-        pathEllipsis: "end",
-        scrollbarStyle: "separate",
-      });
+    it("grouped settings survive round-trip", async () => {
+      useSettingsStore.getState().setPaste({ smart: false, imageDir: "/tmp/img" });
+      useSettingsStore.getState().setControlBar({ hoverIdleSeconds: 5 });
+      useSettingsStore.getState().setNotifications({ dismiss: "manual" });
+      useSettingsStore.getState().setTerminal({ copyOnSelect: false, scrollbarStyle: "separate" });
+      useSettingsStore.getState().setWorkspaceSelector({ pathEllipsis: "end" });
 
       await persistSession();
 
@@ -235,14 +231,15 @@ describe("persistSession", () => {
       useSettingsStore.setState(useSettingsStore.getInitialState());
       useSettingsStore.getState().loadFromSettings(saved);
 
-      const { convenience } = useSettingsStore.getState();
-      expect(convenience.smartPaste).toBe(false);
-      expect(convenience.pasteImageDir).toBe("/tmp/img");
-      expect(convenience.hoverIdleSeconds).toBe(5);
-      expect(convenience.notificationDismiss).toBe("manual");
-      expect(convenience.copyOnSelect).toBe(false);
-      expect(convenience.pathEllipsis).toBe("end");
-      expect(convenience.scrollbarStyle).toBe("separate");
+      const { paste, terminal, controlBar, notifications, workspaceSelector } =
+        useSettingsStore.getState();
+      expect(paste.smart).toBe(false);
+      expect(paste.imageDir).toBe("/tmp/img");
+      expect(controlBar.hoverIdleSeconds).toBe(5);
+      expect(notifications.dismiss).toBe("manual");
+      expect(terminal.copyOnSelect).toBe(false);
+      expect(workspaceSelector.pathEllipsis).toBe("end");
+      expect(terminal.scrollbarStyle).toBe("separate");
     });
 
     it("claude settings survive round-trip", async () => {

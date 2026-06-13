@@ -36,7 +36,7 @@ describe("PaneControlBar", () => {
     localStorage.clear();
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+      controlBar: { ...s.controlBar, defaultMode: "hover" },
     }));
     vi.clearAllMocks();
   });
@@ -259,7 +259,7 @@ describe("PaneControlBar", () => {
   it("keeps unpin available in the narrow pinned menu", async () => {
     stubPaneWidth(320);
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+      controlBar: { ...s.controlBar, defaultMode: "pinned" },
     }));
     const user = userEvent.setup();
     render(
@@ -430,7 +430,7 @@ describe("PaneControlBar", () => {
 
   it("uses defaultControlBarMode from settings when no persisted mode", () => {
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "minimized" },
+      controlBar: { ...s.controlBar, defaultMode: "minimized" },
     }));
     render(
       <PaneControlBar
@@ -448,7 +448,7 @@ describe("PaneControlBar", () => {
 
   it("uses pinned as default when configured", () => {
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+      controlBar: { ...s.controlBar, defaultMode: "pinned" },
     }));
     render(
       <PaneControlBar
@@ -477,7 +477,7 @@ describe("PaneControlBar", () => {
 
   it("renders a child-injected left bar node on the pinned bar", () => {
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "pinned" },
+      controlBar: { ...s.controlBar, defaultMode: "pinned" },
     }));
     render(
       <PaneControlBar

@@ -11,7 +11,6 @@ import {
   useSettingsStore,
   makeDefaultColorScheme,
   defaultProfileDefaults,
-  type WorkspaceSortOrder,
 } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -56,25 +55,19 @@ export function useSessionPersistence() {
         }
 
         const rawSettings = loadResult.settings;
-        const sFont = rawSettings.font;
         const sProfiles = rawSettings.profiles;
         const sColorSchemes = rawSettings.colorSchemes;
         const sKeybindings = rawSettings.keybindings;
         const sProfileDefaults = rawSettings.profileDefaults;
         const sViewOrder = rawSettings.viewOrder;
-        const sAppThemeId = rawSettings.appThemeId;
 
         // Apply to settings store
         useSettingsStore.getState().loadFromSettings({
-          ...(sFont
-            ? { font: { face: sFont.face, size: sFont.size, weight: sFont.weight ?? "normal" } }
-            : {}),
           defaultProfile: rawSettings.defaultProfile,
           profileDefaults: sProfileDefaults as Parameters<
             ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]
           >[0]["profileDefaults"],
           viewOrder: Array.isArray(sViewOrder) ? (sViewOrder as string[]) : undefined,
-          appThemeId: typeof sAppThemeId === "string" ? sAppThemeId : undefined,
           profiles:
             sProfiles?.map((p) => ({
               name: p.name,
@@ -124,14 +117,14 @@ export function useSessionPersistence() {
               keys: kb.keys,
               command: kb.command,
             })) ?? [],
-          ...(rawSettings.workspaceSortOrder
-            ? { workspaceSortOrder: rawSettings.workspaceSortOrder as WorkspaceSortOrder }
-            : {}),
-          ...(rawSettings.convenience
-            ? {
-                convenience:
-                  rawSettings.convenience as import("@/stores/settings-store").ConvenienceSettings,
-              }
+          ...(rawSettings.appearance ? { appearance: rawSettings.appearance } : {}),
+          ...(rawSettings.paste ? { paste: rawSettings.paste } : {}),
+          ...(rawSettings.terminal ? { terminal: rawSettings.terminal } : {}),
+          ...(rawSettings.controlBar ? { controlBar: rawSettings.controlBar } : {}),
+          ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
+          ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
+          ...(rawSettings.workspaceSelector
+            ? { workspaceSelector: rawSettings.workspaceSelector }
             : {}),
           ...(rawSettings.claude
             ? { claude: rawSettings.claude as import("@/lib/tauri-api").ClaudeSettings }

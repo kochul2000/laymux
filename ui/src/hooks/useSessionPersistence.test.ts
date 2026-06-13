@@ -8,7 +8,7 @@ vi.mock("@/lib/persist-session", () => ({
 
 vi.mock("@/lib/tauri-api", () => {
   const mockSettings = {
-    font: { face: "Fira Code", size: 16 },
+    profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } },
     defaultProfile: "WSL",
     profiles: [
       {
@@ -129,7 +129,6 @@ describe("useSessionPersistence", () => {
     });
 
     const settingsState = useSettingsStore.getState();
-    // Legacy root-level font is migrated to profileDefaults.font
     expect(settingsState.profileDefaults.font.face).toBe("Fira Code");
     expect(settingsState.profileDefaults.font.size).toBe(16);
     expect(settingsState.defaultProfile).toBe("WSL");
@@ -352,7 +351,7 @@ describe("useSessionPersistence", () => {
     expect(profile.font).toBeUndefined();
   });
 
-  it("loads convenience settings from backend", async () => {
+  it("loads grouped settings from backend", async () => {
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce(
       wrapOk({
         defaultProfile: "WSL",
@@ -370,15 +369,11 @@ describe("useSessionPersistence", () => {
         layouts: [],
         workspaces: [],
         docks: [],
-        convenience: {
-          smartPaste: false,
-          pasteImageDir: "/images",
-          hoverIdleSeconds: 5,
-          notificationDismiss: "manual",
-          copyOnSelect: false,
-          pathEllipsis: "end",
-          scrollbarStyle: "separate",
-        },
+        paste: { smart: false, imageDir: "/images" },
+        terminal: { copyOnSelect: false, scrollbarStyle: "separate" },
+        controlBar: { hoverIdleSeconds: 5 },
+        notifications: { dismiss: "manual" },
+        workspaceSelector: { pathEllipsis: "end" },
         claude: { syncCwd: "skip" },
       }) as any,
     );
@@ -388,14 +383,15 @@ describe("useSessionPersistence", () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(false);
-    expect(convenience.pasteImageDir).toBe("/images");
-    expect(convenience.hoverIdleSeconds).toBe(5);
-    expect(convenience.notificationDismiss).toBe("manual");
-    expect(convenience.copyOnSelect).toBe(false);
-    expect(convenience.pathEllipsis).toBe("end");
-    expect(convenience.scrollbarStyle).toBe("separate");
+    const { paste, terminal, controlBar, notifications, workspaceSelector } =
+      useSettingsStore.getState();
+    expect(paste.smart).toBe(false);
+    expect(paste.imageDir).toBe("/images");
+    expect(controlBar.hoverIdleSeconds).toBe(5);
+    expect(notifications.dismiss).toBe("manual");
+    expect(terminal.copyOnSelect).toBe(false);
+    expect(workspaceSelector.pathEllipsis).toBe("end");
+    expect(terminal.scrollbarStyle).toBe("separate");
   });
 
   it("restores layout viewConfig (overwritten layouts persist across restart)", async () => {

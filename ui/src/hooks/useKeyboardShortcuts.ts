@@ -27,12 +27,12 @@ const ARROW_TO_DIRECTION: Record<string, Direction> = {
  * #311: When a dock is focused and the user changes workspace by arrow, the
  * dock would keep visual focus while no pane was focused. The fix is to always
  * re-focus a pane on switch — falling back to pane 0 when there is no valid
- * reference. The `convenience.dockArrowFocusPane` setting (default true) lets
+ * reference. The `dock.arrowFocusPane` setting (default true) lets
  * users opt out: when false, an active dock focus is preserved (memo-style).
  */
 function switchWorkspace(id: string) {
   const wasDockFocused = useDockStore.getState().focusedDock !== null;
-  const focusPane = useSettingsStore.getState().convenience.dockArrowFocusPane;
+  const focusPane = useSettingsStore.getState().dock.arrowFocusPane;
 
   useWorkspaceStore.getState().setActiveWorkspace(id);
 
@@ -62,7 +62,7 @@ function switchWorkspace(id: string) {
 /** Sorted (display-order) workspaces + the visible subset, derived from current store state. */
 function getSortedWorkspaces() {
   const { workspaces: rawWorkspaces, workspaceDisplayOrder } = useWorkspaceStore.getState();
-  const { workspaceSortOrder } = useSettingsStore.getState();
+  const workspaceSortOrder = useSettingsStore.getState().workspaceSelector.sortOrder;
   const { notifications } = useNotificationStore.getState();
   const workspaces = sortWorkspaces(
     rawWorkspaces,
@@ -161,7 +161,7 @@ function navigatePaneFocus(e: KeyboardEvent) {
 
   const dockStore = useDockStore.getState();
   const { focusedDock } = dockStore;
-  const dockArrowNav = useSettingsStore.getState().convenience.dockArrowNav;
+  const dockArrowNav = useSettingsStore.getState().dock.arrowNav;
 
   // If currently focused on a dock, try navigation within dock panes first
   if (focusedDock !== null) {

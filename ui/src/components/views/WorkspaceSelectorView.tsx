@@ -184,7 +184,7 @@ function WorkspaceItem({
   onToggleWsHidden: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const wsDisplay = useSettingsStore((s) => s.workspaceDisplay);
+  const wsDisplay = useSettingsStore((s) => s.workspaceSelector.display);
   const claudeSettings = useSettingsStore((s) => s.claude);
   const codexSettings = useSettingsStore((s) => s.codex);
   const isCollapsed = !hideMode && isWsHidden && !isActive;
@@ -1054,9 +1054,9 @@ export function WorkspaceSelectorView() {
   const togglePaneHidden = useUiStore((s) => s.togglePaneHidden);
   const toggleWorkspaceHidden = useUiStore((s) => s.toggleWorkspaceHidden);
 
-  const pathEllipsis = useSettingsStore((s) => s.convenience.pathEllipsis);
-  const workspaceSortOrder = useSettingsStore((s) => s.workspaceSortOrder);
-  const setWorkspaceSortOrder = useSettingsStore((s) => s.setWorkspaceSortOrder);
+  const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
+  const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
+  const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const terminalInstances = useTerminalStore((s) => s.instances);
   const listeningPorts = usePortDetection();
   const portNumbers = useMemo(
@@ -1268,7 +1268,9 @@ export function WorkspaceSelectorView() {
           <button
             data-testid="sort-order-toggle"
             onClick={() =>
-              setWorkspaceSortOrder(workspaceSortOrder === "manual" ? "notification" : "manual")
+              setWorkspaceSelector({
+                sortOrder: workspaceSortOrder === "manual" ? "notification" : "manual",
+              })
             }
             className="flex cursor-pointer items-center gap-1 rounded px-1.5 text-[9px]"
             style={{

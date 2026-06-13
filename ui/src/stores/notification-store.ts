@@ -79,7 +79,7 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
 
   addNotification: ({ terminalId, workspaceId, message, level, requiresAction }) => {
     const now = Date.now();
-    const dismissMode = useSettingsStore.getState().convenience.notificationDismiss;
+    const dismissMode = useSettingsStore.getState().notifications.dismiss;
     const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
 
     // requiresAction alerts never auto-dismiss: they exist precisely to

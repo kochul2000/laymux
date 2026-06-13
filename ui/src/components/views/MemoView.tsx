@@ -80,7 +80,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   };
 
   const memo = useSettingsStore((s) => s.memo);
-  const appFont = useSettingsStore((s) => s.appFont);
+  const appFont = useSettingsStore((s) => s.appearance.font);
 
   // Paragraph detection: drives triple-click paragraph select.
   const paragraphs = useMemo(() => {

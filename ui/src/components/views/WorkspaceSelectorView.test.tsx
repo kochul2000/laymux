@@ -1162,7 +1162,10 @@ describe("WorkspaceSelectorView", () => {
   it("hides minimap when workspaceDisplay.minimap is false", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, minimap: false },
+      workspaceSelector: {
+        ...useSettingsStore.getState().workspaceSelector,
+        display: { ...useSettingsStore.getState().workspaceSelector.display, minimap: false },
+      },
     });
     useWorkspaceStore.setState({
       workspaces: [
@@ -1214,7 +1217,10 @@ describe("WorkspaceSelectorView", () => {
   it("hides activity when workspaceDisplay.activity is false", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      workspaceDisplay: { ...useSettingsStore.getState().workspaceDisplay, activity: false },
+      workspaceSelector: {
+        ...useSettingsStore.getState().workspaceSelector,
+        display: { ...useSettingsStore.getState().workspaceSelector.display, activity: false },
+      },
     });
     useWorkspaceStore.setState({
       workspaces: [
@@ -1276,21 +1282,21 @@ describe("WorkspaceSelectorView", () => {
     });
 
     it("workspace items have draggable attribute in manual sort mode", () => {
-      useSettingsStore.getState().setWorkspaceSortOrder("manual");
+      useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "manual" });
       render(<WorkspaceSelectorView />);
       const item = screen.getByTestId("workspace-item-ws-1");
       expect(item).toHaveAttribute("draggable", "true");
     });
 
     it("workspace items are not draggable in notification sort mode", () => {
-      useSettingsStore.getState().setWorkspaceSortOrder("notification");
+      useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
       render(<WorkspaceSelectorView />);
       const item = screen.getByTestId("workspace-item-ws-1");
       expect(item).toHaveAttribute("draggable", "false");
     });
 
     it("fires reorderWorkspaces on drag-drop and verifies order", () => {
-      useSettingsStore.getState().setWorkspaceSortOrder("manual");
+      useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "manual" });
       render(<WorkspaceSelectorView />);
 
       const item1 = screen.getByTestId("workspace-item-ws-1");
@@ -1334,7 +1340,7 @@ describe("WorkspaceSelectorView", () => {
         ],
         activeWorkspaceId: "ws-1",
       });
-      useSettingsStore.getState().setWorkspaceSortOrder("notification");
+      useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
     });
 
     it("preserves original array order when no workspaces have notifications", () => {
@@ -1377,14 +1383,14 @@ describe("WorkspaceSelectorView", () => {
       const user = userEvent.setup();
       render(<WorkspaceSelectorView />);
 
-      expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+      expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
 
       const toggle = screen.getByTestId("sort-order-toggle");
       await user.click(toggle);
-      expect(useSettingsStore.getState().workspaceSortOrder).toBe("notification");
+      expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("notification");
 
       await user.click(toggle);
-      expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+      expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
     });
   });
 

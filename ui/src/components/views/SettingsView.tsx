@@ -65,6 +65,20 @@ function SettingRow({
   );
 }
 
+/** Sidebar group header (e.g. "Appearance", "Terminal"). */
+function NavGroupHeader({ label }: { label: string }) {
+  return (
+    <div className="mt-3 px-3 pb-1">
+      <span
+        className="text-[10px] uppercase tracking-wider"
+        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3
@@ -136,14 +150,12 @@ function StartupSection() {
   const storeDefaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
   const profiles = useSettingsStore((s) => s.profiles);
-  const storeAppThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
-  const setAppTheme = useSettingsStore((s) => s.setAppTheme);
+  const storeAppThemeId = useSettingsStore((s) => s.appearance.themeId ?? "catppuccin-mocha");
+  const setAppearance = useSettingsStore((s) => s.setAppearance);
 
   // Draft state — only committed to store on Save
-  const [draftAppTheme, setDraftAppTheme] = useDraft(
-    "startup-appTheme",
-    storeAppThemeId,
-    setAppTheme,
+  const [draftAppTheme, setDraftAppTheme] = useDraft("startup-appTheme", storeAppThemeId, (v) =>
+    setAppearance({ themeId: v }),
   );
   const [draftDefaultProfile, setDraftDefaultProfile] = useDraft(
     "startup-defaultProfile",
@@ -225,10 +237,12 @@ function StartupSection() {
 // -- Shared: Font fields (used by both Defaults and Profile) --
 
 function FontSection() {
-  const storeAppFont = useSettingsStore((s) => s.appFont);
-  const setAppFont = useSettingsStore((s) => s.setAppFont);
+  const storeAppFont = useSettingsStore((s) => s.appearance.font);
+  const setAppearance = useSettingsStore((s) => s.setAppearance);
   const monoFonts = useMonospacedFonts();
-  const [draftFont, setDraftFont] = useDraft("appFont", storeAppFont, setAppFont);
+  const [draftFont, setDraftFont] = useDraft("appFont", storeAppFont, (f) =>
+    setAppearance({ font: f }),
+  );
 
   return (
     <div>
@@ -1138,288 +1152,208 @@ function ColorSchemesSection() {
   );
 }
 
-// -- Section: Convenience --
+// -- Shared: toggle row --
 
-function ConvenienceSection() {
-  const storeConvenience = useSettingsStore((s) => s.convenience);
-  const setConvenience = useSettingsStore((s) => s.setConvenience);
-  const [convenience, setDraftConvenience] = useDraft("convenience", storeConvenience, (v) =>
-    setConvenience(v),
+function ToggleRow({
+  label,
+  desc,
+  testid,
+  checked,
+  onChange,
+}: {
+  label: string;
+  desc: string;
+  testid: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <SettingRow label={label} desc={desc}>
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          data-testid={testid}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+          {checked ? "Enabled" : "Disabled"}
+        </span>
+      </label>
+    </SettingRow>
   );
-  const updateConvenience = (partial: Partial<typeof convenience>) =>
-    setDraftConvenience((prev) => ({ ...prev, ...partial }));
+}
+
+// -- Section: Paste --
+
+function PasteSection() {
+  const storePaste = useSettingsStore((s) => s.paste);
+  const setPaste = useSettingsStore((s) => s.setPaste);
+  const [paste, setDraftPaste] = useDraft("paste", storePaste, (v) => setPaste(v));
+  const update = (partial: Partial<typeof paste>) =>
+    setDraftPaste((prev) => ({ ...prev, ...partial }));
 
   return (
     <div>
-      <SectionTitle>Convenience</SectionTitle>
-
+      <SectionTitle>Paste</SectionTitle>
       <div style={cardStyle} className="p-4">
-        {/* Smart Paste toggle */}
-        <div className="flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Smart Paste
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="smart-paste-toggle"
-                type="checkbox"
-                checked={convenience.smartPaste}
-                onChange={(e) => updateConvenience({ smartPaste: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.smartPaste ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Smart Paste"
+          desc="Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기"
+          testid="smart-paste-toggle"
+          checked={paste.smart}
+          onChange={(v) => update({ smart: v })}
+        />
 
-        {/* Multi-file paste separator (#325) */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Multi-file Separator
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              여러 파일 붙여넣기 시 경로 사이 구분자
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <select
-              data-testid="paste-path-separator-select"
-              value={convenience.pastePathSeparator}
-              onChange={(e) =>
-                updateConvenience({
-                  pastePathSeparator: e.target.value as PastePathSeparator,
-                })
-              }
-              className={inputCls}
-              style={inputStyle}
-            >
-              <option value="space">Space</option>
-              <option value="newline">Newline</option>
-              <option value="comma">Comma (,)</option>
-              <option value="semicolon">Semicolon (;)</option>
-            </select>
-          </div>
-        </div>
+        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
+          <select
+            data-testid="paste-path-separator-select"
+            value={paste.pathSeparator}
+            onChange={(e) => update({ pathSeparator: e.target.value as PastePathSeparator })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="space">Space</option>
+            <option value="newline">Newline</option>
+            <option value="comma">Comma (,)</option>
+            <option value="semicolon">Semicolon (;)</option>
+          </select>
+        </SettingRow>
 
-        {/* Multi-file paste quote wrapping (#325) */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Quote File Paths
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="paste-path-quote-toggle"
-                type="checkbox"
-                checked={convenience.pastePathQuote}
-                onChange={(e) => updateConvenience({ pastePathQuote: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.pastePathQuote ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Quote File Paths"
+          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
+          testid="paste-path-quote-toggle"
+          checked={paste.pathQuote}
+          onChange={(v) => update({ pathQuote: v })}
+        />
 
-        {/* Smart Remove Indent toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Smart Remove Indent
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              붙여넣기 시 공통 들여쓰기 제거
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="smart-remove-indent-toggle"
-                type="checkbox"
-                checked={convenience.smartRemoveIndent}
-                onChange={(e) => updateConvenience({ smartRemoveIndent: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.smartRemoveIndent ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Smart Remove Indent"
+          desc="붙여넣기 시 공통 들여쓰기 제거"
+          testid="smart-remove-indent-toggle"
+          checked={paste.removeIndent}
+          onChange={(v) => update({ removeIndent: v })}
+        />
 
-        {/* Smart Remove Line Break toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Smart Remove Line Break
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              붙여넣기 시 줄바꿈으로 깨진 URL 복원
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="smart-remove-linebreak-toggle"
-                type="checkbox"
-                checked={convenience.smartRemoveLineBreak}
-                onChange={(e) => updateConvenience({ smartRemoveLineBreak: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.smartRemoveLineBreak ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Smart Remove Line Break"
+          desc="붙여넣기 시 줄바꿈으로 깨진 URL 복원"
+          testid="smart-remove-linebreak-toggle"
+          checked={paste.removeLineBreak}
+          onChange={(v) => update({ removeLineBreak: v })}
+        />
 
-        {/* Smart Link Join toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Smart Link Join
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              인덴트된 여러 줄 URL을 하나의 클릭 가능한 링크로 감지
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="smart-link-join-toggle"
-                type="checkbox"
-                checked={convenience.smartLinkJoin}
-                onChange={(e) => updateConvenience({ smartLinkJoin: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.smartLinkJoin ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Smart Link Join"
+          desc="인덴트된 여러 줄 URL을 하나의 클릭 가능한 링크로 감지"
+          testid="smart-link-join-toggle"
+          checked={paste.linkJoin}
+          onChange={(v) => update({ linkJoin: v })}
+        />
 
-        {/* Copy On Select toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Copy On Select
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              터미널에서 텍스트 선택 시 자동으로 클립보드에 복사
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="copy-on-select-toggle"
-                type="checkbox"
-                checked={convenience.copyOnSelect}
-                onChange={(e) => updateConvenience({ copyOnSelect: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.copyOnSelect ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <ToggleRow
+          label="Large Paste Warning"
+          desc="대용량 텍스트 붙여넣기 시 확인 다이얼로그 표시"
+          testid="large-paste-warning-toggle"
+          checked={paste.largeWarning}
+          onChange={(v) => update({ largeWarning: v })}
+        />
 
-        {/* Large Paste Warning toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Large Paste Warning
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              대용량 텍스트 붙여넣기 시 확인 다이얼로그 표시
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="large-paste-warning-toggle"
-                type="checkbox"
-                checked={convenience.largePasteWarning}
-                onChange={(e) => updateConvenience({ largePasteWarning: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.largePasteWarning ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
+          <FocusInput
+            data-testid="paste-image-dir-input"
+            className={inputCls}
+            placeholder="(default: %APPDATA%\laymux\paste-images)"
+            value={paste.imageDir}
+            onChange={(e) => update({ imageDir: e.target.value })}
+          />
+        </SettingRow>
+      </div>
+    </div>
+  );
+}
 
-        {/* Paste Image Directory */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Image Directory
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              이미지 저장 경로 (비워두면 기본 디렉터리 사용)
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusInput
-              data-testid="paste-image-dir-input"
-              className={inputCls}
-              placeholder="(default: %APPDATA%\laymux\paste-images)"
-              value={convenience.pasteImageDir}
-              onChange={(e) => updateConvenience({ pasteImageDir: e.target.value })}
-            />
-          </div>
-        </div>
+// -- Section: Terminal --
 
-        {/* Hover idle seconds */}
-        <div className="flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Hover Auto-hide
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)
-            </p>
-          </div>
+function TerminalSection() {
+  const storeTerminal = useSettingsStore((s) => s.terminal);
+  const setTerminal = useSettingsStore((s) => s.setTerminal);
+  const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminal, (v) => setTerminal(v));
+  const update = (partial: Partial<typeof terminal>) =>
+    setDraftTerminal((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>Terminal</SectionTitle>
+      <div style={cardStyle} className="p-4">
+        <ToggleRow
+          label="Copy On Select"
+          desc="터미널에서 텍스트 선택 시 자동으로 클립보드에 복사"
+          testid="copy-on-select-toggle"
+          checked={terminal.copyOnSelect}
+          onChange={(v) => update({ copyOnSelect: v })}
+        />
+
+        <SettingRow
+          label="Scrollbar Style"
+          desc="터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다."
+        >
+          <FocusSelect
+            data-testid="scrollbar-style-select"
+            className={inputCls}
+            value={terminal.scrollbarStyle}
+            onChange={(e) => update({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
+          >
+            <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
+            <option value="separate">Separate (별도 공간 차지)</option>
+          </FocusSelect>
+        </SettingRow>
+      </div>
+    </div>
+  );
+}
+
+// -- Section: Interface (control bar, dock, notifications) --
+
+function InterfaceSection() {
+  const storeControlBar = useSettingsStore((s) => s.controlBar);
+  const setControlBar = useSettingsStore((s) => s.setControlBar);
+  const storeDock = useSettingsStore((s) => s.dock);
+  const setDock = useSettingsStore((s) => s.setDock);
+  const storeNotifications = useSettingsStore((s) => s.notifications);
+  const setNotifications = useSettingsStore((s) => s.setNotifications);
+
+  const [controlBar, setDraftControlBar] = useDraft("controlBar", storeControlBar, (v) =>
+    setControlBar(v),
+  );
+  const [dock, setDraftDock] = useDraft("dock", storeDock, (v) => setDock(v));
+  const [notifications, setDraftNotifications] = useDraft(
+    "notifications",
+    storeNotifications,
+    (v) => setNotifications(v),
+  );
+  const updateControlBar = (partial: Partial<typeof controlBar>) =>
+    setDraftControlBar((prev) => ({ ...prev, ...partial }));
+  const updateDock = (partial: Partial<typeof dock>) =>
+    setDraftDock((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>Interface</SectionTitle>
+
+      {/* Control Bar */}
+      <div style={cardStyle} className="p-4">
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
+          Control Bar
+        </h3>
+        <SettingRow
+          label="Hover Auto-hide"
+          desc="마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)"
+        >
           <div className="flex items-center gap-2">
             <FocusInput
               data-testid="hover-idle-seconds-input"
@@ -1429,252 +1363,88 @@ function ConvenienceSection() {
               step={0.5}
               className={inputCls}
               style={{ width: 70 }}
-              value={convenience.hoverIdleSeconds}
+              value={controlBar.hoverIdleSeconds}
               onChange={(e) =>
-                updateConvenience({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
+                updateControlBar({ hoverIdleSeconds: Math.max(0, Number(e.target.value)) })
               }
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
               초
             </span>
           </div>
-        </div>
+        </SettingRow>
 
-        {/* Hidden terminal auto-close (issue #269) */}
-        <div className="flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Hidden Auto-close
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              숨긴 워크스페이스/Pane의 터미널을 자동 종료해 리소스 절약 (0 = 종료 안 함). 다시
-              표시하면 새 터미널이 생성됩니다.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="hidden-auto-close-seconds-input"
-              type="number"
-              min={0}
-              step={30}
-              className={inputCls}
-              style={{ width: 80 }}
-              value={convenience.hiddenAutoCloseSeconds}
-              onChange={(e) =>
-                updateConvenience({
-                  hiddenAutoCloseSeconds: Math.max(0, Math.floor(Number(e.target.value))),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              초
-            </span>
-          </div>
-        </div>
+        <SettingRow label="Control Bar Mode" desc="새 Pane의 기본 컨트롤 바 모드">
+          <FocusSelect
+            data-testid="default-control-bar-mode-select"
+            className={inputCls}
+            value={controlBar.defaultMode}
+            onChange={(e) =>
+              updateControlBar({ defaultMode: e.target.value as "hover" | "pinned" | "minimized" })
+            }
+          >
+            <option value="minimized">Minimized (최소화, 호버 시 ⋯ 버튼)</option>
+            <option value="hover">Hover (호버 시 바 표시)</option>
+            <option value="pinned">Pinned (항상 고정 표시)</option>
+          </FocusSelect>
+        </SettingRow>
+      </div>
 
-        {/* Default control bar mode */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Control Bar Mode
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              새 Pane의 기본 컨트롤 바 모드
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="default-control-bar-mode-select"
-              className={inputCls}
-              value={convenience.defaultControlBarMode}
-              onChange={(e) =>
-                updateConvenience({
-                  defaultControlBarMode: e.target.value as "hover" | "pinned" | "minimized",
-                })
-              }
-            >
-              <option value="minimized">Minimized (최소화, 호버 시 ⋯ 버튼)</option>
-              <option value="hover">Hover (호버 시 바 표시)</option>
-              <option value="pinned">Pinned (항상 고정 표시)</option>
-            </FocusSelect>
-          </div>
-        </div>
+      {/* Dock */}
+      <div style={cardStyle} className="mt-3 p-4">
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
+          Dock
+        </h3>
+        <ToggleRow
+          label="Dock Persist State"
+          desc="Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)"
+          testid="dock-persist-state-toggle"
+          checked={dock.persistState}
+          onChange={(v) => updateDock({ persistState: v })}
+        />
+        <ToggleRow
+          label="Dock Arrow Nav"
+          desc="Alt+Arrow로 Dock 영역 진입/이탈 허용"
+          testid="dock-arrow-nav-toggle"
+          checked={dock.arrowNav}
+          onChange={(v) => updateDock({ arrowNav: v })}
+        />
+        <ToggleRow
+          label="Workspace Switch Focus"
+          desc="화살표로 워크스페이스 이동 시 Dock에서 Pane으로 포커스 자동 이동"
+          testid="dock-arrow-focus-pane-toggle"
+          checked={dock.arrowFocusPane}
+          onChange={(v) => updateDock({ arrowFocusPane: v })}
+        />
+      </div>
 
-        {/* Notification dismiss mode */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Notification Dismiss
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              알림을 읽음 처리하는 시점
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="notification-dismiss-select"
-              className={inputCls}
-              value={convenience.notificationDismiss}
-              onChange={(e) =>
-                updateConvenience({
-                  notificationDismiss: e.target.value as "workspace" | "paneFocus" | "manual",
-                })
-              }
-            >
-              <option value="workspace">워크스페이스 선택 시 자동 해제</option>
-              <option value="paneFocus">Pane 포커스 시 자동 해제</option>
-              <option value="manual">알림 클릭으로만 해제</option>
-            </FocusSelect>
-          </div>
-        </div>
-
-        {/* Path ellipsis mode */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Path Ellipsis
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              경로가 길 때 생략 방향 (워크스페이스 목록)
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="path-ellipsis-select"
-              className={inputCls}
-              value={convenience.pathEllipsis}
-              onChange={(e) => setConvenience({ pathEllipsis: e.target.value as "start" | "end" })}
-            >
-              <option value="start">앞부분 생략 (.../dir/file)</option>
-              <option value="end">뒷부분 생략 (/home/user/...)</option>
-            </FocusSelect>
-          </div>
-        </div>
-
-        {/* Scrollbar style */}
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Scrollbar Style
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을
-              차지합니다.
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <FocusSelect
-              data-testid="scrollbar-style-select"
-              className={inputCls}
-              value={convenience.scrollbarStyle}
-              onChange={(e) =>
-                setConvenience({ scrollbarStyle: e.target.value as "overlay" | "separate" })
-              }
-            >
-              <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
-              <option value="separate">Separate (별도 공간 차지)</option>
-            </FocusSelect>
-          </div>
-        </div>
-
-        {/* Dock Persist State toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Dock Persist State
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="dock-persist-state-toggle"
-                type="checkbox"
-                checked={convenience.dockPersistState}
-                onChange={(e) => updateConvenience({ dockPersistState: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.dockPersistState ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {/* Dock Arrow Nav toggle */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Dock Arrow Nav
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              Alt+Arrow로 Dock 영역 진입/이탈 허용
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="dock-arrow-nav-toggle"
-                type="checkbox"
-                checked={convenience.dockArrowNav}
-                onChange={(e) => updateConvenience({ dockArrowNav: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.dockArrowNav ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {/* Dock Arrow Focus Pane toggle (#311) */}
-        <div className="mt-3 flex items-start gap-3 py-1">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Workspace Switch Focus
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              화살표로 워크스페이스 이동 시 Dock에서 Pane으로 포커스 자동 이동
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                data-testid="dock-arrow-focus-pane-toggle"
-                type="checkbox"
-                checked={convenience.dockArrowFocusPane}
-                onChange={(e) => updateConvenience({ dockArrowFocusPane: e.target.checked })}
-              />
-              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {convenience.dockArrowFocusPane ? "Enabled" : "Disabled"}
-              </span>
-            </label>
-          </div>
-        </div>
+      {/* Notifications */}
+      <div style={cardStyle} className="mt-3 p-4">
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
+          Notifications
+        </h3>
+        <SettingRow label="Notification Dismiss" desc="알림을 읽음 처리하는 시점">
+          <FocusSelect
+            data-testid="notification-dismiss-select"
+            className={inputCls}
+            value={notifications.dismiss}
+            onChange={(e) =>
+              setDraftNotifications({
+                dismiss: e.target.value as "workspace" | "paneFocus" | "manual",
+              })
+            }
+          >
+            <option value="workspace">워크스페이스 선택 시 자동 해제</option>
+            <option value="paneFocus">Pane 포커스 시 자동 해제</option>
+            <option value="manual">알림 클릭으로만 해제</option>
+          </FocusSelect>
+        </SettingRow>
       </div>
     </div>
   );
@@ -1683,20 +1453,23 @@ function ConvenienceSection() {
 // -- Section: Workspaces --
 
 function WorkspacesSection() {
-  const storeWsDisplay = useSettingsStore((s) => s.workspaceDisplay);
-  const setWsDisplay = useSettingsStore((s) => s.setWorkspaceDisplay);
+  const storeWsSelector = useSettingsStore((s) => s.workspaceSelector);
+  const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const storeSyncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
   const setSyncCwdDefaults = useSettingsStore((s) => s.setSyncCwdDefaults);
-  const [wsDisplay, setDraftWsDisplay] = useDraft("workspaceDisplay", storeWsDisplay, (v) =>
-    setWsDisplay(v),
+  const [wsSelector, setDraftWsSelector] = useDraft("workspaceSelector", storeWsSelector, (v) =>
+    setWorkspaceSelector(v),
   );
   const [syncCwdDefaults, setDraftSyncCwdDefaults] = useDraft(
     "syncCwdDefaults",
     storeSyncCwdDefaults,
     (v) => setSyncCwdDefaults(v),
   );
+  const wsDisplay = wsSelector.display;
   const updateWsDisplay = (partial: Partial<typeof wsDisplay>) =>
-    setDraftWsDisplay((prev) => ({ ...prev, ...partial }));
+    setDraftWsSelector((prev) => ({ ...prev, display: { ...prev.display, ...partial } }));
+  const updateWsSelector = (partial: Partial<typeof wsSelector>) =>
+    setDraftWsSelector((prev) => ({ ...prev, ...partial }));
   const updateSyncCwdDefault = (
     location: "workspace" | "dock",
     key: "send" | "receive",
@@ -1755,6 +1528,53 @@ function WorkspacesSection() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Behavior */}
+      <div style={cardStyle} className="mt-3 p-4">
+        <h3
+          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+        >
+          Behavior
+        </h3>
+
+        <SettingRow label="Path Ellipsis" desc="경로가 길 때 생략 방향 (워크스페이스 목록)">
+          <FocusSelect
+            data-testid="path-ellipsis-select"
+            className={inputCls}
+            value={wsSelector.pathEllipsis}
+            onChange={(e) => updateWsSelector({ pathEllipsis: e.target.value as "start" | "end" })}
+          >
+            <option value="start">앞부분 생략 (.../dir/file)</option>
+            <option value="end">뒷부분 생략 (/home/user/...)</option>
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow
+          label="Hidden Auto-close"
+          desc="숨긴 워크스페이스/Pane의 터미널을 자동 종료해 리소스 절약 (0 = 종료 안 함). 다시 표시하면 새 터미널이 생성됩니다."
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="hidden-auto-close-seconds-input"
+              type="number"
+              min={0}
+              step={30}
+              className={inputCls}
+              style={{ width: 80 }}
+              value={wsSelector.hiddenAutoCloseSeconds}
+              onChange={(e) =>
+                updateWsSelector({
+                  hiddenAutoCloseSeconds: Math.max(0, Math.floor(Number(e.target.value))),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              초
+            </span>
+          </div>
+        </SettingRow>
       </div>
 
       {/* Default CWD propagation */}
@@ -2407,7 +2227,7 @@ function FileExplorerSection() {
 function IssueReporterSection() {
   const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
   const setIssueReporter = useSettingsStore((s) => s.setIssueReporter);
-  const appFont = useSettingsStore((s) => s.appFont);
+  const appFont = useSettingsStore((s) => s.appearance.font);
   const monoFonts = useMonospacedFonts();
   const [issueReporter, setDraftIssueReporter] = useDraft(
     "issueReporter",
@@ -2574,7 +2394,7 @@ function IssueReporterSection() {
 function MemoSection() {
   const storeMemo = useSettingsStore((s) => s.memo);
   const setMemo = useSettingsStore((s) => s.setMemo);
-  const appFont = useSettingsStore((s) => s.appFont);
+  const appFont = useSettingsStore((s) => s.appearance.font);
   const monoFonts = useMonospacedFonts();
   const [memo, setDraftMemo] = useDraft("memo", storeMemo, (v) => setMemo(v));
   const updateMemo = (partial: Partial<typeof memo>) =>
@@ -3322,7 +3142,8 @@ export function SettingsView() {
             settings.json
           </button>
 
-          {/* General settings */}
+          {/* Appearance */}
+          <NavGroupHeader label="Appearance" />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("startup")}
@@ -3340,8 +3161,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("font")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Font
+            App Font
           </button>
+
+          {/* Terminal */}
+          <NavGroupHeader label="Terminal" />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("colorSchemes")}
@@ -3352,23 +3176,37 @@ export function SettingsView() {
             Color Schemes
           </button>
           <button
+            data-testid="nav-terminal"
             className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("keybindings")}
-            onClick={() => setActiveNav("keybindings")}
-            onMouseEnter={() => setNavHover("keybindings")}
+            style={navBtnStyle("terminal")}
+            onClick={() => setActiveNav("terminal")}
+            onMouseEnter={() => setNavHover("terminal")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Keybindings
+            Terminal
           </button>
           <button
-            data-testid="nav-convenience"
+            data-testid="nav-paste"
             className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("convenience")}
-            onClick={() => setActiveNav("convenience")}
-            onMouseEnter={() => setNavHover("convenience")}
+            style={navBtnStyle("paste")}
+            onClick={() => setActiveNav("paste")}
+            onMouseEnter={() => setNavHover("paste")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Convenience
+            Paste
+          </button>
+
+          {/* Interface */}
+          <NavGroupHeader label="Interface" />
+          <button
+            data-testid="nav-interface"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("interface")}
+            onClick={() => setActiveNav("interface")}
+            onMouseEnter={() => setNavHover("interface")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Interface
           </button>
           <button
             data-testid="nav-workspaceDisplay"
@@ -3380,6 +3218,9 @@ export function SettingsView() {
           >
             Workspaces
           </button>
+
+          {/* Integrations */}
+          <NavGroupHeader label="Integrations" />
           <button
             data-testid="nav-claude"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3400,6 +3241,9 @@ export function SettingsView() {
           >
             Codex
           </button>
+
+          {/* Views */}
+          <NavGroupHeader label="Views" />
           <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3429,6 +3273,18 @@ export function SettingsView() {
             onMouseLeave={() => setNavHover(null)}
           >
             Issue Reporter
+          </button>
+
+          {/* Input */}
+          <NavGroupHeader label="Input" />
+          <button
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("keybindings")}
+            onClick={() => setActiveNav("keybindings")}
+            onMouseEnter={() => setNavHover("keybindings")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            Keybindings
           </button>
 
           {/* Profiles group */}
@@ -3516,7 +3372,9 @@ export function SettingsView() {
             )}
             {activeNav === "colorSchemes" && <ColorSchemesSection />}
             {activeNav === "keybindings" && <KeybindingsSection />}
-            {activeNav === "convenience" && <ConvenienceSection />}
+            {activeNav === "terminal" && <TerminalSection />}
+            {activeNav === "paste" && <PasteSection />}
+            {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}

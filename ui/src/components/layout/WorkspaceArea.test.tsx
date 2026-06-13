@@ -25,7 +25,7 @@ describe("WorkspaceArea", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, defaultControlBarMode: "hover" },
+      controlBar: { ...s.controlBar, defaultMode: "hover" },
     }));
   });
 

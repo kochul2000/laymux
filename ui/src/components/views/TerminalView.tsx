@@ -140,12 +140,12 @@ function pasteFromBrowserClipboard(terminal: Terminal, logPrefix: string): void 
  */
 function runTerminalCopy(terminal: Terminal): void {
   if (!terminal.hasSelection()) return;
-  const { convenience: conv } = useSettingsStore.getState();
-  const useSmart = conv.smartRemoveIndent || conv.smartRemoveLineBreak;
+  const { paste } = useSettingsStore.getState();
+  const useSmart = paste.removeIndent || paste.removeLineBreak;
   const text = useSmart
     ? prepareSelectionForCopy(terminal.getSelection(), {
-        smartRemoveIndent: conv.smartRemoveIndent,
-        smartRemoveLineBreak: conv.smartRemoveLineBreak,
+        smartRemoveIndent: paste.removeIndent,
+        smartRemoveLineBreak: paste.removeLineBreak,
       })
     : terminal.getSelection();
   clipboardWriteText(text).catch((err) => {
@@ -166,12 +166,12 @@ function runTerminalCopy(terminal: Terminal): void {
  * as plain text — instead of silently doing nothing.
  */
 function runTerminalPaste(terminal: Terminal, profile: string): void {
-  const { convenience: conv } = useSettingsStore.getState();
-  if (!conv.smartPaste) {
+  const { paste } = useSettingsStore.getState();
+  if (!paste.smart) {
     pasteFromBrowserClipboard(terminal, "plain paste");
     return;
   }
-  smartPaste(conv.pasteImageDir, profile)
+  smartPaste(paste.imageDir, profile)
     .then((result) => {
       if (result.pasteType === "none" || !result.content) return;
       // Multiple clipboard files (issue #325): join all resolved paths with
@@ -181,14 +181,14 @@ function runTerminalPaste(terminal: Terminal, profile: string): void {
       const content =
         result.pasteType === "path" && result.paths && result.paths.length > 0
           ? formatPastePaths(result.paths, {
-              separator: conv.pastePathSeparator,
-              quote: conv.pastePathQuote,
+              separator: paste.pathSeparator,
+              quote: paste.pathQuote,
             })
           : transformPasteContent(result.content, result.pasteType, {
-              removeIndent: conv.smartRemoveIndent,
-              removeLineBreak: conv.smartRemoveLineBreak,
+              removeIndent: paste.removeIndent,
+              removeLineBreak: paste.removeLineBreak,
             });
-      if (shouldBlockLargePaste(content, conv.largePasteWarning)) return;
+      if (shouldBlockLargePaste(content, paste.largeWarning)) return;
       terminal.paste(content);
     })
     .catch((err) => {
@@ -458,7 +458,7 @@ export function TerminalView({
 
     // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
     // does not reserve space for the scrollbar — it renders on top of content.
-    const sbStyle = settingsState.convenience.scrollbarStyle ?? "overlay";
+    const sbStyle = settingsState.terminal.scrollbarStyle ?? "overlay";
     const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
 
     const resolvedFont = settingsState.resolveFont(
@@ -508,7 +508,7 @@ export function TerminalView({
       createIndentedLinkProvider(
         terminal,
         (uri) => openExternal(uri).catch(() => {}),
-        () => useSettingsStore.getState().convenience.smartLinkJoin,
+        () => useSettingsStore.getState().paste.linkJoin,
       ),
     );
 
@@ -1260,7 +1260,7 @@ export function TerminalView({
     // `runTerminalCopy` handles the has-selection guard and smart-indent
     // branching, keeping this path in lockstep with Ctrl+C and right-click.
     terminal.onSelectionChange(() => {
-      if (useSettingsStore.getState().convenience.copyOnSelect) {
+      if (useSettingsStore.getState().terminal.copyOnSelect) {
         runTerminalCopy(terminal);
       }
     });
@@ -1286,7 +1286,7 @@ export function TerminalView({
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       const onWindowPointerUp = () => {
         pointerUpWatcher = null;
-        if (!useSettingsStore.getState().convenience.copyOnSelect) return;
+        if (!useSettingsStore.getState().terminal.copyOnSelect) return;
         runTerminalCopy(terminal);
       };
       pointerUpWatcher = onWindowPointerUp;
@@ -2273,9 +2273,7 @@ export function TerminalView({
   }, []);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
-  const scrollbarStyleForEffect = useSettingsStore(
-    (s) => s.convenience.scrollbarStyle ?? "overlay",
-  );
+  const scrollbarStyleForEffect = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   useEffect(() => {
     const term = terminalRef.current;
     if (!term?.options) return;
@@ -2310,7 +2308,7 @@ export function TerminalView({
 
   // Scrollbar style: overlay (default) renders on top of terminal content,
   // separate reserves space for the scrollbar.
-  const scrollbarStyle = useSettingsStore((s) => s.convenience.scrollbarStyle ?? "overlay");
+  const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
   const wrapperStyle: CSSProperties & {

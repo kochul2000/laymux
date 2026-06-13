@@ -658,7 +658,7 @@ export function PaneControlBar({
   const persistedMode = useOverridesStore((s) =>
     paneId ? s.paneOverrides[paneId]?.controlBarMode : undefined,
   );
-  const defaultMode = useSettingsStore((s) => s.convenience.defaultControlBarMode);
+  const defaultMode = useSettingsStore((s) => s.controlBar.defaultMode);
   const setPaneOverride = useOverridesStore((s) => s.setPaneOverride);
   // Local fallback for components rendered without a paneId (tests, previews) —
   // keeps toggling functional but doesn't persist anywhere.

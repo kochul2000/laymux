@@ -42,7 +42,7 @@ describe("SettingsView", () => {
     render(<SettingsView />);
     await user.click(screen.getByTestId("nav-profile-defaults"));
     // "Font" appears in both nav sidebar and profile defaults section
-    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(1);
     const input = screen.getByTestId("font-face-input") as HTMLInputElement;
     expect(input.value).toBe("Cascadia Mono");
   });
@@ -154,7 +154,7 @@ describe("SettingsView", () => {
     const select = screen.getByTestId("app-theme-select") as HTMLSelectElement;
     await user.selectOptions(select, "dracula");
 
-    expect(useSettingsStore.getState().appThemeId).toBe("catppuccin-mocha");
+    expect(useSettingsStore.getState().appearance.themeId).toBe("catppuccin-mocha");
     expect(select.value).toBe("dracula");
   });
 
@@ -168,7 +168,7 @@ describe("SettingsView", () => {
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().appThemeId).toBe("dracula");
+    expect(useSettingsStore.getState().appearance.themeId).toBe("dracula");
   });
 
   // -- Default Profile draft --
@@ -263,10 +263,10 @@ describe("SettingsView", () => {
     await user.click(within(tabBar).getByText("Additional Settings"));
 
     // Font fields (multiple "Font" text: nav sidebar + profile section)
-    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Font").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("font-face-input")).toBeInTheDocument();
     // Appearance fields
-    expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getAllByText("Appearance").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Color Scheme")).toBeInTheDocument();
     expect(screen.getByText("Opacity")).toBeInTheDocument();
     expect(screen.getByText("Padding")).toBeInTheDocument();
@@ -584,7 +584,7 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByTestId("nav-profile-defaults"));
     expect(screen.getByText("Profile Defaults")).toBeInTheDocument();
-    expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getAllByText("Appearance").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Cursor")).toBeInTheDocument();
     expect(screen.getByText("Cursor Shape")).toBeInTheDocument();
     expect(screen.getByText("Scrollback Lines")).toBeInTheDocument();
@@ -710,20 +710,20 @@ describe("SettingsView", () => {
     expect(screen.getByText("UI")).toBeInTheDocument();
   });
 
-  // -- Convenience section --
+  // -- Paste section --
 
-  it("shows Convenience nav button", () => {
+  it("shows Paste nav button", () => {
     render(<SettingsView />);
-    expect(screen.getByTestId("nav-convenience")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-paste")).toBeInTheDocument();
   });
 
-  it("renders Convenience section with smart paste toggle", async () => {
+  it("renders Paste section with smart paste toggle", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
-    // "Convenience" appears in both nav button and section title
-    expect(screen.getAllByText("Convenience").length).toBeGreaterThanOrEqual(2);
+    await user.click(screen.getByTestId("nav-paste"));
+    // "Paste" appears in both nav button and section title
+    expect(screen.getAllByText("Paste").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("smart-paste-toggle")).toBeInTheDocument();
   });
 
@@ -731,7 +731,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
     expect(toggle.checked).toBe(true);
   });
@@ -740,33 +740,33 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const toggle = screen.getByTestId("smart-paste-toggle");
     await user.click(toggle);
 
     // Store unchanged
-    expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
+    expect(useSettingsStore.getState().paste.smart).toBe(true);
   });
 
   it("toggling smart paste updates store after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const toggle = screen.getByTestId("smart-paste-toggle");
     await user.click(toggle);
 
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+    expect(useSettingsStore.getState().paste.smart).toBe(false);
   });
 
   it("renders multi-file paste separator select and quote toggle (#325)", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const select = screen.getByTestId("paste-path-separator-select") as HTMLSelectElement;
     expect(select.value).toBe("space"); // 기본값
     const quoteToggle = screen.getByTestId("paste-path-quote-toggle") as HTMLInputElement;
@@ -777,60 +777,35 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const select = screen.getByTestId("paste-path-separator-select") as HTMLSelectElement;
     await user.selectOptions(select, "newline");
 
     // Store unchanged until Save
-    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("space");
+    expect(useSettingsStore.getState().paste.pathSeparator).toBe("space");
 
     await user.click(screen.getByTestId("save-settings-btn"));
-    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("newline");
+    expect(useSettingsStore.getState().paste.pathSeparator).toBe("newline");
   });
 
   it("toggling paste path quote updates store after Save (#325)", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     await user.click(screen.getByTestId("paste-path-quote-toggle"));
 
-    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(false);
+    expect(useSettingsStore.getState().paste.pathQuote).toBe(false);
 
     await user.click(screen.getByTestId("save-settings-btn"));
-    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(true);
-  });
-
-  it("does NOT update copy on select in store until Save is clicked", async () => {
-    const user = userEvent.setup();
-    render(<SettingsView />);
-
-    await user.click(screen.getByTestId("nav-convenience"));
-    const toggle = screen.getByTestId("copy-on-select-toggle");
-    await user.click(toggle);
-
-    expect(useSettingsStore.getState().convenience.copyOnSelect).toBe(true);
-  });
-
-  it("toggling copy on select updates store after Save", async () => {
-    const user = userEvent.setup();
-    render(<SettingsView />);
-
-    await user.click(screen.getByTestId("nav-convenience"));
-    const toggle = screen.getByTestId("copy-on-select-toggle");
-    await user.click(toggle);
-
-    const saveBtn = screen.getByTestId("save-settings-btn");
-    await user.click(saveBtn);
-
-    expect(useSettingsStore.getState().convenience.copyOnSelect).toBe(false);
+    expect(useSettingsStore.getState().paste.pathQuote).toBe(true);
   });
 
   it("shows paste image dir input", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     expect(screen.getByTestId("paste-image-dir-input")).toBeInTheDocument();
   });
 
@@ -838,19 +813,19 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const input = screen.getByTestId("paste-image-dir-input") as HTMLInputElement;
     await user.clear(input);
     await user.type(input, "C:\\my\\dir");
 
-    expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("");
+    expect(useSettingsStore.getState().paste.imageDir).toBe("");
   });
 
   it("paste image dir input updates store after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const input = screen.getByTestId("paste-image-dir-input") as HTMLInputElement;
     await user.clear(input);
     await user.type(input, "C:\\my\\dir");
@@ -858,16 +833,43 @@ describe("SettingsView", () => {
     const saveBtn = screen.getByTestId("save-settings-btn");
     await user.click(saveBtn);
 
-    expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\my\\dir");
+    expect(useSettingsStore.getState().paste.imageDir).toBe("C:\\my\\dir");
   });
 
-  // -- Scrollbar style --
+  // -- Terminal section: copy on select --
 
-  it("shows scrollbar style select in convenience section", async () => {
+  it("does NOT update copy on select in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("copy-on-select-toggle");
+    await user.click(toggle);
+
+    expect(useSettingsStore.getState().terminal.copyOnSelect).toBe(true);
+  });
+
+  it("toggling copy on select updates store after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("copy-on-select-toggle");
+    await user.click(toggle);
+
+    const saveBtn = screen.getByTestId("save-settings-btn");
+    await user.click(saveBtn);
+
+    expect(useSettingsStore.getState().terminal.copyOnSelect).toBe(false);
+  });
+
+  // -- Terminal section: scrollbar style --
+
+  it("shows scrollbar style select in terminal section", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
     expect(screen.getByTestId("scrollbar-style-select")).toBeInTheDocument();
   });
 
@@ -875,19 +877,21 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-terminal"));
     const select = screen.getByTestId("scrollbar-style-select") as HTMLSelectElement;
     await user.selectOptions(select, "separate");
-    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
   });
 
   // -- Hidden terminal auto-close (issue #269) --
 
-  it("shows hidden auto-close input in convenience section", async () => {
+  it("shows hidden auto-close input in workspaces section", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-workspaceDisplay"));
     expect(screen.getByTestId("hidden-auto-close-seconds-input")).toBeInTheDocument();
   });
 
@@ -895,25 +899,25 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-workspaceDisplay"));
     const input = screen.getByTestId("hidden-auto-close-seconds-input") as HTMLInputElement;
     await user.clear(input);
     await user.type(input, "600");
 
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(0);
   });
 
   it("hidden auto-close input updates store after Save", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-workspaceDisplay"));
     const input = screen.getByTestId("hidden-auto-close-seconds-input") as HTMLInputElement;
     await user.clear(input);
     await user.type(input, "600");
 
     await user.click(screen.getByTestId("save-settings-btn"));
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(600);
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(600);
   });
 
   // -- Claude Code section --
@@ -1078,14 +1082,14 @@ describe("SettingsView", () => {
     await user.click(discardBtn);
 
     expect(select.value).toBe("catppuccin-mocha");
-    expect(useSettingsStore.getState().appThemeId).toBe("catppuccin-mocha");
+    expect(useSettingsStore.getState().appearance.themeId).toBe("catppuccin-mocha");
   });
 
   it("discard reverts convenience draft to store value", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
 
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
     await user.click(toggle);
     expect(toggle.checked).toBe(false);
@@ -1094,10 +1098,10 @@ describe("SettingsView", () => {
     await user.click(discardBtn);
 
     // Need to navigate back to convenience since discard may re-render
-    await user.click(screen.getByTestId("nav-convenience"));
+    await user.click(screen.getByTestId("nav-paste"));
     const toggleAfter = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
     expect(toggleAfter.checked).toBe(true);
-    expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
+    expect(useSettingsStore.getState().paste.smart).toBe(true);
   });
 
   // -- Dirty state (Save/Discard button enabled/disabled) --
@@ -1242,22 +1246,22 @@ describe("SettingsView", () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       await user.click(toggle);
       expect(toggle.checked).toBe(false);
 
-      // ConvenienceSection이 구독하는 store 상태 변경으로 재렌더 유발
+      // PasteSection이 구독하는 store 상태 변경으로 재렌더 유발
       act(() => {
         const state = useSettingsStore.getState();
         useSettingsStore.setState({
-          convenience: { ...state.convenience },
+          paste: { ...state.paste },
         });
       });
 
       // 재렌더 후 draft 보존 + Save 정상 동작
       await user.click(screen.getByTestId("save-settings-btn"));
-      expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+      expect(useSettingsStore.getState().paste.smart).toBe(false);
     });
   });
 
@@ -1300,7 +1304,7 @@ describe("SettingsView", () => {
       expect(fontSelect.value).toBe("Fira Code");
 
       // Convenience로 이동 → DefaultsSection 언마운트
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
 
       // Save → DefaultsSection의 flush 콜백이 cleanup으로 삭제됨
       await user.click(screen.getByTestId("save-settings-btn"));
@@ -1314,7 +1318,7 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       // ConvenienceSection으로 이동 후 smart paste 토글
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       await user.click(toggle);
       expect(toggle.checked).toBe(false);
@@ -1326,7 +1330,7 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("save-settings-btn"));
 
       // BUG: smart paste 변경이 유실됨
-      expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
+      expect(useSettingsStore.getState().paste.smart).toBe(false);
     });
 
     it("여러 섹션에서 순차 변경 → Save 시 마지막 섹션만 반영됨", async () => {
@@ -1339,7 +1343,7 @@ describe("SettingsView", () => {
       await user.selectOptions(fontSelect, "Fira Code");
 
       // 2. ConvenienceSection: smart paste 변경
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       await user.click(toggle);
 
@@ -1355,7 +1359,7 @@ describe("SettingsView", () => {
       // BUG: DefaultsSection 변경 유실
       expect(state.profileDefaults.font.face).toBe("Fira Code");
       // BUG: ConvenienceSection 변경 유실
-      expect(state.convenience.smartPaste).toBe(false);
+      expect(state.paste.smart).toBe(false);
       // ClaudeSection은 마운트 상태이므로 정상 반영
       expect(state.claude.syncCwd).toBe("command");
     });
@@ -1442,7 +1446,7 @@ describe("SettingsView", () => {
       await user.type(input, "echo hello");
 
       // Navigate away to Convenience
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
 
       // Navigate back
       await navigateToProfile(user, "PowerShell");
@@ -1464,14 +1468,14 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       // Convenience 섹션으로 이동
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       expect(toggle.checked).toBe(true); // 기본값
 
       // 외부에서 store 변경 (settings.json 핫 리로드 시뮬레이션)
       act(() => {
         useSettingsStore.setState({
-          convenience: { ...useSettingsStore.getState().convenience, smartPaste: false },
+          paste: { ...useSettingsStore.getState().paste, smart: false },
         });
       });
 
@@ -1532,7 +1536,7 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       // draft 수정 → dirty 상태
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       await user.click(toggle);
       const saveBtn = screen.getByTestId("save-settings-btn");
@@ -1541,7 +1545,7 @@ describe("SettingsView", () => {
       // 외부에서 store 변경 → draft 리셋 → dirty 클리어
       act(() => {
         useSettingsStore.setState({
-          convenience: { ...useSettingsStore.getState().convenience, smartPaste: false },
+          paste: { ...useSettingsStore.getState().paste, smart: false },
         });
       });
 
@@ -1554,7 +1558,7 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       // A 필드 수정: convenience 섹션의 smartPaste 토글
-      await user.click(screen.getByTestId("nav-convenience"));
+      await user.click(screen.getByTestId("nav-paste"));
       const toggle = screen.getByTestId("smart-paste-toggle") as HTMLInputElement;
       await user.click(toggle);
       const saveBtn = screen.getByTestId("save-settings-btn");
@@ -1579,7 +1583,9 @@ describe("SettingsView", () => {
 
       // 외부에서 store 변경
       act(() => {
-        useSettingsStore.setState({ appThemeId: "dracula" });
+        useSettingsStore.setState((s) => ({
+          appearance: { ...s.appearance, themeId: "dracula" },
+        }));
       });
 
       expect(select.value).toBe("dracula");
@@ -1637,8 +1643,8 @@ describe("SettingsView", () => {
       expect((minimap as HTMLInputElement).checked).toBe(false);
 
       await user.click(screen.getByTestId("save-settings-btn"));
-      expect(useSettingsStore.getState().workspaceDisplay.minimap).toBe(false);
-      expect(useSettingsStore.getState().workspaceDisplay.environment).toBe(true);
+      expect(useSettingsStore.getState().workspaceSelector.display.minimap).toBe(false);
+      expect(useSettingsStore.getState().workspaceSelector.display.environment).toBe(true);
     });
 
     it("renders default CWD propagation toggles", async () => {

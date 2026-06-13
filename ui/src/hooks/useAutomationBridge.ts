@@ -447,7 +447,7 @@ const handlers: HandlerMap = {
       return ok({ set: true });
     },
     setAppTheme: (p) => {
-      useSettingsStore.getState().setAppTheme(p.themeId as string);
+      useSettingsStore.getState().setAppearance({ themeId: p.themeId as string });
       return ok({ set: true });
     },
     updateProfile: (p) => {

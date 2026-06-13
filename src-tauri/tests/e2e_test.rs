@@ -1,7 +1,7 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
 use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
-    ClaudeSettings, ColorScheme, ConvenienceSettings, DockSetting, FileExplorerSettings,
+    AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
     FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
     OutputActivityBurstSettings, Profile, ProfileDefaults, Settings, SettingsLoadResult,
     TerminalSettings, ValidationWarning, Workspace, WorkspacePane, WorkspacePaneView,
@@ -71,16 +71,17 @@ fn settings_round_trip_with_full_config() {
                 command: "closeTab".into(),
             },
         ],
-        font: None,
-        app_font: FontSettings {
-            face: "Consolas".into(),
-            size: 15,
-            weight: "semi-bold".into(),
+        appearance: AppearanceSettings {
+            theme_id: "catppuccin-mocha".into(),
+            font: FontSettings {
+                face: "Consolas".into(),
+                size: 15,
+                weight: "semi-bold".into(),
+            },
         },
         default_profile: "Ubuntu".into(),
         profile_defaults: ProfileDefaults::default(),
         view_order: vec![],
-        app_theme_id: "catppuccin-mocha".into(),
         layouts: vec![Layout {
             id: "triple-split".into(),
             name: "Triple Split".into(),
@@ -170,7 +171,11 @@ fn settings_round_trip_with_full_config() {
             },
         ],
         terminal: TerminalSettings::default(),
-        convenience: ConvenienceSettings::default(),
+        paste: Default::default(),
+        control_bar: Default::default(),
+        dock: Default::default(),
+        notifications: Default::default(),
+        workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),
         memo: MemoSettings::default(),
@@ -178,8 +183,6 @@ fn settings_round_trip_with_full_config() {
         file_explorer: FileExplorerSettings::default(),
         sync_cwd_defaults: None,
         workspace_display_order: Vec::new(),
-        workspace_sort_order: None,
-        workspace_display: None,
     };
 
     let json = serde_json::to_string_pretty(&settings).unwrap();
@@ -202,14 +205,14 @@ fn settings_deserialize_empty_json_object() {
     assert!(settings.color_schemes.is_empty());
     assert!(settings.keybindings.is_empty());
     assert!(settings.docks.is_empty());
-    // Root font is None after deserialization of empty JSON
-    assert!(settings.font.is_none());
+    // appearance falls back to defaults for an empty JSON object
+    assert_eq!(settings.appearance.theme_id, "catppuccin-mocha");
 }
 
 #[test]
 fn settings_malformed_json_falls_back_to_default() {
     // Simulate what load_settings does with bad JSON
-    let bad_json = r#"{"font": {"face": 12345}}"#;
+    let bad_json = r#"{"appearance": {"font": {"face": 12345}}}"#;
     let result: Result<Settings, _> = serde_json::from_str(bad_json);
     // This should fail because face expects a string
     assert!(result.is_err());
@@ -1620,10 +1623,8 @@ fn windows_terminal_settings_compatibility() {
     assert_eq!(settings.color_schemes.len(), 1);
     assert_eq!(settings.color_schemes[0].name, "Campbell");
     assert_eq!(settings.color_schemes[0].bright_white, "#F2F2F2");
-    // Root-level font is parsed as legacy backward compat
-    let font = settings.font.as_ref().unwrap();
-    assert_eq!(font.face, "Cascadia Mono");
-    assert_eq!(font.size, 12);
+    // 레거시 root-level `font` 은 제거됨 — 이제 알 수 없는 필드로 무시되며,
+    // 크래시 없이 나머지 필드가 정상 파싱되는지만 검증한다.
     assert_eq!(settings.keybindings.len(), 2);
     assert_eq!(settings.default_profile, "Windows PowerShell");
 }
@@ -1976,11 +1977,10 @@ fn settings_json_with_extra_fields_ignored() {
     // This may or may not fail depending on serde configuration
     // With deny_unknown_fields it would fail; without it, extras are ignored
     let result: Result<Settings, _> = serde_json::from_str(json);
-    // If it succeeds, verify known fields are correct
+    // 알 수 없는 필드(`font` 포함 — 레거시 제거됨)는 무시되고 기본값으로 채워진다.
     if let Ok(settings) = result {
-        let font = settings.font.as_ref().unwrap();
-        assert_eq!(font.face, "Mono");
-        assert_eq!(font.size, 14);
+        assert_eq!(settings.default_profile, "PowerShell");
+        assert_eq!(settings.appearance.theme_id, "catppuccin-mocha");
     }
     // Either way, it shouldn't panic
 }

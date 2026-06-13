@@ -170,7 +170,7 @@ export function AppLayout() {
   const closeConnectionInfoModal = useUiStore((s) => s.closeConnectionInfoModal);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
-  const notificationDismiss = useSettingsStore((s) => s.convenience.notificationDismiss);
+  const notificationDismiss = useSettingsStore((s) => s.notifications.dismiss);
   const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const markTerminalAsRead = useNotificationStore((s) => s.markTerminalAsRead);
   const unreadCount = useNotificationStore(
@@ -211,7 +211,7 @@ export function AppLayout() {
   const left = docks.find((d) => d.position === "left");
   const right = docks.find((d) => d.position === "right");
 
-  const dockPersistState = useSettingsStore((s) => s.convenience.dockPersistState);
+  const dockPersistState = useSettingsStore((s) => s.dock.persistState);
 
   const gridStyles = useMemo((): React.CSSProperties => {
     const topSize = top?.visible ? `${top.size}px` : "0px";

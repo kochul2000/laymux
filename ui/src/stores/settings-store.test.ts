@@ -301,42 +301,13 @@ describe("settings-store", () => {
     expect(font.weight).toBe("bold");
   });
 
-  it("loadFromSettings migrates root-level font to profileDefaults when profileDefaults.font absent", () => {
+  it("loadFromSettings loads profileDefaults.font", () => {
     useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
-      profileDefaults: { colorScheme: "Catppuccin Mocha" } as any,
-    });
-    const { profileDefaults } = useSettingsStore.getState();
-    expect(profileDefaults.font.face).toBe("Fira Code");
-    expect(profileDefaults.font.size).toBe(16);
-    expect(profileDefaults.font.weight).toBe("normal");
-  });
-
-  it("loadFromSettings migrates root-level font when no profileDefaults provided", () => {
-    useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
-    });
-    const { profileDefaults } = useSettingsStore.getState();
-    expect(profileDefaults.font.face).toBe("Fira Code");
-    expect(profileDefaults.font.size).toBe(16);
-  });
-
-  it("loadFromSettings prefers profileDefaults.font over root-level font", () => {
-    useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
       profileDefaults: { font: { face: "JetBrains Mono", size: 13, weight: "normal" } } as any,
     });
     const { profileDefaults } = useSettingsStore.getState();
     expect(profileDefaults.font.face).toBe("JetBrains Mono");
     expect(profileDefaults.font.size).toBe(13);
-  });
-
-  it("loadFromSettings does not leak root-level font into store state", () => {
-    useSettingsStore.getState().loadFromSettings({
-      font: { face: "Fira Code", size: 16, weight: "normal" },
-    });
-    const state = useSettingsStore.getState() as Record<string, unknown>;
-    expect(state.font).toBeUndefined();
   });
 
   it("profile font override is persisted through loadFromSettings", () => {
@@ -370,123 +341,116 @@ describe("settings-store", () => {
     expect(font.size).toBe(16);
   });
 
-  // -- Convenience settings --
+  // -- Paste settings --
 
-  it("has default convenience settings", () => {
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(true);
-    expect(convenience.pasteImageDir).toBe("");
+  it("has default paste settings", () => {
+    const { paste } = useSettingsStore.getState();
+    expect(paste.smart).toBe(true);
+    expect(paste.imageDir).toBe("");
   });
 
-  it("hiddenAutoCloseSeconds defaults to 0 (disabled)", () => {
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+  it("workspaceSelector.hiddenAutoCloseSeconds defaults to 0 (disabled)", () => {
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(0);
   });
 
-  it("setConvenience updates hiddenAutoCloseSeconds", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 600 });
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(600);
+  it("setWorkspaceSelector updates hiddenAutoCloseSeconds", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 600 });
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(600);
   });
 
   it("loadFromSettings fills missing hiddenAutoCloseSeconds with default 0", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false } as any,
+      workspaceSelector: { sortOrder: "manual" } as any,
     });
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(0);
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(0);
   });
 
   it("loadFromSettings preserves explicit hiddenAutoCloseSeconds", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { hiddenAutoCloseSeconds: 1200 } as any,
+      workspaceSelector: { hiddenAutoCloseSeconds: 1200 } as any,
     });
-    expect(useSettingsStore.getState().convenience.hiddenAutoCloseSeconds).toBe(1200);
+    expect(useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds).toBe(1200);
   });
 
   it("has default multi-file paste settings (#325)", () => {
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.pastePathSeparator).toBe("space");
-    expect(convenience.pastePathQuote).toBe(false);
+    const { paste } = useSettingsStore.getState();
+    expect(paste.pathSeparator).toBe("space");
+    expect(paste.pathQuote).toBe(false);
   });
 
-  it("setConvenience updates multi-file paste settings (#325)", () => {
-    useSettingsStore
-      .getState()
-      .setConvenience({ pastePathSeparator: "comma", pastePathQuote: true });
-    expect(useSettingsStore.getState().convenience.pastePathSeparator).toBe("comma");
-    expect(useSettingsStore.getState().convenience.pastePathQuote).toBe(true);
+  it("setPaste updates multi-file paste settings (#325)", () => {
+    useSettingsStore.getState().setPaste({ pathSeparator: "comma", pathQuote: true });
+    expect(useSettingsStore.getState().paste.pathSeparator).toBe("comma");
+    expect(useSettingsStore.getState().paste.pathQuote).toBe(true);
   });
 
   it("loadFromSettings fills missing multi-file paste fields with defaults (#325)", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false } as any,
+      paste: { smart: false } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.pastePathSeparator).toBe("space");
-    expect(convenience.pastePathQuote).toBe(false);
+    const { paste } = useSettingsStore.getState();
+    expect(paste.pathSeparator).toBe("space");
+    expect(paste.pathQuote).toBe(false);
   });
 
-  it("setConvenience updates smart paste", () => {
-    useSettingsStore.getState().setConvenience({ smartPaste: false });
-    expect(useSettingsStore.getState().convenience.smartPaste).toBe(false);
-    expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("");
+  it("setPaste updates smart paste", () => {
+    useSettingsStore.getState().setPaste({ smart: false });
+    expect(useSettingsStore.getState().paste.smart).toBe(false);
+    expect(useSettingsStore.getState().paste.imageDir).toBe("");
   });
 
-  it("setConvenience updates paste image dir", () => {
-    useSettingsStore.getState().setConvenience({ pasteImageDir: "C:\\temp\\images" });
-    expect(useSettingsStore.getState().convenience.smartPaste).toBe(true);
-    expect(useSettingsStore.getState().convenience.pasteImageDir).toBe("C:\\temp\\images");
+  it("setPaste updates paste image dir", () => {
+    useSettingsStore.getState().setPaste({ imageDir: "C:\\temp\\images" });
+    expect(useSettingsStore.getState().paste.smart).toBe(true);
+    expect(useSettingsStore.getState().paste.imageDir).toBe("C:\\temp\\images");
   });
 
-  it("loadFromSettings loads convenience settings", () => {
+  it("loadFromSettings loads paste settings", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: {
-        smartPaste: false,
-        pasteImageDir: "/tmp/images",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace" as const,
-        copyOnSelect: false,
-      },
+      paste: {
+        smart: false,
+        imageDir: "/tmp/images",
+      } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(false);
-    expect(convenience.pasteImageDir).toBe("/tmp/images");
+    const { paste } = useSettingsStore.getState();
+    expect(paste.smart).toBe(false);
+    expect(paste.imageDir).toBe("/tmp/images");
   });
 
-  it("loadFromSettings fills missing convenience fields with defaults", () => {
+  it("loadFromSettings fills missing paste fields with defaults", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false } as any,
+      paste: { smart: false } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(false);
-    expect(convenience.pasteImageDir).toBe("");
+    const { paste } = useSettingsStore.getState();
+    expect(paste.smart).toBe(false);
+    expect(paste.imageDir).toBe("");
   });
 
-  it("loadFromSettings without convenience preserves defaults", () => {
+  it("loadFromSettings without paste preserves defaults", () => {
     useSettingsStore.getState().loadFromSettings({
       profileDefaults: { font: { face: "Fira Code", size: 16, weight: "normal" } } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(true);
-    expect(convenience.pasteImageDir).toBe("");
+    const { paste } = useSettingsStore.getState();
+    expect(paste.smart).toBe(true);
+    expect(paste.imageDir).toBe("");
   });
 
   // -- Path ellipsis settings --
 
   it("has default pathEllipsis set to start", () => {
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.pathEllipsis).toBe("start");
+    expect(useSettingsStore.getState().workspaceSelector.pathEllipsis).toBe("start");
   });
 
-  it("setConvenience updates pathEllipsis", () => {
-    useSettingsStore.getState().setConvenience({ pathEllipsis: "end" });
-    expect(useSettingsStore.getState().convenience.pathEllipsis).toBe("end");
+  it("setWorkspaceSelector updates pathEllipsis", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ pathEllipsis: "end" });
+    expect(useSettingsStore.getState().workspaceSelector.pathEllipsis).toBe("end");
   });
 
   it("loadFromSettings fills missing pathEllipsis with default", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false } as any,
+      workspaceSelector: { sortOrder: "manual" } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.pathEllipsis).toBe("start");
+    expect(useSettingsStore.getState().workspaceSelector.pathEllipsis).toBe("start");
   });
 
   // -- Claude settings --
@@ -574,111 +538,108 @@ describe("settings-store", () => {
   // -- Scrollbar style settings --
 
   it("has default scrollbarStyle as overlay", () => {
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.scrollbarStyle).toBe("overlay");
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
   });
 
-  it("setConvenience updates scrollbarStyle", () => {
-    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
-    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("separate");
+  it("setTerminal updates scrollbarStyle", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
   });
 
-  it("setConvenience updates scrollbarStyle back to overlay", () => {
-    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
-    useSettingsStore.getState().setConvenience({ scrollbarStyle: "overlay" });
-    expect(useSettingsStore.getState().convenience.scrollbarStyle).toBe("overlay");
+  it("setTerminal updates scrollbarStyle back to overlay", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
   });
 
   it("loadFromSettings loads scrollbarStyle", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: {
-        smartPaste: true,
-        pasteImageDir: "",
-        hoverIdleSeconds: 2,
-        notificationDismiss: "workspace" as const,
+      terminal: {
         copyOnSelect: true,
         scrollbarStyle: "separate" as const,
       },
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.scrollbarStyle).toBe("separate");
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
   });
 
   it("loadFromSettings fills missing scrollbarStyle with default overlay", () => {
     useSettingsStore.getState().loadFromSettings({
-      convenience: { smartPaste: false } as any,
+      terminal: { copyOnSelect: false } as any,
     });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.scrollbarStyle).toBe("overlay");
+    expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
   });
 
-  it("setConvenience does not affect other convenience fields when setting scrollbarStyle", () => {
-    useSettingsStore.getState().setConvenience({ scrollbarStyle: "separate" });
-    const { convenience } = useSettingsStore.getState();
-    expect(convenience.smartPaste).toBe(true);
-    expect(convenience.copyOnSelect).toBe(true);
-    expect(convenience.scrollbarStyle).toBe("separate");
+  it("setTerminal does not affect other terminal fields when setting scrollbarStyle", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
+    const { terminal } = useSettingsStore.getState();
+    expect(terminal.copyOnSelect).toBe(true);
+    expect(terminal.scrollbarStyle).toBe("separate");
   });
 
   // -- Workspace display settings --
 
-  it("has default workspaceDisplay with all items enabled", () => {
-    const { workspaceDisplay } = useSettingsStore.getState();
-    expect(workspaceDisplay.minimap).toBe(true);
-    expect(workspaceDisplay.environment).toBe(true);
-    expect(workspaceDisplay.activity).toBe(true);
-    expect(workspaceDisplay.path).toBe(true);
-    expect(workspaceDisplay.result).toBe(true);
+  it("has default workspaceSelector.display with all items enabled", () => {
+    const { display } = useSettingsStore.getState().workspaceSelector;
+    expect(display.minimap).toBe(true);
+    expect(display.environment).toBe(true);
+    expect(display.activity).toBe(true);
+    expect(display.path).toBe(true);
+    expect(display.result).toBe(true);
   });
 
-  it("setWorkspaceDisplay partial update", () => {
-    useSettingsStore.getState().setWorkspaceDisplay({ minimap: false, activity: false });
-    const { workspaceDisplay } = useSettingsStore.getState();
-    expect(workspaceDisplay.minimap).toBe(false);
-    expect(workspaceDisplay.environment).toBe(true);
-    expect(workspaceDisplay.activity).toBe(false);
-    expect(workspaceDisplay.path).toBe(true);
-    expect(workspaceDisplay.result).toBe(true);
+  it("setWorkspaceSelector partial display update", () => {
+    const prev = useSettingsStore.getState().workspaceSelector.display;
+    useSettingsStore
+      .getState()
+      .setWorkspaceSelector({ display: { ...prev, minimap: false, activity: false } });
+    const { display } = useSettingsStore.getState().workspaceSelector;
+    expect(display.minimap).toBe(false);
+    expect(display.environment).toBe(true);
+    expect(display.activity).toBe(false);
+    expect(display.path).toBe(true);
+    expect(display.result).toBe(true);
   });
 
-  it("loadFromSettings loads workspaceDisplay", () => {
+  it("loadFromSettings loads workspaceSelector.display", () => {
     useSettingsStore.getState().loadFromSettings({
-      workspaceDisplay: {
-        minimap: false,
-        environment: false,
-        activity: true,
-        path: true,
-        result: false,
-      },
+      workspaceSelector: {
+        display: {
+          minimap: false,
+          environment: false,
+          activity: true,
+          path: true,
+          result: false,
+        },
+      } as any,
     });
-    const { workspaceDisplay } = useSettingsStore.getState();
-    expect(workspaceDisplay.minimap).toBe(false);
-    expect(workspaceDisplay.environment).toBe(false);
-    expect(workspaceDisplay.result).toBe(false);
+    const { display } = useSettingsStore.getState().workspaceSelector;
+    expect(display.minimap).toBe(false);
+    expect(display.environment).toBe(false);
+    expect(display.result).toBe(false);
   });
 
-  it("loadFromSettings fills missing workspaceDisplay fields with defaults", () => {
+  it("loadFromSettings fills missing workspaceSelector.display fields with defaults", () => {
     useSettingsStore.getState().loadFromSettings({
-      workspaceDisplay: { minimap: false } as any,
+      workspaceSelector: { display: { minimap: false } } as any,
     });
-    const { workspaceDisplay } = useSettingsStore.getState();
-    expect(workspaceDisplay.minimap).toBe(false);
-    expect(workspaceDisplay.environment).toBe(true);
-    expect(workspaceDisplay.activity).toBe(true);
-    expect(workspaceDisplay.path).toBe(true);
-    expect(workspaceDisplay.result).toBe(true);
+    const { display } = useSettingsStore.getState().workspaceSelector;
+    expect(display.minimap).toBe(false);
+    expect(display.environment).toBe(true);
+    expect(display.activity).toBe(true);
+    expect(display.path).toBe(true);
+    expect(display.result).toBe(true);
   });
 
-  it("loadFromSettings without workspaceDisplay preserves defaults", () => {
+  it("loadFromSettings without workspaceSelector preserves display defaults", () => {
     useSettingsStore.getState().loadFromSettings({
       defaultProfile: "WSL",
     });
-    const { workspaceDisplay } = useSettingsStore.getState();
-    expect(workspaceDisplay.minimap).toBe(true);
-    expect(workspaceDisplay.environment).toBe(true);
-    expect(workspaceDisplay.activity).toBe(true);
-    expect(workspaceDisplay.path).toBe(true);
-    expect(workspaceDisplay.result).toBe(true);
+    const { display } = useSettingsStore.getState().workspaceSelector;
+    expect(display.minimap).toBe(true);
+    expect(display.environment).toBe(true);
+    expect(display.activity).toBe(true);
+    expect(display.path).toBe(true);
+    expect(display.result).toBe(true);
   });
 
   // --- syncCwdDefaults ---
@@ -830,36 +791,36 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().issueReporter.repositories).toEqual(["kochul2000/laymux"]);
   });
 
-  // workspaceSortOrder
-  it("has default workspaceSortOrder of 'manual'", () => {
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+  // workspaceSelector.sortOrder
+  it("has default sortOrder of 'manual'", () => {
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
-  it("setWorkspaceSortOrder changes sort order", () => {
-    useSettingsStore.getState().setWorkspaceSortOrder("notification");
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("notification");
+  it("setWorkspaceSelector changes sort order", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("notification");
 
-    useSettingsStore.getState().setWorkspaceSortOrder("manual");
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+    useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "manual" });
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
-  it("loadFromSettings loads workspaceSortOrder", () => {
+  it("loadFromSettings loads sortOrder", () => {
     useSettingsStore.getState().loadFromSettings({
-      workspaceSortOrder: "notification",
+      workspaceSelector: { sortOrder: "notification" } as any,
     });
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("notification");
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("notification");
   });
 
-  it("loadFromSettings without workspaceSortOrder preserves default", () => {
+  it("loadFromSettings without workspaceSelector preserves sortOrder default", () => {
     useSettingsStore.getState().loadFromSettings({});
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
-  it("loadFromSettings ignores invalid workspaceSortOrder values", () => {
+  it("loadFromSettings ignores invalid sortOrder values", () => {
     useSettingsStore.getState().loadFromSettings({
-      workspaceSortOrder: "invalid-value" as any,
+      workspaceSelector: { sortOrder: "invalid-value" } as any,
     });
     // Should keep the default, not blindly accept the invalid value
-    expect(useSettingsStore.getState().workspaceSortOrder).toBe("manual");
+    expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 });
