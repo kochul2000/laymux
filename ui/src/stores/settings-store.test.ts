@@ -587,8 +587,11 @@ describe("settings-store", () => {
     expect(display.result).toBe(true);
   });
 
-  it("setWorkspaceDisplay partial update", () => {
-    useSettingsStore.getState().setWorkspaceDisplay({ minimap: false, activity: false });
+  it("setWorkspaceSelector partial display update", () => {
+    const prev = useSettingsStore.getState().workspaceSelector.display;
+    useSettingsStore
+      .getState()
+      .setWorkspaceSelector({ display: { ...prev, minimap: false, activity: false } });
     const { display } = useSettingsStore.getState().workspaceSelector;
     expect(display.minimap).toBe(false);
     expect(display.environment).toBe(true);

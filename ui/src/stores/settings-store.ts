@@ -361,7 +361,6 @@ interface SettingsState {
   setDock: (data: Partial<DockSettings>) => void;
   setNotifications: (data: Partial<NotificationSettings>) => void;
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
-  setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
@@ -932,14 +931,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setWorkspaceSelector: (data) =>
     set((state) => ({
       workspaceSelector: { ...state.workspaceSelector, ...data },
-    })),
-
-  setWorkspaceDisplay: (data) =>
-    set((state) => ({
-      workspaceSelector: {
-        ...state.workspaceSelector,
-        display: { ...state.workspaceSelector.display, ...data },
-      },
     })),
 
   setClaude: (data) =>
