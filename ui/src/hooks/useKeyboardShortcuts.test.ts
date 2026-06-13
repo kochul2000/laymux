@@ -1633,4 +1633,282 @@ describe("useKeyboardShortcuts", () => {
       expect(propagateCwdOnce).toHaveBeenCalledWith("terminal-pane-a");
     });
   });
+
+  // --- #337: 모든 document 단축키가 키바인딩 레지스트리(사용자 오버라이드)를 따른다 ---
+  describe("registry-based rebinding for document shortcuts (#337)", () => {
+    function setOverride(command: string, keys: string) {
+      useSettingsStore.setState({
+        keybindings: [{ command, keys }],
+      } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+    }
+
+    it("workspace.new rebound: new combo works, old default is inert", () => {
+      setOverride("workspace.new", "Ctrl+Shift+M");
+      renderHook(() => useKeyboardShortcuts());
+
+      // Old default Ctrl+Alt+N must NOT create a workspace anymore
+      fireKey("n", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+
+      // New combo creates a workspace
+      fireKey("M", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+    });
+
+    it("workspace.close rebound: new combo works, old default is inert", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+      setOverride("workspace.close", "Ctrl+Shift+W");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("w", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(2);
+
+      fireKey("W", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
+    });
+
+    it("workspace.1 rebound: new combo switches, old default is inert", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+      setOverride("workspace.1", "Ctrl+Shift+1");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("1", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+
+      fireKey("1", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+    });
+
+    it("workspace.next rebound: new combo cycles, old default is inert", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      setOverride("workspace.next", "Ctrl+Shift+Down");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+
+      fireKey("ArrowDown", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    });
+
+    it("sidebar.toggle rebound: new combo toggles, old default is inert", () => {
+      setOverride("sidebar.toggle", "Ctrl+Alt+B");
+      renderHook(() => useKeyboardShortcuts());
+      const before = useDockStore.getState().getDock("left")?.visible;
+
+      fireKey("B", { ctrlKey: true, shiftKey: true });
+      expect(useDockStore.getState().getDock("left")?.visible).toBe(before);
+
+      fireKey("b", { ctrlKey: true, altKey: true });
+      expect(useDockStore.getState().getDock("left")?.visible).toBe(!before);
+    });
+
+    it("notifications.toggle rebound: new combo toggles, old default is inert", () => {
+      setOverride("notifications.toggle", "Ctrl+Alt+I");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("I", { ctrlKey: true, shiftKey: true });
+      expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+
+      fireKey("i", { ctrlKey: true, altKey: true });
+      expect(useUiStore.getState().notificationPanelOpen).toBe(true);
+    });
+
+    it("notifications.recent rebound: new combo navigates, old default is inert", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+      useNotificationStore.setState({
+        notifications: [
+          {
+            id: "n1",
+            terminalId: "terminal-p2",
+            workspaceId: "ws-default",
+            message: "alert",
+            level: "info",
+            createdAt: 100,
+            readAt: null,
+          },
+        ],
+      });
+      useGridStore.setState({ focusedPaneIndex: null });
+      setOverride("notifications.recent", "Ctrl+Shift+Left");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("ArrowLeft", { ctrlKey: true, altKey: true });
+      expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+
+      fireKey("ArrowLeft", { ctrlKey: true, shiftKey: true });
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    it("settings.open rebound: new combo toggles, old default is inert", () => {
+      setOverride("settings.open", "Ctrl+Shift+,");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey(",", { ctrlKey: true });
+      expect(useUiStore.getState().settingsModalOpen).toBe(false);
+
+      fireKey(",", { ctrlKey: true, shiftKey: true });
+      expect(useUiStore.getState().settingsModalOpen).toBe(true);
+    });
+
+    it("fileViewer.open rebound outside the Ctrl+Shift block still works", () => {
+      // #337: the old handler only consulted matchesKeybinding() inside the
+      // Ctrl+Shift branch — a Ctrl+Alt rebinding never reached it.
+      setOverride("fileViewer.open", "Ctrl+Alt+O");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("O", { ctrlKey: true, shiftKey: true });
+      expect(useFileViewerStore.getState().open).toBe(false);
+
+      fireKey("o", { ctrlKey: true, altKey: true });
+      expect(useFileViewerStore.getState().open).toBe(true);
+    });
+
+    it("pane.focus rebound to Ctrl+Shift+Arrow: new combo navigates, old Alt+Arrow is inert", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+      useGridStore.setState({ focusedPaneIndex: 0 });
+      setOverride("pane.focus", "Ctrl+Shift+Arrow");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("ArrowRight", { altKey: true });
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+
+      fireKey("ArrowRight", { ctrlKey: true, shiftKey: true });
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    it("pane.delete rebound: new combo removes pane, plain Delete is inert", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            ],
+          },
+        ],
+      });
+      useGridStore.setState({ focusedPaneIndex: 1 });
+      setOverride("pane.delete", "Ctrl+Shift+Delete");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("Delete");
+      expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
+
+      fireKey("Delete", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(1);
+    });
+
+    it("pane.delete keeps the text-input guard after rebinding", () => {
+      useWorkspaceStore.setState({
+        ...useWorkspaceStore.getState(),
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              { id: "p1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "p2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+            ],
+          },
+        ],
+      });
+      useGridStore.setState({ focusedPaneIndex: 1 });
+      setOverride("pane.delete", "Ctrl+Shift+Delete");
+      renderHook(() => useKeyboardShortcuts());
+
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      input.focus();
+
+      fireKey("Delete", { ctrlKey: true, shiftKey: true });
+
+      expect(useWorkspaceStore.getState().workspaces[0].panes).toHaveLength(2);
+      document.body.removeChild(input);
+    });
+
+    it("workspace.rename rebound: new combo prompts, old default is inert", () => {
+      const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+      setOverride("workspace.rename", "Ctrl+Shift+R");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("r", { ctrlKey: true, altKey: true });
+      expect(promptSpy).not.toHaveBeenCalled();
+
+      fireKey("R", { ctrlKey: true, shiftKey: true });
+      expect(promptSpy).toHaveBeenCalled();
+      expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
+      promptSpy.mockRestore();
+    });
+
+    it("notifications.unread rebound: new combo jumps, old default is inert", () => {
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      useNotificationStore.getState().addNotification({
+        terminalId: "t1",
+        workspaceId: ws2.id,
+        message: "Build done",
+      });
+      setOverride("notifications.unread", "Ctrl+Alt+U");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("U", { ctrlKey: true, shiftKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+
+      fireKey("u", { ctrlKey: true, altKey: true });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    });
+
+    it("collision tie-break follows table order: workspace.N beats UI actions (PR #338 review)", () => {
+      // workspace.1 and settings.open rebound to the SAME combo — the
+      // documented contract (pane.* → workspace.* → UI) says workspace.1 wins.
+      useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+      const ws2 = useWorkspaceStore.getState().workspaces[1];
+      useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+      useSettingsStore.setState({
+        keybindings: [
+          { command: "workspace.1", keys: "Ctrl+Shift+9" },
+          { command: "settings.open", keys: "Ctrl+Shift+9" },
+        ],
+      } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("9", { ctrlKey: true, shiftKey: true });
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+      expect(useUiStore.getState().settingsModalOpen).toBe(false);
+    });
+  });
 });

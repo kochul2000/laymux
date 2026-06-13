@@ -423,6 +423,31 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().keybindings).toHaveLength(1);
   });
 
+  // PR #338 리뷰 P2: 와일드카드 액션(pane.focus)은 화살표 캡처만 허용해야 한다.
+  // 비화살표 콤보가 저장되면 핸들러가 방향을 도출할 수 없어 영구 no-op이 된다.
+  it("rejects a non-arrow capture for wildcard actions and accepts arrows (PR #338 review P2)", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByText("Keybindings"));
+    // pane.focus 기본값 kbd를 클릭해 캡처 시작
+    await user.click(screen.getByText("Alt+Arrow"));
+    const captureBox = screen.getByText("Press keys...");
+
+    // 비화살표 콤보는 거부 — 캡처 박스가 placeholder 그대로여야 한다
+    fireEvent.keyDown(captureBox, { key: "G", ctrlKey: true, shiftKey: true });
+    expect(screen.getByText("Press keys...")).toBeInTheDocument();
+
+    // 화살표 콤보는 Arrow 와일드카드로 수용
+    fireEvent.keyDown(captureBox, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    expect(screen.getByText("Ctrl+Shift+Arrow")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().keybindings).toEqual([
+      { keys: "Ctrl+Shift+Arrow", command: "pane.focus" },
+    ]);
+  });
+
   // -- Color Schemes --
 
   it("shows color schemes section", async () => {
