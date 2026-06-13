@@ -531,84 +531,236 @@ impl OutputActivityBurstSettings {
     }
 }
 
-/// Terminal behavior settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+/// Terminal behavior & rendering settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     #[serde(default)]
     pub output_activity_burst: OutputActivityBurstSettings,
-}
-
-/// Convenience feature settings (smart paste, etc.).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ConvenienceSettings {
-    #[serde(default = "default_true")]
-    pub smart_paste: bool,
-    #[serde(default)]
-    pub paste_image_dir: String,
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
-    /// Path ellipsis direction in workspace selector. "start" (default) shows the end of the path.
-    #[serde(default)]
-    pub path_ellipsis: PathEllipsisMode,
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
-    /// Keep dock state in background when hidden.
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            output_activity_burst: OutputActivityBurstSettings::default(),
+            copy_on_select: true,
+            scrollbar_style: default_scrollbar_style(),
+        }
+    }
+}
+
+/// App-wide appearance settings (theme + non-terminal font).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppearanceSettings {
+    /// App UI theme id (e.g. "catppuccin-mocha"). Separate from terminal color schemes.
+    #[serde(default = "default_app_theme_id")]
+    pub theme_id: String,
+    /// App-wide default font for non-terminal views (Memo, Issue Reporter, etc.).
+    #[serde(default)]
+    pub font: FontSettings,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme_id: default_app_theme_id(),
+            font: FontSettings::default(),
+        }
+    }
+}
+
+/// Paste / clipboard behavior settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteSettings {
+    /// Smart paste master toggle.
     #[serde(default = "default_true")]
-    pub dock_persist_state: bool,
-    /// Allow Alt+Arrow to navigate into/out of dock areas.
+    pub smart: bool,
+    /// Directory for clipboard image pastes. Empty = default temp dir.
+    #[serde(default)]
+    pub image_dir: String,
+    /// Strip common leading whitespace when pasting.
     #[serde(default = "default_true")]
-    pub dock_arrow_nav: bool,
-    /// Smart remove indent: strip common leading whitespace when pasting.
+    pub remove_indent: bool,
+    /// Rejoin URLs split across lines when pasting.
     #[serde(default = "default_true")]
-    pub smart_remove_indent: bool,
-    /// Smart remove line break: rejoin URLs split across lines when pasting.
+    pub remove_line_break: bool,
+    /// Detect indented multi-line URLs and make them clickable as a single link.
     #[serde(default = "default_true")]
-    pub smart_remove_line_break: bool,
-    /// Smart link join: detect indented multi-line URLs and make them clickable as a single link.
-    #[serde(default = "default_true")]
-    pub smart_link_join: bool,
+    pub link_join: bool,
     /// Show a confirmation dialog when pasting large text (like Windows Terminal).
     #[serde(default = "default_true")]
-    pub large_paste_warning: bool,
-    /// Seconds a pane/workspace must stay hidden (in WorkspaceSelectorView hide mode)
-    /// before its terminal (PTY) is automatically closed to save resources.
-    /// 0 = disabled (never auto-close). See issue #269.
-    #[serde(default)]
-    pub hidden_auto_close_seconds: u64,
+    pub large_warning: bool,
     /// Separator token between paths when pasting multiple clipboard files:
     /// "space" (default) | "newline" | "comma" | "semicolon". See issue #325.
     #[serde(default = "default_paste_path_separator")]
-    pub paste_path_separator: String,
+    pub path_separator: String,
     /// Wrap each pasted file path in double quotes (useful for paths with spaces). See issue #325.
     #[serde(default)]
-    pub paste_path_quote: bool,
+    pub path_quote: bool,
 }
 
 fn default_paste_path_separator() -> String {
     "space".to_string()
 }
 
-impl Default for ConvenienceSettings {
+impl Default for PasteSettings {
     fn default() -> Self {
         Self {
-            smart_paste: true,
-            paste_image_dir: String::new(),
-            copy_on_select: true,
+            smart: true,
+            image_dir: String::new(),
+            remove_indent: true,
+            remove_line_break: true,
+            link_join: true,
+            large_warning: true,
+            path_separator: default_paste_path_separator(),
+            path_quote: false,
+        }
+    }
+}
+
+/// Pane control bar settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlBarSettings {
+    /// Seconds of mouse inactivity before hiding the pane control bar. 0 = never hide.
+    #[serde(default = "default_hover_idle_seconds")]
+    pub hover_idle_seconds: u64,
+    /// Default control bar mode for new panes: "hover" | "pinned" | "minimized".
+    #[serde(default = "default_control_bar_mode")]
+    pub default_mode: String,
+}
+
+fn default_hover_idle_seconds() -> u64 {
+    2
+}
+
+fn default_control_bar_mode() -> String {
+    "minimized".to_string()
+}
+
+impl Default for ControlBarSettings {
+    fn default() -> Self {
+        Self {
+            hover_idle_seconds: default_hover_idle_seconds(),
+            default_mode: default_control_bar_mode(),
+        }
+    }
+}
+
+/// Dock behavior settings (distinct from the structural `docks` array).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DockSettings {
+    /// Keep dock state in background when hidden.
+    #[serde(default = "default_true")]
+    pub persist_state: bool,
+    /// Allow Alt+Arrow to navigate into/out of dock areas.
+    #[serde(default = "default_true")]
+    pub arrow_nav: bool,
+    /// When switching workspaces by keyboard arrow while a dock is focused,
+    /// automatically hand focus to a workspace pane. See #311.
+    #[serde(default = "default_true")]
+    pub arrow_focus_pane: bool,
+}
+
+impl Default for DockSettings {
+    fn default() -> Self {
+        Self {
+            persist_state: true,
+            arrow_nav: true,
+            arrow_focus_pane: true,
+        }
+    }
+}
+
+/// Notification behavior settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSettings {
+    /// When to auto-dismiss notifications as read:
+    /// "workspace" (default) | "paneFocus" | "manual".
+    #[serde(default = "default_notification_dismiss")]
+    pub dismiss: String,
+}
+
+fn default_notification_dismiss() -> String {
+    "workspace".to_string()
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            dismiss: default_notification_dismiss(),
+        }
+    }
+}
+
+/// Which elements to display in WorkspaceSelectorView pane rows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDisplaySettings {
+    #[serde(default = "default_true")]
+    pub minimap: bool,
+    #[serde(default = "default_true")]
+    pub environment: bool,
+    #[serde(default = "default_true")]
+    pub activity: bool,
+    #[serde(default = "default_true")]
+    pub path: bool,
+    #[serde(default = "default_true")]
+    pub result: bool,
+}
+
+impl Default for WorkspaceDisplaySettings {
+    fn default() -> Self {
+        Self {
+            minimap: true,
+            environment: true,
+            activity: true,
+            path: true,
+            result: true,
+        }
+    }
+}
+
+/// WorkspaceSelectorView settings (display toggles, sort order, lifecycle).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSelectorSettings {
+    /// Display toggles for pane rows.
+    #[serde(default)]
+    pub display: WorkspaceDisplaySettings,
+    /// Workspace sort mode: "manual" (default) | "notification".
+    #[serde(default = "default_workspace_sort_order")]
+    pub sort_order: String,
+    /// Path ellipsis direction. "start" (default) shows the end of the path.
+    #[serde(default)]
+    pub path_ellipsis: PathEllipsisMode,
+    /// Seconds a pane/workspace must stay hidden (in hide mode) before its terminal (PTY)
+    /// is automatically closed to save resources. 0 = disabled. See issue #269.
+    #[serde(default)]
+    pub hidden_auto_close_seconds: u64,
+}
+
+fn default_workspace_sort_order() -> String {
+    "manual".to_string()
+}
+
+impl Default for WorkspaceSelectorSettings {
+    fn default() -> Self {
+        Self {
+            display: WorkspaceDisplaySettings::default(),
+            sort_order: default_workspace_sort_order(),
             path_ellipsis: PathEllipsisMode::default(),
-            scrollbar_style: "overlay".to_string(),
-            dock_persist_state: true,
-            dock_arrow_nav: true,
-            smart_remove_indent: true,
-            smart_remove_line_break: true,
-            smart_link_join: true,
-            large_paste_warning: true,
             hidden_auto_close_seconds: 0,
-            paste_path_separator: default_paste_path_separator(),
-            paste_path_quote: false,
         }
     }
 }
@@ -862,19 +1014,15 @@ pub struct Settings {
     pub profiles: Vec<Profile>,
     #[serde(default)]
     pub keybindings: Vec<Keybinding>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub font: Option<FontSettings>,
-    /// App-wide default font for non-terminal views (Memo, Issue Reporter, etc.).
-    #[serde(default)]
-    pub app_font: FontSettings,
     #[serde(default = "default_profile")]
     pub default_profile: String,
     #[serde(default)]
     pub profile_defaults: ProfileDefaults,
     #[serde(default)]
     pub view_order: Vec<String>,
-    #[serde(default = "default_app_theme_id")]
-    pub app_theme_id: String,
+    /// App-wide appearance (theme + non-terminal font).
+    #[serde(default)]
+    pub appearance: AppearanceSettings,
     #[serde(default)]
     pub layouts: Vec<Layout>,
     #[serde(default)]
@@ -884,7 +1032,16 @@ pub struct Settings {
     #[serde(default)]
     pub terminal: TerminalSettings,
     #[serde(default)]
-    pub convenience: ConvenienceSettings,
+    pub paste: PasteSettings,
+    #[serde(default)]
+    pub control_bar: ControlBarSettings,
+    /// Dock behavior settings (distinct from the structural `docks` array).
+    #[serde(default)]
+    pub dock: DockSettings,
+    #[serde(default)]
+    pub notifications: NotificationSettings,
+    #[serde(default)]
+    pub workspace_selector: WorkspaceSelectorSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
     #[serde(default)]
@@ -901,12 +1058,6 @@ pub struct Settings {
     /// User-defined workspace display order (drag-and-drop). Opaque to backend.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_display_order: Vec<String>,
-    /// Workspace sort mode ("manual" | "notification"). Opaque to backend.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_sort_order: Option<String>,
-    /// Workspace display toggles (minimap, environment, etc.). Opaque to backend.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_display: Option<serde_json::Value>,
 }
 
 fn default_app_theme_id() -> String {
@@ -934,12 +1085,10 @@ impl Default for Settings {
                 },
             ],
             keybindings: Vec::new(),
-            font: None,
-            app_font: FontSettings::default(),
             default_profile: default_profile(),
             profile_defaults: ProfileDefaults::default(),
             view_order: Vec::new(),
-            app_theme_id: default_app_theme_id(),
+            appearance: AppearanceSettings::default(),
             layouts: vec![Layout {
                 id: "default-layout".into(),
                 name: "Default".into(),
@@ -977,7 +1126,11 @@ impl Default for Settings {
                 panes: Vec::new(),
             }],
             terminal: TerminalSettings::default(),
-            convenience: ConvenienceSettings::default(),
+            paste: PasteSettings::default(),
+            control_bar: ControlBarSettings::default(),
+            dock: DockSettings::default(),
+            notifications: NotificationSettings::default(),
+            workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),
             memo: MemoSettings::default(),
@@ -985,8 +1138,6 @@ impl Default for Settings {
             file_explorer: FileExplorerSettings::default(),
             sync_cwd_defaults: None,
             workspace_display_order: Vec::new(),
-            workspace_sort_order: None,
-            workspace_display: None,
         }
     }
 }

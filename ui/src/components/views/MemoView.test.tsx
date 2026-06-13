@@ -586,7 +586,10 @@ describe("MemoView", () => {
     it("inherits appFont when fontFamily/fontSize/fontWeight are empty/zero", async () => {
       useSettingsStore.setState({
         memo: { ...useSettingsStore.getState().memo, fontFamily: "", fontSize: 0, fontWeight: "" },
-        appFont: { face: "Fira Code", size: 15, weight: "bold" },
+        appearance: {
+          ...useSettingsStore.getState().appearance,
+          font: { face: "Fira Code", size: 15, weight: "bold" },
+        },
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {
@@ -613,7 +616,10 @@ describe("MemoView", () => {
     it("defaults to appFont size when fontSize is 0", async () => {
       useSettingsStore.setState({
         memo: { ...useSettingsStore.getState().memo, fontSize: 0 },
-        appFont: { face: "Cascadia Mono", size: 13, weight: "normal" },
+        appearance: {
+          ...useSettingsStore.getState().appearance,
+          font: { face: "Cascadia Mono", size: 13, weight: "normal" },
+        },
       });
       render(<MemoView memoKey="pane-1" />);
       await act(async () => {

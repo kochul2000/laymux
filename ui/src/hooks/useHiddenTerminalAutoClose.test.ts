@@ -32,7 +32,7 @@ describe("useHiddenTerminalAutoClose", () => {
   });
 
   it("does nothing when the timeout is disabled (0)", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 0 });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 0 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
     act(() => vi.advanceTimersByTime(60_000));
@@ -40,7 +40,7 @@ describe("useHiddenTerminalAutoClose", () => {
   });
 
   it("evicts a hidden background pane after the timeout", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 10 });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
 
@@ -55,7 +55,7 @@ describe("useHiddenTerminalAutoClose", () => {
   });
 
   it("never evicts panes in the active workspace even when flagged hidden", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 10 });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().togglePaneHidden("p1"); // p1 is in active wsA
     renderHook(() => useHiddenTerminalAutoClose());
     act(() => vi.advanceTimersByTime(30_000));
@@ -63,7 +63,7 @@ describe("useHiddenTerminalAutoClose", () => {
   });
 
   it("clears eviction when the pane is un-hidden", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 10 });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
     act(() => vi.advanceTimersByTime(15_000));
@@ -78,14 +78,14 @@ describe("useHiddenTerminalAutoClose", () => {
   });
 
   it("clears prior evictions when the feature is disabled at runtime", () => {
-    useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 10 });
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
     useUiStore.getState().toggleWorkspaceHidden("wsB");
     renderHook(() => useHiddenTerminalAutoClose());
     act(() => vi.advanceTimersByTime(15_000));
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
     act(() => {
-      useSettingsStore.getState().setConvenience({ hiddenAutoCloseSeconds: 0 });
+      useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 0 });
       vi.advanceTimersByTime(5_000);
     });
     expect(useUiStore.getState().evictedPaneIds.size).toBe(0);

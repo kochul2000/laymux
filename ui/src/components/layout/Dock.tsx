@@ -46,7 +46,7 @@ export function Dock({
   const focusedDock = useDockStore((s) => s.focusedDock);
   const isFocused = focusedDock === position;
   const hasSplitPanes = panes.length >= 2;
-  const hoverIdleSeconds = useSettingsStore((s) => s.convenience.hoverIdleSeconds);
+  const hoverIdleSeconds = useSettingsStore((s) => s.controlBar.hoverIdleSeconds);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWsName = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);

@@ -2202,10 +2202,10 @@ describe("TerminalView", () => {
   it("pastes multiple file paths with newline separator and quote wrapping from settings", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
-        pastePathSeparator: "newline",
-        pastePathQuote: true,
+      paste: {
+        ...useSettingsStore.getState().paste,
+        pathSeparator: "newline",
+        pathQuote: true,
       },
     });
     mockSmartPaste.mockResolvedValue({
@@ -2254,9 +2254,9 @@ describe("TerminalView", () => {
     // fall back to plain navigator.clipboard in runTerminalPaste.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
-        smartPaste: false,
+      paste: {
+        ...useSettingsStore.getState().paste,
+        smart: false,
       },
     });
 
@@ -2335,10 +2335,10 @@ describe("TerminalView", () => {
     // old native-Ctrl+C clipboard contents byte-for-byte.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
-        smartRemoveIndent: false,
-        smartRemoveLineBreak: false,
+      paste: {
+        ...useSettingsStore.getState().paste,
+        removeIndent: false,
+        removeLineBreak: false,
       },
     });
     mockHasSelection.mockReturnValue(true);
@@ -2421,7 +2421,7 @@ describe("TerminalView", () => {
   it("auto-copies selection when copyOnSelect is enabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
     });
 
     mockHasSelection.mockReturnValue(true);
@@ -2446,11 +2446,11 @@ describe("TerminalView", () => {
     // share runTerminalCopy — raw-when-off semantics apply uniformly.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
-        copyOnSelect: true,
-        smartRemoveIndent: false,
-        smartRemoveLineBreak: false,
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
+      paste: {
+        ...useSettingsStore.getState().paste,
+        removeIndent: false,
+        removeLineBreak: false,
       },
     });
     mockHasSelection.mockReturnValue(true);
@@ -2470,7 +2470,7 @@ describe("TerminalView", () => {
   it("does not auto-copy when copyOnSelect is disabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: false },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: false },
     });
 
     mockHasSelection.mockReturnValue(true);
@@ -2492,7 +2492,7 @@ describe("TerminalView", () => {
   it("does not auto-copy when selection is empty (copyOnSelect enabled)", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
     });
 
     mockHasSelection.mockReturnValue(false);
@@ -2514,7 +2514,7 @@ describe("TerminalView", () => {
     // pointerdown→window-pointerup watcher guarantees the copy happens.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
     });
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("dragged outside text");
@@ -2544,7 +2544,7 @@ describe("TerminalView", () => {
     // Guard: an unrelated pointerup anywhere on the page must not copy.
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: true },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: true },
     });
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("unrelated selection");
@@ -2562,7 +2562,7 @@ describe("TerminalView", () => {
   it("does not copy on pointerup when copyOnSelect is disabled", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, copyOnSelect: false },
+      terminal: { ...useSettingsStore.getState().terminal, copyOnSelect: false },
     });
     mockHasSelection.mockReturnValue(true);
     mockGetSelection.mockReturnValue("ignored text");
@@ -3423,8 +3423,8 @@ describe("TerminalView", () => {
       // Scrollbar style change while hidden.
       useSettingsStore.setState({
         ...useSettingsStore.getState(),
-        convenience: {
-          ...useSettingsStore.getState().convenience,
+        terminal: {
+          ...useSettingsStore.getState().terminal,
           scrollbarStyle: "separate" as const,
         },
       });
@@ -3635,8 +3635,8 @@ describe("TerminalView", () => {
   it("applies scrollbar-separate class when setting is separate", () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
+      terminal: {
+        ...useSettingsStore.getState().terminal,
         scrollbarStyle: "separate" as const,
       },
     });
@@ -3658,8 +3658,8 @@ describe("TerminalView", () => {
 
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
+      terminal: {
+        ...useSettingsStore.getState().terminal,
         scrollbarStyle: "separate" as const,
       },
     });
@@ -3677,8 +3677,8 @@ describe("TerminalView", () => {
   it("updates xterm overviewRuler when scrollbarStyle changes from separate to overlay", async () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
+      terminal: {
+        ...useSettingsStore.getState().terminal,
         scrollbarStyle: "separate" as const,
       },
     });
@@ -3693,8 +3693,8 @@ describe("TerminalView", () => {
 
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: {
-        ...useSettingsStore.getState().convenience,
+      terminal: {
+        ...useSettingsStore.getState().terminal,
         scrollbarStyle: "overlay" as const,
       },
     });

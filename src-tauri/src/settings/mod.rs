@@ -247,16 +247,15 @@ mod tests {
     }
 
     #[test]
-    fn convenience_multi_file_paste_defaults() {
+    fn paste_multi_file_defaults() {
         // issue #325: 다중 파일 붙여넣기 설정 기본값
-        let conv = crate::settings::models::ConvenienceSettings::default();
-        assert_eq!(conv.paste_path_separator, "space");
-        assert!(!conv.paste_path_quote);
+        let paste = crate::settings::models::PasteSettings::default();
+        assert_eq!(paste.path_separator, "space");
+        assert!(!paste.path_quote);
         // 구버전 settings.json(필드 없음)도 기본값으로 채워진다
-        let parsed: crate::settings::models::ConvenienceSettings =
-            serde_json::from_str("{}").unwrap();
-        assert_eq!(parsed.paste_path_separator, "space");
-        assert!(!parsed.paste_path_quote);
+        let parsed: crate::settings::models::PasteSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed.path_separator, "space");
+        assert!(!parsed.path_quote);
     }
 
     #[test]
@@ -331,29 +330,29 @@ mod tests {
     }
 
     #[test]
-    fn convenience_hidden_auto_close_default_is_disabled() {
+    fn workspace_selector_hidden_auto_close_default_is_disabled() {
         // Default must be 0 (disabled) so existing users see no behavior change.
         let settings = Settings::default();
-        assert_eq!(settings.convenience.hidden_auto_close_seconds, 0);
+        assert_eq!(settings.workspace_selector.hidden_auto_close_seconds, 0);
     }
 
     #[test]
-    fn convenience_hidden_auto_close_round_trip() {
+    fn workspace_selector_hidden_auto_close_round_trip() {
         // The timeout must persist through a full save/load cycle in settings.json.
         let json = r#"{
-          "convenience": {
+          "workspaceSelector": {
             "hiddenAutoCloseSeconds": 600
           }
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(settings.convenience.hidden_auto_close_seconds, 600);
+        assert_eq!(settings.workspace_selector.hidden_auto_close_seconds, 600);
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"hiddenAutoCloseSeconds\":600"));
 
         // Round-trip the serialized form back to ensure the field is not dropped.
         let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(reparsed.convenience.hidden_auto_close_seconds, 600);
+        assert_eq!(reparsed.workspace_selector.hidden_auto_close_seconds, 600);
     }
 
     #[test]
@@ -550,9 +549,10 @@ mod tests {
 
     #[test]
     fn view_order_and_app_theme_round_trip() {
-        let json = r#"{"viewOrder": ["TerminalView", "MemoView"], "appThemeId": "dracula"}"#;
+        let json =
+            r#"{"viewOrder": ["TerminalView", "MemoView"], "appearance": {"themeId": "dracula"}}"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.view_order, vec!["TerminalView", "MemoView"]);
-        assert_eq!(settings.app_theme_id, "dracula");
+        assert_eq!(settings.appearance.theme_id, "dracula");
     }
 }

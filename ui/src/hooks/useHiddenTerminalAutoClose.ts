@@ -28,7 +28,7 @@ export function useHiddenTerminalAutoClose() {
 
   useEffect(() => {
     const evaluate = () => {
-      const timeoutSec = useSettingsStore.getState().convenience.hiddenAutoCloseSeconds;
+      const timeoutSec = useSettingsStore.getState().workspaceSelector.hiddenAutoCloseSeconds;
       const ui = useUiStore.getState();
 
       // Disabled: clear timers + any prior evictions so terminals re-mount.

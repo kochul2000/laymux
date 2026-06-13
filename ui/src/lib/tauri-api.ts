@@ -149,15 +149,6 @@ export async function loadWindowGeometry(): Promise<WindowGeometry | null> {
   return invoke("load_window_geometry");
 }
 
-export interface ConvenienceSettings {
-  smartPaste: boolean;
-  pasteImageDir: string;
-  /** Strip common leading whitespace when pasting. */
-  smartRemoveIndent: boolean;
-  /** Rejoin URLs split across lines when pasting. */
-  smartRemoveLineBreak: boolean;
-}
-
 export type ClaudeSyncCwdMode = "skip" | "command";
 export type ClaudeStatusMessageMode = "bullet" | "title" | "title-bullet" | "bullet-title";
 export type CodexStatusMessageMode = ClaudeStatusMessageMode;
@@ -245,13 +236,16 @@ export type FileViewerContent =
   | { kind: "image"; dataUrl: string }
   | { kind: "binary"; size: number };
 
-export interface WorkspaceDisplaySettings {
-  minimap: boolean;
-  environment: boolean;
-  activity: boolean;
-  path: boolean;
-  result: boolean;
-}
+export type {
+  AppearanceSettings,
+  PasteSettings,
+  TerminalSettings,
+  ControlBarSettings,
+  DockSettings,
+  NotificationSettings,
+  WorkspaceDisplaySettings,
+  WorkspaceSelectorSettings,
+} from "@/stores/settings-store";
 
 export interface ProfileDefaults {
   colorScheme?: string;
@@ -276,20 +270,21 @@ export interface Settings {
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];
-  font?: FontSettings;
-  appFont?: FontSettings;
   defaultProfile: string;
   profileDefaults?: ProfileDefaults;
   syncCwdDefaults?: SyncCwdDefaults;
   viewOrder?: string[];
-  appThemeId?: string;
+  appearance: import("@/stores/settings-store").AppearanceSettings;
   layouts: SettingsLayout[];
   workspaces: SettingsWorkspace[];
   docks: DockSetting[];
   workspaceDisplayOrder?: string[];
-  workspaceSortOrder?: import("@/stores/settings-store").WorkspaceSortOrder;
-  convenience: ConvenienceSettings;
-  workspaceDisplay?: WorkspaceDisplaySettings;
+  paste: import("@/stores/settings-store").PasteSettings;
+  terminal: import("@/stores/settings-store").TerminalSettings;
+  controlBar: import("@/stores/settings-store").ControlBarSettings;
+  dock: import("@/stores/settings-store").DockSettings;
+  notifications: import("@/stores/settings-store").NotificationSettings;
+  workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
   memo: MemoSettings;

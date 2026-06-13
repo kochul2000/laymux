@@ -6,7 +6,7 @@ import { useSettingsStore, builtinAppThemes, type AppTheme } from "@/stores/sett
  * App theme is separate from terminal color schemes.
  */
 export function useAppTheme() {
-  const appThemeId = useSettingsStore((s) => s.appThemeId ?? "catppuccin-mocha");
+  const appThemeId = useSettingsStore((s) => s.appearance.themeId ?? "catppuccin-mocha");
 
   useEffect(() => {
     const theme = builtinAppThemes.find((t) => t.id === appThemeId) ?? builtinAppThemes[0];

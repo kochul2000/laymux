@@ -66,7 +66,7 @@ describe("AppLayout", () => {
 
   it("keeps dock in DOM when toggled invisible with dockPersistState on", () => {
     useSettingsStore.setState({
-      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: true },
+      dock: { ...useSettingsStore.getState().dock, persistState: true },
     });
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
@@ -76,7 +76,7 @@ describe("AppLayout", () => {
 
   it("removes dock from DOM when toggled invisible with dockPersistState off", () => {
     useSettingsStore.setState({
-      convenience: { ...useSettingsStore.getState().convenience, dockPersistState: false },
+      dock: { ...useSettingsStore.getState().dock, persistState: false },
     });
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
@@ -199,7 +199,7 @@ describe("AppLayout", () => {
   it("workspace mode: clears active-workspace alerts on entry (issue #302)", () => {
     const wsId = useWorkspaceStore.getState().activeWorkspaceId;
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, notificationDismiss: "workspace" },
+      notifications: { ...s.notifications, dismiss: "workspace" },
     }));
     // 비활성 시점에 도착해 unread 로 남아 있던 알림을 흉내낸다(강제 unread).
     const n = useNotificationStore.getState().addNotification({
@@ -229,7 +229,7 @@ describe("AppLayout", () => {
     const pane1 = ws.panes[1].id;
 
     useSettingsStore.setState((s) => ({
-      convenience: { ...s.convenience, notificationDismiss: "paneFocus" },
+      notifications: { ...s.notifications, dismiss: "paneFocus" },
     }));
     useGridStore.setState({ focusedPaneIndex: null });
 

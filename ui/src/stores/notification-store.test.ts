@@ -388,9 +388,9 @@ describe("NotificationStore", () => {
     it("does NOT auto-dismiss when notificationDismiss is manual", () => {
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
       useSettingsStore.setState({
-        convenience: {
-          ...useSettingsStore.getState().convenience,
-          notificationDismiss: "manual",
+        notifications: {
+          ...useSettingsStore.getState().notifications,
+          dismiss: "manual",
         },
       });
 
@@ -411,9 +411,9 @@ describe("NotificationStore", () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
       const focusedPaneId = ws.panes[0].id;
       useSettingsStore.setState({
-        convenience: {
-          ...useSettingsStore.getState().convenience,
-          notificationDismiss: "paneFocus",
+        notifications: {
+          ...useSettingsStore.getState().notifications,
+          dismiss: "paneFocus",
         },
       });
       useGridStore.setState({ focusedPaneIndex: 0 });
@@ -482,9 +482,9 @@ describe("NotificationStore", () => {
     it("does NOT auto-dismiss in paneFocus mode when no pane is focused", () => {
       const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
       useSettingsStore.setState({
-        convenience: {
-          ...useSettingsStore.getState().convenience,
-          notificationDismiss: "paneFocus",
+        notifications: {
+          ...useSettingsStore.getState().notifications,
+          dismiss: "paneFocus",
         },
       });
       useGridStore.setState({ focusedPaneIndex: null });

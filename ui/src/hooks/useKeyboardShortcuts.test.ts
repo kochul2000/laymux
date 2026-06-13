@@ -110,7 +110,7 @@ describe("useKeyboardShortcuts", () => {
     const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
 
     // Switch to notification sort
-    useSettingsStore.getState().setWorkspaceSortOrder("notification");
+    useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
 
     // Add unread notification to WS3 (most recent)
     useNotificationStore.getState().addNotification({
@@ -132,7 +132,7 @@ describe("useKeyboardShortcuts", () => {
     useWorkspaceStore.getState().addWorkspace("WS3", "default-layout");
     const ids = useWorkspaceStore.getState().workspaces.map((ws) => ws.id);
 
-    useSettingsStore.getState().setWorkspaceSortOrder("notification");
+    useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
 
     // WS3 gets notification → becomes first in sort
     useNotificationStore.getState().addNotification({
@@ -208,7 +208,7 @@ describe("useKeyboardShortcuts", () => {
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, dockArrowFocusPane: false },
+      dock: { ...useSettingsStore.getState().dock, arrowFocusPane: false },
     });
     useDockStore.getState().setFocusedDock("left");
     useGridStore.setState({ focusedPaneIndex: null });
@@ -250,7 +250,7 @@ describe("useKeyboardShortcuts", () => {
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, dockArrowFocusPane: false },
+      dock: { ...useSettingsStore.getState().dock, arrowFocusPane: false },
     });
     useDockStore.getState().setFocusedDock(null);
     useGridStore.setState({ focusedPaneIndex: null });
@@ -671,7 +671,7 @@ describe("useKeyboardShortcuts", () => {
   it("Alt+Arrow dock nav disabled when dockArrowNav is false", () => {
     useSettingsStore.setState({
       ...useSettingsStore.getState(),
-      convenience: { ...useSettingsStore.getState().convenience, dockArrowNav: false },
+      dock: { ...useSettingsStore.getState().dock, arrowNav: false },
     });
     // Hide left dock to ensure dock nav doesn't interfere
     useDockStore.getState().toggleDockVisible("left");

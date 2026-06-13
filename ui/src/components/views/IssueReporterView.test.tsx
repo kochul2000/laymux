@@ -482,7 +482,10 @@ describe("IssueReporterView", () => {
           fontSize: 0,
           fontWeight: "",
         },
-        appFont: { face: "Fira Code", size: 15, weight: "bold" },
+        appearance: {
+          ...useSettingsStore.getState().appearance,
+          font: { face: "Fira Code", size: 15, weight: "bold" },
+        },
       });
       render(<IssueReporterView />);
       const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;
@@ -503,7 +506,10 @@ describe("IssueReporterView", () => {
     it("defaults to appFont size when fontSize is 0", () => {
       useSettingsStore.setState({
         issueReporter: { ...useSettingsStore.getState().issueReporter, fontSize: 0 },
-        appFont: { face: "Cascadia Mono", size: 13, weight: "normal" },
+        appearance: {
+          ...useSettingsStore.getState().appearance,
+          font: { face: "Cascadia Mono", size: 13, weight: "normal" },
+        },
       });
       render(<IssueReporterView />);
       const textarea = screen.getByTestId("issue-body") as HTMLTextAreaElement;

@@ -32,7 +32,7 @@ const ARROW_TO_DIRECTION: Record<string, Direction> = {
  */
 function switchWorkspace(id: string) {
   const wasDockFocused = useDockStore.getState().focusedDock !== null;
-  const focusPane = useSettingsStore.getState().convenience.dockArrowFocusPane;
+  const focusPane = useSettingsStore.getState().dock.arrowFocusPane;
 
   useWorkspaceStore.getState().setActiveWorkspace(id);
 
@@ -136,7 +136,7 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           const dockStore = useDockStore.getState();
           const { focusedDock } = dockStore;
-          const dockArrowNav = useSettingsStore.getState().convenience.dockArrowNav;
+          const dockArrowNav = useSettingsStore.getState().dock.arrowNav;
 
           // If currently focused on a dock, try navigation within dock panes first
           if (focusedDock !== null) {
@@ -212,7 +212,7 @@ export function useKeyboardShortcuts() {
         removeWorkspace,
         renameWorkspace,
       } = useWorkspaceStore.getState();
-      const { workspaceSortOrder } = useSettingsStore.getState();
+      const workspaceSortOrder = useSettingsStore.getState().workspaceSelector.sortOrder;
       const { notifications } = useNotificationStore.getState();
       const workspaces = sortWorkspaces(
         rawWorkspaces,

@@ -75,7 +75,10 @@ async function persistSessionCore(): Promise<void> {
       ...settingsState.profileDefaults,
     },
     viewOrder: settingsState.viewOrder ?? [],
-    appThemeId: settingsState.appThemeId ?? "catppuccin-mocha",
+    appearance: {
+      themeId: settingsState.appearance.themeId,
+      font: { ...settingsState.appearance.font },
+    },
     // WARNING: Profile 필드를 추가할 때 여기에도 반드시 포함할 것.
     // 누락하면 settings.json 저장 시 해당 필드가 사라짐.
     // persist-session.test.ts에도 보존 테스트를 추가할 것.
@@ -165,15 +168,20 @@ async function persistSessionCore(): Promise<void> {
       }),
     })),
     workspaceDisplayOrder: wsState.workspaceDisplayOrder,
-    workspaceSortOrder: settingsState.workspaceSortOrder,
-    convenience: { ...settingsState.convenience },
-    workspaceDisplay: { ...settingsState.workspaceDisplay },
+    paste: { ...settingsState.paste },
+    terminal: { ...settingsState.terminal },
+    controlBar: { ...settingsState.controlBar },
+    dock: { ...settingsState.dock },
+    notifications: { ...settingsState.notifications },
+    workspaceSelector: {
+      ...settingsState.workspaceSelector,
+      display: { ...settingsState.workspaceSelector.display },
+    },
     claude: { ...settingsState.claude },
     codex: { ...settingsState.codex },
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },
-    appFont: { ...settingsState.appFont },
     syncCwdDefaults: { ...settingsState.syncCwdDefaults },
     docks: dockState.docks.map((d) => ({
       position: d.position,

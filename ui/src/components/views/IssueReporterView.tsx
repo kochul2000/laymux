@@ -33,7 +33,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const submittingRef = useRef(false);
 
   const ir = useSettingsStore((s) => s.issueReporter);
-  const appFont = useSettingsStore((s) => s.appFont);
+  const appFont = useSettingsStore((s) => s.appearance.font);
   // Sanitize the configured list for display/selection: trim each entry, drop
   // blanks, and de-duplicate. Keeps the dropdown free of empty/duplicate options
   // (no React key collisions) and ensures the value sent to the backend has no

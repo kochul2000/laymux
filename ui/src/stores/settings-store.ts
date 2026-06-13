@@ -66,49 +66,68 @@ export type ScrollbarStyle = "overlay" | "separate";
 /** Pane control bar default mode. */
 export type ControlBarMode = "hover" | "pinned" | "minimized";
 
-export interface ConvenienceSettings {
-  smartPaste: boolean;
-  pasteImageDir: string;
+/** App-wide appearance (theme + non-terminal font). */
+export interface AppearanceSettings {
+  /** App UI theme id (e.g. "catppuccin-mocha"). Separate from terminal color schemes. */
+  themeId: string;
+  /** App-wide default font for non-terminal views (Memo, Issue Reporter, etc.). */
+  font: FontSettings;
+}
+
+/** Paste / clipboard behavior. */
+export interface PasteSettings {
+  /** Smart paste master toggle. */
+  smart: boolean;
+  /** Directory for clipboard image pastes. Empty = default temp dir. */
+  imageDir: string;
+  /** Strip common leading whitespace when pasting. */
+  removeIndent: boolean;
+  /** Rejoin URLs split across lines when pasting. */
+  removeLineBreak: boolean;
+  /** Detect indented multi-line URLs and make them clickable as a single link. */
+  linkJoin: boolean;
+  /** Show a confirmation dialog when pasting large text. */
+  largeWarning: boolean;
+  /** Separator between paths when pasting multiple clipboard files. See issue #325. */
+  pathSeparator: PastePathSeparator;
+  /** Wrap each pasted file path in double quotes (useful for paths with spaces). See issue #325. */
+  pathQuote: boolean;
+}
+
+/** Terminal behavior & rendering. */
+export interface TerminalSettings {
+  /** Automatically copy text to clipboard when selected in terminal. */
+  copyOnSelect: boolean;
+  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
+  scrollbarStyle: ScrollbarStyle;
+}
+
+/** Pane control bar behavior. */
+export interface ControlBarSettings {
   /** Seconds of mouse inactivity before hiding the pane control bar. 0 = never hide. */
   hoverIdleSeconds: number;
   /** Default control bar mode for new panes. */
-  defaultControlBarMode: ControlBarMode;
-  /** When to auto-dismiss notifications as read. */
-  notificationDismiss: NotificationDismissMode;
-  /** Automatically copy text to clipboard when selected in terminal. */
-  copyOnSelect: boolean;
-  /** Path ellipsis direction in WorkspaceSelectorView. "start" (default) shows the end of the path, "end" shows the beginning. */
-  pathEllipsis: PathEllipsisMode;
-  /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
-  scrollbarStyle: ScrollbarStyle;
+  defaultMode: ControlBarMode;
+}
+
+/** Dock behavior (distinct from the structural docks array). */
+export interface DockSettings {
   /** Keep dock state in background when hidden. */
-  dockPersistState: boolean;
+  persistState: boolean;
   /** Allow Alt+Arrow to navigate into/out of dock areas. */
-  dockArrowNav: boolean;
+  arrowNav: boolean;
   /**
    * When switching workspaces by keyboard arrow (Ctrl+Alt+Arrow) while a dock
    * is focused, automatically hand focus to a workspace pane. When false, dock
    * focus is preserved across the switch (memo-style). Default: true. See #311.
    */
-  dockArrowFocusPane: boolean;
-  /** Strip common leading whitespace when pasting. */
-  smartRemoveIndent: boolean;
-  /** Rejoin URLs split across lines when pasting. */
-  smartRemoveLineBreak: boolean;
-  /** Detect indented multi-line URLs and make them clickable as a single link. */
-  smartLinkJoin: boolean;
-  /** Show a confirmation dialog when pasting large text. */
-  largePasteWarning: boolean;
-  /**
-   * Seconds a pane/workspace must stay hidden (in the WorkspaceSelectorView hide mode)
-   * before its terminal (PTY) is automatically closed to free memory/CPU. 0 = disabled.
-   * See issue #269.
-   */
-  hiddenAutoCloseSeconds: number;
-  /** Separator between paths when pasting multiple clipboard files. See issue #325. */
-  pastePathSeparator: PastePathSeparator;
-  /** Wrap each pasted file path in double quotes (useful for paths with spaces). See issue #325. */
-  pastePathQuote: boolean;
+  arrowFocusPane: boolean;
+}
+
+/** Notification behavior. */
+export interface NotificationSettings {
+  /** When to auto-dismiss notifications as read. */
+  dismiss: NotificationDismissMode;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -118,6 +137,21 @@ export interface WorkspaceDisplaySettings {
   activity: boolean;
   path: boolean;
   result: boolean;
+}
+
+/** WorkspaceSelectorView settings (display toggles, sort order, lifecycle). */
+export interface WorkspaceSelectorSettings {
+  /** Display toggles for pane rows. */
+  display: WorkspaceDisplaySettings;
+  /** Workspace sort order. */
+  sortOrder: WorkspaceSortOrder;
+  /** Path ellipsis direction. "start" (default) shows the end of the path, "end" shows the beginning. */
+  pathEllipsis: PathEllipsisMode;
+  /**
+   * Seconds a pane/workspace must stay hidden (in the hide mode) before its terminal (PTY)
+   * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
+   */
+  hiddenAutoCloseSeconds: number;
 }
 
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
@@ -304,30 +338,35 @@ interface SettingsState {
   colorSchemes: ColorScheme[];
   keybindings: Keybinding[];
   viewOrder: string[];
-  appThemeId: string;
-  convenience: ConvenienceSettings;
-  workspaceDisplay: WorkspaceDisplaySettings;
+  appearance: AppearanceSettings;
+  paste: PasteSettings;
+  terminal: TerminalSettings;
+  controlBar: ControlBarSettings;
+  dock: DockSettings;
+  notifications: NotificationSettings;
+  workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
-  appFont: FontSettings;
   syncCwdDefaults: SyncCwdDefaults;
-  workspaceSortOrder: WorkspaceSortOrder;
 
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
-  setAppTheme: (themeId: string) => void;
-  setConvenience: (data: Partial<ConvenienceSettings>) => void;
+  setAppearance: (data: Partial<AppearanceSettings>) => void;
+  setPaste: (data: Partial<PasteSettings>) => void;
+  setTerminal: (data: Partial<TerminalSettings>) => void;
+  setControlBar: (data: Partial<ControlBarSettings>) => void;
+  setDock: (data: Partial<DockSettings>) => void;
+  setNotifications: (data: Partial<NotificationSettings>) => void;
+  setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setWorkspaceDisplay: (data: Partial<WorkspaceDisplaySettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
-  setAppFont: (font: FontSettings) => void;
-  setWorkspaceSortOrder: (order: WorkspaceSortOrder) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
   addProfile: (profile: Profile) => void;
@@ -360,19 +399,21 @@ interface SettingsState {
         | "colorSchemes"
         | "keybindings"
         | "viewOrder"
-        | "appThemeId"
-        | "convenience"
-        | "workspaceDisplay"
+        | "appearance"
+        | "paste"
+        | "terminal"
+        | "controlBar"
+        | "dock"
+        | "notifications"
+        | "workspaceSelector"
         | "claude"
         | "codex"
         | "memo"
         | "issueReporter"
         | "fileExplorer"
-        | "appFont"
         | "syncCwdDefaults"
-        | "workspaceSortOrder"
       >
-    > & { font?: FontSettings },
+    >,
   ) => void;
 }
 
@@ -421,6 +462,57 @@ export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, wei
 
 /** Default app font for non-terminal views (Memo, Issue Reporter, etc.). */
 export const DEFAULT_APP_FONT: FontSettings = { face: "Cascadia Mono", size: 13, weight: "normal" };
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  themeId: "catppuccin-mocha",
+  font: { ...DEFAULT_APP_FONT },
+};
+
+export const DEFAULT_PASTE: PasteSettings = {
+  smart: true,
+  imageDir: "",
+  removeIndent: true,
+  removeLineBreak: true,
+  linkJoin: true,
+  largeWarning: true,
+  pathSeparator: "space",
+  pathQuote: false,
+};
+
+export const DEFAULT_TERMINAL: TerminalSettings = {
+  copyOnSelect: true,
+  scrollbarStyle: "overlay",
+};
+
+export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
+  hoverIdleSeconds: 2,
+  defaultMode: "minimized",
+};
+
+export const DEFAULT_DOCK: DockSettings = {
+  persistState: true,
+  arrowNav: true,
+  arrowFocusPane: true,
+};
+
+export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
+  dismiss: "workspace",
+};
+
+export const DEFAULT_WORKSPACE_DISPLAY: WorkspaceDisplaySettings = {
+  minimap: true,
+  environment: true,
+  activity: true,
+  path: true,
+  result: true,
+};
+
+export const DEFAULT_WORKSPACE_SELECTOR: WorkspaceSelectorSettings = {
+  display: { ...DEFAULT_WORKSPACE_DISPLAY },
+  sortOrder: "manual",
+  pathEllipsis: "start",
+  hiddenAutoCloseSeconds: 0,
+};
 
 /** Fallback profile name when defaultProfile is unset. */
 export const FALLBACK_PROFILE = "PowerShell";
@@ -778,28 +870,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   colorSchemes: [...builtinColorSchemes],
   keybindings: [],
   viewOrder: [],
-  appThemeId: "catppuccin-mocha",
-  convenience: {
-    smartPaste: true,
-    pasteImageDir: "",
-    hoverIdleSeconds: 2,
-    defaultControlBarMode: "minimized" as const,
-    notificationDismiss: "workspace" as const,
-    copyOnSelect: true,
-    pathEllipsis: "start" as const,
-    scrollbarStyle: "overlay" as const,
-    dockPersistState: true,
-    dockArrowNav: true,
-    dockArrowFocusPane: true,
-    smartRemoveIndent: true,
-    smartRemoveLineBreak: true,
-    smartLinkJoin: true,
-    largePasteWarning: true,
-    hiddenAutoCloseSeconds: 0,
-    pastePathSeparator: "space" as const,
-    pastePathQuote: false,
+  appearance: { ...DEFAULT_APPEARANCE, font: { ...DEFAULT_APPEARANCE.font } },
+  paste: { ...DEFAULT_PASTE },
+  terminal: { ...DEFAULT_TERMINAL },
+  controlBar: { ...DEFAULT_CONTROL_BAR },
+  dock: { ...DEFAULT_DOCK },
+  notifications: { ...DEFAULT_NOTIFICATIONS },
+  workspaceSelector: {
+    ...DEFAULT_WORKSPACE_SELECTOR,
+    display: { ...DEFAULT_WORKSPACE_SELECTOR.display },
   },
-  workspaceDisplay: { minimap: true, environment: true, activity: true, path: true, result: true },
   claude: {
     syncCwd: "skip" as ClaudeSyncCwdMode,
     restoreSession: true,
@@ -817,20 +897,49 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
-  appFont: { ...DEFAULT_APP_FONT },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
-  workspaceSortOrder: "manual" as WorkspaceSortOrder,
 
-  setAppTheme: (appThemeId) => set({ appThemeId }),
-
-  setConvenience: (data) =>
+  setAppearance: (data) =>
     set((state) => ({
-      convenience: { ...state.convenience, ...data },
+      appearance: { ...state.appearance, ...data },
+    })),
+
+  setPaste: (data) =>
+    set((state) => ({
+      paste: { ...state.paste, ...data },
+    })),
+
+  setTerminal: (data) =>
+    set((state) => ({
+      terminal: { ...state.terminal, ...data },
+    })),
+
+  setControlBar: (data) =>
+    set((state) => ({
+      controlBar: { ...state.controlBar, ...data },
+    })),
+
+  setDock: (data) =>
+    set((state) => ({
+      dock: { ...state.dock, ...data },
+    })),
+
+  setNotifications: (data) =>
+    set((state) => ({
+      notifications: { ...state.notifications, ...data },
+    })),
+
+  setWorkspaceSelector: (data) =>
+    set((state) => ({
+      workspaceSelector: { ...state.workspaceSelector, ...data },
     })),
 
   setWorkspaceDisplay: (data) =>
     set((state) => ({
-      workspaceDisplay: { ...state.workspaceDisplay, ...data },
+      workspaceSelector: {
+        ...state.workspaceSelector,
+        display: { ...state.workspaceSelector.display, ...data },
+      },
     })),
 
   setClaude: (data) =>
@@ -857,9 +966,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set((state) => ({
       fileExplorer: { ...state.fileExplorer, ...data },
     })),
-  setAppFont: (font) => set({ appFont: font }),
-
-  setWorkspaceSortOrder: (order) => set({ workspaceSortOrder: order }),
 
   setSyncCwdDefaults: (data) =>
     set((state) => ({
@@ -964,9 +1070,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
 
   loadFromSettings: (data) => {
-    // Legacy migration: root-level font → profileDefaults.font
-    const legacyFont = data.font;
-
     // Ensure profiles have all required fields (backwards compat)
     const profiles = data.profiles?.map((p) => ({
       ...makeProfile(p.name, p.commandLine),
@@ -976,28 +1079,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(p.font ? { font: { ...p.font, weight: p.font.weight ?? "normal" } } : {}),
     }));
     // Ensure profileDefaults has all fields (backwards compat)
-    // If root-level font exists but profileDefaults.font doesn't, migrate it
-    const resolvedProfileDefaultsFont = data.profileDefaults?.font
-      ? {
-          ...DEFAULT_FONT,
-          ...data.profileDefaults.font,
-          weight: data.profileDefaults.font.weight ?? "normal",
-        }
-      : legacyFont
-        ? { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" }
-        : defaultProfileDefaults.font;
     const profileDefaults = data.profileDefaults
       ? {
           ...defaultProfileDefaults,
           ...data.profileDefaults,
-          font: resolvedProfileDefaultsFont,
+          font: data.profileDefaults.font
+            ? {
+                ...DEFAULT_FONT,
+                ...data.profileDefaults.font,
+                weight: data.profileDefaults.font.weight ?? "normal",
+              }
+            : defaultProfileDefaults.font,
         }
-      : legacyFont
-        ? {
-            ...defaultProfileDefaults,
-            font: { ...DEFAULT_FONT, ...legacyFont, weight: legacyFont.weight ?? "normal" },
-          }
-        : undefined;
+      : undefined;
     // Merge loaded color schemes with builtins (builtins first, user schemes appended)
     const loadedSchemes = data.colorSchemes?.map((cs) => ({
       ...makeDefaultColorScheme(),
@@ -1012,39 +1106,37 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
             return [...kept, ...loadedSchemes];
           })()
         : undefined;
-    // Ensure convenience settings have all fields (backwards compat)
-    const convenience = data.convenience
+    // Ensure appearance settings have all fields
+    const appearance = data.appearance
       ? {
-          smartPaste: true,
-          pasteImageDir: "",
-          hoverIdleSeconds: 2,
-          defaultControlBarMode: "minimized" as const,
-          notificationDismiss: "workspace" as const,
-          copyOnSelect: true,
-          pathEllipsis: "start" as const,
-          scrollbarStyle: "overlay" as const,
-          dockPersistState: true,
-          dockArrowNav: true,
-          dockArrowFocusPane: true,
-          smartRemoveIndent: true,
-          smartRemoveLineBreak: true,
-          smartLinkJoin: true,
-          largePasteWarning: true,
-          hiddenAutoCloseSeconds: 0,
-          pastePathSeparator: "space" as const,
-          pastePathQuote: false,
-          ...(data.convenience as Partial<ConvenienceSettings>),
+          ...DEFAULT_APPEARANCE,
+          ...data.appearance,
+          font: data.appearance.font
+            ? {
+                ...DEFAULT_APP_FONT,
+                ...data.appearance.font,
+                weight: data.appearance.font.weight ?? "normal",
+              }
+            : { ...DEFAULT_APPEARANCE.font },
         }
       : undefined;
-    // Ensure workspaceDisplay settings have all fields (backwards compat)
-    const workspaceDisplay = data.workspaceDisplay
+    const paste = data.paste ? { ...DEFAULT_PASTE, ...data.paste } : undefined;
+    const terminal = data.terminal ? { ...DEFAULT_TERMINAL, ...data.terminal } : undefined;
+    const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;
+    const dock = data.dock ? { ...DEFAULT_DOCK, ...data.dock } : undefined;
+    const notifications = data.notifications
+      ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
+      : undefined;
+    // Ensure workspaceSelector settings (incl. nested display) have all fields
+    const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
+    const workspaceSelector = data.workspaceSelector
       ? {
-          minimap: true,
-          environment: true,
-          activity: true,
-          path: true,
-          result: true,
-          ...(data.workspaceDisplay as Partial<WorkspaceDisplaySettings>),
+          ...DEFAULT_WORKSPACE_SELECTOR,
+          ...data.workspaceSelector,
+          display: { ...DEFAULT_WORKSPACE_DISPLAY, ...(data.workspaceSelector.display ?? {}) },
+          sortOrder: validSortOrders.includes(data.workspaceSelector.sortOrder)
+            ? data.workspaceSelector.sortOrder
+            : DEFAULT_WORKSPACE_SELECTOR.sortOrder,
         }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)
@@ -1067,10 +1159,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),
         }
-      : undefined;
-    // Ensure appFont has all fields (backwards compat)
-    const appFont = data.appFont
-      ? { ...DEFAULT_APP_FONT, ...data.appFont, weight: data.appFont.weight ?? "normal" }
       : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
@@ -1100,30 +1188,34 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         }
       : undefined;
 
-    // Validate workspaceSortOrder — only accept known values, otherwise drop it
-    const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
-    const validatedSortOrder =
-      data.workspaceSortOrder && validSortOrders.includes(data.workspaceSortOrder)
-        ? { workspaceSortOrder: data.workspaceSortOrder }
-        : {};
-
-    // Strip legacy font field before spreading into state
-    const { font: _legacyFont, workspaceSortOrder: _rawSort, ...rest } = data;
+    const {
+      appearance: _rawAppearance,
+      paste: _rawPaste,
+      terminal: _rawTerminal,
+      controlBar: _rawControlBar,
+      dock: _rawDock,
+      notifications: _rawNotifications,
+      workspaceSelector: _rawWorkspaceSelector,
+      ...rest
+    } = data;
     set((state) => ({
       ...state,
       ...rest,
-      ...validatedSortOrder,
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),
-      ...(convenience ? { convenience } : {}),
-      ...(workspaceDisplay ? { workspaceDisplay } : {}),
+      ...(appearance ? { appearance } : {}),
+      ...(paste ? { paste } : {}),
+      ...(terminal ? { terminal } : {}),
+      ...(controlBar ? { controlBar } : {}),
+      ...(dock ? { dock } : {}),
+      ...(notifications ? { notifications } : {}),
+      ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),
-      ...(appFont ? { appFont } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
   },
