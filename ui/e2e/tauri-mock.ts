@@ -10,9 +10,9 @@ export const TAURI_MOCK_SCRIPT = `
   var eventListeners = {};
 
   var SETTINGS_DATA = {
-    font: { face: 'Consolas', size: 14 },
+    appearance: { themeId: 'catppuccin-mocha', font: { face: 'Consolas', size: 14, weight: 'normal' } },
     defaultProfile: 'PowerShell',
-    convenience: { defaultControlBarMode: 'hover' },
+    controlBar: { hoverIdleSeconds: 2, defaultMode: 'hover' },
     profiles: [
       { name: 'PowerShell', commandLine: 'powershell.exe', colorScheme: '', startingDirectory: '', hidden: false },
       { name: 'WSL', commandLine: 'wsl.exe', colorScheme: '', startingDirectory: '', hidden: false },
