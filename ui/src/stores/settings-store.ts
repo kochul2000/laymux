@@ -424,7 +424,7 @@ const DEFAULT_MEMO: MemoSettings = {
   paddingBottom: 8,
   paddingLeft: 8,
   paragraphCopy: { enabled: true, minBlankLines: 2 },
-  copyOnSelect: false,
+  copyOnSelect: true,
   tripleClickParagraphSelect: true,
   indentSize: 2,
   fontFamily: "",
