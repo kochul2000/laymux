@@ -701,6 +701,25 @@ export function PaneControlBar({
     [showPropagateCwd, actions.onPropagateCwdOnce],
   );
 
+  // 좌측 아이콘(pane 번호 배지 + propagate 버튼)은 컨트롤 바 투명화(issue #320)에서
+  // 제외되어 항상 불투명하게 보여야 한다 (issue #341). 반투명 배경의 바 위에서
+  // 터미널 내용이 비쳐 흐릿해지지 않도록 자체 불투명 배경(.pane-bar-left-solid)을
+  // 가진 컨테이너로 감싼다. 좌측 아이콘이 하나도 없으면 컨테이너 자체를 렌더하지 않는다.
+  const hasLeftIcons = paneNumber != null || showPropagateCwd;
+  const leftIcons = hasLeftIcons ? (
+    <div
+      data-testid="pane-control-bar-left-solid"
+      className="pane-bar-left-solid flex shrink-0 items-center"
+    >
+      <PaneNumberBadge
+        number={paneNumber}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+      />
+      {leftPaneControls}
+    </div>
+  ) : null;
+
   // 자식(TerminalView 등)이 주입한 좌측 콘텐츠가 있으면 기본 BarLabel 대신 사용.
   // 둘 다 없으면 flex-1 스페이서만 렌더하여 pane 컨트롤이 오른쪽 끝에 정렬되도록 한다.
   const hasLeftContent =
@@ -784,12 +803,7 @@ export function PaneControlBar({
               borderBottom: `1px solid ${borderClr}`,
             }}
           >
-            <PaneNumberBadge
-              number={paneNumber}
-              workspaceId={workspaceId}
-              workspaceName={workspaceName}
-            />
-            {leftPaneControls}
+            {leftIcons}
             {hasBarLabel ? (
               <BarLabel viewType={currentView.type} />
             ) : leftBarContent ? (
@@ -841,12 +855,7 @@ export function PaneControlBar({
                 borderRadius: 0,
               }}
             >
-              <PaneNumberBadge
-                number={paneNumber}
-                workspaceId={workspaceId}
-                workspaceName={workspaceName}
-              />
-              {leftPaneControls}
+              {leftIcons}
               {hasBarLabel ? (
                 <BarLabel viewType={currentView.type} />
               ) : leftBarContent ? (
