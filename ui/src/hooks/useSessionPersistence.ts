@@ -138,6 +138,26 @@ export function useSessionPersistence() {
                   rawSettings.issueReporter as import("@/lib/tauri-api").IssueReporterSettings,
               }
             : {}),
+          // fileExplorer carries extensionViewers (#342): without forwarding it
+          // here the store keeps its empty default, so configured per-extension
+          // viewers (e.g. .txt → vi) never resolve to the terminal viewer and
+          // the file always opens in the built-in web/text viewer after a
+          // restart. memo / syncCwdDefaults were missing for the same reason.
+          ...(rawSettings.fileExplorer
+            ? {
+                fileExplorer:
+                  rawSettings.fileExplorer as import("@/lib/tauri-api").FileExplorerSettings,
+              }
+            : {}),
+          ...(rawSettings.memo
+            ? { memo: rawSettings.memo as import("@/lib/tauri-api").MemoSettings }
+            : {}),
+          ...(rawSettings.syncCwdDefaults
+            ? {
+                syncCwdDefaults:
+                  rawSettings.syncCwdDefaults as import("@/lib/sync-cwd-config").SyncCwdDefaults,
+              }
+            : {}),
         });
 
         // Apply layouts and workspaces to workspace store

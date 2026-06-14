@@ -21,6 +21,17 @@ vi.mock("@/lib/tauri-api", () => {
     ],
     colorSchemes: [],
     keybindings: [],
+    fileExplorer: {
+      shellProfile: "",
+      paddingTop: 8,
+      paddingRight: 8,
+      paddingBottom: 8,
+      paddingLeft: 8,
+      fontFamily: "",
+      fontSize: 13,
+      copyOnSelect: false,
+      extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+    },
     layouts: [
       {
         id: "layout-1",
@@ -132,6 +143,21 @@ describe("useSessionPersistence", () => {
     expect(settingsState.profileDefaults.font.face).toBe("Fira Code");
     expect(settingsState.profileDefaults.font.size).toBe(16);
     expect(settingsState.defaultProfile).toBe("WSL");
+  });
+
+  // #342: fileExplorer (and thus extensionViewers) must be hydrated into the
+  // settings store on load. Without it the per-extension terminal viewers
+  // (e.g. .txt → vi) never resolve and the file always opens in the built-in
+  // web viewer after an app restart.
+  it("applies loaded fileExplorer.extensionViewers to settings store", async () => {
+    renderHook(() => useSessionPersistence());
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const { extensionViewers } = useSettingsStore.getState().fileExplorer;
+    expect(extensionViewers).toEqual([{ extensions: [".txt"], command: "vi" }]);
   });
 
   it("applies loaded layouts and workspaces to workspace store", async () => {
