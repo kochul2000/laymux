@@ -2,6 +2,8 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { formatRelativeTime } from "@/lib/workspace-summary";
+import { extractNotificationUrl } from "@/lib/notification-url";
+import { openExternal } from "@/lib/tauri-api";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
@@ -78,6 +80,7 @@ export function NotificationPanel({ workspaceId, embedded }: NotificationPanelPr
               </div>
               {wsNotifs.map((n) => {
                 const terminal = terminalInstances.find((t) => t.id === n.terminalId);
+                const url = extractNotificationUrl(n.message);
                 return (
                   <div
                     key={n.id}
@@ -97,13 +100,37 @@ export function NotificationPanel({ workspaceId, embedded }: NotificationPanelPr
                       [{terminal?.label ?? "?"}]
                     </span>
 
-                    {/* Message with level color */}
-                    <span
-                      className="flex-1 truncate text-xs"
-                      style={{ color: levelColorMap[n.level] }}
-                    >
-                      {n.message}
-                    </span>
+                    {/* Message with level color. When the message carries a
+                        URL (e.g. a Codex auth/login link), render it as a
+                        clickable link that opens the user's default browser
+                        through the Tauri opener/shell plugin — `window.open`
+                        does not work inside the Tauri webview (issue #345). */}
+                    {url ? (
+                      <button
+                        type="button"
+                        data-testid="notification-url-link"
+                        title={url}
+                        onClick={() => {
+                          openExternal(url).catch(() => {});
+                        }}
+                        className="flex-1 cursor-pointer truncate text-left text-xs underline"
+                        style={{
+                          color: levelColorMap[n.level],
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                        }}
+                      >
+                        {n.message}
+                      </button>
+                    ) : (
+                      <span
+                        className="flex-1 truncate text-xs"
+                        style={{ color: levelColorMap[n.level] }}
+                      >
+                        {n.message}
+                      </span>
+                    )}
 
                     {/* Relative time */}
                     <span className="shrink-0 text-xs" style={{ color: "var(--text-secondary)" }}>

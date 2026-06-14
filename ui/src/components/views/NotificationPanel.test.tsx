@@ -1,12 +1,18 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NotificationPanel } from "./NotificationPanel";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
+const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/tauri-api", () => ({
+  openExternal: (...args: unknown[]) => mockOpenExternal(...args),
+}));
+
 describe("NotificationPanel", () => {
   beforeEach(() => {
+    mockOpenExternal.mockClear();
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -254,5 +260,49 @@ describe("NotificationPanel", () => {
 
     render(<NotificationPanel />);
     expect(screen.getByText("방금")).toBeInTheDocument();
+  });
+
+  // -- URL in notification message opens browser (issue #345) --
+
+  it("opens a URL from the notification message via openExternal when clicked", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "t1",
+      workspaceId: "ws-default",
+      message: "Sign in at https://codex.example.com/login to continue",
+    });
+
+    render(<NotificationPanel />);
+
+    const link = screen.getByTestId("notification-url-link");
+    fireEvent.click(link);
+
+    expect(mockOpenExternal).toHaveBeenCalledTimes(1);
+    expect(mockOpenExternal).toHaveBeenCalledWith("https://codex.example.com/login");
+  });
+
+  it("does not render a URL link when message has no URL", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "t1",
+      workspaceId: "ws-default",
+      message: "Codex task completed",
+    });
+
+    render(<NotificationPanel />);
+
+    expect(screen.queryByTestId("notification-url-link")).not.toBeInTheDocument();
+  });
+
+  it("clicking a URL notification does not throw when openExternal rejects", () => {
+    mockOpenExternal.mockRejectedValueOnce(new Error("shell open failed"));
+    useNotificationStore.getState().addNotification({
+      terminalId: "t1",
+      workspaceId: "ws-default",
+      message: "Open https://example.com/x",
+    });
+
+    render(<NotificationPanel />);
+
+    const link = screen.getByTestId("notification-url-link");
+    expect(() => fireEvent.click(link)).not.toThrow();
   });
 });
