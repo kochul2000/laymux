@@ -90,6 +90,21 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Card wrapper grouping related fields under an uppercase sub-header within a section. */
+function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={cardStyle} className="mt-3 p-4 first:mt-0">
+      <h3
+        className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+      >
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
 function ColorSwatch({
   color,
   label,
@@ -1654,7 +1669,7 @@ function ClaudeSection() {
     <div>
       <SectionTitle>Claude Code</SectionTitle>
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="CWD 동기화">
         {/* Sync CWD mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1680,7 +1695,9 @@ function ClaudeSection() {
             </FocusSelect>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="세션 복원">
         {/* Restore Session */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1744,7 +1761,9 @@ function ClaudeSection() {
             </div>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="상태 메시지">
         {/* Status Message Mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1824,7 +1843,9 @@ function ClaudeSection() {
             </div>
           </div>
         )}
+      </SubGroup>
 
+      <SubGroup title="세션 리미트 자동 복귀">
         {/* Session Limit Auto Resume (issue #312) */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1919,7 +1940,7 @@ function ClaudeSection() {
             </div>
           </>
         )}
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2043,7 +2064,7 @@ function FileExplorerSection() {
     <div>
       <SectionTitle>File Explorer</SectionTitle>
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="쉘">
         {/* Shell Profile */}
         <SettingRow
           label="Shell Profile"
@@ -2063,7 +2084,9 @@ function FileExplorerSection() {
             ))}
           </FocusSelect>
         </SettingRow>
+      </SubGroup>
 
+      <SubGroup title="모양">
         {/* Font */}
         <SettingRow label="Font Family" desc="파일 목록 영역의 폰트. 비워두면 기본 폰트 상속.">
           <FocusInput
@@ -2136,7 +2159,9 @@ function FileExplorerSection() {
             </div>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="동작">
         {/* Copy on Select */}
         <SettingRow label="Copy on Select" desc="파일 선택 시 자동으로 경로를 클립보드에 복사.">
           <label className="flex items-center gap-2">
@@ -2219,7 +2244,7 @@ function FileExplorerSection() {
             </button>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2275,7 +2300,7 @@ function IssueReporterSection() {
         faceDesc="비워두면 앱 기본 폰트 상속"
       />
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="이슈 제출">
         <SettingRow
           label="Shell"
           desc="gh CLI를 실행할 셸 접두어. 비워두면 gh를 직접 실행. 따옴표 지원."
@@ -2341,7 +2366,9 @@ function IssueReporterSection() {
             </button>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="모양">
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2384,7 +2411,7 @@ function IssueReporterSection() {
             </div>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2427,7 +2454,7 @@ function MemoSection() {
         faceDesc="비워두면 앱 기본 폰트 상속"
       />
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="레이아웃">
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2505,7 +2532,9 @@ function MemoSection() {
             />
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="동작">
         {/* Paragraph Detection */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2617,7 +2646,7 @@ function MemoSection() {
             </label>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
