@@ -93,7 +93,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 /** Card wrapper grouping related fields under an uppercase sub-header within a section. */
 function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={cardStyle} className="mt-3 p-4 first:mt-0">
+    <div style={cardStyle} className="mt-3 p-4">
       <h3
         className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
         style={{ color: "var(--text-secondary)", opacity: 0.7 }}
@@ -1364,14 +1364,7 @@ function InterfaceSection() {
     <div>
       <SectionTitle>Interface</SectionTitle>
 
-      {/* Control Bar */}
-      <div style={cardStyle} className="p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Control Bar
-        </h3>
+      <SubGroup title="Control Bar">
         <SettingRow
           label="Hover Auto-hide"
           desc="마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)"
@@ -1410,16 +1403,9 @@ function InterfaceSection() {
             <option value="pinned">Pinned (항상 고정 표시)</option>
           </FocusSelect>
         </SettingRow>
-      </div>
+      </SubGroup>
 
-      {/* Dock */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Dock
-        </h3>
+      <SubGroup title="Dock">
         <ToggleRow
           label="Dock Persist State"
           desc="Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)"
@@ -1441,16 +1427,9 @@ function InterfaceSection() {
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
         />
-      </div>
+      </SubGroup>
 
-      {/* Notifications */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Notifications
-        </h3>
+      <SubGroup title="Notifications">
         <SettingRow label="Notification Dismiss" desc="알림을 읽음 처리하는 시점">
           <FocusSelect
             data-testid="notification-dismiss-select"
@@ -1467,7 +1446,7 @@ function InterfaceSection() {
             <option value="manual">알림 클릭으로만 해제</option>
           </FocusSelect>
         </SettingRow>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -1514,14 +1493,7 @@ function WorkspacesSection() {
     <div>
       <SectionTitle>Workspaces</SectionTitle>
 
-      {/* Display */}
-      <div style={cardStyle} className="p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Display
-        </h3>
+      <SubGroup title="Display">
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">
@@ -1550,17 +1522,9 @@ function WorkspacesSection() {
             </div>
           </div>
         ))}
-      </div>
+      </SubGroup>
 
-      {/* Behavior */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Behavior
-        </h3>
-
+      <SubGroup title="Behavior">
         <SettingRow label="Path Ellipsis" desc="경로가 길 때 생략 방향 (워크스페이스 목록)">
           <FocusSelect
             data-testid="path-ellipsis-select"
@@ -1597,16 +1561,9 @@ function WorkspacesSection() {
             </span>
           </div>
         </SettingRow>
-      </div>
+      </SubGroup>
 
-      {/* Default CWD propagation */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          CWD Propagation Defaults
-        </h3>
+      <SubGroup title="CWD Propagation Defaults">
         {(["workspace", "dock"] as const).map((location, i) => {
           const label = location === "workspace" ? "Workspace" : "Dock";
           const desc =
@@ -1656,7 +1613,7 @@ function WorkspacesSection() {
             </div>
           );
         })}
-      </div>
+      </SubGroup>
     </div>
   );
 }
