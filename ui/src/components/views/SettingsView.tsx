@@ -1211,7 +1211,8 @@ function PasteSection() {
   return (
     <div>
       <SectionTitle>Paste</SectionTitle>
-      <div style={cardStyle} className="p-4">
+
+      <SubGroup title="일반">
         <ToggleRow
           label="Smart Paste"
           desc="Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기"
@@ -1220,29 +1221,18 @@ function PasteSection() {
           onChange={(v) => update({ smart: v })}
         />
 
-        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
-          <select
-            data-testid="paste-path-separator-select"
-            value={paste.pathSeparator}
-            onChange={(e) => update({ pathSeparator: e.target.value as PastePathSeparator })}
+        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
+          <FocusInput
+            data-testid="paste-image-dir-input"
             className={inputCls}
-            style={inputStyle}
-          >
-            <option value="space">Space</option>
-            <option value="newline">Newline</option>
-            <option value="comma">Comma (,)</option>
-            <option value="semicolon">Semicolon (;)</option>
-          </select>
+            placeholder="(default: %APPDATA%\laymux\paste-images)"
+            value={paste.imageDir}
+            onChange={(e) => update({ imageDir: e.target.value })}
+          />
         </SettingRow>
+      </SubGroup>
 
-        <ToggleRow
-          label="Quote File Paths"
-          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
-          testid="paste-path-quote-toggle"
-          checked={paste.pathQuote}
-          onChange={(v) => update({ pathQuote: v })}
-        />
-
+      <SubGroup title="텍스트 변환">
         <ToggleRow
           label="Smart Remove Indent"
           desc="붙여넣기 시 공통 들여쓰기 제거"
@@ -1266,7 +1256,34 @@ function PasteSection() {
           checked={paste.linkJoin}
           onChange={(v) => update({ linkJoin: v })}
         />
+      </SubGroup>
 
+      <SubGroup title="다중 파일">
+        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
+          <select
+            data-testid="paste-path-separator-select"
+            value={paste.pathSeparator}
+            onChange={(e) => update({ pathSeparator: e.target.value as PastePathSeparator })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="space">Space</option>
+            <option value="newline">Newline</option>
+            <option value="comma">Comma (,)</option>
+            <option value="semicolon">Semicolon (;)</option>
+          </select>
+        </SettingRow>
+
+        <ToggleRow
+          label="Quote File Paths"
+          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
+          testid="paste-path-quote-toggle"
+          checked={paste.pathQuote}
+          onChange={(v) => update({ pathQuote: v })}
+        />
+      </SubGroup>
+
+      <SubGroup title="안전">
         <ToggleRow
           label="Large Paste Warning"
           desc="대용량 텍스트 붙여넣기 시 확인 다이얼로그 표시"
@@ -1274,17 +1291,7 @@ function PasteSection() {
           checked={paste.largeWarning}
           onChange={(v) => update({ largeWarning: v })}
         />
-
-        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
-          <FocusInput
-            data-testid="paste-image-dir-input"
-            className={inputCls}
-            placeholder="(default: %APPDATA%\laymux\paste-images)"
-            value={paste.imageDir}
-            onChange={(e) => update({ imageDir: e.target.value })}
-          />
-        </SettingRow>
-      </div>
+      </SubGroup>
     </div>
   );
 }
