@@ -90,6 +90,21 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Card wrapper grouping related fields under an uppercase sub-header within a section. */
+function SubGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={cardStyle} className="mt-3 p-4">
+      <h3
+        className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
+        style={{ color: "var(--text-secondary)", opacity: 0.7 }}
+      >
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
 function ColorSwatch({
   color,
   label,
@@ -1196,7 +1211,8 @@ function PasteSection() {
   return (
     <div>
       <SectionTitle>Paste</SectionTitle>
-      <div style={cardStyle} className="p-4">
+
+      <SubGroup title="일반">
         <ToggleRow
           label="Smart Paste"
           desc="Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기"
@@ -1205,29 +1221,18 @@ function PasteSection() {
           onChange={(v) => update({ smart: v })}
         />
 
-        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
-          <select
-            data-testid="paste-path-separator-select"
-            value={paste.pathSeparator}
-            onChange={(e) => update({ pathSeparator: e.target.value as PastePathSeparator })}
+        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
+          <FocusInput
+            data-testid="paste-image-dir-input"
             className={inputCls}
-            style={inputStyle}
-          >
-            <option value="space">Space</option>
-            <option value="newline">Newline</option>
-            <option value="comma">Comma (,)</option>
-            <option value="semicolon">Semicolon (;)</option>
-          </select>
+            placeholder="(default: %APPDATA%\laymux\paste-images)"
+            value={paste.imageDir}
+            onChange={(e) => update({ imageDir: e.target.value })}
+          />
         </SettingRow>
+      </SubGroup>
 
-        <ToggleRow
-          label="Quote File Paths"
-          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
-          testid="paste-path-quote-toggle"
-          checked={paste.pathQuote}
-          onChange={(v) => update({ pathQuote: v })}
-        />
-
+      <SubGroup title="텍스트 변환">
         <ToggleRow
           label="Smart Remove Indent"
           desc="붙여넣기 시 공통 들여쓰기 제거"
@@ -1251,7 +1256,34 @@ function PasteSection() {
           checked={paste.linkJoin}
           onChange={(v) => update({ linkJoin: v })}
         />
+      </SubGroup>
 
+      <SubGroup title="다중 파일">
+        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
+          <select
+            data-testid="paste-path-separator-select"
+            value={paste.pathSeparator}
+            onChange={(e) => update({ pathSeparator: e.target.value as PastePathSeparator })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="space">Space</option>
+            <option value="newline">Newline</option>
+            <option value="comma">Comma (,)</option>
+            <option value="semicolon">Semicolon (;)</option>
+          </select>
+        </SettingRow>
+
+        <ToggleRow
+          label="Quote File Paths"
+          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
+          testid="paste-path-quote-toggle"
+          checked={paste.pathQuote}
+          onChange={(v) => update({ pathQuote: v })}
+        />
+      </SubGroup>
+
+      <SubGroup title="안전">
         <ToggleRow
           label="Large Paste Warning"
           desc="대용량 텍스트 붙여넣기 시 확인 다이얼로그 표시"
@@ -1259,17 +1291,7 @@ function PasteSection() {
           checked={paste.largeWarning}
           onChange={(v) => update({ largeWarning: v })}
         />
-
-        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
-          <FocusInput
-            data-testid="paste-image-dir-input"
-            className={inputCls}
-            placeholder="(default: %APPDATA%\laymux\paste-images)"
-            value={paste.imageDir}
-            onChange={(e) => update({ imageDir: e.target.value })}
-          />
-        </SettingRow>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -1342,14 +1364,7 @@ function InterfaceSection() {
     <div>
       <SectionTitle>Interface</SectionTitle>
 
-      {/* Control Bar */}
-      <div style={cardStyle} className="p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Control Bar
-        </h3>
+      <SubGroup title="Control Bar">
         <SettingRow
           label="Hover Auto-hide"
           desc="마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)"
@@ -1388,16 +1403,9 @@ function InterfaceSection() {
             <option value="pinned">Pinned (항상 고정 표시)</option>
           </FocusSelect>
         </SettingRow>
-      </div>
+      </SubGroup>
 
-      {/* Dock */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Dock
-        </h3>
+      <SubGroup title="Dock">
         <ToggleRow
           label="Dock Persist State"
           desc="Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)"
@@ -1419,16 +1427,9 @@ function InterfaceSection() {
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
         />
-      </div>
+      </SubGroup>
 
-      {/* Notifications */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Notifications
-        </h3>
+      <SubGroup title="Notifications">
         <SettingRow label="Notification Dismiss" desc="알림을 읽음 처리하는 시점">
           <FocusSelect
             data-testid="notification-dismiss-select"
@@ -1445,7 +1446,7 @@ function InterfaceSection() {
             <option value="manual">알림 클릭으로만 해제</option>
           </FocusSelect>
         </SettingRow>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -1492,14 +1493,7 @@ function WorkspacesSection() {
     <div>
       <SectionTitle>Workspaces</SectionTitle>
 
-      {/* Display */}
-      <div style={cardStyle} className="p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Display
-        </h3>
+      <SubGroup title="Display">
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">
@@ -1528,17 +1522,9 @@ function WorkspacesSection() {
             </div>
           </div>
         ))}
-      </div>
+      </SubGroup>
 
-      {/* Behavior */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          Behavior
-        </h3>
-
+      <SubGroup title="Behavior">
         <SettingRow label="Path Ellipsis" desc="경로가 길 때 생략 방향 (워크스페이스 목록)">
           <FocusSelect
             data-testid="path-ellipsis-select"
@@ -1575,16 +1561,9 @@ function WorkspacesSection() {
             </span>
           </div>
         </SettingRow>
-      </div>
+      </SubGroup>
 
-      {/* Default CWD propagation */}
-      <div style={cardStyle} className="mt-3 p-4">
-        <h3
-          className="mb-3 text-[12px] font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)", opacity: 0.7 }}
-        >
-          CWD Propagation Defaults
-        </h3>
+      <SubGroup title="CWD Propagation Defaults">
         {(["workspace", "dock"] as const).map((location, i) => {
           const label = location === "workspace" ? "Workspace" : "Dock";
           const desc =
@@ -1634,7 +1613,7 @@ function WorkspacesSection() {
             </div>
           );
         })}
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -1654,7 +1633,7 @@ function ClaudeSection() {
     <div>
       <SectionTitle>Claude Code</SectionTitle>
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="CWD 동기화">
         {/* Sync CWD mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1680,7 +1659,9 @@ function ClaudeSection() {
             </FocusSelect>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="세션 복원">
         {/* Restore Session */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1744,7 +1725,9 @@ function ClaudeSection() {
             </div>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="상태 메시지">
         {/* Status Message Mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1824,7 +1807,9 @@ function ClaudeSection() {
             </div>
           </div>
         )}
+      </SubGroup>
 
+      <SubGroup title="세션 리미트 자동 복귀">
         {/* Session Limit Auto Resume (issue #312) */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -1919,7 +1904,7 @@ function ClaudeSection() {
             </div>
           </>
         )}
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2043,7 +2028,7 @@ function FileExplorerSection() {
     <div>
       <SectionTitle>File Explorer</SectionTitle>
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="쉘">
         {/* Shell Profile */}
         <SettingRow
           label="Shell Profile"
@@ -2063,7 +2048,9 @@ function FileExplorerSection() {
             ))}
           </FocusSelect>
         </SettingRow>
+      </SubGroup>
 
+      <SubGroup title="모양">
         {/* Font */}
         <SettingRow label="Font Family" desc="파일 목록 영역의 폰트. 비워두면 기본 폰트 상속.">
           <FocusInput
@@ -2136,7 +2123,9 @@ function FileExplorerSection() {
             </div>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="동작">
         {/* Copy on Select */}
         <SettingRow label="Copy on Select" desc="파일 선택 시 자동으로 경로를 클립보드에 복사.">
           <label className="flex items-center gap-2">
@@ -2219,7 +2208,7 @@ function FileExplorerSection() {
             </button>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2275,7 +2264,7 @@ function IssueReporterSection() {
         faceDesc="비워두면 앱 기본 폰트 상속"
       />
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="이슈 제출">
         <SettingRow
           label="Shell"
           desc="gh CLI를 실행할 셸 접두어. 비워두면 gh를 직접 실행. 따옴표 지원."
@@ -2341,7 +2330,9 @@ function IssueReporterSection() {
             </button>
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="모양">
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2384,7 +2375,7 @@ function IssueReporterSection() {
             </div>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
@@ -2427,7 +2418,7 @@ function MemoSection() {
         faceDesc="비워두면 앱 기본 폰트 상속"
       />
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title="레이아웃">
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2505,7 +2496,9 @@ function MemoSection() {
             />
           </div>
         </div>
+      </SubGroup>
 
+      <SubGroup title="동작">
         {/* Paragraph Detection */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2617,7 +2610,7 @@ function MemoSection() {
             </label>
           </div>
         </div>
-      </div>
+      </SubGroup>
     </div>
   );
 }
