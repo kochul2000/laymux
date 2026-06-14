@@ -5,6 +5,7 @@ import { inputStyle } from "@/components/ui/FormControls";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
+import { openExternal } from "@/lib/tauri-api";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
@@ -336,15 +337,9 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
           <a
             data-testid="issue-link"
             href={resultMsg}
-            onClick={async (e) => {
+            onClick={(e) => {
               e.preventDefault();
-              try {
-                const { open } = await import("@tauri-apps/plugin-shell");
-                await open(resultMsg);
-              } catch (e) {
-                console.warn("shell.open failed, falling back to window.open:", e);
-                window.open(resultMsg, "_blank");
-              }
+              openExternal(resultMsg).catch(() => {});
             }}
             className="mt-1 truncate text-[11px] underline"
             style={{ color: "var(--accent)", cursor: "pointer" }}
