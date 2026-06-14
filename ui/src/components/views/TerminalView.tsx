@@ -491,6 +491,17 @@ export function TerminalView({
       // disables reflow and truncates instead) — its real cause is resize
       // events racing ConPTY repaints, fixed by the debounced fit below.
       windowsPty: { backend: "conpty", buildNumber: 21376 },
+      // OSC 8 hyperlinks (e.g. Codex wraps URLs in escape sequences) are
+      // activated by xterm's built-in handler. Without a custom linkHandler
+      // it defaults to window.open, which only pops a useless navigation
+      // dialog inside the Tauri webview. Route them through the same
+      // openExternal path as plain-text links so they open the OS browser
+      // (issue #345).
+      linkHandler: {
+        activate: (_event, uri) => {
+          openExternal(uri).catch(() => {});
+        },
+      },
     });
 
     const fitAddon = new FitAddon();

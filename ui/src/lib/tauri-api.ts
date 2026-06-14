@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 
@@ -491,11 +492,9 @@ export async function updateTerminalSyncGroup(terminalId: string, newGroup: stri
 /** Open a URL in the user's default browser via Tauri shell plugin. */
 export async function openExternal(url: string): Promise<void> {
   try {
-    const { open } = await import("@tauri-apps/plugin-shell");
-    await open(url);
+    await openInDefaultApp(url);
   } catch (e) {
-    console.warn("shell.open failed, falling back to window.open:", e);
-    window.open(url, "_blank");
+    console.error("Failed to open external URL:", url, e);
   }
 }
 
