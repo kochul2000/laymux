@@ -112,9 +112,9 @@ export function SettingsRecoveryModal({
         {warnings.length > 0 && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              {t("recovery.repairedCount", { count: warnings.filter((w) => w.repaired).length })}
+              {t("recovery.repairedCount", { num: warnings.filter((w) => w.repaired).length })}
               {warnings.filter((w) => !w.repaired).length > 0 &&
-                t("recovery.manualCount", { count: warnings.filter((w) => !w.repaired).length })}
+                t("recovery.manualCount", { num: warnings.filter((w) => !w.repaired).length })}
             </div>
             <div
               className="overflow-auto rounded p-3 text-xs"
