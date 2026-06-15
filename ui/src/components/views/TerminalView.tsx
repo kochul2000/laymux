@@ -257,6 +257,22 @@ function getBufferCursorAbsY(terminal: Terminal): number {
   return (activeBuffer.baseY ?? 0) + (activeBuffer.cursorY ?? 0);
 }
 
+/**
+ * Whether the viewport is scrolled away from the bottom of the scrollback
+ * (issue #349). xterm exposes the bottom-most scroll offset as
+ * `buffer.active.baseY` and the current top-of-viewport line as
+ * `viewportY`; they are equal exactly when the user is pinned to the live
+ * bottom. Treated as "at bottom" whenever they match (or the API is
+ * unavailable) so the floating jump-to-bottom button only appears while the
+ * user is actually looking at scrollback.
+ */
+export function isTerminalScrolledUp(terminal: Terminal): boolean {
+  const activeBuffer = terminal.buffer.active as { baseY?: number; viewportY?: number };
+  const baseY = activeBuffer.baseY ?? 0;
+  const viewportY = activeBuffer.viewportY ?? baseY;
+  return viewportY < baseY;
+}
+
 function getOverlayCaretMetrics(
   shape: "bar" | "underscore" | "filledBox",
   cellWidth: number,
@@ -356,6 +372,9 @@ export function TerminalView({
   const terminalGeneration = terminalGenerationRef.current;
   const [readyGeneration, setReadyGeneration] = useState(-1);
   const readyGenerationRef = useRef(-1);
+  // Issue #349: floating "jump to bottom" button. Shown while the user has
+  // scrolled up into the scrollback; hidden once pinned to the live bottom.
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const isReady = readyGeneration === terminalGeneration;
   const isFocusedRef = useRef(isFocused);
   const activityRef = useRef<TerminalActivityInfo | undefined>(undefined);
@@ -1176,6 +1195,14 @@ export function TerminalView({
       }
       scheduleOverlayCaretUpdate();
     });
+    // Issue #349: toggle the floating jump-to-bottom button as the viewport
+    // moves through the scrollback. xterm fires onScroll on every wheel
+    // step / scrollToBottom; reading baseY vs viewportY tells us whether the
+    // user is pinned to the live bottom.
+    const refreshScrollToBottom = () => {
+      setShowScrollToBottom(isTerminalScrolledUp(terminal));
+    };
+    const scrollDisposable = terminal.onScroll?.(refreshScrollToBottom);
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
@@ -1850,6 +1877,11 @@ export function TerminalView({
 
         fitAddon.fit();
         openedRef.current = true;
+        // Issue #349: sync the jump-to-bottom button once on mount. onScroll
+        // only fires on subsequent viewport moves, so a terminal restored
+        // (or reattached) while parked above the scrollback bottom would
+        // otherwise show no button until the first scroll event.
+        refreshScrollToBottom();
         scheduleOverlayCaretUpdate();
         if (isFocusedRef.current) {
           terminal.focus();
@@ -2019,6 +2051,7 @@ export function TerminalView({
       cursorMoveDisposable?.dispose();
       writeParsedDisposable?.dispose();
       renderDisposable?.dispose();
+      scrollDisposable?.dispose();
       setSyncOutputCursorVisibility(false);
       if (paneId) {
         unregisterTerminalSerializer(paneId);
@@ -2377,6 +2410,36 @@ export function TerminalView({
       >
         <div className="terminal-loading-spinner" />
       </div>
+      {showScrollToBottom && (
+        <button
+          type="button"
+          data-testid={`terminal-scroll-to-bottom-${instanceId}`}
+          className="terminal-scroll-to-bottom"
+          title="맨 아래로 이동"
+          aria-label="맨 아래로 이동"
+          onClick={() => {
+            const term = terminalRef.current;
+            if (!term) return;
+            term.scrollToBottom();
+            setShowScrollToBottom(false);
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

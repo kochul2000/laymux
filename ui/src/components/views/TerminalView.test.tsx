@@ -1,6 +1,11 @@
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TerminalView, _resetWebglStagger, shouldEnableTerminalWebgl } from "./TerminalView";
+import {
+  TerminalView,
+  _resetWebglStagger,
+  shouldEnableTerminalWebgl,
+  isTerminalScrolledUp,
+} from "./TerminalView";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -23,6 +28,27 @@ const mockClearSelection = vi.fn();
 const mockOnCursorMove = vi.fn().mockReturnValue({ dispose: vi.fn() });
 const mockOnWriteParsed = vi.fn().mockReturnValue({ dispose: vi.fn() });
 const mockOnRender = vi.fn().mockReturnValue({ dispose: vi.fn() });
+// Issue #349: capture the onScroll handler + scrollToBottom for the
+// jump-to-bottom button tests. `mockBufferActive` is mutated by tests to
+// simulate scrolling up (viewportY < baseY) vs being pinned to the bottom.
+let capturedScrollHandler: (() => void) | null = null;
+// Mirror real xterm: scrollToBottom pins the viewport to the live bottom.
+// Tests rely on this so a later refreshScrollToBottom() (e.g. the deferred
+// mount-time sync) sees the post-click "at bottom" state, not a stale
+// scrolled-up one.
+const mockScrollToBottom = vi.fn(() => {
+  mockBufferActive.viewportY = mockBufferActive.baseY;
+});
+const mockBufferActive: { cursorX: number; cursorY: number; baseY: number; viewportY: number } = {
+  cursorX: 0,
+  cursorY: 0,
+  baseY: 0,
+  viewportY: 0,
+};
+const mockOnScroll = vi.fn((handler: () => void) => {
+  capturedScrollHandler = handler;
+  return { dispose: vi.fn() };
+});
 const createdTerminals: Array<{ options: Record<string, unknown> }> = [];
 const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
@@ -73,6 +99,8 @@ vi.mock("@xterm/xterm", () => ({
     onCursorMove = mockOnCursorMove;
     onWriteParsed = mockOnWriteParsed;
     onRender = mockOnRender;
+    onScroll = mockOnScroll;
+    scrollToBottom = mockScrollToBottom;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     focus = mockFocus;
     blur = mockBlur;
@@ -86,7 +114,7 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     element = document.createElement("div");
-    buffer = { active: { cursorX: 0, cursorY: 0 } };
+    buffer = { active: mockBufferActive };
     modes = mockModes;
     parser = {
       registerOscHandler: mockRegisterOscHandler.mockImplementation(
@@ -223,6 +251,11 @@ describe("TerminalView", () => {
     oscHandlers.clear();
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
+    capturedScrollHandler = null;
+    mockBufferActive.cursorX = 0;
+    mockBufferActive.cursorY = 0;
+    mockBufferActive.baseY = 0;
+    mockBufferActive.viewportY = 0;
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -4257,6 +4290,103 @@ describe("TerminalView", () => {
 
       vi.useRealTimers();
     });
+  });
+});
+
+describe("isTerminalScrolledUp", () => {
+  const makeTerminal = (baseY: number, viewportY?: number) =>
+    ({ buffer: { active: { baseY, viewportY } } }) as unknown as Parameters<
+      typeof isTerminalScrolledUp
+    >[0];
+
+  it("returns false when pinned to the live bottom (viewportY === baseY)", () => {
+    expect(isTerminalScrolledUp(makeTerminal(100, 100))).toBe(false);
+  });
+
+  it("returns true when scrolled up into scrollback (viewportY < baseY)", () => {
+    expect(isTerminalScrolledUp(makeTerminal(100, 40))).toBe(true);
+  });
+
+  it("treats a missing viewportY as being at the bottom", () => {
+    expect(isTerminalScrolledUp(makeTerminal(100))).toBe(false);
+  });
+});
+
+describe("TerminalView jump-to-bottom button (issue #349)", () => {
+  it("hides the button initially and shows it after scrolling up", async () => {
+    render(<TerminalView instanceId="t-jump" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+
+    expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump")).not.toBeInTheDocument();
+
+    // Simulate the user scrolling up: viewport now sits above the base.
+    mockBufferActive.baseY = 100;
+    mockBufferActive.viewportY = 30;
+    await act(async () => {
+      capturedScrollHandler?.();
+    });
+
+    expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump")).toBeInTheDocument();
+  });
+
+  it("scrolls to bottom and hides the button on click", async () => {
+    render(<TerminalView instanceId="t-jump2" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+
+    mockBufferActive.baseY = 100;
+    mockBufferActive.viewportY = 30;
+    await act(async () => {
+      capturedScrollHandler?.();
+    });
+
+    const button = screen.getByTestId("terminal-scroll-to-bottom-t-jump2");
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump2")).not.toBeInTheDocument();
+  });
+
+  it("shows the button on mount when already scrolled up (no scroll event yet)", async () => {
+    // Reattach/restore case: the viewport is parked above the scrollback
+    // bottom before the first onScroll fires. The mount-time refresh must
+    // sync the button so it appears without waiting for a scroll event.
+    mockBufferActive.baseY = 100;
+    mockBufferActive.viewportY = 30;
+    render(<TerminalView instanceId="t-jump-init" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump-init")).toBeInTheDocument();
+    });
+  });
+
+  it("hides the button again when the viewport returns to the bottom", async () => {
+    render(<TerminalView instanceId="t-jump3" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+
+    mockBufferActive.baseY = 100;
+    mockBufferActive.viewportY = 30;
+    await act(async () => {
+      capturedScrollHandler?.();
+    });
+    expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump3")).toBeInTheDocument();
+
+    // Viewport scrolls back down to the live bottom.
+    mockBufferActive.viewportY = 100;
+    await act(async () => {
+      capturedScrollHandler?.();
+    });
+    expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
   });
 });
 
