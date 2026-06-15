@@ -19,7 +19,9 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - **로케일 해석:** `ui/src/i18n/resolve-language.ts` 의 순수 함수 `resolveLanguage(setting, navigatorLang)` 가 단일 진실원. `"system"` 이면 `navigator.language` 가 `ko*` (대소문자 무시)일 때 한글, 그 외/빈 값은 영어로 폴백. `"ko"`/`"en"` 은 그대로. 명시적 시작 모달은 두지 않는다.
 - **초기화/동기화:** `ui/src/i18n/index.ts` 가 import 시점에 i18next 를 동기 초기화(resources 번들, `fallbackLng:"ko"`, `interpolation.escapeValue:false`). 실제 언어는 설정 로드 후 `useLanguageSync` 훅이 `language` 변경을 구독해 `applyLanguage()`(→ `i18n.changeLanguage()`)로 적용. `main.tsx` 가 `import "./i18n"` 로 부트.
 - **사전 구조:** `ui/src/i18n/locales/{ko,en}.json`. 네임스페이스 `common` · `settings` · `workspace`. 키는 `t("ns:path.to.key")`, 보간은 `{{name}}`.
-- **현재 번역 범위(슬라이스):** `WorkspaceSelectorView` + SettingsView "Startup" 의 Language 카드만 `t()` 전환됨. 나머지 화면의 전체 번역은 후속 작업.
+- **누락 키 감지(dev):** `import.meta.env.DEV` 일 때만 i18next `saveMissing` + `missingKeyHandler` 활성화(`reportMissingKey()` 순수 함수). prod 번들에서는 트리셰이킹으로 제거. `locale-parity.test.ts` 가 ko/en 키 집합 대칭을 강제. 보간 변수는 i18next 예약어 `count` 대신 `num` 등 비예약어를 쓴다(불필요한 복수형 처리·거짓 누락키 경고 회피).
+- **현재 번역 범위:** `WorkspaceSelectorView`, `SettingsView`(전체), `SettingsRecoveryModal`, `TerminalView`(붙여넣기 확인·스크롤 버튼). 나머지 뷰의 하드코딩 영어 라벨까지 ko 로 보이게 하는 완전 양방향 번역은 후속 작업.
+- **번역 용어 정책(글로사리):** ko 값은 (1) 자연스러운 한국어 우선(모양/커서/여백/불투명도/선택 시 복사 등), (2) 굳어진 IT 외래어는 음차(폰트·프로필·워크스페이스·독·테마), (3) 영어 유지 = ANSI 색상명(Black/Red/…)·브랜드/표준/포맷 고유명사(Claude Code·Codex·ANSI·ClearType·Grayscale·Aliased·settings.json)·제품 약어(Pane·CWD·Git). 외래어 표기는 국립국어원 기준(프로필/셸/디렉터리). 제목과 설명문은 같은 개념을 동일 용어로 표기한다. en 값은 일관된 Title Case.
 
 ### 접근 방법
 
