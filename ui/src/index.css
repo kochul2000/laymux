@@ -350,3 +350,32 @@
     transform: rotate(360deg);
   }
 }
+
+/* Issue #349: floating jump-to-bottom button, shown while scrolled up into
+   scrollback. Sits above the overlay caret / loading layers so it stays
+   clickable, and clears the overlay scrollbar gutter on the right. */
+.terminal-scroll-to-bottom {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: #11111b;
+  cursor: pointer;
+  opacity: 0.9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  z-index: 5;
+}
+.terminal-scroll-to-bottom:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}
