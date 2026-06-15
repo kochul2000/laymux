@@ -12,6 +12,7 @@ import { SettingsView } from "@/components/views/SettingsView";
 import { NotificationPanel } from "@/components/views/NotificationPanel";
 import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
 import { FileViewerOverlay } from "./FileViewerOverlay";
+import { RenameWorkspaceOverlay } from "./RenameWorkspaceOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { getPaneInstanceId } from "@/lib/view-instance-id";
 import type { DockPosition, ViewType } from "@/stores/types";
@@ -400,6 +401,9 @@ export function AppLayout() {
 
       {/* Unified global file viewer (#277/#279) */}
       <FileViewerOverlay />
+
+      {/* Inline workspace rename overlay (#339) — replaces native window.prompt */}
+      <RenameWorkspaceOverlay />
     </div>
   );
 }
