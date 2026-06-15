@@ -88,4 +88,34 @@ describe("RenameWorkspaceOverlay", () => {
 
     expect(useRenameWorkspaceStore.getState().targetId).toBeNull();
   });
+
+  it("exposes a labelled modal dialog for screen readers", () => {
+    act(() => useRenameWorkspaceStore.getState().openRename("ws-default", "Default"));
+    render(<RenameWorkspaceOverlay />);
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    // The accessible name comes from the title via aria-labelledby.
+    expect(dialog).toHaveAccessibleName("Rename workspace");
+  });
+
+  it("restores focus to the previously focused element on close", () => {
+    // Simulate the rename shortcut firing while another element (e.g. a terminal)
+    // holds focus.
+    const prev = document.createElement("button");
+    document.body.appendChild(prev);
+    prev.focus();
+    expect(document.activeElement).toBe(prev);
+
+    act(() => useRenameWorkspaceStore.getState().openRename("ws-default", "Default"));
+    render(<RenameWorkspaceOverlay />);
+    // The overlay input steals focus while open.
+    expect(document.activeElement).not.toBe(prev);
+
+    act(() => useRenameWorkspaceStore.getState().closeRename());
+    // On close, focus returns to where it was before the overlay opened.
+    expect(document.activeElement).toBe(prev);
+
+    prev.remove();
+  });
 });

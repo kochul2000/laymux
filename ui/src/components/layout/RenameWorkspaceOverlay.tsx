@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -23,11 +23,26 @@ export function RenameWorkspaceOverlay() {
   const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // Element that had focus when the overlay opened (e.g. the terminal that owned
+  // the keyboard when the rename shortcut fired). Restored on close so the next
+  // keystrokes don't fall through to <body>/the wrong pane (#354 review).
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus + select the field each time the overlay opens for a workspace, so
-  // the user can immediately type or overwrite the existing name.
-  useEffect(() => {
-    if (targetId !== null) inputRef.current?.select();
+  // On open: capture the currently focused element first, then focus + select the
+  // field so the user can immediately type or overwrite the existing name. A
+  // layout effect (not autoFocus) drives the focus so the capture provably runs
+  // before focus moves — autoFocus fires during mount, which would record the
+  // overlay input itself instead of the terminal/button to return to. On close,
+  // restore focus to the captured element.
+  useLayoutEffect(() => {
+    if (targetId === null) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    return () => {
+      restoreFocusRef.current?.focus?.();
+      restoreFocusRef.current = null;
+    };
   }, [targetId]);
 
   if (targetId === null) return null;
@@ -63,20 +78,26 @@ export function RenameWorkspaceOverlay() {
         onClick={closeRename}
       />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-workspace-overlay-title"
         className="relative z-10 flex w-[360px] flex-col gap-3 rounded-lg p-4 shadow-2xl"
         style={{
           background: "var(--bg-surface, #181825)",
           border: "1px solid var(--border, #333)",
         }}
       >
-        <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+        <div
+          id="rename-workspace-overlay-title"
+          className="text-sm font-medium"
+          style={{ color: "var(--text-primary)" }}
+        >
           Rename workspace
         </div>
         <FocusInput
           key={`rename-workspace-input:${targetId}`}
           ref={inputRef}
           defaultValue={currentName}
-          autoFocus
           onKeyDown={onKeyDown}
           spellCheck={false}
           autoComplete="off"
