@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   resetSettings,
   getSettingsPath,
@@ -22,6 +23,7 @@ export function SettingsRecoveryModal({
   onDismiss,
   onReset,
 }: SettingsRecoveryModalProps) {
+  const { t } = useTranslation("settings");
   const [settingsPath, setSettingsPath] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
 
@@ -35,7 +37,7 @@ export function SettingsRecoveryModal({
       const path = parseErrorPath || (await getSettingsPath());
       setSettingsPath(path);
     } catch {
-      setSettingsPath("(경로를 가져올 수 없습니다)");
+      setSettingsPath(t("recovery.pathUnavailable"));
     }
   };
 
@@ -80,14 +82,16 @@ export function SettingsRecoveryModal({
           >
             {isParseError ? "\u26A0" : "\u2139"}
           </span>
-          <span>{isParseError ? "설정 파일을 읽을 수 없습니다" : "설정 파일 검증 결과"}</span>
+          <span>
+            {isParseError ? t("recovery.parseErrorTitle") : t("recovery.validationTitle")}
+          </span>
         </div>
 
         {/* Parse error details */}
         {isParseError && parseError && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              settings.json 파일의 JSON 구문이 올바르지 않아 기본 설정으로 시작합니다.
+              {t("recovery.parseErrorDescription")}
             </div>
             <pre
               className="overflow-auto rounded p-3 text-xs"
@@ -108,9 +112,9 @@ export function SettingsRecoveryModal({
         {warnings.length > 0 && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              {warnings.filter((w) => w.repaired).length}개 항목이 자동 수정되었습니다.
+              {t("recovery.repairedCount", { count: warnings.filter((w) => w.repaired).length })}
               {warnings.filter((w) => !w.repaired).length > 0 &&
-                ` ${warnings.filter((w) => !w.repaired).length}개 항목은 수동 확인이 필요합니다.`}
+                t("recovery.manualCount", { count: warnings.filter((w) => !w.repaired).length })}
             </div>
             <div
               className="overflow-auto rounded p-3 text-xs"
@@ -172,7 +176,7 @@ export function SettingsRecoveryModal({
               }}
               data-testid="settings-recovery-show-path"
             >
-              경로 확인
+              {t("recovery.showPath")}
             </button>
           )}
           <button
@@ -186,7 +190,7 @@ export function SettingsRecoveryModal({
             }}
             data-testid="settings-recovery-reset"
           >
-            {resetting ? "초기화 중..." : "기본값으로 초기화"}
+            {resetting ? t("recovery.resetting") : t("recovery.resetToDefault")}
           </button>
           <button
             onClick={onDismiss}
@@ -197,7 +201,7 @@ export function SettingsRecoveryModal({
             }}
             data-testid="settings-recovery-dismiss"
           >
-            {isParseError ? "기본 설정으로 계속" : "확인"}
+            {isParseError ? t("recovery.continueWithDefaults") : t("recovery.confirm")}
           </button>
         </div>
       </div>
