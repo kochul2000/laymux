@@ -14,6 +14,33 @@ describe("settings-store", () => {
     expect(profileDefaults.stabilizeInteractiveCursor).toBe(true);
   });
 
+  it("defaults language to system", () => {
+    expect(useSettingsStore.getState().language).toBe("system");
+  });
+
+  it("setLanguage updates the language setting", () => {
+    useSettingsStore.getState().setLanguage("en");
+    expect(useSettingsStore.getState().language).toBe("en");
+    useSettingsStore.getState().setLanguage("ko");
+    expect(useSettingsStore.getState().language).toBe("ko");
+  });
+
+  it("loadFromSettings applies a valid language", () => {
+    useSettingsStore.getState().loadFromSettings({ language: "en" });
+    expect(useSettingsStore.getState().language).toBe("en");
+  });
+
+  it("loadFromSettings falls back to system for an invalid language", () => {
+    useSettingsStore.getState().loadFromSettings({ language: "fr" as unknown as "system" });
+    expect(useSettingsStore.getState().language).toBe("system");
+  });
+
+  it("loadFromSettings leaves language untouched when absent", () => {
+    useSettingsStore.getState().setLanguage("ko");
+    useSettingsStore.getState().loadFromSettings({ defaultProfile: "WSL" });
+    expect(useSettingsStore.getState().language).toBe("ko");
+  });
+
   it("has default profiles", () => {
     const { profiles } = useSettingsStore.getState();
     expect(profiles).toHaveLength(2);

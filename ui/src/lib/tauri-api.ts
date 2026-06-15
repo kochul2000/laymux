@@ -268,6 +268,8 @@ export interface ProfileDefaults {
 }
 
 export interface Settings {
+  /** App UI language: "system" (OS locale), "ko", or "en". */
+  language?: import("@/stores/settings-store").LanguageSetting;
   colorSchemes: ColorScheme[];
   profiles: Profile[];
   keybindings: Keybinding[];

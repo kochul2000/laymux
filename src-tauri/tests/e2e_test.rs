@@ -20,6 +20,7 @@ fn settings_round_trip_with_full_config() {
     let path = dir.path().join("settings.json");
 
     let settings = Settings {
+        language: "system".into(),
         color_schemes: vec![ColorScheme {
             name: "Solarized Dark".into(),
             foreground: "#839496".into(),

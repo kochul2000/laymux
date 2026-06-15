@@ -1,0 +1,57 @@
+{
+  "common": {
+    "language": {
+      "system": "System",
+      "ko": "한국어",
+      "en": "English"
+    }
+  },
+  "settings": {
+    "startup": {
+      "title": "Startup",
+      "language": {
+        "title": "Language",
+        "description": "App UI display language (System follows the OS locale)"
+      }
+    }
+  },
+  "workspace": {
+    "newWorkspace": "New Workspace",
+    "workspaces": "Workspaces",
+    "notifications": "Notifications",
+    "hideNotifications": "Hide Notifications",
+    "sort": {
+      "manual": "Manual",
+      "notification": "Notif",
+      "manualTitle": "Sort: Manual (drag to reorder)",
+      "notificationTitle": "Sort: Notification (most recent first)"
+    },
+    "hideMode": {
+      "enter": "Enter hide mode",
+      "apply": "Apply and exit hide mode"
+    },
+    "layout": {
+      "options": "Layout options",
+      "overwrite": "Overwrite",
+      "rename": "Rename",
+      "duplicate": "Duplicate",
+      "setDefault": "Set as Default",
+      "delete": "Delete",
+      "default": "default",
+      "overwriteTitle": "Save current workspace pane layout to this template",
+      "renameTitle": "Rename this layout",
+      "duplicateTitle": "Create a copy of this layout",
+      "setDefaultTitle": "Use this layout when creating new workspaces",
+      "deleteTitle": "Permanently delete this layout",
+      "deleteConfirm": "Delete layout \"{{name}}\"?",
+      "renamePrompt": "Rename layout:"
+    },
+    "item": {
+      "showWorkspace": "Show workspace",
+      "hideWorkspace": "Hide workspace",
+      "duplicateWorkspace": "Duplicate workspace (Ctrl+Alt+D)",
+      "renameWorkspace": "Rename workspace (Ctrl+Alt+R)",
+      "closeWorkspace": "Close workspace (Ctrl+Alt+W)"
+    }
+  }
+}
