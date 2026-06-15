@@ -13,8 +13,12 @@
  * 링크 URL 을 도출한다.
  *
  *   1. OSC 8 hyperlink — 클릭한 셀에 hyperlink uri 가 있으면 그대로 사용
- *   2. 평문 URL — 해당 줄에서 WebLinksAddon 과 동일한 정규식으로 탐지
- *   3. 들여쓰기 하드랩 URL — indented-link-provider 와 같은 방식(여러 줄 결합)
+ *   2. 들여쓰기 하드랩 URL — indented-link-provider 와 같은 방식(여러 줄 결합)
+ *   3. 평문 URL — 해당 줄에서 WebLinksAddon 과 동일한 정규식으로 탐지
+ *
+ * 평문보다 들여쓰기 결합을 먼저 시도하는 이유는 `resolveLinkAtCell` 의
+ * 단계 주석을 참고하라(하드랩 첫 줄을 클릭하면 평문 정규식이 잘린 조각만
+ * 잡으므로 결합 URL 을 우선해야 한다).
  */
 
 import { findIndentedUrls, type IndentedLineInfo } from "./indented-link-provider";
@@ -71,7 +75,7 @@ export interface LinkAtCellInput {
 
 /**
  * 클릭한 셀에 대응하는 링크 URL 을 우선순위에 따라 도출한다.
- * OSC 8 → 평문 URL → 들여쓰기 하드랩 URL 순. 없으면 null.
+ * OSC 8 → 들여쓰기 하드랩 URL → 평문 URL 순. 없으면 null.
  */
 export function resolveLinkAtCell(input: LinkAtCellInput): string | null {
   // 1) OSC 8 hyperlink 우선
