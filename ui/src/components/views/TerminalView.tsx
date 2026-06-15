@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
@@ -209,7 +211,7 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
   const byteLength = textEncoder.encode(content).length;
   if (byteLength <= LARGE_PASTE_THRESHOLD) return false;
   return !window.confirm(
-    `붙여넣을 텍스트가 ${byteLength.toLocaleString()}바이트입니다. 계속하시겠습니까?`,
+    i18n.t("terminal.pasteConfirm", { ns: "common", bytes: byteLength.toLocaleString() }),
   );
 }
 
@@ -405,6 +407,7 @@ export function TerminalView({
   lastClaudeSession,
   startupCommandOverride,
 }: TerminalViewProps) {
+  const { t } = useTranslation("common");
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCaretRef = useRef<HTMLDivElement>(null);
@@ -2537,8 +2540,8 @@ export function TerminalView({
           type="button"
           data-testid={`terminal-scroll-to-bottom-${instanceId}`}
           className="terminal-scroll-to-bottom"
-          title="맨 아래로 이동"
-          aria-label="맨 아래로 이동"
+          title={t("terminal.scrollToBottom")}
+          aria-label={t("terminal.scrollToBottom")}
           onClick={() => {
             const term = terminalRef.current;
             if (!term) return;

@@ -4,6 +4,10 @@
       "system": "System",
       "ko": "한국어",
       "en": "English"
+    },
+    "terminal": {
+      "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
+      "scrollToBottom": "Scroll to bottom"
     }
   },
   "settings": {
@@ -363,6 +367,19 @@
       "changeShortcut": "Click to change shortcut",
       "actionPlaceholder": "action.name",
       "addBinding": "+ Add new binding"
+    },
+    "recovery": {
+      "pathUnavailable": "(Unable to get the path)",
+      "parseErrorTitle": "Could not read the settings file",
+      "validationTitle": "Settings file validation result",
+      "parseErrorDescription": "The JSON syntax in settings.json is invalid, so starting with default settings.",
+      "repairedCount": "{{num}} item(s) were automatically repaired.",
+      "manualCount": " {{num}} item(s) need manual review.",
+      "showPath": "Show path",
+      "resetting": "Resetting...",
+      "resetToDefault": "Reset to default",
+      "continueWithDefaults": "Continue with defaults",
+      "confirm": "OK"
     }
   },
   "workspace": {
