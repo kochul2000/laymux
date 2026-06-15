@@ -17,14 +17,20 @@ export const resources = {
 
 /**
  * i18next is initialized synchronously at module import (resources are bundled,
- * no async backend). The concrete startup language is applied later from the
- * loaded settings via `applyLanguage` — until then we use the fallback so the
- * first paint is never blank.
+ * no async backend). The user's explicit language is applied later from the
+ * loaded settings via `applyLanguage`; until then we resolve `"system"` against
+ * the browser locale so the very first paint already matches the OS language
+ * (no Korean→English flash for new/English-OS users). Settings load then
+ * re-applies any explicit "ko"/"en" override on top of this.
  */
+const initialLanguage = resolveLanguage(
+  "system",
+  typeof navigator !== "undefined" ? navigator.language : undefined,
+);
+
 i18n.use(initReactI18next).init({
   resources,
-  // Resolved language is applied from settings after load; start at the fallback.
-  lng: "ko",
+  lng: initialLanguage,
   fallbackLng: "ko",
   ns: namespaces as unknown as string[],
   defaultNS: "common",
