@@ -4,6 +4,8 @@ import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
+import type { IndentedLineInfo } from "@/lib/indented-link-provider";
+import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
@@ -250,6 +252,73 @@ function hasDecModeParam(params: readonly (number | number[])[], mode: number): 
 
 export function shouldEnableTerminalWebgl(): boolean {
   return true;
+}
+
+/**
+ * 풀스크린 TUI(codex 등)가 마우스 트래킹을 켠 상태에서도 Shift/Alt+클릭으로
+ * 링크를 열기 위한 좌표→셀 변환 + 링크 조회(issue #352).
+ *
+ * xterm 의 마우스 좌표 변환(`_mouseService.getCoords`)과 OSC 8 hyperlink
+ * 조회(`_oscLinkService.getLinkData`)는 공개 API 가 아니라 코어 내부에 있다.
+ * 모든 접근을 try/catch + optional 로 감싸 빌드/버전 변동에 안전하게 한다.
+ * (평문 URL / 들여쓰기 하드랩 URL 은 공개 buffer API 만으로도 동작한다.)
+ */
+interface XtermCoreLite {
+  _mouseService?: {
+    getCoords?: (
+      event: MouseEvent,
+      element: HTMLElement | null,
+      cols: number,
+      rows: number,
+    ) => [number, number] | undefined;
+  };
+  _oscLinkService?: {
+    getLinkData?: (linkId: number) => { uri?: string } | undefined;
+  };
+  screenElement?: HTMLElement | null;
+}
+
+/** 클릭 좌표를 1-based [컬럼, 뷰포트 행] 으로 변환. 실패 시 undefined. */
+function getClickCellCoords(terminal: Terminal, event: MouseEvent): [number, number] | undefined {
+  try {
+    const core = (terminal as Terminal & { _core?: XtermCoreLite })._core;
+    const mouseService = core?._mouseService;
+    if (!mouseService?.getCoords) return undefined;
+    const element = core?.screenElement ?? terminal.element ?? null;
+    return mouseService.getCoords(event, element, terminal.cols, terminal.rows);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 해당 0-based 버퍼 셀의 OSC 8 hyperlink uri 를 조회한다(없으면 undefined).
+ * 셀의 확장 속성(`extended.urlId`)과 코어의 OSC 링크 서비스를 사용하는데
+ * 둘 다 내부 API 이므로 방어적으로 접근한다.
+ */
+function getOscLinkUriAtCell(
+  terminal: Terminal,
+  bufferLine0: number,
+  col0: number,
+): string | undefined {
+  try {
+    const line = terminal.buffer.active.getLine(bufferLine0);
+    if (!line) return undefined;
+    const cell = line.getCell(col0) as
+      | {
+          getChars?: () => string;
+          hasExtendedAttrs?: () => number;
+          extended?: { urlId?: number };
+        }
+      | undefined;
+    const urlId = cell?.extended?.urlId;
+    if (!urlId) return undefined;
+    const core = (terminal as Terminal & { _core?: XtermCoreLite })._core;
+    const uri = core?._oscLinkService?.getLinkData?.(urlId)?.uri;
+    return uri || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getBufferCursorAbsY(terminal: Terminal): number {
@@ -1305,6 +1374,58 @@ export function TerminalView({
     };
     outerEl?.addEventListener("pointerdown", handlePointerDown);
 
+    // Issue #352: 풀스크린 TUI(codex 등)가 마우스 트래킹을 켜면 클릭이 앱으로
+    // 전달되어 xterm 의 링크 활성화(linkHandler/WebLinksAddon/linkProvider)가
+    // 트리거되지 않는다. 다수 터미널의 관례대로 Shift/Alt+클릭 시 마우스
+    // 리포팅을 우회해 로컬에서 링크를 연다. capture 단계에서 가로채 링크를
+    // 찾으면 즉시 openExternal 하고 이벤트 전파를 막아(앱으로 미전달) 일반
+    // 셸·TUI 모두에서 동일하게 동작하도록 한다. 링크가 없으면 그대로 흘려
+    // 보내 기존 선택/드래그 동작을 해치지 않는다.
+    const handleModifierLinkClick = (event: MouseEvent) => {
+      if (!isModifierLinkClick(event)) return;
+      const coords = getClickCellCoords(terminal, event);
+      if (!coords) return;
+      const [col, viewportRow] = coords; // 1-based
+      const viewportY = (terminal.buffer.active as { viewportY?: number }).viewportY ?? 0;
+      const clickedLineNumber = viewportY + viewportRow; // 1-based 버퍼 라인
+      const buffer = terminal.buffer.active;
+
+      // 들여쓰기 결합 탐지를 위해 클릭 줄 주변 윈도우를 수집(±10줄).
+      const windowSize = 10;
+      const startLine = Math.max(1, clickedLineNumber - windowSize);
+      const endLine = Math.min(buffer.length, clickedLineNumber + windowSize);
+      const lines: IndentedLineInfo[] = [];
+      for (let y = startLine; y <= endLine; y++) {
+        const bufLine = buffer.getLine(y - 1);
+        if (!bufLine) continue;
+        lines.push({
+          text: bufLine.translateToString(),
+          isWrapped: bufLine.isWrapped,
+          lineNumber: y,
+        });
+      }
+
+      const oscLinkUri = getOscLinkUriAtCell(terminal, clickedLineNumber - 1, col - 1);
+      const uri = resolveLinkAtCell({
+        oscLinkUri,
+        lines,
+        clickedLineNumber,
+        col,
+        enableIndentedJoin: useSettingsStore.getState().paste.linkJoin,
+      });
+      if (!uri) return;
+
+      // 링크를 찾았다 → 클릭이 TUI 로 전달되지 않도록 차단하고 브라우저로 연다.
+      event.preventDefault();
+      event.stopPropagation();
+      (
+        event as MouseEvent & { stopImmediatePropagation?: () => void }
+      ).stopImmediatePropagation?.();
+      openExternal(uri).catch(() => {});
+    };
+    const wrapperEl = wrapperRef.current;
+    wrapperEl?.addEventListener("mousedown", handleModifierLinkClick, true);
+
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
       trace("terminal-onData", {
@@ -2002,6 +2123,7 @@ export function TerminalView({
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
+      wrapperEl?.removeEventListener("mousedown", handleModifierLinkClick, true);
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();
       wrapperRef.current?.classList.remove("terminal-ime-composition-active");
