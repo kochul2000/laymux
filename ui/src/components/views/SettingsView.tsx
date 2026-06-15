@@ -226,13 +226,13 @@ function StartupSection() {
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                App Theme
+                {t("startup.appTheme.title")}
               </h4>
               <p
                 className="mt-0.5 text-[11px]"
                 style={{ color: "var(--text-secondary)", opacity: 0.6 }}
               >
-                Application UI appearance
+                {t("startup.appTheme.description")}
               </p>
             </div>
             <FocusSelect
@@ -241,9 +241,9 @@ function StartupSection() {
               onChange={(e) => setDraftAppTheme(e.target.value)}
               className="w-44 rounded px-2 py-1.5 text-xs"
             >
-              {builtinAppThemes.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {builtinAppThemes.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.name}
                 </option>
               ))}
             </FocusSelect>
@@ -257,13 +257,13 @@ function StartupSection() {
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                Default Profile
+                {t("startup.defaultProfile.title")}
               </h4>
               <p
                 className="mt-0.5 text-[11px]"
                 style={{ color: "var(--text-secondary)", opacity: 0.6 }}
               >
-                New terminal sessions will use this profile
+                {t("startup.defaultProfile.description")}
               </p>
             </div>
             <FocusSelect
@@ -290,6 +290,7 @@ function StartupSection() {
 // -- Shared: Font fields (used by both Defaults and Profile) --
 
 function FontSection() {
+  const { t } = useTranslation("settings");
   const storeAppFont = useSettingsStore((s) => s.appearance.font);
   const setAppearance = useSettingsStore((s) => s.setAppearance);
   const monoFonts = useMonospacedFonts();
@@ -299,16 +300,15 @@ function FontSection() {
 
   return (
     <div>
-      <SectionTitle>Font</SectionTitle>
+      <SectionTitle>{t("font.sectionTitle")}</SectionTitle>
       <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
-        앱 기본 폰트. Memo, Issue Reporter 등 비터미널 뷰에서 상속됩니다. 터미널 폰트는 Profile
-        Defaults에서 설정합니다.
+        {t("font.appFontDescription")}
       </p>
       <FontFields
         font={draftFont}
         onChange={setDraftFont}
         monoFonts={monoFonts}
-        faceDesc="Default font for non-terminal views"
+        faceDesc={t("font.faceDescDefault")}
       />
     </div>
   );
@@ -329,6 +329,7 @@ function FontFields({
   monoFonts: string[];
   faceDesc?: string;
 }) {
+  const { t } = useTranslation("settings");
   const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
   const resetBtn =
     showReset && defaults && !isDefault ? (
@@ -341,9 +342,9 @@ function FontFields({
           border: "none",
           cursor: "pointer",
         }}
-        title="Reset to default"
+        title={t("common.resetToDefault")}
       >
-        Reset
+        {t("common.reset")}
       </button>
     ) : null;
 
@@ -352,11 +353,11 @@ function FontFields({
       <div className="px-4 py-2">
         <div className="flex items-center gap-2 mb-2">
           <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            Font
+            {t("font.cardTitle")}
           </h4>
           {resetBtn}
         </div>
-        <SettingRow label="Font Face" desc={faceDesc ?? "Monospaced font for terminals"}>
+        <SettingRow label={t("font.face")} desc={faceDesc ?? t("font.faceDescTerminal")}>
           <FocusSelect
             data-testid="font-face-input"
             value={font.face}
@@ -371,7 +372,7 @@ function FontFields({
             ))}
           </FocusSelect>
         </SettingRow>
-        <SettingRow label="Font Size" desc="Size in points (6-72)">
+        <SettingRow label={t("font.size")} desc={t("font.sizeDesc")}>
           <FocusInput
             data-testid="font-size-input"
             type="number"
@@ -382,7 +383,7 @@ function FontFields({
             max={72}
           />
         </SettingRow>
-        <SettingRow label="Font Weight">
+        <SettingRow label={t("font.weight")}>
           <select
             data-testid="font-weight-select"
             value={font.weight}
@@ -417,6 +418,7 @@ function AppearanceFields({
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
   const resetBtn = (key: keyof ProfileDefaults) =>
@@ -432,9 +434,9 @@ function AppearanceFields({
           border: "none",
           cursor: "pointer",
         }}
-        title="Reset to default"
+        title={t("common.resetToDefault")}
       >
-        Reset
+        {t("common.reset")}
       </button>
     ) : null;
 
@@ -443,9 +445,9 @@ function AppearanceFields({
       <div style={cardStyle} className="mb-3">
         <div className="px-4 py-2">
           <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            Appearance
+            {t("appearance.title")}
           </h4>
-          <SettingRow label="Color Scheme">
+          <SettingRow label={t("appearance.colorScheme")}>
             <div className="flex items-center">
               <select
                 value={data.colorScheme}
@@ -453,7 +455,7 @@ function AppearanceFields({
                 className={inputCls}
                 style={inputStyle}
               >
-                <option value="">(default)</option>
+                <option value="">{t("appearance.colorSchemeDefault")}</option>
                 {colorSchemes.map((cs) => (
                   <option key={cs.name} value={cs.name}>
                     {cs.name}
@@ -463,7 +465,7 @@ function AppearanceFields({
               {resetBtn("colorScheme")}
             </div>
           </SettingRow>
-          <SettingRow label="Opacity">
+          <SettingRow label={t("appearance.opacity")}>
             <div className="flex items-center gap-2">
               <input
                 type="range"
@@ -487,13 +489,13 @@ function AppearanceFields({
         <div className="px-4 py-2">
           <div className="flex items-center gap-2 mb-2">
             <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-              Padding
+              {t("appearance.padding")}
             </h4>
             {resetBtn("padding")}
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
             {(["top", "right", "bottom", "left"] as const).map((side) => (
-              <SettingRow key={side} label={side.charAt(0).toUpperCase() + side.slice(1)}>
+              <SettingRow key={side} label={t(`appearance.${side}`)}>
                 <input
                   type="number"
                   value={data.padding[side]}
@@ -530,6 +532,7 @@ function CursorFields({
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const supportedCursorShape = toSupportedCursorShape(data.cursorShape);
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && JSON.stringify(data[key as keyof typeof data]) === JSON.stringify(defaults[key]);
@@ -544,9 +547,9 @@ function CursorFields({
           border: "none",
           cursor: "pointer",
         }}
-        title="Reset to default"
+        title={t("common.resetToDefault")}
       >
-        Reset
+        {t("common.reset")}
       </button>
     ) : null;
 
@@ -554,9 +557,9 @@ function CursorFields({
     <div style={cardStyle} className="mb-3">
       <div className="px-4 py-2">
         <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          Cursor
+          {t("cursor.title")}
         </h4>
-        <SettingRow label="Cursor Shape">
+        <SettingRow label={t("cursor.shape")}>
           <div className="flex items-center">
             <select
               data-testid="cursor-shape-select"
@@ -565,14 +568,14 @@ function CursorFields({
               className={inputCls}
               style={inputStyle}
             >
-              <option value="bar">Bar |</option>
-              <option value="underscore">Underscore _</option>
-              <option value="filledBox">Filled Box &#9608;</option>
+              <option value="bar">{t("cursor.shapeBar")}</option>
+              <option value="underscore">{t("cursor.shapeUnderscore")}</option>
+              <option value="filledBox">{t("cursor.shapeFilledBox")}</option>
             </select>
             {resetBtn("cursorShape")}
           </div>
         </SettingRow>
-        <SettingRow label="Cursor Blink">
+        <SettingRow label={t("cursor.blink")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -582,16 +585,13 @@ function CursorFields({
                 onChange={(e) => onChange({ cursorBlink: e.target.checked })}
               />
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                Enable blinking cursor
+                {t("cursor.blinkEnable")}
               </span>
             </label>
             {resetBtn("cursorBlink")}
           </div>
         </SettingRow>
-        <SettingRow
-          label="Interactive Cursor Stability"
-          desc="Use the stabilized cursor path for redraw-heavy interactive apps like Codex and Claude."
-        >
+        <SettingRow label={t("cursor.stability")} desc={t("cursor.stabilityDesc")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -601,14 +601,14 @@ function CursorFields({
                 onChange={(e) => onChange({ stabilizeInteractiveCursor: e.target.checked })}
               />
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                Enable stable interactive cursor
+                {t("cursor.stabilityEnable")}
               </span>
             </label>
             {resetBtn("stabilizeInteractiveCursor")}
           </div>
         </SettingRow>
         <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
-          Cursor changes apply to new terminals.
+          {t("cursor.applyNote")}
         </p>
       </div>
     </div>
@@ -636,6 +636,7 @@ function AdvancedFields({
   defaults?: ProfileDefaults;
   showReset?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const isDefault = (key: keyof ProfileDefaults) =>
     defaults && data[key as keyof typeof data] === defaults[key];
   const resetBtn = (key: keyof ProfileDefaults) =>
@@ -649,9 +650,9 @@ function AdvancedFields({
           border: "none",
           cursor: "pointer",
         }}
-        title="Reset to default"
+        title={t("common.resetToDefault")}
       >
-        Reset
+        {t("common.reset")}
       </button>
     ) : null;
 
@@ -659,9 +660,9 @@ function AdvancedFields({
     <div style={cardStyle}>
       <div className="px-4 py-2">
         <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          Advanced
+          {t("advanced.title")}
         </h4>
-        <SettingRow label="Scrollback Lines" desc="Number of lines stored in history">
+        <SettingRow label={t("advanced.scrollbackLines")} desc={t("advanced.scrollbackLinesDesc")}>
           <div className="flex items-center">
             <input
               type="number"
@@ -677,7 +678,7 @@ function AdvancedFields({
             {resetBtn("scrollbackLines")}
           </div>
         </SettingRow>
-        <SettingRow label="Bell Style" desc="How the terminal bell is signaled">
+        <SettingRow label={t("advanced.bellStyle")} desc={t("advanced.bellStyleDesc")}>
           <div className="flex items-center">
             <select
               value={data.bellStyle}
@@ -685,16 +686,16 @@ function AdvancedFields({
               className={inputCls}
               style={inputStyle}
             >
-              <option value="audible">Audible</option>
-              <option value="none">None</option>
-              <option value="window">Window flash</option>
-              <option value="taskbar">Taskbar flash</option>
-              <option value="all">All</option>
+              <option value="audible">{t("advanced.bellAudible")}</option>
+              <option value="none">{t("advanced.bellNone")}</option>
+              <option value="window">{t("advanced.bellWindow")}</option>
+              <option value="taskbar">{t("advanced.bellTaskbar")}</option>
+              <option value="all">{t("advanced.bellAll")}</option>
             </select>
             {resetBtn("bellStyle")}
           </div>
         </SettingRow>
-        <SettingRow label="Close on Exit" desc="When the shell process terminates">
+        <SettingRow label={t("advanced.closeOnExit")} desc={t("advanced.closeOnExitDesc")}>
           <div className="flex items-center">
             <select
               value={data.closeOnExit}
@@ -702,15 +703,15 @@ function AdvancedFields({
               className={inputCls}
               style={inputStyle}
             >
-              <option value="automatic">Automatic</option>
-              <option value="graceful">Graceful</option>
-              <option value="always">Always</option>
-              <option value="never">Never</option>
+              <option value="automatic">{t("advanced.closeAutomatic")}</option>
+              <option value="graceful">{t("advanced.closeGraceful")}</option>
+              <option value="always">{t("advanced.closeAlways")}</option>
+              <option value="never">{t("advanced.closeNever")}</option>
             </select>
             {resetBtn("closeOnExit")}
           </div>
         </SettingRow>
-        <SettingRow label="Text Antialiasing" desc="Text rendering method">
+        <SettingRow label={t("advanced.antialiasing")} desc={t("advanced.antialiasingDesc")}>
           <div className="flex items-center">
             <select
               value={data.antialiasingMode}
@@ -718,14 +719,14 @@ function AdvancedFields({
               className={inputCls}
               style={inputStyle}
             >
-              <option value="grayscale">Grayscale</option>
-              <option value="cleartype">ClearType</option>
-              <option value="aliased">Aliased</option>
+              <option value="grayscale">{t("advanced.antialiasingGrayscale")}</option>
+              <option value="cleartype">{t("advanced.antialiasingClearType")}</option>
+              <option value="aliased">{t("advanced.antialiasingAliased")}</option>
             </select>
             {resetBtn("antialiasingMode")}
           </div>
         </SettingRow>
-        <SettingRow label="Suppress Title Changes">
+        <SettingRow label={t("advanced.suppressTitle")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -734,13 +735,13 @@ function AdvancedFields({
                 onChange={(e) => onChange({ suppressApplicationTitle: e.target.checked })}
               />
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Prevent shell from changing the tab title
+                {t("advanced.suppressTitleDesc")}
               </span>
             </label>
             {resetBtn("suppressApplicationTitle")}
           </div>
         </SettingRow>
-        <SettingRow label="Scroll to Input on Typing">
+        <SettingRow label={t("advanced.snapOnInput")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -749,7 +750,7 @@ function AdvancedFields({
                 onChange={(e) => onChange({ snapOnInput: e.target.checked })}
               />
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Auto-scroll to input line when typing
+                {t("advanced.snapOnInputDesc")}
               </span>
             </label>
             {resetBtn("snapOnInput")}
@@ -757,12 +758,9 @@ function AdvancedFields({
         </SettingRow>
 
         <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-          Session Restore
+          {t("advanced.sessionRestore")}
         </h4>
-        <SettingRow
-          label="Restore Working Directory"
-          desc="Restore last working directory on restart"
-        >
+        <SettingRow label={t("advanced.restoreCwd")} desc={t("advanced.restoreCwdDesc")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -772,16 +770,13 @@ function AdvancedFields({
                 onChange={(e) => onChange({ restoreCwd: e.target.checked })}
               />
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Start terminal in last used directory
+                {t("advanced.restoreCwdEnable")}
               </span>
             </label>
             {resetBtn("restoreCwd")}
           </div>
         </SettingRow>
-        <SettingRow
-          label="Restore Terminal Output"
-          desc="Restore previous terminal output on restart"
-        >
+        <SettingRow label={t("advanced.restoreOutput")} desc={t("advanced.restoreOutputDesc")}>
           <div className="flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -791,7 +786,7 @@ function AdvancedFields({
                 onChange={(e) => onChange({ restoreOutput: e.target.checked })}
               />
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Show previous session output above new shell
+                {t("advanced.restoreOutputEnable")}
               </span>
             </label>
             {resetBtn("restoreOutput")}
@@ -807,6 +802,7 @@ function AdvancedFields({
 const fallbackDefaults: ProfileDefaults = { ...defaultProfileDefaults };
 
 function DefaultsSection() {
+  const { t } = useTranslation("settings");
   const rawDefaults = useSettingsStore((s) => s.profileDefaults);
   const storeDefaults = rawDefaults ?? fallbackDefaults;
   const setProfileDefaults = useSettingsStore((s) => s.setProfileDefaults);
@@ -820,9 +816,9 @@ function DefaultsSection() {
 
   return (
     <div>
-      <SectionTitle>Profile Defaults</SectionTitle>
+      <SectionTitle>{t("defaults.title")}</SectionTitle>
       <p className="mb-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
-        These settings apply to all new profiles. Individual profiles can override them.
+        {t("defaults.description")}
       </p>
 
       <FontFields
@@ -857,6 +853,7 @@ const profileTabStyle = (active: boolean): React.CSSProperties => ({
 });
 
 function ProfileSection({ profileIndex }: { profileIndex: number }) {
+  const { t } = useTranslation("settings");
   const storeProfile = useSettingsStore((s) => s.profiles[profileIndex]);
   const updateProfile = useSettingsStore((s) => s.updateProfile);
   const colorSchemes = useSettingsStore((s) => s.colorSchemes);
@@ -886,8 +883,8 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
       >
         {(
           [
-            ["general", "General"],
-            ["additional", "Additional Settings"],
+            ["general", t("profile.tabGeneral")],
+            ["additional", t("profile.tabAdditional")],
           ] as const
         ).map(([tab, label]) => (
           <button
@@ -905,7 +902,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
       {activeTab === "general" && (
         <div style={cardStyle} className="mb-3">
           <div className="px-4 py-2">
-            <SettingRow label="Name">
+            <SettingRow label={t("profile.name")}>
               <input
                 data-testid="profile-name-input"
                 type="text"
@@ -915,7 +912,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 style={inputStyle}
               />
             </SettingRow>
-            <SettingRow label="Command Line" desc="Executable to run when this profile is launched">
+            <SettingRow label={t("profile.commandLine")} desc={t("profile.commandLineDesc")}>
               <input
                 type="text"
                 value={profile.commandLine}
@@ -925,7 +922,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 placeholder="powershell.exe"
               />
             </SettingRow>
-            <SettingRow label="Startup Command" desc="Command to run after shell initialization">
+            <SettingRow label={t("profile.startupCommand")} desc={t("profile.startupCommandDesc")}>
               <input
                 type="text"
                 value={profile.startupCommand}
@@ -935,7 +932,10 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 placeholder="cd ~/project && conda activate myenv"
               />
             </SettingRow>
-            <SettingRow label="Starting Directory" desc="Directory where the shell starts">
+            <SettingRow
+              label={t("profile.startingDirectory")}
+              desc={t("profile.startingDirectoryDesc")}
+            >
               <input
                 type="text"
                 value={profile.startingDirectory}
@@ -945,7 +945,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 placeholder="~"
               />
             </SettingRow>
-            <SettingRow label="Tab Title" desc="Leave empty to use profile name">
+            <SettingRow label={t("profile.tabTitle")} desc={t("profile.tabTitleDesc")}>
               <input
                 type="text"
                 value={profile.tabTitle}
@@ -955,7 +955,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                 placeholder=""
               />
             </SettingRow>
-            <SettingRow label="Hidden">
+            <SettingRow label={t("profile.hidden")}>
               <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
@@ -963,7 +963,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
                   onChange={(e) => update({ hidden: e.target.checked })}
                 />
                 <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                  Hide this profile from dropdown menus
+                  {t("profile.hiddenDesc")}
                 </span>
               </label>
             </SettingRow>
@@ -975,7 +975,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
       {activeTab === "additional" && (
         <>
           <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
-            Override defaults for this profile. Click "Reset" to restore inherited value.
+            {t("profile.additionalIntro")}
           </p>
           <FontFields
             font={profile.font ?? profileDefaults.font}
@@ -1002,6 +1002,7 @@ function ProfileSection({ profileIndex }: { profileIndex: number }) {
 // -- Section: Color Schemes --
 
 function ColorSchemesSection() {
+  const { t } = useTranslation("settings");
   const storeColorSchemes = useSettingsStore((s) => s.colorSchemes);
   const setColorSchemes = useSettingsStore((s) => s.setColorSchemes);
   const [colorSchemes, setDraftColorSchemes] = useDraft<ColorScheme[]>(
@@ -1058,7 +1059,7 @@ function ColorSchemesSection() {
 
   return (
     <div>
-      <SectionTitle>Color Schemes</SectionTitle>
+      <SectionTitle>{t("colorSchemes.title")}</SectionTitle>
 
       {/* Scheme selector */}
       <div className="mb-4 flex items-center gap-2">
@@ -1070,7 +1071,7 @@ function ColorSchemesSection() {
         >
           {colorSchemes.length === 0 && (
             <option value="" disabled>
-              No schemes
+              {t("colorSchemes.noSchemes")}
             </option>
           )}
           {colorSchemes.map((cs, i) => (
@@ -1085,7 +1086,7 @@ function ColorSchemesSection() {
           className="shrink-0 rounded px-3 py-1.5 text-xs"
           style={{ ...inputStyle, cursor: "pointer" }}
         >
-          + Add
+          {t("colorSchemes.add")}
         </button>
         {scheme && (
           <button
@@ -1093,7 +1094,7 @@ function ColorSchemesSection() {
             className="shrink-0 rounded px-3 py-1.5 text-xs"
             style={{ ...inputStyle, color: "var(--red)", cursor: "pointer" }}
           >
-            Delete
+            {t("common.delete")}
           </button>
         )}
       </div>
@@ -1103,7 +1104,7 @@ function ColorSchemesSection() {
           <div style={cardStyle} className="mb-3">
             <div className="px-4 py-2">
               <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                Scheme Name
+                {t("colorSchemes.schemeName")}
               </h4>
               <input
                 type="text"
@@ -1119,27 +1120,27 @@ function ColorSchemesSection() {
           <div style={cardStyle} className="mb-3">
             <div className="px-4 py-2">
               <h4 className="mb-3 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                Terminal Colors
+                {t("colorSchemes.terminalColors")}
               </h4>
               <div className="mb-3 flex gap-2">
                 <ColorSwatch
                   color={scheme.foreground}
-                  label="Fg"
+                  label={t("colorSchemes.fg")}
                   onChange={(v) => updateField("foreground", v)}
                 />
                 <ColorSwatch
                   color={scheme.background}
-                  label="Bg"
+                  label={t("colorSchemes.bg")}
                   onChange={(v) => updateField("background", v)}
                 />
                 <ColorSwatch
                   color={scheme.cursorColor}
-                  label="Cursor"
+                  label={t("colorSchemes.cursor")}
                   onChange={(v) => updateField("cursorColor", v)}
                 />
                 <ColorSwatch
                   color={scheme.selectionBackground}
-                  label="Select"
+                  label={t("colorSchemes.select")}
                   onChange={(v) => updateField("selectionBackground", v)}
                 />
               </div>
@@ -1148,27 +1149,30 @@ function ColorSchemesSection() {
                 className="mb-2 mt-4 text-xs font-semibold"
                 style={{ color: "var(--text-primary)" }}
               >
-                ANSI Colors
+                {t("colorSchemes.ansiColors")}
               </h4>
               <div className="mb-2 flex gap-2">
-                {ansiColors.map(([key, label]) => (
+                {ansiColors.map(([key]) => (
                   <ColorSwatch
                     key={key}
                     color={scheme[key]}
-                    label={label.replace("Bright ", "")}
+                    label={t(`colorSchemes.${key}`)}
                     onChange={(v) => updateField(key, v)}
                   />
                 ))}
               </div>
               <div className="flex gap-2">
-                {brightColors.map(([key, label]) => (
-                  <ColorSwatch
-                    key={key}
-                    color={scheme[key]}
-                    label={"B." + label.replace("Bright ", "")}
-                    onChange={(v) => updateField(key, v)}
-                  />
-                ))}
+                {brightColors.map(([key]) => {
+                  const base = key.replace("bright", "").toLowerCase();
+                  return (
+                    <ColorSwatch
+                      key={key}
+                      color={scheme[key]}
+                      label={t("colorSchemes.brightPrefix") + t(`colorSchemes.${base}`)}
+                      onChange={(v) => updateField(key, v)}
+                    />
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1177,7 +1181,7 @@ function ColorSchemesSection() {
           <div style={cardStyle}>
             <div className="px-4 py-2">
               <h4 className="mb-2 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                Preview
+                {t("colorSchemes.preview")}
               </h4>
               <div
                 className="rounded p-3 font-mono text-xs"
@@ -1220,6 +1224,7 @@ function ToggleRow({
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("settings");
   return (
     <SettingRow label={label} desc={desc}>
       <label className="flex cursor-pointer items-center gap-2">
@@ -1230,7 +1235,7 @@ function ToggleRow({
           onChange={(e) => onChange(e.target.checked)}
         />
         <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-          {checked ? "Enabled" : "Disabled"}
+          {checked ? t("common.enabled") : t("common.disabled")}
         </span>
       </label>
     </SettingRow>
@@ -1240,6 +1245,7 @@ function ToggleRow({
 // -- Section: Paste --
 
 function PasteSection() {
+  const { t } = useTranslation("settings");
   const storePaste = useSettingsStore((s) => s.paste);
   const setPaste = useSettingsStore((s) => s.setPaste);
   const [paste, setDraftPaste] = useDraft("paste", storePaste, (v) => setPaste(v));
@@ -1248,56 +1254,56 @@ function PasteSection() {
 
   return (
     <div>
-      <SectionTitle>Paste</SectionTitle>
+      <SectionTitle>{t("paste.title")}</SectionTitle>
 
-      <SubGroup title="일반">
+      <SubGroup title={t("paste.groupGeneral")}>
         <ToggleRow
-          label="Smart Paste"
-          desc="Ctrl+V 시 클립보드의 파일/이미지를 경로로 붙여넣기"
+          label={t("paste.smartPaste")}
+          desc={t("paste.smartPasteDesc")}
           testid="smart-paste-toggle"
           checked={paste.smart}
           onChange={(v) => update({ smart: v })}
         />
 
-        <SettingRow label="Image Directory" desc="이미지 저장 경로 (비워두면 기본 디렉터리 사용)">
+        <SettingRow label={t("paste.imageDir")} desc={t("paste.imageDirDesc")}>
           <FocusInput
             data-testid="paste-image-dir-input"
             className={inputCls}
-            placeholder="(default: %APPDATA%\laymux\paste-images)"
+            placeholder={t("paste.imageDirPlaceholder")}
             value={paste.imageDir}
             onChange={(e) => update({ imageDir: e.target.value })}
           />
         </SettingRow>
       </SubGroup>
 
-      <SubGroup title="텍스트 변환">
+      <SubGroup title={t("paste.groupTextTransform")}>
         <ToggleRow
-          label="Smart Remove Indent"
-          desc="붙여넣기 시 공통 들여쓰기 제거"
+          label={t("paste.smartRemoveIndent")}
+          desc={t("paste.smartRemoveIndentDesc")}
           testid="smart-remove-indent-toggle"
           checked={paste.removeIndent}
           onChange={(v) => update({ removeIndent: v })}
         />
 
         <ToggleRow
-          label="Smart Remove Line Break"
-          desc="붙여넣기 시 줄바꿈으로 깨진 URL 복원"
+          label={t("paste.smartRemoveLineBreak")}
+          desc={t("paste.smartRemoveLineBreakDesc")}
           testid="smart-remove-linebreak-toggle"
           checked={paste.removeLineBreak}
           onChange={(v) => update({ removeLineBreak: v })}
         />
 
         <ToggleRow
-          label="Smart Link Join"
-          desc="인덴트된 여러 줄 URL을 하나의 클릭 가능한 링크로 감지"
+          label={t("paste.smartLinkJoin")}
+          desc={t("paste.smartLinkJoinDesc")}
           testid="smart-link-join-toggle"
           checked={paste.linkJoin}
           onChange={(v) => update({ linkJoin: v })}
         />
       </SubGroup>
 
-      <SubGroup title="다중 파일">
-        <SettingRow label="Multi-file Separator" desc="여러 파일 붙여넣기 시 경로 사이 구분자">
+      <SubGroup title={t("paste.groupMultiFile")}>
+        <SettingRow label={t("paste.multiFileSeparator")} desc={t("paste.multiFileSeparatorDesc")}>
           <select
             data-testid="paste-path-separator-select"
             value={paste.pathSeparator}
@@ -1305,26 +1311,26 @@ function PasteSection() {
             className={inputCls}
             style={inputStyle}
           >
-            <option value="space">Space</option>
-            <option value="newline">Newline</option>
-            <option value="comma">Comma (,)</option>
-            <option value="semicolon">Semicolon (;)</option>
+            <option value="space">{t("paste.separatorSpace")}</option>
+            <option value="newline">{t("paste.separatorNewline")}</option>
+            <option value="comma">{t("paste.separatorComma")}</option>
+            <option value="semicolon">{t("paste.separatorSemicolon")}</option>
           </select>
         </SettingRow>
 
         <ToggleRow
-          label="Quote File Paths"
-          desc="붙여넣는 각 파일 경로를 큰따옴표로 감싸기 (공백 포함 경로에 유용)"
+          label={t("paste.quotePaths")}
+          desc={t("paste.quotePathsDesc")}
           testid="paste-path-quote-toggle"
           checked={paste.pathQuote}
           onChange={(v) => update({ pathQuote: v })}
         />
       </SubGroup>
 
-      <SubGroup title="안전">
+      <SubGroup title={t("paste.groupSafety")}>
         <ToggleRow
-          label="Large Paste Warning"
-          desc="대용량 텍스트 붙여넣기 시 확인 다이얼로그 표시"
+          label={t("paste.largeWarning")}
+          desc={t("paste.largeWarningDesc")}
           testid="large-paste-warning-toggle"
           checked={paste.largeWarning}
           onChange={(v) => update({ largeWarning: v })}
@@ -1337,6 +1343,7 @@ function PasteSection() {
 // -- Section: Terminal --
 
 function TerminalSection() {
+  const { t } = useTranslation("settings");
   const storeTerminal = useSettingsStore((s) => s.terminal);
   const setTerminal = useSettingsStore((s) => s.setTerminal);
   const [terminal, setDraftTerminal] = useDraft("terminal", storeTerminal, (v) => setTerminal(v));
@@ -1345,28 +1352,25 @@ function TerminalSection() {
 
   return (
     <div>
-      <SectionTitle>Terminal</SectionTitle>
+      <SectionTitle>{t("terminal.title")}</SectionTitle>
       <div style={cardStyle} className="p-4">
         <ToggleRow
-          label="Copy On Select"
-          desc="터미널에서 텍스트 선택 시 자동으로 클립보드에 복사"
+          label={t("terminal.copyOnSelect")}
+          desc={t("terminal.copyOnSelectDesc")}
           testid="copy-on-select-toggle"
           checked={terminal.copyOnSelect}
           onChange={(v) => update({ copyOnSelect: v })}
         />
 
-        <SettingRow
-          label="Scrollbar Style"
-          desc="터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다."
-        >
+        <SettingRow label={t("terminal.scrollbarStyle")} desc={t("terminal.scrollbarStyleDesc")}>
           <FocusSelect
             data-testid="scrollbar-style-select"
             className={inputCls}
             value={terminal.scrollbarStyle}
             onChange={(e) => update({ scrollbarStyle: e.target.value as "overlay" | "separate" })}
           >
-            <option value="overlay">Overlay (콘텐츠 위에 겹침)</option>
-            <option value="separate">Separate (별도 공간 차지)</option>
+            <option value="overlay">{t("terminal.scrollbarOverlay")}</option>
+            <option value="separate">{t("terminal.scrollbarSeparate")}</option>
           </FocusSelect>
         </SettingRow>
       </div>
@@ -1377,6 +1381,7 @@ function TerminalSection() {
 // -- Section: Interface (control bar, dock, notifications) --
 
 function InterfaceSection() {
+  const { t } = useTranslation("settings");
   const storeControlBar = useSettingsStore((s) => s.controlBar);
   const setControlBar = useSettingsStore((s) => s.setControlBar);
   const storeDock = useSettingsStore((s) => s.dock);
@@ -1400,13 +1405,10 @@ function InterfaceSection() {
 
   return (
     <div>
-      <SectionTitle>Interface</SectionTitle>
+      <SectionTitle>{t("interface.title")}</SectionTitle>
 
-      <SubGroup title="Control Bar">
-        <SettingRow
-          label="Hover Auto-hide"
-          desc="마우스 움직임 없을 때 컨트롤 바 숨김 대기 시간 (0 = 숨기지 않음)"
-        >
+      <SubGroup title={t("interface.groupControlBar")}>
+        <SettingRow label={t("interface.hoverAutoHide")} desc={t("interface.hoverAutoHideDesc")}>
           <div className="flex items-center gap-2">
             <FocusInput
               data-testid="hover-idle-seconds-input"
@@ -1422,12 +1424,12 @@ function InterfaceSection() {
               }
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              초
+              {t("common.seconds")}
             </span>
           </div>
         </SettingRow>
 
-        <SettingRow label="Control Bar Mode" desc="새 Pane의 기본 컨트롤 바 모드">
+        <SettingRow label={t("interface.controlBarMode")} desc={t("interface.controlBarModeDesc")}>
           <FocusSelect
             data-testid="default-control-bar-mode-select"
             className={inputCls}
@@ -1436,39 +1438,42 @@ function InterfaceSection() {
               updateControlBar({ defaultMode: e.target.value as "hover" | "pinned" | "minimized" })
             }
           >
-            <option value="minimized">Minimized (최소화, 호버 시 ⋯ 버튼)</option>
-            <option value="hover">Hover (호버 시 바 표시)</option>
-            <option value="pinned">Pinned (항상 고정 표시)</option>
+            <option value="minimized">{t("interface.controlBarMinimized")}</option>
+            <option value="hover">{t("interface.controlBarHover")}</option>
+            <option value="pinned">{t("interface.controlBarPinned")}</option>
           </FocusSelect>
         </SettingRow>
       </SubGroup>
 
-      <SubGroup title="Dock">
+      <SubGroup title={t("interface.groupDock")}>
         <ToggleRow
-          label="Dock Persist State"
-          desc="Dock을 숨겨도 백그라운드에서 상태를 유지 (터미널 프로세스가 계속 실행됨)"
+          label={t("interface.dockPersist")}
+          desc={t("interface.dockPersistDesc")}
           testid="dock-persist-state-toggle"
           checked={dock.persistState}
           onChange={(v) => updateDock({ persistState: v })}
         />
         <ToggleRow
-          label="Dock Arrow Nav"
-          desc="Alt+Arrow로 Dock 영역 진입/이탈 허용"
+          label={t("interface.dockArrowNav")}
+          desc={t("interface.dockArrowNavDesc")}
           testid="dock-arrow-nav-toggle"
           checked={dock.arrowNav}
           onChange={(v) => updateDock({ arrowNav: v })}
         />
         <ToggleRow
-          label="Workspace Switch Focus"
-          desc="화살표로 워크스페이스 이동 시 Dock에서 Pane으로 포커스 자동 이동"
+          label={t("interface.dockArrowFocusPane")}
+          desc={t("interface.dockArrowFocusPaneDesc")}
           testid="dock-arrow-focus-pane-toggle"
           checked={dock.arrowFocusPane}
           onChange={(v) => updateDock({ arrowFocusPane: v })}
         />
       </SubGroup>
 
-      <SubGroup title="Notifications">
-        <SettingRow label="Notification Dismiss" desc="알림을 읽음 처리하는 시점">
+      <SubGroup title={t("interface.groupNotifications")}>
+        <SettingRow
+          label={t("interface.notificationDismiss")}
+          desc={t("interface.notificationDismissDesc")}
+        >
           <FocusSelect
             data-testid="notification-dismiss-select"
             className={inputCls}
@@ -1479,9 +1484,9 @@ function InterfaceSection() {
               })
             }
           >
-            <option value="workspace">워크스페이스 선택 시 자동 해제</option>
-            <option value="paneFocus">Pane 포커스 시 자동 해제</option>
-            <option value="manual">알림 클릭으로만 해제</option>
+            <option value="workspace">{t("interface.dismissWorkspace")}</option>
+            <option value="paneFocus">{t("interface.dismissPaneFocus")}</option>
+            <option value="manual">{t("interface.dismissManual")}</option>
           </FocusSelect>
         </SettingRow>
       </SubGroup>
@@ -1492,6 +1497,7 @@ function InterfaceSection() {
 // -- Section: Workspaces --
 
 function WorkspacesSection() {
+  const { t } = useTranslation("settings");
   const storeWsSelector = useSettingsStore((s) => s.workspaceSelector);
   const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const storeSyncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
@@ -1520,18 +1526,22 @@ function WorkspacesSection() {
     }));
 
   const displayItems: { key: keyof typeof wsDisplay; label: string; desc: string }[] = [
-    { key: "minimap", label: "Minimap", desc: "Pane 위치를 나타내는 미니맵" },
-    { key: "environment", label: "Environment", desc: "실행 환경 (PS, WSL 등)" },
-    { key: "activity", label: "Activity", desc: "실행 프로그램 (shell, Claude 등)" },
-    { key: "path", label: "Path", desc: "Git 브랜치 및 현재 경로" },
-    { key: "result", label: "Result", desc: "명령 실행 결과 및 알림" },
+    { key: "minimap", label: t("workspaces.minimap"), desc: t("workspaces.minimapDesc") },
+    {
+      key: "environment",
+      label: t("workspaces.environment"),
+      desc: t("workspaces.environmentDesc"),
+    },
+    { key: "activity", label: t("workspaces.activity"), desc: t("workspaces.activityDesc") },
+    { key: "path", label: t("workspaces.path"), desc: t("workspaces.pathDesc") },
+    { key: "result", label: t("workspaces.result"), desc: t("workspaces.resultDesc") },
   ];
 
   return (
     <div>
-      <SectionTitle>Workspaces</SectionTitle>
+      <SectionTitle>{t("workspaces.title")}</SectionTitle>
 
-      <SubGroup title="Display">
+      <SubGroup title={t("workspaces.groupDisplay")}>
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">
@@ -1554,7 +1564,7 @@ function WorkspacesSection() {
                   onChange={(e) => updateWsDisplay({ [item.key]: e.target.checked })}
                 />
                 <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  {wsDisplay[item.key] ? "Enabled" : "Disabled"}
+                  {wsDisplay[item.key] ? t("common.enabled") : t("common.disabled")}
                 </span>
               </label>
             </div>
@@ -1562,22 +1572,22 @@ function WorkspacesSection() {
         ))}
       </SubGroup>
 
-      <SubGroup title="Behavior">
-        <SettingRow label="Path Ellipsis" desc="경로가 길 때 생략 방향 (워크스페이스 목록)">
+      <SubGroup title={t("workspaces.groupBehavior")}>
+        <SettingRow label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
           <FocusSelect
             data-testid="path-ellipsis-select"
             className={inputCls}
             value={wsSelector.pathEllipsis}
             onChange={(e) => updateWsSelector({ pathEllipsis: e.target.value as "start" | "end" })}
           >
-            <option value="start">앞부분 생략 (.../dir/file)</option>
-            <option value="end">뒷부분 생략 (/home/user/...)</option>
+            <option value="start">{t("workspaces.ellipsisStart")}</option>
+            <option value="end">{t("workspaces.ellipsisEnd")}</option>
           </FocusSelect>
         </SettingRow>
 
         <SettingRow
-          label="Hidden Auto-close"
-          desc="숨긴 워크스페이스/Pane의 터미널을 자동 종료해 리소스 절약 (0 = 종료 안 함). 다시 표시하면 새 터미널이 생성됩니다."
+          label={t("workspaces.hiddenAutoClose")}
+          desc={t("workspaces.hiddenAutoCloseDesc")}
         >
           <div className="flex items-center gap-2">
             <FocusInput
@@ -1595,19 +1605,20 @@ function WorkspacesSection() {
               }
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              초
+              {t("common.seconds")}
             </span>
           </div>
         </SettingRow>
       </SubGroup>
 
-      <SubGroup title="CWD Propagation Defaults">
+      <SubGroup title={t("workspaces.groupCwdDefaults")}>
         {(["workspace", "dock"] as const).map((location, i) => {
-          const label = location === "workspace" ? "Workspace" : "Dock";
+          const label =
+            location === "workspace" ? t("workspaces.cwdWorkspace") : t("workspaces.cwdDock");
           const desc =
             location === "workspace"
-              ? "Default for terminal panes inside workspaces"
-              : "Default for terminal panes inside dock areas";
+              ? t("workspaces.cwdWorkspaceDesc")
+              : t("workspaces.cwdDockDesc");
           const value = syncCwdDefaults[location];
           return (
             <div key={location} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
@@ -1632,7 +1643,7 @@ function WorkspacesSection() {
                       onChange={(e) => updateSyncCwdDefault(location, "send", e.target.checked)}
                     />
                     <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                      Send
+                      {t("workspaces.send")}
                     </span>
                   </label>
                   <label className="flex cursor-pointer items-center gap-2">
@@ -1643,7 +1654,7 @@ function WorkspacesSection() {
                       onChange={(e) => updateSyncCwdDefault(location, "receive", e.target.checked)}
                     />
                     <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                      Receive
+                      {t("workspaces.receive")}
                     </span>
                   </label>
                 </div>
@@ -1661,6 +1672,7 @@ function WorkspacesSection() {
 const DEFAULT_STATUS_MESSAGE_DELIMITER = " · ";
 
 function ClaudeSection() {
+  const { t } = useTranslation("settings");
   const storeClaude = useSettingsStore((s) => s.claude);
   const setClaude = useSettingsStore((s) => s.setClaude);
   const [claude, setDraftClaude] = useDraft("claude", storeClaude, (v) => setClaude(v));
@@ -1669,20 +1681,20 @@ function ClaudeSection() {
 
   return (
     <div>
-      <SectionTitle>Claude Code</SectionTitle>
+      <SectionTitle>{t("claude.title")}</SectionTitle>
 
-      <SubGroup title="CWD 동기화">
+      <SubGroup title={t("claude.groupSyncCwd")}>
         {/* Sync CWD mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Sync CWD
+              {t("claude.syncCwd")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              Claude Code 실행 중인 터미널에 cd 전파 방식
+              {t("claude.syncCwdDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -1692,25 +1704,25 @@ function ClaudeSection() {
               value={claude.syncCwd}
               onChange={(e) => updateClaude({ syncCwd: e.target.value as "skip" | "command" })}
             >
-              <option value="skip">Skip (전파하지 않음)</option>
-              <option value="command">Command (유휴 시 ! cd 전송)</option>
+              <option value="skip">{t("claude.syncCwdSkip")}</option>
+              <option value="command">{t("claude.syncCwdCommand")}</option>
             </FocusSelect>
           </div>
         </div>
       </SubGroup>
 
-      <SubGroup title="세션 복원">
+      <SubGroup title={t("claude.groupSessionRestore")}>
         {/* Restore Session */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              세션 복원
+              {t("claude.restoreSession")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              앱 재시작 시 Claude Code 세션을 자동 복원
+              {t("claude.restoreSessionDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1 pt-1">
@@ -1722,7 +1734,7 @@ function ClaudeSection() {
                 onChange={(e) => updateClaude({ restoreSession: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {claude.restoreSession ? "사용" : "사용 안함"}
+                {claude.restoreSession ? t("common.enabled") : t("common.disabled")}
               </span>
             </label>
           </div>
@@ -1732,13 +1744,13 @@ function ClaudeSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              세션 유효 기간
+              {t("claude.sessionMaxAge")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              이 시간보다 오래된 세션 파일은 무시 (0 = 무제한)
+              {t("claude.sessionMaxAgeDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -1758,25 +1770,25 @@ function ClaudeSection() {
                 }}
               />
               <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                시간
+                {t("common.hours")}
               </span>
             </div>
           </div>
         </div>
       </SubGroup>
 
-      <SubGroup title="상태 메시지">
+      <SubGroup title={t("claude.groupStatusMessage")}>
         {/* Status Message Mode */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              상태 메시지 모드
+              {t("claude.statusMessageMode")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              워크스페이스 목록에 표시할 상태 소스
+              {t("claude.statusMessageModeDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -1794,10 +1806,10 @@ function ClaudeSection() {
                 })
               }
             >
-              <option value="bullet-title">Bullet · Title (기본)</option>
-              <option value="title-bullet">Title · Bullet</option>
-              <option value="bullet">Bullet만</option>
-              <option value="title">Title만</option>
+              <option value="bullet-title">{t("claude.modeBulletTitle")}</option>
+              <option value="title-bullet">{t("claude.modeTitleBullet")}</option>
+              <option value="bullet">{t("claude.modeBullet")}</option>
+              <option value="title">{t("claude.modeTitle")}</option>
             </FocusSelect>
           </div>
         </div>
@@ -1808,13 +1820,13 @@ function ClaudeSection() {
           <div className="flex items-start gap-3 py-1.5">
             <div className="w-36 shrink-0 pt-1">
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                구분자
+                {t("claude.delimiter")}
               </span>
               <p
                 className="mt-0.5 text-[11px] leading-tight"
                 style={{ color: "var(--text-secondary)", opacity: 0.65 }}
               >
-                두 소스 사이 구분 텍스트
+                {t("claude.delimiterDesc")}
               </p>
             </div>
             <div className="min-w-0 flex-1">
@@ -1838,7 +1850,7 @@ function ClaudeSection() {
                       })
                     }
                   >
-                    기본값
+                    {t("common.default")}
                   </button>
                 )}
               </div>
@@ -1847,18 +1859,18 @@ function ClaudeSection() {
         )}
       </SubGroup>
 
-      <SubGroup title="세션 리미트 자동 복귀">
+      <SubGroup title={t("claude.groupAutoResume")}>
         {/* Session Limit Auto Resume (issue #312) */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              세션 리미트 자동 복귀
+              {t("claude.autoResume")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              세션 리미트 해제(resets) 시각이 지나면 복귀 메시지를 자동 전송
+              {t("claude.autoResumeDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1 pt-1">
@@ -1870,7 +1882,7 @@ function ClaudeSection() {
                 onChange={(e) => updateClaude({ sessionLimitAutoResume: e.target.checked })}
               />
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                {claude.sessionLimitAutoResume ? "사용" : "사용 안함"}
+                {claude.sessionLimitAutoResume ? t("common.enabled") : t("common.disabled")}
               </span>
             </label>
           </div>
@@ -1882,13 +1894,13 @@ function ClaudeSection() {
             <div className="flex items-start gap-3 py-1.5">
               <div className="w-36 shrink-0 pt-1">
                 <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  복귀 대기 시간
+                  {t("claude.resumeDelay")}
                 </span>
                 <p
                   className="mt-0.5 text-[11px] leading-tight"
                   style={{ color: "var(--text-secondary)", opacity: 0.65 }}
                 >
-                  리미트 해제 시각 이후 이 시간만큼 기다렸다가 전송
+                  {t("claude.resumeDelayDesc")}
                 </p>
               </div>
               <div className="min-w-0 flex-1">
@@ -1910,7 +1922,7 @@ function ClaudeSection() {
                     }}
                   />
                   <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-                    초
+                    {t("common.seconds")}
                   </span>
                 </div>
               </div>
@@ -1920,13 +1932,13 @@ function ClaudeSection() {
             <div className="flex items-start gap-3 py-1.5">
               <div className="w-36 shrink-0 pt-1">
                 <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                  복귀 문구
+                  {t("claude.resumeMessage")}
                 </span>
                 <p
                   className="mt-0.5 text-[11px] leading-tight"
                   style={{ color: "var(--text-secondary)", opacity: 0.65 }}
                 >
-                  리미트 해제 후 Claude Code에 전송할 메시지
+                  {t("claude.resumeMessageDesc")}
                 </p>
               </div>
               <div className="min-w-0 flex-1">
@@ -1948,6 +1960,7 @@ function ClaudeSection() {
 }
 
 function CodexSection() {
+  const { t } = useTranslation("settings");
   const storeCodex = useSettingsStore((s) => s.codex);
   const setCodex = useSettingsStore((s) => s.setCodex);
   const [codex, setDraftCodex] = useDraft("codex", storeCodex, (v) => setCodex(v));
@@ -1956,19 +1969,19 @@ function CodexSection() {
 
   return (
     <div>
-      <SectionTitle>Codex</SectionTitle>
+      <SectionTitle>{t("codex.title")}</SectionTitle>
 
       <div style={cardStyle} className="p-4">
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              상태 메시지 모드
+              {t("codex.statusMessageMode")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              워크스페이스 목록에서 Codex 상태 텍스트 표시 방식
+              {t("codex.statusMessageModeDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -1986,10 +1999,10 @@ function CodexSection() {
                 })
               }
             >
-              <option value="title">Title만 (기본)</option>
-              <option value="bullet-title">Bullet · Title</option>
-              <option value="title-bullet">Title · Bullet</option>
-              <option value="bullet">Bullet만</option>
+              <option value="title">{t("codex.modeTitle")}</option>
+              <option value="bullet-title">{t("codex.modeBulletTitle")}</option>
+              <option value="title-bullet">{t("codex.modeTitleBullet")}</option>
+              <option value="bullet">{t("codex.modeBullet")}</option>
             </FocusSelect>
           </div>
         </div>
@@ -1999,13 +2012,13 @@ function CodexSection() {
           <div className="flex items-start gap-3 py-1.5">
             <div className="w-36 shrink-0 pt-1">
               <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-                구분자
+                {t("codex.delimiter")}
               </span>
               <p
                 className="mt-0.5 text-[11px] leading-tight"
                 style={{ color: "var(--text-secondary)", opacity: 0.65 }}
               >
-                두 텍스트 사이 구분 문자열
+                {t("codex.delimiterDesc")}
               </p>
             </div>
             <div className="min-w-0 flex-1">
@@ -2029,7 +2042,7 @@ function CodexSection() {
                       })
                     }
                   >
-                    기본값
+                    {t("common.default")}
                   </button>
                 )}
               </div>
@@ -2044,6 +2057,7 @@ function CodexSection() {
 // -- Section: Issue Reporter --
 
 function FileExplorerSection() {
+  const { t } = useTranslation("settings");
   const storeFileExplorer = useSettingsStore((s) => s.fileExplorer);
   const setFileExplorer = useSettingsStore((s) => s.setFileExplorer);
   const profiles = useSettingsStore((s) => s.profiles);
@@ -2064,13 +2078,13 @@ function FileExplorerSection() {
 
   return (
     <div>
-      <SectionTitle>File Explorer</SectionTitle>
+      <SectionTitle>{t("fileExplorer.title")}</SectionTitle>
 
-      <SubGroup title="쉘">
+      <SubGroup title={t("fileExplorer.groupShell")}>
         {/* Shell Profile */}
         <SettingRow
-          label="Shell Profile"
-          desc="CWD 동기화에 사용할 쉘 프로파일. 비우면 기본 프로파일 사용."
+          label={t("fileExplorer.shellProfile")}
+          desc={t("fileExplorer.shellProfileDesc")}
         >
           <FocusSelect
             data-testid="fe-shell-profile"
@@ -2078,7 +2092,7 @@ function FileExplorerSection() {
             value={fe.shellProfile}
             onChange={(e) => updateFe({ shellProfile: e.target.value })}
           >
-            <option value="">Default</option>
+            <option value="">{t("fileExplorer.shellProfileDefault")}</option>
             {profiles.map((p) => (
               <option key={p.name} value={p.name}>
                 {p.name}
@@ -2088,19 +2102,19 @@ function FileExplorerSection() {
         </SettingRow>
       </SubGroup>
 
-      <SubGroup title="모양">
+      <SubGroup title={t("fileExplorer.groupAppearance")}>
         {/* Font */}
-        <SettingRow label="Font Family" desc="파일 목록 영역의 폰트. 비워두면 기본 폰트 상속.">
+        <SettingRow label={t("fileExplorer.fontFamily")} desc={t("fileExplorer.fontFamilyDesc")}>
           <FocusInput
             data-testid="fe-font-family"
             className={inputCls}
-            placeholder="예: Consolas, monospace"
+            placeholder={t("fileExplorer.fontFamilyPlaceholder")}
             value={fe.fontFamily}
             onChange={(e) => updateFe({ fontFamily: e.target.value })}
           />
         </SettingRow>
 
-        <SettingRow label="Font Size" desc="파일 목록 영역의 폰트 크기 (px). 기본값: 13">
+        <SettingRow label={t("fileExplorer.fontSize")} desc={t("fileExplorer.fontSizeDesc")}>
           <input
             data-testid="fe-font-size"
             type="number"
@@ -2119,13 +2133,13 @@ function FileExplorerSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Padding
+              {t("fileExplorer.padding")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              파일 목록 영역의 안쪽 여백 (px)
+              {t("fileExplorer.paddingDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2139,7 +2153,7 @@ function FileExplorerSection() {
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                      {dir}
+                      {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
                       data-testid={`fe-padding-${dir.toLowerCase()}`}
@@ -2163,9 +2177,12 @@ function FileExplorerSection() {
         </div>
       </SubGroup>
 
-      <SubGroup title="동작">
+      <SubGroup title={t("fileExplorer.groupBehavior")}>
         {/* Copy on Select */}
-        <SettingRow label="Copy on Select" desc="파일 선택 시 자동으로 경로를 클립보드에 복사.">
+        <SettingRow
+          label={t("fileExplorer.copyOnSelect")}
+          desc={t("fileExplorer.copyOnSelectDesc")}
+        >
           <label className="flex items-center gap-2">
             <input
               data-testid="fe-copy-on-select"
@@ -2174,7 +2191,7 @@ function FileExplorerSection() {
               onChange={(e) => updateFe({ copyOnSelect: e.target.checked })}
             />
             <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              활성화
+              {t("common.enabledShort")}
             </span>
           </label>
         </SettingRow>
@@ -2183,13 +2200,13 @@ function FileExplorerSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Extension Viewers
+              {t("fileExplorer.extensionViewers")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              확장자별 쉘 프로그램으로 파일 열기
+              {t("fileExplorer.extensionViewersDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2228,7 +2245,7 @@ function FileExplorerSection() {
                   }}
                   onClick={() => removeViewer(i)}
                 >
-                  Remove
+                  {t("common.remove")}
                 </button>
               </div>
             ))}
@@ -2242,7 +2259,7 @@ function FileExplorerSection() {
               }}
               onClick={addViewer}
             >
-              + Add Viewer
+              {t("fileExplorer.addViewer")}
             </button>
           </div>
         </div>
@@ -2252,6 +2269,7 @@ function FileExplorerSection() {
 }
 
 function IssueReporterSection() {
+  const { t } = useTranslation("settings");
   const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
   const setIssueReporter = useSettingsStore((s) => s.setIssueReporter);
   const appFont = useSettingsStore((s) => s.appearance.font);
@@ -2284,7 +2302,7 @@ function IssueReporterSection() {
 
   return (
     <div>
-      <SectionTitle>Issue Reporter</SectionTitle>
+      <SectionTitle>{t("issueReporter.title")}</SectionTitle>
 
       {/* Font (inherits from App Font) */}
       <FontFields
@@ -2299,18 +2317,15 @@ function IssueReporterSection() {
         defaults={appFont}
         showReset
         monoFonts={monoFonts}
-        faceDesc="비워두면 앱 기본 폰트 상속"
+        faceDesc={t("font.inheritAppFont")}
       />
 
-      <SubGroup title="이슈 제출">
-        <SettingRow
-          label="Shell"
-          desc="gh CLI를 실행할 셸 접두어. 비워두면 gh를 직접 실행. 따옴표 지원."
-        >
+      <SubGroup title={t("issueReporter.groupSubmit")}>
+        <SettingRow label={t("issueReporter.shell")} desc={t("issueReporter.shellDesc")}>
           <FocusInput
             data-testid="issue-reporter-shell-input"
             className={inputCls}
-            placeholder='예: wsl.exe -d "My Distro" --'
+            placeholder={t("issueReporter.shellPlaceholder")}
             value={issueReporter.shell}
             onChange={(e) => updateIssueReporter({ shell: e.target.value })}
           />
@@ -2320,13 +2335,13 @@ function IssueReporterSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Repositories
+              {t("issueReporter.repositories")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              이슈를 올릴 리포 목록 (owner/repo). 첫 번째 항목이 기본 선택됨.
+              {t("issueReporter.repositoriesDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2350,7 +2365,7 @@ function IssueReporterSection() {
                   }}
                   onClick={() => removeRepository(i)}
                 >
-                  Remove
+                  {t("common.remove")}
                 </button>
               </div>
             ))}
@@ -2364,24 +2379,24 @@ function IssueReporterSection() {
               }}
               onClick={addRepository}
             >
-              + Add Repository
+              {t("issueReporter.addRepository")}
             </button>
           </div>
         </div>
       </SubGroup>
 
-      <SubGroup title="모양">
+      <SubGroup title={t("issueReporter.groupAppearance")}>
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Padding
+              {t("issueReporter.padding")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              이슈 리포터 영역의 안쪽 여백 (px)
+              {t("issueReporter.paddingDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2391,7 +2406,7 @@ function IssueReporterSection() {
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                      {dir}
+                      {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
                       data-testid={`issue-reporter-padding-${dir.toLowerCase()}`}
@@ -2421,6 +2436,7 @@ function IssueReporterSection() {
 // -- Section: Memo --
 
 function MemoSection() {
+  const { t } = useTranslation("settings");
   const storeMemo = useSettingsStore((s) => s.memo);
   const setMemo = useSettingsStore((s) => s.setMemo);
   const appFont = useSettingsStore((s) => s.appearance.font);
@@ -2438,7 +2454,7 @@ function MemoSection() {
 
   return (
     <div>
-      <SectionTitle>Memo</SectionTitle>
+      <SectionTitle>{t("memo.title")}</SectionTitle>
 
       {/* Font (inherits from App Font) */}
       <FontFields
@@ -2453,21 +2469,21 @@ function MemoSection() {
         defaults={appFont}
         showReset
         monoFonts={monoFonts}
-        faceDesc="비워두면 앱 기본 폰트 상속"
+        faceDesc={t("font.inheritAppFont")}
       />
 
-      <SubGroup title="레이아웃">
+      <SubGroup title={t("memo.groupLayout")}>
         {/* Padding */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              Padding
+              {t("memo.padding")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              메모 영역의 안쪽 여백 (px)
+              {t("memo.paddingDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2481,7 +2497,7 @@ function MemoSection() {
                 return (
                   <label key={dir} className="flex items-center gap-1.5">
                     <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                      {dir}
+                      {t(`appearance.${dir.toLowerCase()}`)}
                     </span>
                     <input
                       data-testid={`memo-padding-${dir.toLowerCase()}`}
@@ -2508,13 +2524,13 @@ function MemoSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              인덴트 크기
+              {t("memo.indentSize")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              Tab 키로 삽입할 스페이스 수
+              {t("memo.indentSizeDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2536,18 +2552,18 @@ function MemoSection() {
         </div>
       </SubGroup>
 
-      <SubGroup title="동작">
+      <SubGroup title={t("memo.groupBehavior")}>
         {/* Paragraph Detection */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              단락 인식
+              {t("memo.paragraphDetection")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              N줄 이상 빈 줄로 단락을 구분 (트리플클릭 단락 선택에 사용)
+              {t("memo.paragraphDetectionDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2564,12 +2580,12 @@ function MemoSection() {
                   }
                 />
                 <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                  활성화
+                  {t("common.enabledShort")}
                 </span>
               </label>
               <label className="flex items-center gap-1.5">
                 <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                  빈 줄 수
+                  {t("memo.blankLineCount")}
                 </span>
                 <input
                   data-testid="memo-paragraph-copy-min-blank-lines"
@@ -2597,13 +2613,13 @@ function MemoSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              트리플클릭 단락 선택
+              {t("memo.tripleClickSelect")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              트리플클릭 시 해당 단락 전체를 선택
+              {t("memo.tripleClickSelectDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2615,7 +2631,7 @@ function MemoSection() {
                 onChange={(e) => updateMemo({ tripleClickParagraphSelect: e.target.checked })}
               />
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                활성화
+                {t("common.enabledShort")}
               </span>
             </label>
           </div>
@@ -2625,13 +2641,13 @@ function MemoSection() {
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              선택 시 복사
+              {t("memo.copyOnSelect")}
             </span>
             <p
               className="mt-0.5 text-[11px] leading-tight"
               style={{ color: "var(--text-secondary)", opacity: 0.65 }}
             >
-              텍스트 드래그 선택 시 자동으로 클립보드에 복사
+              {t("memo.copyOnSelectDesc")}
             </p>
           </div>
           <div className="min-w-0 flex-1">
@@ -2643,7 +2659,7 @@ function MemoSection() {
                 onChange={(e) => updateMemo({ copyOnSelect: e.target.checked })}
               />
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                활성화
+                {t("common.enabledShort")}
               </span>
             </label>
           </div>
@@ -2702,6 +2718,7 @@ function keyEventToString(e: KeyboardEvent): string {
 }
 
 function KeybindingsSection() {
+  const { t } = useTranslation("settings");
   const storeKeybindings = useSettingsStore((s) => s.keybindings);
   const setKeybindings = useSettingsStore((s) => s.setKeybindings);
   const [keybindings, setDraftKeybindings] = useDraft<Keybinding[]>(
@@ -2740,7 +2757,7 @@ function KeybindingsSection() {
 
   return (
     <div>
-      <SectionTitle>Keybindings</SectionTitle>
+      <SectionTitle>{t("keybindings.title")}</SectionTitle>
 
       <div data-testid="default-keybindings" className="flex flex-col gap-0">
         {defaultKeybindings.map((def, idx) => {
@@ -2811,13 +2828,15 @@ function KeybindingsSection() {
                       fontSize: "var(--fs-sm)",
                     }}
                   >
-                    {capturedKeys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
+                    {capturedKeys || (
+                      <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>
+                    )}
                   </div>
                 ) : (
                   <kbd
                     style={{ ...kbdStyle, cursor: "pointer" }}
                     onClick={() => handleStartCapture(def.id, def.defaultKeys)}
-                    title="Click to change shortcut"
+                    title={t("keybindings.changeShortcut")}
                   >
                     {displayKeys}
                   </kbd>
@@ -2834,9 +2853,9 @@ function KeybindingsSection() {
                         border: "1px solid var(--border)",
                         cursor: "pointer",
                       }}
-                      title="Reset to default"
+                      title={t("common.resetToDefault")}
                     >
-                      Reset
+                      {t("common.reset")}
                     </button>
                   )}
                 </div>
@@ -2860,7 +2879,7 @@ function KeybindingsSection() {
                   prev.map((k, i) => (i === kb.index ? { ...k, command: val } : k)),
                 );
               }}
-              placeholder="action.name"
+              placeholder={t("keybindings.actionPlaceholder")}
               className="min-w-0 flex-1 rounded px-2 py-0.5 text-xs"
             />
             <kbd
@@ -2895,7 +2914,7 @@ function KeybindingsSection() {
                   fontSize: "var(--fs-sm)",
                 }}
               >
-                {kb.keys || <span style={{ opacity: 0.5 }}>Press keys...</span>}
+                {kb.keys || <span style={{ opacity: 0.5 }}>{t("keybindings.pressKeys")}</span>}
               </div>
             )}
             <div className="w-12 shrink-0 text-right">
@@ -2909,7 +2928,7 @@ function KeybindingsSection() {
                   background: "transparent",
                   border: "none",
                 }}
-                title="Remove"
+                title={t("common.remove")}
               >
                 ✕
               </button>
@@ -2925,7 +2944,7 @@ function KeybindingsSection() {
           className="rounded px-4 py-1.5 text-xs"
           style={{ ...inputStyle, cursor: "pointer" }}
         >
-          + Add new binding
+          {t("keybindings.addBinding")}
         </button>
       </div>
     </div>
@@ -3037,6 +3056,7 @@ function useDraft<T>(
 // -- Main SettingsView --
 
 export function SettingsView() {
+  const { t } = useTranslation("settings");
   const profiles = useSettingsStore((s) => s.profiles);
   const addProfile = useSettingsStore((s) => s.addProfile);
   const removeProfile = useSettingsStore((s) => s.removeProfile);
@@ -3168,13 +3188,13 @@ export function SettingsView() {
               cursor: "pointer",
               opacity: 0.7,
             }}
-            title="Open settings.json"
+            title={t("nav.openJsonTitle")}
           >
-            settings.json
+            {t("nav.openJson")}
           </button>
 
           {/* Appearance */}
-          <NavGroupHeader label="Appearance" />
+          <NavGroupHeader label={t("nav.groupAppearance")} />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("startup")}
@@ -3182,7 +3202,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("startup")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Startup
+            {t("nav.startup")}
           </button>
           <button
             data-testid="nav-font"
@@ -3192,11 +3212,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("font")}
             onMouseLeave={() => setNavHover(null)}
           >
-            App Font
+            {t("nav.appFont")}
           </button>
 
           {/* Terminal */}
-          <NavGroupHeader label="Terminal" />
+          <NavGroupHeader label={t("nav.groupTerminal")} />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("colorSchemes")}
@@ -3204,7 +3224,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("colorSchemes")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Color Schemes
+            {t("nav.colorSchemes")}
           </button>
           <button
             data-testid="nav-terminal"
@@ -3214,7 +3234,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("terminal")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Terminal
+            {t("nav.terminal")}
           </button>
           <button
             data-testid="nav-paste"
@@ -3224,11 +3244,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("paste")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Paste
+            {t("nav.paste")}
           </button>
 
           {/* Interface */}
-          <NavGroupHeader label="Interface" />
+          <NavGroupHeader label={t("nav.groupInterface")} />
           <button
             data-testid="nav-interface"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3237,7 +3257,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("interface")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Interface
+            {t("nav.interface")}
           </button>
           <button
             data-testid="nav-workspaceDisplay"
@@ -3247,11 +3267,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("workspaceDisplay")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Workspaces
+            {t("nav.workspaces")}
           </button>
 
           {/* Integrations */}
-          <NavGroupHeader label="Integrations" />
+          <NavGroupHeader label={t("nav.groupIntegrations")} />
           <button
             data-testid="nav-claude"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3260,7 +3280,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("claude")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Claude Code
+            {t("nav.claude")}
           </button>
           <button
             data-testid="nav-codex"
@@ -3270,11 +3290,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("codex")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Codex
+            {t("nav.codex")}
           </button>
 
           {/* Views */}
-          <NavGroupHeader label="Views" />
+          <NavGroupHeader label={t("nav.groupViews")} />
           <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3283,7 +3303,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("memo")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Memo
+            {t("nav.memo")}
           </button>
           <button
             data-testid="nav-fileExplorer"
@@ -3293,7 +3313,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("fileExplorer")}
             onMouseLeave={() => setNavHover(null)}
           >
-            File Explorer
+            {t("nav.fileExplorer")}
           </button>
           <button
             data-testid="nav-issueReporter"
@@ -3303,11 +3323,11 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("issueReporter")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Issue Reporter
+            {t("nav.issueReporter")}
           </button>
 
           {/* Input */}
-          <NavGroupHeader label="Input" />
+          <NavGroupHeader label={t("nav.groupInput")} />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("keybindings")}
@@ -3315,7 +3335,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("keybindings")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Keybindings
+            {t("nav.keybindings")}
           </button>
 
           {/* Profiles group */}
@@ -3324,7 +3344,7 @@ export function SettingsView() {
               className="text-[10px] uppercase tracking-wider"
               style={{ color: "var(--text-secondary)", opacity: 0.7 }}
             >
-              Profiles
+              {t("nav.groupProfiles")}
             </span>
             <button
               data-testid="add-profile-btn"
@@ -3349,7 +3369,7 @@ export function SettingsView() {
             onMouseEnter={() => setNavHover("defaults")}
             onMouseLeave={() => setNavHover(null)}
           >
-            Defaults
+            {t("nav.profileDefaults")}
           </button>
 
           {profiles.map((p, i) => {
@@ -3378,7 +3398,7 @@ export function SettingsView() {
                     border: "none",
                     cursor: "pointer",
                   }}
-                  title="Delete profile"
+                  title={t("nav.deleteProfile")}
                 >
                   ✕
                 </button>
@@ -3434,7 +3454,7 @@ export function SettingsView() {
                 opacity: dirty ? 1 : 0.4,
               }}
             >
-              Discard changes
+              {t("save.discard")}
             </button>
             <button
               data-testid="save-settings-btn"
@@ -3456,7 +3476,11 @@ export function SettingsView() {
                 opacity: dirty ? 1 : 0.4,
               }}
             >
-              {saveLabel}
+              {saveLabel === "Saved!"
+                ? t("save.saved")
+                : saveLabel === "Error!"
+                  ? t("save.error")
+                  : t("save.save")}
             </button>
           </div>
         </div>

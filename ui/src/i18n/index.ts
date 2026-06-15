@@ -16,6 +16,23 @@ export const resources = {
 } as const;
 
 /**
+ * Dev-only missing-key reporter. Wired into i18next via `saveMissing` +
+ * `missingKeyHandler` only when `import.meta.env.DEV` so production builds pay
+ * nothing. Catches the common failure where `en.json` lacks a key that `ko.json`
+ * has: an English user would otherwise silently see Korean (via `fallbackLng`).
+ * Exported (pure, no i18next dependency) so it can be unit-tested directly.
+ */
+export function reportMissingKey(
+  languages: readonly string[],
+  namespace: string,
+  key: string,
+  warn: (message: string) => void = console.warn,
+): void {
+  const lng = languages[0] ?? "?";
+  warn(`[i18n] Missing translation: "${lng}:${namespace}:${key}"`);
+}
+
+/**
  * i18next is initialized synchronously at module import (resources are bundled,
  * no async backend). The user's explicit language is applied later from the
  * loaded settings via `applyLanguage`; until then we resolve `"system"` against
@@ -28,6 +45,10 @@ const initialLanguage = resolveLanguage(
   typeof navigator !== "undefined" ? navigator.language : undefined,
 );
 
+// Vite replaces `import.meta.env.DEV` with a literal at build time, so the
+// missing-key wiring is tree-shaken out of production bundles.
+const isDev = import.meta.env.DEV;
+
 i18n.use(initReactI18next).init({
   resources,
   lng: initialLanguage,
@@ -38,6 +59,9 @@ i18n.use(initReactI18next).init({
     // React already escapes values — double-escaping breaks interpolated text.
     escapeValue: false,
   },
+  // Dev-only: surface any key that has no translation in the active language.
+  saveMissing: isDev,
+  missingKeyHandler: isDev ? (lngs, ns, key) => reportMissingKey(lngs, ns, key) : undefined,
 });
 
 /**
