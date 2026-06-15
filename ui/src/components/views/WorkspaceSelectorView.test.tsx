@@ -9,6 +9,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { getListeningPorts, getTerminalSummaries } from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
+import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -112,6 +113,7 @@ describe("WorkspaceSelectorView", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useRenameWorkspaceStore.setState({ targetId: null, currentName: "" });
 
     // Wire getTerminalSummaries to read from the stores dynamically
     vi.mocked(getTerminalSummaries).mockImplementation(async (ids: string[]) => {
@@ -951,23 +953,29 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.getByTestId("layout-menu-default-layout")).toBeInTheDocument();
   });
 
-  it("double-clicking workspace name triggers rename prompt", async () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+  it("double-clicking workspace name opens the inline rename overlay (#339)", () => {
+    // #339: no native window.prompt — opens the in-app rename overlay seeded
+    // with the workspace's id and current name.
+    const promptSpy = vi.spyOn(window, "prompt");
     render(<WorkspaceSelectorView />);
     const nameEl = screen.getByTestId("workspace-name-ws-default");
     fireEvent.doubleClick(nameEl);
-    expect(promptSpy).toHaveBeenCalledWith("Rename workspace:", "Default");
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
+    expect(promptSpy).not.toHaveBeenCalled();
+    const s = useRenameWorkspaceStore.getState();
+    expect(s.targetId).toBe("ws-default");
+    expect(s.currentName).toBe("Default");
     promptSpy.mockRestore();
   });
 
-  it("double-clicking workspace name does not rename when prompt is cancelled", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+  it("clicking the rename button opens the inline rename overlay (#339)", async () => {
+    const promptSpy = vi.spyOn(window, "prompt");
+    const user = userEvent.setup();
     render(<WorkspaceSelectorView />);
-    const nameEl = screen.getByTestId("workspace-name-ws-default");
-    fireEvent.doubleClick(nameEl);
-    expect(promptSpy).toHaveBeenCalled();
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Default");
+    const item = screen.getByTestId("workspace-item-ws-default");
+    await user.hover(item);
+    fireEvent.click(screen.getByTestId("workspace-rename-ws-default"));
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(useRenameWorkspaceStore.getState().targetId).toBe("ws-default");
     promptSpy.mockRestore();
   });
 
@@ -976,13 +984,11 @@ describe("WorkspaceSelectorView", () => {
     useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
     const workspaces = useWorkspaceStore.getState().workspaces;
     const ws2 = workspaces[workspaces.length - 1];
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
     render(<WorkspaceSelectorView />);
     const nameEl = screen.getByTestId(`workspace-name-${ws2.id}`);
     fireEvent.doubleClick(nameEl);
     // Active workspace should still be the first one
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
-    promptSpy.mockRestore();
   });
 
   it("renameLayout changes layout name in store", () => {

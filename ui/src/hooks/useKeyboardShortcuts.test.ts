@@ -8,6 +8,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   loadMemo: vi.fn().mockResolvedValue(""),
@@ -36,6 +37,7 @@ describe("useKeyboardShortcuts", () => {
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useFileViewerStore.setState({ open: false, path: "", maximized: false });
+    useRenameWorkspaceStore.setState({ targetId: null, currentName: "" });
   });
 
   // --- Ctrl+Alt+1~9: workspace switch ---
@@ -295,24 +297,19 @@ describe("useKeyboardShortcuts", () => {
     expect(useWorkspaceStore.getState().workspaces).toHaveLength(1);
   });
 
-  it("Ctrl+Alt+R triggers rename of active workspace", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+  it("Ctrl+Alt+R opens the inline rename overlay (no native prompt) (#339)", () => {
+    // #339: native window.prompt does not work on Windows/WebView2 — the
+    // shortcut opens the in-app rename overlay instead, seeded with the
+    // active workspace's id and current name.
+    const promptSpy = vi.spyOn(window, "prompt");
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("R", { ctrlKey: true, altKey: true });
 
-    expect(promptSpy).toHaveBeenCalled();
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
-    promptSpy.mockRestore();
-  });
-
-  it("Ctrl+Alt+R cancels rename on null prompt", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
-    renderHook(() => useKeyboardShortcuts());
-
-    fireKey("R", { ctrlKey: true, altKey: true });
-
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Default");
+    expect(promptSpy).not.toHaveBeenCalled();
+    const s = useRenameWorkspaceStore.getState();
+    expect(s.targetId).toBe("ws-default");
+    expect(s.currentName).toBe("Default");
     promptSpy.mockRestore();
   });
 
@@ -1331,14 +1328,14 @@ describe("useKeyboardShortcuts", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
   });
 
-  it("Ctrl+Alt+r (lowercase) triggers rename of active workspace", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+  it("Ctrl+Alt+r (lowercase) opens the inline rename overlay (#339)", () => {
+    const promptSpy = vi.spyOn(window, "prompt");
     renderHook(() => useKeyboardShortcuts());
 
     fireKey("r", { ctrlKey: true, altKey: true });
 
-    expect(promptSpy).toHaveBeenCalled();
-    expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(useRenameWorkspaceStore.getState().targetId).toBe("ws-default");
     promptSpy.mockRestore();
   });
 
@@ -1859,18 +1856,15 @@ describe("useKeyboardShortcuts", () => {
       document.body.removeChild(input);
     });
 
-    it("workspace.rename rebound: new combo prompts, old default is inert", () => {
-      const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Renamed WS");
+    it("workspace.rename rebound: new combo opens overlay, old default is inert", () => {
       setOverride("workspace.rename", "Ctrl+Shift+R");
       renderHook(() => useKeyboardShortcuts());
 
       fireKey("r", { ctrlKey: true, altKey: true });
-      expect(promptSpy).not.toHaveBeenCalled();
+      expect(useRenameWorkspaceStore.getState().targetId).toBeNull();
 
       fireKey("R", { ctrlKey: true, shiftKey: true });
-      expect(promptSpy).toHaveBeenCalled();
-      expect(useWorkspaceStore.getState().workspaces[0].name).toBe("Renamed-WS");
-      promptSpy.mockRestore();
+      expect(useRenameWorkspaceStore.getState().targetId).toBe("ws-default");
     });
 
     it("notifications.unread rebound: new combo jumps, old default is inert", () => {
