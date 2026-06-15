@@ -212,7 +212,7 @@
     },
     "terminal": {
       "title": "Terminal",
-      "copyOnSelect": "Copy On Select",
+      "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy to clipboard when selecting text in the terminal",
       "scrollbarStyle": "Scrollbar Style",
       "scrollbarStyleDesc": "How the terminal scrollbar is shown. Overlay overlaps the content, Separate takes its own space.",
