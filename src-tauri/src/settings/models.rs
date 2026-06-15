@@ -1008,6 +1008,11 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    /// App UI language: "system" (OS locale), "ko", or "en". Opaque to the
+    /// backend — resolved on the frontend. `#[serde(default)]` keeps existing
+    /// settings.json (without this key) parsing cleanly.
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default)]
     pub color_schemes: Vec<ColorScheme>,
     #[serde(default)]
@@ -1068,9 +1073,14 @@ fn default_profile() -> String {
     "PowerShell".into()
 }
 
+fn default_language() -> String {
+    "system".into()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            language: default_language(),
             color_schemes: Vec::new(),
             profiles: vec![
                 Profile {

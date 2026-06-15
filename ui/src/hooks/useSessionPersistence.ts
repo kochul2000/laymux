@@ -63,6 +63,7 @@ export function useSessionPersistence() {
 
         // Apply to settings store
         useSettingsStore.getState().loadFromSettings({
+          ...(rawSettings.language ? { language: rawSettings.language } : {}),
           defaultProfile: rawSettings.defaultProfile,
           profileDefaults: sProfileDefaults as Parameters<
             ReturnType<typeof useSettingsStore.getState>["loadFromSettings"]

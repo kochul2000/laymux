@@ -1,4 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import i18n from "@/i18n";
+
+// Tests assert against English UI strings; pin the test locale to English so
+// the default ("ko") fallback does not flip rendered labels.
+void i18n.changeLanguage("en");
 
 // Polyfill ResizeObserver for jsdom — fires callback immediately with non-zero dimensions
 if (typeof globalThis.ResizeObserver === "undefined") {

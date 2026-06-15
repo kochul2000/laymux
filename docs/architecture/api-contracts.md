@@ -11,6 +11,16 @@
 
 `settings.json`은 **사용자가 의도적으로 편집·공유하는 구성**만 담는다. 재시작 간 유지돼야 하지만 구성이 아닌 UI 상태(컨트롤 바 모드, 폰트 줌 등)는 localStorage에 저장되는 인스턴스 오버라이드 레이어([overview.md](./overview.md) §4.2)에 들어간다.
 
+### 다국어(i18n) — 언어 설정
+
+UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
+
+- **설정 키:** `settings.json` 의 최상위 `language: "system" | "ko" | "en"` (Rust `Settings.language: String`, camelCase). 첫 실행 기본값은 `"system"`. serde `#[serde(default = "default_language")]` 로 구버전(키 없음) settings.json 도 `"system"` 으로 파싱된다(하위호환 목적 default 만 유지). 프론트 SSOT 는 `settings-store` 의 `language` 필드 + `setLanguage` 액션.
+- **로케일 해석:** `ui/src/i18n/resolve-language.ts` 의 순수 함수 `resolveLanguage(setting, navigatorLang)` 가 단일 진실원. `"system"` 이면 `navigator.language` 가 `ko*` (대소문자 무시)일 때 한글, 그 외/빈 값은 영어로 폴백. `"ko"`/`"en"` 은 그대로. 명시적 시작 모달은 두지 않는다.
+- **초기화/동기화:** `ui/src/i18n/index.ts` 가 import 시점에 i18next 를 동기 초기화(resources 번들, `fallbackLng:"ko"`, `interpolation.escapeValue:false`). 실제 언어는 설정 로드 후 `useLanguageSync` 훅이 `language` 변경을 구독해 `applyLanguage()`(→ `i18n.changeLanguage()`)로 적용. `main.tsx` 가 `import "./i18n"` 로 부트.
+- **사전 구조:** `ui/src/i18n/locales/{ko,en}.json`. 네임스페이스 `common` · `settings` · `workspace`. 키는 `t("ns:path.to.key")`, 보간은 `{{name}}`.
+- **현재 번역 범위(슬라이스):** `WorkspaceSelectorView` + SettingsView "Startup" 의 Language 카드만 `t()` 전환됨. 나머지 화면의 전체 번역은 후속 작업.
+
 ### 접근 방법
 
 - 모달로 열기 (기본)

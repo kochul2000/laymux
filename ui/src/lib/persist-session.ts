@@ -70,6 +70,7 @@ async function persistSessionCore(): Promise<void> {
 
   // Build the base settings object (matches the Tauri Settings type).
   const base: Settings = {
+    language: settingsState.language,
     defaultProfile: settingsState.defaultProfile,
     profileDefaults: {
       ...settingsState.profileDefaults,

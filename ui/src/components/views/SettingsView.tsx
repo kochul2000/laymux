@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -15,6 +16,7 @@ import {
   type AntialiasingMode,
   type ColorScheme,
   type Keybinding,
+  type LanguageSetting,
 } from "@/stores/settings-store";
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
@@ -161,7 +163,12 @@ function useMonospacedFonts() {
   return installed;
 }
 
+const LANGUAGE_OPTIONS: LanguageSetting[] = ["system", "ko", "en"];
+
 function StartupSection() {
+  const { t } = useTranslation(["settings", "common"]);
+  const language = useSettingsStore((s) => s.language);
+  const setLanguage = useSettingsStore((s) => s.setLanguage);
   const storeDefaultProfile = useSettingsStore((s) => s.defaultProfile);
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile);
   const profiles = useSettingsStore((s) => s.profiles);
@@ -180,7 +187,38 @@ function StartupSection() {
 
   return (
     <div>
-      <SectionTitle>Startup</SectionTitle>
+      <SectionTitle>{t("settings:startup.title")}</SectionTitle>
+
+      {/* Language — applies immediately (live i18n effect), so it is not draft-gated. */}
+      <div className="mb-3" style={cardStyle}>
+        <div className="px-4 py-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+                {t("settings:startup.language.title")}
+              </h4>
+              <p
+                className="mt-0.5 text-[11px]"
+                style={{ color: "var(--text-secondary)", opacity: 0.6 }}
+              >
+                {t("settings:startup.language.description")}
+              </p>
+            </div>
+            <FocusSelect
+              data-testid="language-select"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
+              className="w-44 rounded px-2 py-1.5 text-xs"
+            >
+              {LANGUAGE_OPTIONS.map((lng) => (
+                <option key={lng} value={lng}>
+                  {t(`common:language.${lng}`)}
+                </option>
+              ))}
+            </FocusSelect>
+          </div>
+        </div>
+      </div>
 
       {/* App Theme */}
       <div className="mb-3" style={cardStyle}>

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -184,6 +185,7 @@ function WorkspaceItem({
   onTogglePaneHidden: (paneId: string) => void;
   onToggleWsHidden: () => void;
 }) {
+  const { t } = useTranslation("workspace");
   const [hovered, setHovered] = useState(false);
   const wsDisplay = useSettingsStore((s) => s.workspaceSelector.display);
   const claudeSettings = useSettingsStore((s) => s.claude);
@@ -334,7 +336,7 @@ function WorkspaceItem({
                       background: "transparent",
                       border: "none",
                     }}
-                    title={isWsHidden ? "Show workspace" : "Hide workspace"}
+                    title={isWsHidden ? t("item.showWorkspace") : t("item.hideWorkspace")}
                   >
                     {isWsHidden ? <EyeOffIcon size={11} /> : <EyeIcon size={11} />}
                   </button>
@@ -351,7 +353,7 @@ function WorkspaceItem({
                     background: "transparent",
                     border: "none",
                   }}
-                  title="Duplicate workspace (Ctrl+Alt+D)"
+                  title={t("item.duplicateWorkspace")}
                 >
                   <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                     <rect
@@ -386,7 +388,7 @@ function WorkspaceItem({
                     background: "transparent",
                     border: "none",
                   }}
-                  title="Rename workspace (Ctrl+Alt+R)"
+                  title={t("item.renameWorkspace")}
                 >
                   <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                     <path
@@ -410,7 +412,7 @@ function WorkspaceItem({
                       background: "transparent",
                       border: "none",
                     }}
-                    title="Close workspace (Ctrl+Alt+W)"
+                    title={t("item.closeWorkspace")}
                   >
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                       <path
@@ -811,6 +813,7 @@ function LayoutCard({
   onSetDefault: () => void;
   onOverwrite: () => void;
 }) {
+  const { t } = useTranslation("workspace");
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -908,7 +911,7 @@ function LayoutCard({
                 lineHeight: "14px",
               }}
             >
-              default
+              {t("layout.default")}
             </span>
           )}
           {hovered && isDefault && (
@@ -934,7 +937,7 @@ function LayoutCard({
             color: "var(--text-secondary)",
             border: "none",
           }}
-          title="Layout options"
+          title={t("layout.options")}
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
             <circle cx="6" cy="2.5" r="1.2" />
@@ -962,9 +965,9 @@ function LayoutCard({
             }}
             className="cursor-pointer px-3 py-1 text-left text-[11px]"
             style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
-            title="Save current workspace pane layout to this template"
+            title={t("layout.overwriteTitle")}
           >
-            Overwrite
+            {t("layout.overwrite")}
           </button>
           <button
             onClick={() => {
@@ -973,9 +976,9 @@ function LayoutCard({
             }}
             className="cursor-pointer px-3 py-1 text-left text-[11px]"
             style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
-            title="Rename this layout"
+            title={t("layout.renameTitle")}
           >
-            Rename
+            {t("layout.rename")}
           </button>
           <button
             onClick={() => {
@@ -984,9 +987,9 @@ function LayoutCard({
             }}
             className="cursor-pointer px-3 py-1 text-left text-[11px]"
             style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
-            title="Create a copy of this layout"
+            title={t("layout.duplicateTitle")}
           >
-            Duplicate
+            {t("layout.duplicate")}
           </button>
           {!isDefault && (
             <button
@@ -996,24 +999,24 @@ function LayoutCard({
               }}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--text-primary)", background: "transparent", border: "none" }}
-              title="Use this layout when creating new workspaces"
+              title={t("layout.setDefaultTitle")}
             >
-              Set as Default
+              {t("layout.setDefault")}
             </button>
           )}
           {canDelete && (
             <button
               onClick={() => {
-                if (window.confirm(`Delete layout "${layout.name}"?`)) {
+                if (window.confirm(t("layout.deleteConfirm", { name: layout.name }))) {
                   onDelete();
                 }
                 setMenuOpen(false);
               }}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--red)", background: "transparent", border: "none" }}
-              title="Permanently delete this layout"
+              title={t("layout.deleteTitle")}
             >
-              Delete
+              {t("layout.delete")}
             </button>
           )}
         </div>
@@ -1023,6 +1026,7 @@ function LayoutCard({
 }
 
 export function WorkspaceSelectorView() {
+  const { t } = useTranslation("workspace");
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -1189,7 +1193,7 @@ export function WorkspaceSelectorView() {
       tabIndex={-1}
       onBlur={handleSelectorBlur}
     >
-      <ViewHeader testId="workspace-selector-header" title="New Workspace" />
+      <ViewHeader testId="workspace-selector-header" title={t("newWorkspace")} />
       {/* New Workspace: Layout picker */}
       <div className="shrink-0" data-testid="new-workspace-panel">
         <div className="flex flex-col">
@@ -1201,7 +1205,7 @@ export function WorkspaceSelectorView() {
               canDelete={layouts.length > 1}
               onClick={() => handleCreateWithLayout(layout.id)}
               onRename={() => {
-                const name = window.prompt("Rename layout:", layout.name);
+                const name = window.prompt(t("layout.renamePrompt"), layout.name);
                 if (name?.trim()) renameLayout(layout.id, name.trim());
               }}
               onDuplicate={() => duplicateLayout(layout.id, `${layout.name} Copy`)}
@@ -1221,7 +1225,7 @@ export function WorkspaceSelectorView() {
         className="px-2 pb-1 flex items-center justify-between"
         style={{ borderBottom: "1px solid var(--border)" }}
       >
-        <SectionLabel>Workspaces</SectionLabel>
+        <SectionLabel>{t("workspaces")}</SectionLabel>
         <span className="flex items-center gap-1">
           <button
             data-testid="hide-mode-toggle"
@@ -1242,7 +1246,7 @@ export function WorkspaceSelectorView() {
               fontWeight: hideMode ? 600 : 400,
               opacity: hideMode ? 1 : 0.7,
             }}
-            title={hideMode ? "Apply and exit hide mode" : "Enter hide mode"}
+            title={hideMode ? t("hideMode.apply") : t("hideMode.enter")}
           >
             {hideMode ? (
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -1280,9 +1284,7 @@ export function WorkspaceSelectorView() {
               opacity: 0.7,
             }}
             title={
-              workspaceSortOrder === "manual"
-                ? "Sort: Manual (drag to reorder)"
-                : "Sort: Notification (most recent first)"
+              workspaceSortOrder === "manual" ? t("sort.manualTitle") : t("sort.notificationTitle")
             }
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -1300,7 +1302,7 @@ export function WorkspaceSelectorView() {
                 </>
               )}
             </svg>
-            {workspaceSortOrder === "manual" ? "Manual" : "Notif"}
+            {workspaceSortOrder === "manual" ? t("sort.manual") : t("sort.notification")}
           </button>
         </span>
       </div>
@@ -1432,7 +1434,7 @@ export function WorkspaceSelectorView() {
         className="hover-bg flex shrink-0 cursor-pointer items-center justify-between px-2 pt-1 pb-1"
         style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
       >
-        <SectionLabel>{showNotifPanel ? "Hide Notifications" : "Notifications"}</SectionLabel>
+        <SectionLabel>{showNotifPanel ? t("hideNotifications") : t("notifications")}</SectionLabel>
         {totalUnread > 0 && <CountBadge count={totalUnread} />}
       </div>
 

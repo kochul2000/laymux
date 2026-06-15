@@ -16,6 +16,10 @@ import {
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
 import type { PastePathSeparator } from "../lib/smart-text";
+import type { LanguageSetting } from "../i18n/resolve-language";
+
+/** Re-export so settings consumers can import the language type from one place. */
+export type { LanguageSetting };
 
 export interface FontSettings {
   face: string;
@@ -332,6 +336,8 @@ export const builtinAppThemes: AppTheme[] = [
 ];
 
 interface SettingsState {
+  /** App UI language. "system" follows the OS/browser locale (ko* → Korean, else English). */
+  language: LanguageSetting;
   defaultProfile: string;
   profileDefaults: ProfileDefaults;
   profiles: Profile[];
@@ -352,6 +358,7 @@ interface SettingsState {
   fileExplorer: FileExplorerSettings;
   syncCwdDefaults: SyncCwdDefaults;
 
+  setLanguage: (language: LanguageSetting) => void;
   setDefaultProfile: (profile: string) => void;
   setViewOrder: (order: string[]) => void;
   setAppearance: (data: Partial<AppearanceSettings>) => void;
@@ -392,6 +399,7 @@ interface SettingsState {
     data: Partial<
       Pick<
         SettingsState,
+        | "language"
         | "defaultProfile"
         | "profileDefaults"
         | "profiles"
@@ -461,6 +469,9 @@ export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, wei
 
 /** Default app font for non-terminal views (Memo, Issue Reporter, etc.). */
 export const DEFAULT_APP_FONT: FontSettings = { face: "Cascadia Mono", size: 13, weight: "normal" };
+
+/** Default UI language. "system" defers to the OS/browser locale on first run. */
+export const DEFAULT_LANGUAGE: LanguageSetting = "system";
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   themeId: "catppuccin-mocha",
@@ -863,6 +874,7 @@ export const builtinColorSchemes: ColorScheme[] = [
 ];
 
 export const useSettingsStore = create<SettingsState>()((set, get) => ({
+  language: DEFAULT_LANGUAGE,
   defaultProfile: "PowerShell",
   profileDefaults: { ...defaultProfileDefaults },
   profiles: [makeProfile("PowerShell", "powershell.exe -NoLogo"), makeProfile("WSL", "wsl.exe")],
@@ -962,6 +974,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set((state) => ({
       syncCwdDefaults: { ...state.syncCwdDefaults, ...data },
     })),
+
+  setLanguage: (language) => set({ language }),
 
   setDefaultProfile: (defaultProfile) => set({ defaultProfile }),
 
@@ -1178,6 +1192,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...(data.syncCwdDefaults as Partial<SyncCwdDefaults>),
         }
       : undefined;
+    // Validate language; unknown values fall back to the default ("system").
+    const validLanguages: LanguageSetting[] = ["system", "ko", "en"];
+    const language =
+      data.language !== undefined
+        ? validLanguages.includes(data.language)
+          ? data.language
+          : DEFAULT_LANGUAGE
+        : undefined;
 
     const {
       appearance: _rawAppearance,
@@ -1187,11 +1209,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       dock: _rawDock,
       notifications: _rawNotifications,
       workspaceSelector: _rawWorkspaceSelector,
+      language: _rawLanguage,
       ...rest
     } = data;
     set((state) => ({
       ...state,
       ...rest,
+      ...(language ? { language } : {}),
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
       ...(mergedSchemes ? { colorSchemes: mergedSchemes } : {}),

@@ -241,6 +241,27 @@ mod tests {
     }
 
     #[test]
+    fn default_language_is_system() {
+        let settings = Settings::default();
+        assert_eq!(settings.language, "system");
+    }
+
+    #[test]
+    fn language_round_trip_and_backcompat() {
+        // Explicit value survives a round trip.
+        let mut settings = Settings::default();
+        settings.language = "en".into();
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"language\":\"en\""));
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.language, "en");
+
+        // 구버전 settings.json(language 없음)도 기본값("system")으로 채워진다.
+        let legacy: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.language, "system");
+    }
+
+    #[test]
     fn default_issue_reporter_settings() {
         let settings = Settings::default();
         assert_eq!(settings.issue_reporter.shell, "");
