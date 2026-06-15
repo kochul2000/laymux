@@ -1877,6 +1877,11 @@ export function TerminalView({
 
         fitAddon.fit();
         openedRef.current = true;
+        // Issue #349: sync the jump-to-bottom button once on mount. onScroll
+        // only fires on subsequent viewport moves, so a terminal restored
+        // (or reattached) while parked above the scrollback bottom would
+        // otherwise show no button until the first scroll event.
+        refreshScrollToBottom();
         scheduleOverlayCaretUpdate();
         if (isFocusedRef.current) {
           terminal.focus();

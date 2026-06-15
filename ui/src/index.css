@@ -366,10 +366,10 @@
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--accent);
-  color: #11111b;
+  color: var(--bg-base);
   cursor: pointer;
   opacity: 0.9;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px var(--backdrop-light);
   transition:
     opacity 120ms ease,
     transform 120ms ease;

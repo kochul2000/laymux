@@ -32,7 +32,13 @@ const mockOnRender = vi.fn().mockReturnValue({ dispose: vi.fn() });
 // jump-to-bottom button tests. `mockBufferActive` is mutated by tests to
 // simulate scrolling up (viewportY < baseY) vs being pinned to the bottom.
 let capturedScrollHandler: (() => void) | null = null;
-const mockScrollToBottom = vi.fn();
+// Mirror real xterm: scrollToBottom pins the viewport to the live bottom.
+// Tests rely on this so a later refreshScrollToBottom() (e.g. the deferred
+// mount-time sync) sees the post-click "at bottom" state, not a stale
+// scrolled-up one.
+const mockScrollToBottom = vi.fn(() => {
+  mockBufferActive.viewportY = mockBufferActive.baseY;
+});
 const mockBufferActive: { cursorX: number; cursorY: number; baseY: number; viewportY: number } = {
   cursorX: 0,
   cursorY: 0,
@@ -4344,6 +4350,22 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
 
     expect(mockScrollToBottom).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump2")).not.toBeInTheDocument();
+  });
+
+  it("shows the button on mount when already scrolled up (no scroll event yet)", async () => {
+    // Reattach/restore case: the viewport is parked above the scrollback
+    // bottom before the first onScroll fires. The mount-time refresh must
+    // sync the button so it appears without waiting for a scroll event.
+    mockBufferActive.baseY = 100;
+    mockBufferActive.viewportY = 30;
+    render(<TerminalView instanceId="t-jump-init" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump-init")).toBeInTheDocument();
+    });
   });
 
   it("hides the button again when the viewport returns to the bottom", async () => {
