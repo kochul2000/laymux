@@ -6,6 +6,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
@@ -333,16 +334,16 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     }
   },
 
-  // workspace.rename: rename current workspace
+  // workspace.rename: rename current workspace.
+  // Opens the inline rename overlay (#339) instead of a native window.prompt,
+  // which does not work on Windows/WebView2 (the #283 root cause) and is not
+  // driveable via the Automation API.
   "workspace.rename": (e) => {
     e.preventDefault();
-    const { workspaces, activeWorkspaceId, renameWorkspace } = useWorkspaceStore.getState();
+    const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
     const current = workspaces.find((ws) => ws.id === activeWorkspaceId);
     if (current) {
-      const newName = window.prompt("Rename workspace:", current.name);
-      if (newName !== null && newName.trim() !== "") {
-        renameWorkspace(activeWorkspaceId, newName.trim());
-      }
+      useRenameWorkspaceStore.getState().openRename(current.id, current.name);
     }
   },
 

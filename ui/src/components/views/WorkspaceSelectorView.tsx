@@ -24,6 +24,7 @@ import type { WorkspacePane } from "@/stores/types";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { persistSession } from "@/lib/persist-session";
 import { useUiStore } from "@/stores/ui-store";
+import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -1030,7 +1031,6 @@ export function WorkspaceSelectorView() {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
-  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
@@ -1381,8 +1381,9 @@ export function WorkspaceSelectorView() {
                 }
               }}
               onRename={() => {
-                const newName = window.prompt("Rename workspace:", ws.name);
-                if (newName?.trim()) renameWorkspace(ws.id, newName.trim());
+                // Inline overlay instead of window.prompt (#339) — native
+                // prompt does not work on Windows/WebView2.
+                useRenameWorkspaceStore.getState().openRename(ws.id, ws.name);
               }}
               onTogglePaneHidden={togglePaneHidden}
               onToggleWsHidden={() => toggleWorkspaceHidden(ws.id)}
