@@ -222,7 +222,9 @@
       "scrollbarStyle": "스크롤바 방식",
       "scrollbarStyleDesc": "터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다.",
       "scrollbarOverlay": "Overlay (콘텐츠 위에 겹침)",
-      "scrollbarSeparate": "Separate (별도 공간 차지)"
+      "scrollbarSeparate": "Separate (별도 공간 차지)",
+      "scrollToBottomButton": "맨 아래로 이동 버튼",
+      "scrollToBottomButtonDesc": "스크롤백을 위로 올렸을 때 맨 아래로 이동하는 떠 있는 버튼을 표시합니다."
     },
     "interface": {
       "title": "인터페이스",

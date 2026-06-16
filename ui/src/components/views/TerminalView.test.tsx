@@ -4331,6 +4331,27 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump")).toBeInTheDocument();
   });
 
+  it("keeps the button hidden when disabled via settings, even when scrolled up", async () => {
+    useSettingsStore.getState().setTerminal({ showScrollToBottomButton: false });
+    try {
+      render(<TerminalView instanceId="t-jump-off" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(capturedScrollHandler).not.toBeNull();
+      });
+
+      // Scroll up: normally this would reveal the button.
+      mockBufferActive.baseY = 100;
+      mockBufferActive.viewportY = 30;
+      await act(async () => {
+        capturedScrollHandler?.();
+      });
+
+      expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump-off")).not.toBeInTheDocument();
+    } finally {
+      useSettingsStore.getState().setTerminal({ showScrollToBottomButton: true });
+    }
+  });
+
   it("scrolls to bottom and hides the button on click", async () => {
     render(<TerminalView instanceId="t-jump2" profile="PowerShell" syncGroup="" />);
     await vi.waitFor(() => {
@@ -4389,21 +4410,22 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
   });
 
-  // Issue #361: the button must clear the scrollbar slider. The right offset is
-  // exposed via the --terminal-scroll-btn-right CSS variable on the wrapper so
-  // it can be widened when the scrollbar reserves its own gutter.
-  it("uses a 16px right offset in overlay scrollbar mode", () => {
+  // Issue #361: the button must clear the scrollbar slider. The slider renders at
+  // the same right-edge width in both modes and the button is positioned relative
+  // to the pane edge, so the offset (--terminal-scroll-btn-right) is the same
+  // (26px = 14px slider + 12px clearance) regardless of scrollbar mode.
+  it("uses a 26px right offset in overlay scrollbar mode", () => {
     useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
     render(<TerminalView instanceId="t-sb-overlay" profile="PowerShell" syncGroup="" />);
     const wrapper = screen.getByTestId("terminal-view-t-sb-overlay");
-    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("16px");
+    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
   });
 
-  it("pushes the button left past the reserved gutter in separate scrollbar mode", () => {
+  it("uses the same 26px right offset in separate scrollbar mode", () => {
     useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
     render(<TerminalView instanceId="t-sb-separate" profile="PowerShell" syncGroup="" />);
     const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
-    // 14px reserved scrollbar gutter + 12px clearance.
+    // 14px scrollbar slider + 12px clearance.
     expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
   });
 });

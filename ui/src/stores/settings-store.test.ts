@@ -603,6 +603,24 @@ describe("settings-store", () => {
     expect(terminal.scrollbarStyle).toBe("separate");
   });
 
+  // -- Jump-to-bottom button setting (issue #361) --
+
+  it("has default showScrollToBottomButton as true", () => {
+    expect(useSettingsStore.getState().terminal.showScrollToBottomButton).toBe(true);
+  });
+
+  it("setTerminal toggles showScrollToBottomButton", () => {
+    useSettingsStore.getState().setTerminal({ showScrollToBottomButton: false });
+    expect(useSettingsStore.getState().terminal.showScrollToBottomButton).toBe(false);
+  });
+
+  it("loadFromSettings fills missing showScrollToBottomButton with default true", () => {
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { copyOnSelect: false } as any,
+    });
+    expect(useSettingsStore.getState().terminal.showScrollToBottomButton).toBe(true);
+  });
+
   // -- Workspace display settings --
 
   it("has default workspaceSelector.display with all items enabled", () => {
