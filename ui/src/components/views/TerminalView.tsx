@@ -1476,6 +1476,23 @@ export function TerminalView({
       });
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
+
+      // Typing into a terminal is a direct "I'm responding here now" signal —
+      // an even stronger dismissal than focus (issue #365). A requiresAction
+      // alert that arrives in the active workspace stays put until the user
+      // acts; entering via keys/mouse, *or* typing, is that action. We clear
+      // with the same granularity as the focus/entry policy (AppLayout / ADR
+      // 0010·0012): "workspace" clears the whole workspace, "paneFocus" only
+      // this pane, "manual" never auto-clears. Guarded by a cheap unread read
+      // so the common no-unread keystroke path does no state write / re-render.
+      const notifStore = useNotificationStore.getState();
+      const dismissMode = useSettingsStore.getState().notifications.dismiss;
+      if (dismissMode === "workspace") {
+        const wsId = resolveWorkspaceId(instanceId);
+        if (notifStore.getUnreadCount(wsId) > 0) notifStore.markWorkspaceAsRead(wsId);
+      } else if (dismissMode === "paneFocus") {
+        if (notifStore.hasUnreadForTerminal(instanceId)) notifStore.markTerminalAsRead(instanceId);
+      }
     });
 
     // Handle terminal resize — notify backend PTY

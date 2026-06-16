@@ -21,6 +21,7 @@ import { usePortDetection } from "@/hooks/usePortDetection";
 import { NotificationPanel } from "./NotificationPanel";
 import { PaneMinimap } from "./PaneMinimap";
 import { ViewHeader } from "@/components/ui/ViewHeader";
+import { ExitFade } from "@/components/ui/ExitFade";
 import type { WorkspacePane } from "@/stores/types";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { persistSession } from "@/lib/persist-session";
@@ -315,9 +316,9 @@ function WorkspaceItem({
             className="flex items-center gap-1"
             style={{ opacity: hideMode && isWsHidden ? 0.35 : undefined }}
           >
-            {summary.unreadCount > 0 && (
+            <ExitFade show={summary.unreadCount > 0}>
               <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
-            )}
+            </ExitFade>
             {hovered && (
               <>
                 {/* Quick hide/show toggle — same mechanism as hide mode's eye
@@ -615,12 +616,19 @@ function WorkspaceItem({
                               boxSizing: "border-box",
                               fontSize: 10,
                               lineHeight: 1,
+                              // Fade the accent ring as the unread alert clears (focus/input),
+                              // matching the badge/dot fade (issue #365 follow-up).
+                              transition: "border-color 200ms ease",
                             }}
                           >
                             {tCmdStatus.icon}
                           </span>
-                        ) : wsDisplay.result && ts.hasUnreadNotification ? (
-                          <span
+                        ) : (
+                          // Rendered as a standalone ExitFade (not a ternary branch) so the
+                          // dot can fade out when the alert clears instead of unmounting
+                          // instantly. Hidden while a cmd badge owns the slot.
+                          <ExitFade
+                            show={!!(wsDisplay.result && ts.hasUnreadNotification)}
                             data-testid={`pane-notif-dot-${ts.id}`}
                             className="shrink-0 ml-auto"
                             style={{
@@ -631,7 +639,7 @@ function WorkspaceItem({
                               display: "inline-block",
                             }}
                           />
-                        ) : null}
+                        )}
                       </div>
                     </div>
                   );
@@ -1438,7 +1446,9 @@ export function WorkspaceSelectorView() {
         style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
       >
         <SectionLabel>{showNotifPanel ? t("hideNotifications") : t("notifications")}</SectionLabel>
-        {totalUnread > 0 && <CountBadge count={totalUnread} />}
+        <ExitFade show={totalUnread > 0}>
+          <CountBadge count={totalUnread} />
+        </ExitFade>
       </div>
 
       {showNotifPanel && (
