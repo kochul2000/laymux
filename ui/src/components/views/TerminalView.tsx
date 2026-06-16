@@ -587,6 +587,9 @@ export function TerminalView({
       defaultProfileDefaults.cursorBlink;
     const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
     const terminal = new Terminal({
+      // #363: 선택한 경로 밑줄을 IDecoration(registerDecoration)으로 그린다.
+      // 데코레이션은 xterm 의 proposed API 라 이 옵션이 없으면 throw 한다.
+      allowProposedApi: true,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
       ...(cursorOptions.cursorWidth ? { cursorWidth: cursorOptions.cursorWidth } : {}),
