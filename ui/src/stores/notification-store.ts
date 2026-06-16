@@ -55,9 +55,12 @@ interface NotificationStoreState {
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   /**
-   * Mark every unread (non-requiresAction) alert for a single terminal/view
-   * instance as read. Used by the "paneFocus" dismiss policy so focusing one
-   * pane clears only that pane's alerts, not the whole workspace.
+   * Mark every unread alert for a single terminal/view instance as read —
+   * including requiresAction, since focus/input is the uniform dismissal
+   * condition (issue #365). The requiresAction exemption lives only in
+   * addNotification's arrival-time auto-dismiss. Used by the "paneFocus"
+   * dismiss policy so focusing/typing in one pane clears only that pane's
+   * alerts, not the whole workspace.
    */
   markTerminalAsRead: (terminalId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
