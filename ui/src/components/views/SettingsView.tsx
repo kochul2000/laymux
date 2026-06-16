@@ -1414,6 +1414,14 @@ function TerminalSection() {
             <option value="separate">{t("terminal.scrollbarSeparate")}</option>
           </FocusSelect>
         </SettingRow>
+
+        <ToggleRow
+          label={t("terminal.scrollToBottomButton")}
+          desc={t("terminal.scrollToBottomButtonDesc")}
+          testid="scroll-to-bottom-button-toggle"
+          checked={terminal.showScrollToBottomButton}
+          onChange={(v) => update({ showScrollToBottomButton: v })}
+        />
       </div>
 
       <SubGroup title={t("terminal.pathLinkGroup")}>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import type { DockPosition } from "@/stores/types";
 import logoSvg from "@/assets/logo.svg";
 
@@ -15,6 +16,7 @@ export function GridEditToolbar() {
   const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const toggleConnectionInfoModal = useUiStore((s) => s.toggleConnectionInfoModal);
+  const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
   const layoutMode = useDockStore((s) => s.layoutMode);
@@ -193,6 +195,22 @@ export function GridEditToolbar() {
         </button>
 
         <div className="ui-sep" />
+
+        <button
+          data-testid="file-viewer-btn"
+          onClick={() => openEmptyFileViewer()}
+          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "none",
+            fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
+            fontSize: "var(--fs-xs)",
+          }}
+          title="Open File Viewer (Ctrl+Shift+O)"
+        >
+          {"\uE8A5"}
+        </button>
 
         <button
           data-testid="connection-info-btn"

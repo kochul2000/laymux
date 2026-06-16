@@ -55,9 +55,12 @@ interface NotificationStoreState {
   }) => Notification;
   markWorkspaceAsRead: (workspaceId: string) => void;
   /**
-   * Mark every unread (non-requiresAction) alert for a single terminal/view
-   * instance as read. Used by the "paneFocus" dismiss policy so focusing one
-   * pane clears only that pane's alerts, not the whole workspace.
+   * Mark every unread alert for a single terminal/view instance as read —
+   * including requiresAction, since focus/input is the uniform dismissal
+   * condition (issue #365). The requiresAction exemption lives only in
+   * addNotification's arrival-time auto-dismiss. Used by the "paneFocus"
+   * dismiss policy so focusing/typing in one pane clears only that pane's
+   * alerts, not the whole workspace.
    */
   markTerminalAsRead: (terminalId: string) => void;
   markNotificationsAsRead: (ids: string[]) => void;
@@ -118,13 +121,14 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     const now = Date.now();
     set((state) => ({
       notifications: state.notifications.map((n) =>
-        // Skip requiresAction alerts — they only clear via explicit user
-        // click (markNotificationsAsRead) or when the originator resolves
-        // the underlying state. Otherwise opening the workspace would
-        // hide a still-active modal alert.
-        n.workspaceId === workspaceId && n.readAt === null && !n.requiresAction
-          ? { ...n, readAt: now }
-          : n,
+        // Focus/entry dismissal is uniform across every alert kind, including
+        // requiresAction (issue #365). Entering a workspace is the user's
+        // explicit "I'm looking at this now" signal — exactly what the nav
+        // keys (markNotificationsAsRead) already treat as a dismissal. The
+        // requiresAction exemption lives only in addNotification's
+        // arrival-time auto-dismiss, so an alert that *arrives* while the
+        // workspace is active still stays visible until the user enters it.
+        n.workspaceId === workspaceId && n.readAt === null ? { ...n, readAt: now } : n,
       ),
     }));
   },
@@ -134,9 +138,9 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
     set((state) => {
       let changed = false;
       const notifications = state.notifications.map((n) => {
-        // requiresAction alerts are preserved here too — they only clear via
-        // explicit click or when the originator resolves the state.
-        if (n.terminalId === terminalId && n.readAt === null && !n.requiresAction) {
+        // Focusing the pane clears all of its unread alerts, requiresAction
+        // included — focus is the uniform dismissal condition (issue #365).
+        if (n.terminalId === terminalId && n.readAt === null) {
           changed = true;
           return { ...n, readAt: now };
         }

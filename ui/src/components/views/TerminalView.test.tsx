@@ -11,6 +11,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
@@ -2017,6 +2018,71 @@ describe("TerminalView", () => {
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
+  });
+
+  // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
+  // Entering a workspace clears its alerts; typing is an even stronger "I'm
+  // responding here" signal, so onData must clear unread alerts (including
+  // requiresAction) with the *same granularity* as the focus/entry policy.
+  describe("clears notifications on terminal input", () => {
+    const latestOnData = () => {
+      const calls = mockOnData.mock.calls;
+      return calls[calls.length - 1]?.[0] as ((data: string) => void) | undefined;
+    };
+    const setDismiss = (mode: "workspace" | "paneFocus" | "manual") =>
+      useSettingsStore.setState((s) => ({ notifications: { ...s.notifications, dismiss: mode } }));
+
+    it("clears the typed pane's requiresAction alert (paneFocus mode)", () => {
+      setDismiss("paneFocus");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-pf",
+        workspaceId: wsId,
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+
+      render(<TerminalView instanceId="t-input-pf" profile="PowerShell" syncGroup="" />);
+      const onData = latestOnData();
+      expect(onData).toBeTypeOf("function");
+      act(() => onData!("a"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
+    });
+
+    it("clears the whole workspace's alerts, even one on another pane (workspace mode)", () => {
+      setDismiss("workspace");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      // Alert belongs to a *different* pane in the same workspace.
+      useNotificationStore.getState().addNotification({
+        terminalId: "other-pane",
+        workspaceId: wsId,
+        message: "Build finished",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-ws" profile="PowerShell" syncGroup="" />);
+      act(() => latestOnData()!("x"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
+    });
+
+    it("does not clear alerts on input in manual dismiss mode", () => {
+      setDismiss("manual");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-manual",
+        workspaceId: wsId,
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-manual" profile="PowerShell" syncGroup="" />);
+      act(() => latestOnData()!("z"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+    });
   });
 
   it("listens for terminal output events", async () => {
@@ -4331,6 +4397,27 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump")).toBeInTheDocument();
   });
 
+  it("keeps the button hidden when disabled via settings, even when scrolled up", async () => {
+    useSettingsStore.getState().setTerminal({ showScrollToBottomButton: false });
+    try {
+      render(<TerminalView instanceId="t-jump-off" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(capturedScrollHandler).not.toBeNull();
+      });
+
+      // Scroll up: normally this would reveal the button.
+      mockBufferActive.baseY = 100;
+      mockBufferActive.viewportY = 30;
+      await act(async () => {
+        capturedScrollHandler?.();
+      });
+
+      expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump-off")).not.toBeInTheDocument();
+    } finally {
+      useSettingsStore.getState().setTerminal({ showScrollToBottomButton: true });
+    }
+  });
+
   it("scrolls to bottom and hides the button on click", async () => {
     render(<TerminalView instanceId="t-jump2" profile="PowerShell" syncGroup="" />);
     await vi.waitFor(() => {
@@ -4387,6 +4474,25 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
       capturedScrollHandler?.();
     });
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
+  });
+
+  // Issue #361: the button must clear the scrollbar slider. The slider renders at
+  // the same right-edge width in both modes and the button is positioned relative
+  // to the pane edge, so the offset (--terminal-scroll-btn-right) is the same
+  // (26px = 14px slider + 12px clearance) regardless of scrollbar mode.
+  it("uses a 26px right offset in overlay scrollbar mode", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
+    render(<TerminalView instanceId="t-sb-overlay" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-overlay");
+    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
+  });
+
+  it("uses the same 26px right offset in separate scrollbar mode", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
+    render(<TerminalView instanceId="t-sb-separate" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
+    // 14px scrollbar slider + 12px clearance.
+    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
   });
 });
 

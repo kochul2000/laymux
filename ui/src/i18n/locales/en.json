@@ -227,7 +227,9 @@
       "pathLink": "Path Links on Selection",
       "pathLinkDesc": "Underline a selected file/folder path; click to open the file in the viewer or change the directory.",
       "pathLinkMaxLength": "Max Path Length",
-      "pathLinkMaxLengthDesc": "Selections longer than this (characters) are not treated as a path."
+      "pathLinkMaxLengthDesc": "Selections longer than this (characters) are not treated as a path.",
+      "scrollToBottomButton": "Jump-to-bottom Button",
+      "scrollToBottomButtonDesc": "Show the floating button that jumps to the bottom when scrolled up into the scrollback."
     },
     "interface": {
       "title": "Interface",

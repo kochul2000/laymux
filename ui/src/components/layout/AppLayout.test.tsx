@@ -20,6 +20,11 @@ vi.mock("@/lib/tauri-api", () => ({
   openExternal: vi.fn().mockResolvedValue(undefined),
   loadTerminalOutputCache: vi.fn().mockRejectedValue(new Error("Cache not found: mock")),
   markClaudeTerminal: vi.fn().mockResolvedValue(false),
+  loadMemo: vi.fn().mockResolvedValue(""),
+  saveMemo: vi.fn().mockResolvedValue(undefined),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+  propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
+  markNotificationsRead: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/components/views/TerminalView", () => ({
@@ -27,6 +32,7 @@ vi.mock("@/components/views/TerminalView", () => ({
 }));
 
 import { AppLayout } from "./AppLayout";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useDockStore } from "@/stores/dock-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -257,5 +263,221 @@ describe("AppLayout", () => {
     expect(notifs.find((nf) => nf.message === "p0 done")?.readAt).not.toBeNull();
     expect(notifs.find((nf) => nf.message === "p1 done")?.readAt).toBeNull();
     expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(1);
+  });
+
+  // --- Regression #365: workspace switch (Ctrl+Alt+Up/Down) must clear, not
+  // only the notification-nav keys (Ctrl+Alt+Left/Right). Entering a workspace
+  // whose focused-pane *index* is unchanged from the previous workspace still
+  // changes activeWorkspaceId, so the focus effect must re-run.
+
+  it("workspace mode: switching into a workspace clears its alerts (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "workspace" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+
+    // Alert arrives for ws2 while ws1 is active → stays unread.
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-x",
+      workspaceId: ws2,
+      message: "ws2 build done",
+    });
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(1);
+
+    render(<AppLayout />);
+
+    // Switch to ws2 (Ctrl+Alt+Down path): focusedPaneIndex stays 0, only
+    // activeWorkspaceId changes. The focus effect must still fire.
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2);
+    });
+
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  it("paneFocus mode: switching into a workspace clears its focused pane (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "paneFocus" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+    // The alerting pane is a terminal (notifications come from TerminalView).
+    useWorkspaceStore.getState().setActiveWorkspace(ws2);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useWorkspaceStore.getState().setActiveWorkspace(ws1);
+    const pane0 = useWorkspaceStore.getState().workspaces.find((w) => w.id === ws2)!.panes[0].id;
+
+    useNotificationStore.getState().addNotification({
+      terminalId: `terminal-${pane0}`,
+      workspaceId: ws2,
+      message: "ws2 p0 done",
+    });
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(1);
+
+    render(<AppLayout />);
+
+    // Focus index already 0 (same as ws1); only activeWorkspaceId changes.
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2);
+      useGridStore.setState({ focusedPaneIndex: 0 });
+    });
+
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  // Core regression (#365): driving the REAL workspace-switch path (the same
+  // code Ctrl+Alt+Up/Down runs) — not a hand-set focus index — must clear the
+  // entered workspace's alerts. Mounts the keyboard-shortcut handler alongside
+  // AppLayout so the focus mutation and the dismiss effect run together.
+  function Harness() {
+    useKeyboardShortcuts();
+    return <AppLayout />;
+  }
+
+  function fireKey(key: string, mods: { ctrlKey?: boolean; altKey?: boolean } = {}) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...mods }));
+  }
+
+  it("workspace mode: Ctrl+Alt+Down into a workspace clears its alerts (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "workspace" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-x",
+      workspaceId: ws2,
+      message: "ws2 build done",
+    });
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(1);
+
+    render(<Harness />);
+
+    act(() => {
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+    });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2);
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  it("paneFocus mode: Ctrl+Alt+Down into a workspace clears its focused pane (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "paneFocus" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+    useWorkspaceStore.getState().setActiveWorkspace(ws2);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const ws2pane0 = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useWorkspaceStore.getState().setActiveWorkspace(ws1);
+
+    useNotificationStore.getState().addNotification({
+      terminalId: `terminal-${ws2pane0}`,
+      workspaceId: ws2,
+      message: "ws2 p0 done",
+    });
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(1);
+
+    render(<Harness />);
+
+    act(() => {
+      fireKey("ArrowDown", { ctrlKey: true, altKey: true });
+    });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2);
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  it("workspace mode: selecting a workspace in the selector clears its alerts (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "workspace" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-x",
+      workspaceId: ws2,
+      message: "ws2 build done",
+    });
+
+    render(<AppLayout />);
+
+    // Mouse-click entry funnels through setActiveWorkspace; the focus effect
+    // (not a handler-local markWorkspaceAsRead) must do the dismissal.
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2);
+    });
+
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  // Root cause of #365: the most common real alert ("Claude is waiting for your
+  // input") is requiresAction. Before the fix, only the notification-nav keys
+  // (Ctrl+Alt+Left/Right → markNotificationsAsRead, which clears requiresAction)
+  // dismissed it, while focus entry (Ctrl+Alt+Up/Down, mouse → markWorkspaceAsRead
+  // /markTerminalAsRead) preserved it. Focus must be the uniform condition: entering
+  // the workspace/pane clears requiresAction alerts too.
+  it("workspace mode: entry clears requiresAction alerts too (#365)", () => {
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "workspace" },
+    }));
+    const ws1 = useWorkspaceStore.getState().activeWorkspaceId;
+    useWorkspaceStore.getState().addWorkspace("ws2", "default-layout");
+    const ws2 = useWorkspaceStore.getState().workspaces.find((w) => w.id !== ws1)!.id;
+
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-x",
+      workspaceId: ws2,
+      message: "Claude is waiting for your input",
+      requiresAction: true,
+    });
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(1);
+
+    render(<AppLayout />);
+
+    act(() => {
+      useWorkspaceStore.getState().setActiveWorkspace(ws2);
+    });
+
+    expect(useNotificationStore.getState().getUnreadCount(ws2)).toBe(0);
+  });
+
+  it("paneFocus mode: focusing a pane clears its requiresAction alerts too (#365)", () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    useWorkspaceStore.getState().setPaneView(1, { type: "TerminalView" });
+    const ws = useWorkspaceStore.getState().getActiveWorkspace()!;
+    const wsId = ws.id;
+    const pane0 = ws.panes[0].id;
+
+    useSettingsStore.setState((s) => ({
+      notifications: { ...s.notifications, dismiss: "paneFocus" },
+    }));
+    useGridStore.setState({ focusedPaneIndex: null });
+
+    useNotificationStore.getState().addNotification({
+      terminalId: `terminal-${pane0}`,
+      workspaceId: wsId,
+      message: "Claude is waiting for your input",
+      requiresAction: true,
+    });
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(1);
+
+    render(<AppLayout />);
+
+    act(() => {
+      useGridStore.setState({ focusedPaneIndex: 0 });
+    });
+
+    expect(useNotificationStore.getState().getUnreadCount(wsId)).toBe(0);
   });
 });

@@ -114,6 +114,17 @@ const RESIZE_FIT_DEBOUNCE_MS = 80;
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
+/** "separate" 스크롤바 모드에서 xterm overviewRuler가 예약하는 거터 폭(px). */
+const SCROLLBAR_SEPARATE_GUTTER_PX = 14;
+
+/**
+ * jump-to-bottom 버튼의 우측 오프셋(px). 버튼은 pane 우측 끝 기준 절대위치이고,
+ * xterm 스크롤바 슬라이더는 overlay/separate 모드 모두 우측 끝에 동일 폭으로
+ * 렌더되므로(슬라이더 폭 ~14px), 모드와 무관하게 슬라이더를 비켜가는 단일 값을 쓴다.
+ * 14px 슬라이더 + 12px 여유 = 26px (issue #361).
+ */
+const SCROLL_BTN_RIGHT_PX = SCROLLBAR_SEPARATE_GUTTER_PX + 12;
+
 const textEncoder = new TextEncoder();
 
 function markBackendInteractiveTerminal(instanceId: string, activity: TerminalActivityInfo): void {
@@ -571,7 +582,7 @@ export function TerminalView({
     // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
     // does not reserve space for the scrollbar — it renders on top of content.
     const sbStyle = settingsState.terminal.scrollbarStyle ?? "overlay";
-    const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
+    const overviewRulerWidth = sbStyle === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
 
     const resolvedFont = settingsState.resolveFont(
       profile,
@@ -1646,6 +1657,23 @@ export function TerminalView({
       });
       scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
+
+      // Typing into a terminal is a direct "I'm responding here now" signal —
+      // an even stronger dismissal than focus (issue #365). A requiresAction
+      // alert that arrives in the active workspace stays put until the user
+      // acts; entering via keys/mouse, *or* typing, is that action. We clear
+      // with the same granularity as the focus/entry policy (AppLayout / ADR
+      // 0010·0012): "workspace" clears the whole workspace, "paneFocus" only
+      // this pane, "manual" never auto-clears. Guarded by a cheap unread read
+      // so the common no-unread keystroke path does no state write / re-render.
+      const notifStore = useNotificationStore.getState();
+      const dismissMode = useSettingsStore.getState().notifications.dismiss;
+      if (dismissMode === "workspace") {
+        const wsId = resolveWorkspaceId(instanceId);
+        if (notifStore.getUnreadCount(wsId) > 0) notifStore.markWorkspaceAsRead(wsId);
+      } else if (dismissMode === "paneFocus") {
+        if (notifStore.hasUnreadForTerminal(instanceId)) notifStore.markTerminalAsRead(instanceId);
+      }
     });
 
     // Handle terminal resize — notify backend PTY
@@ -2630,7 +2658,7 @@ export function TerminalView({
     const term = terminalRef.current;
     if (!term?.options) return;
     try {
-      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
+      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
       term.options.overviewRuler = { width: newWidth };
       // The overviewRuler option update is harmless while hidden, but
       // fit() on a 0×0 container would PTY-resize to cols=0. Defer.
@@ -2663,14 +2691,27 @@ export function TerminalView({
   const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
+  // Issue #361: the jump-to-bottom button is opt-out via settings (default on).
+  const showScrollToBottomButtonSetting = useSettingsStore(
+    (s) => s.terminal.showScrollToBottomButton ?? true,
+  );
+
+  // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
+  // they do not overlap. The slider renders at the same right-edge width in both
+  // overlay and separate modes, and the button is positioned relative to the
+  // pane edge, so the offset is mode-independent (see SCROLL_BTN_RIGHT_PX).
+  const scrollBtnRight = SCROLL_BTN_RIGHT_PX;
+
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
     "--terminal-foreground-color": string;
     "--terminal-background-color": string;
+    "--terminal-scroll-btn-right": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
     "--terminal-foreground-color": termFg,
     "--terminal-background-color": termBg,
+    "--terminal-scroll-btn-right": `${scrollBtnRight}px`,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };
@@ -2718,7 +2759,7 @@ export function TerminalView({
       >
         <div className="terminal-loading-spinner" />
       </div>
-      {showScrollToBottom && (
+      {showScrollToBottom && showScrollToBottomButtonSetting && (
         <button
           type="button"
           data-testid={`terminal-scroll-to-bottom-${instanceId}`}
@@ -2733,18 +2774,17 @@ export function TerminalView({
           }}
         >
           <svg
-            width="16"
-            height="16"
+            width="24"
+            height="24"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+            strokeWidth="3"
+            strokeLinecap="butt"
             strokeLinejoin="round"
             aria-hidden
           >
-            <path d="M12 5v14" />
-            <path d="m19 12-7 7-7-7" />
+            <path d="m5 8.5 7 7 7-7" />
           </svg>
         </button>
       )}

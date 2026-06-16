@@ -114,6 +114,8 @@ export interface TerminalSettings {
   pathLinkEnabled: boolean;
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
   pathLinkMaxLength: number;
+  /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
+  showScrollToBottomButton: boolean;
 }
 
 /** Pane control bar behavior. */
@@ -505,6 +507,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   scrollbarStyle: "overlay",
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
+  showScrollToBottomButton: true,
 };
 
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
