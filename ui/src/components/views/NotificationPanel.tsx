@@ -87,6 +87,9 @@ export function NotificationPanel({ workspaceId, embedded }: NotificationPanelPr
                     style={{
                       borderBottom: "1px solid var(--border)",
                       opacity: n.readAt !== null ? 0.6 : 1,
+                      // Dim smoothly when the alert is read (focus/input dismissal)
+                      // rather than snapping (issue #365 follow-up).
+                      transition: "opacity 200ms ease",
                     }}
                   >
                     {/* Terminal label */}

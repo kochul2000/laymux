@@ -1,6 +1,6 @@
 # 0010. 알림 해제 기준 — 사용자 입력 종류가 아닌 프로그램의 진입/포커스 동작
 
-- Status: Accepted
+- Status: Accepted (requiresAction 예외 조항은 [0012](0012-focus-entry-clears-requires-action.md) 가 정정)
 - Date: 2026-06-10
 - Source: issue #302
 

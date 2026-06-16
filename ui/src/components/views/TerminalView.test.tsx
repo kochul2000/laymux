@@ -11,6 +11,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 
 // Mock xterm since it requires a real DOM with canvas
@@ -2017,6 +2018,71 @@ describe("TerminalView", () => {
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
+  });
+
+  // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
+  // Entering a workspace clears its alerts; typing is an even stronger "I'm
+  // responding here" signal, so onData must clear unread alerts (including
+  // requiresAction) with the *same granularity* as the focus/entry policy.
+  describe("clears notifications on terminal input", () => {
+    const latestOnData = () => {
+      const calls = mockOnData.mock.calls;
+      return calls[calls.length - 1]?.[0] as ((data: string) => void) | undefined;
+    };
+    const setDismiss = (mode: "workspace" | "paneFocus" | "manual") =>
+      useSettingsStore.setState((s) => ({ notifications: { ...s.notifications, dismiss: mode } }));
+
+    it("clears the typed pane's requiresAction alert (paneFocus mode)", () => {
+      setDismiss("paneFocus");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-pf",
+        workspaceId: wsId,
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+
+      render(<TerminalView instanceId="t-input-pf" profile="PowerShell" syncGroup="" />);
+      const onData = latestOnData();
+      expect(onData).toBeTypeOf("function");
+      act(() => onData!("a"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
+    });
+
+    it("clears the whole workspace's alerts, even one on another pane (workspace mode)", () => {
+      setDismiss("workspace");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      // Alert belongs to a *different* pane in the same workspace.
+      useNotificationStore.getState().addNotification({
+        terminalId: "other-pane",
+        workspaceId: wsId,
+        message: "Build finished",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-ws" profile="PowerShell" syncGroup="" />);
+      act(() => latestOnData()!("x"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
+    });
+
+    it("does not clear alerts on input in manual dismiss mode", () => {
+      setDismiss("manual");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-manual",
+        workspaceId: wsId,
+        message: "Claude is waiting for your input",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-manual" profile="PowerShell" syncGroup="" />);
+      act(() => latestOnData()!("z"));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+    });
   });
 
   it("listens for terminal output events", async () => {

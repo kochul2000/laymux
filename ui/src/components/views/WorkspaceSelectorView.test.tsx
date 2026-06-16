@@ -6,7 +6,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { getListeningPorts, getTerminalSummaries } from "@/lib/tauri-api";
+import { getListeningPorts, getTerminalSummaries, markNotificationsRead } from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
@@ -236,17 +236,27 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("marks notifications read when workspace is clicked", async () => {
+  it("activates the workspace and syncs backend read state on click (#365)", async () => {
+    // UI read-marking moved to AppLayout's focus effect (ADR 0010, #365), so the
+    // selector click only activates the workspace and syncs backend (OS-native)
+    // notification state. The UI unread→read transition is covered by the focus
+    // effect in AppLayout.test.tsx.
     const user = userEvent.setup();
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const pane0 = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
     useNotificationStore.getState().addNotification({
-      terminalId: "t1",
+      terminalId: `terminal-${pane0}`,
       workspaceId: "ws-default",
       message: "msg",
     });
+    useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
+    useWorkspaceStore.getState().setActiveWorkspace(useWorkspaceStore.getState().workspaces[1].id);
+
     render(<WorkspaceSelectorView />);
 
     await user.click(screen.getByTestId("workspace-item-ws-default"));
-    expect(useNotificationStore.getState().getUnreadCount("ws-default")).toBe(0);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
+    expect(markNotificationsRead).toHaveBeenCalledWith([`terminal-${pane0}`]);
   });
 
   it("displays git branch from terminal store (most recent activity)", async () => {

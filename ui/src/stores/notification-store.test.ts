@@ -74,7 +74,7 @@ describe("NotificationStore", () => {
     expect(notifs.find((n) => n.terminalId === "terminal-b")!.readAt).toBeNull();
   });
 
-  it("markTerminalAsRead preserves requiresAction alerts", () => {
+  it("markTerminalAsRead clears requiresAction alerts too (focus is uniform, #365)", () => {
     const { addNotification } = useNotificationStore.getState();
     addNotification({
       terminalId: "terminal-a",
@@ -87,7 +87,8 @@ describe("NotificationStore", () => {
     useNotificationStore.getState().markTerminalAsRead("terminal-a");
     const notifs = useNotificationStore.getState().notifications;
 
-    expect(notifs.find((n) => n.message === "modal")?.readAt).toBeNull();
+    // Focusing the pane is an explicit "I see it" — requiresAction clears too.
+    expect(notifs.find((n) => n.message === "modal")?.readAt).not.toBeNull();
     expect(notifs.find((n) => n.message === "done")?.readAt).not.toBeNull();
   });
 
@@ -455,10 +456,13 @@ describe("NotificationStore", () => {
       expect(notifs[0].requiresAction).toBe(true);
     });
 
-    it("markWorkspaceAsRead preserves requiresAction alerts", () => {
-      // Switching into the workspace shouldn't silently dismiss a
-      // still-active modal alert; only the user's explicit click or
-      // the originator clearing the underlying state should do that.
+    it("markWorkspaceAsRead clears requiresAction alerts too (focus is uniform, #365)", () => {
+      // Entering the workspace is the user's explicit "I'm looking now" signal,
+      // identical to the nav-key path (markNotificationsAsRead). It clears every
+      // unread alert, requiresAction included — focus, not the input device, is
+      // the dismissal condition. (The arrival-time auto-dismiss in
+      // addNotification still preserves requiresAction so a fresh modal alert
+      // isn't hidden before the user enters.)
       useNotificationStore.getState().addNotification({
         terminalId: "t1",
         workspaceId: "ws-1",
@@ -475,7 +479,7 @@ describe("NotificationStore", () => {
       const notifs = useNotificationStore.getState().notifications;
       expect(
         notifs.find((n) => n.message === "Claude is waiting for your input")?.readAt,
-      ).toBeNull();
+      ).not.toBeNull();
       expect(notifs.find((n) => n.message === "Build done")?.readAt).not.toBeNull();
     });
 
