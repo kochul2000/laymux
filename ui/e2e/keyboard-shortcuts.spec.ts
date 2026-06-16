@@ -145,25 +145,30 @@ test.describe("Keyboard Shortcuts - Close Workspace", () => {
 
 test.describe("Keyboard Shortcuts - Rename Workspace", () => {
   test("Ctrl+Alt+R opens rename prompt", async ({ appPage: page }) => {
-    page.on("dialog", async (dialog) => {
-      expect(dialog.type()).toBe("prompt");
-      expect(dialog.defaultValue()).toBe("Default");
-      await dialog.accept("Renamed WS");
-    });
-
     await page.keyboard.press("Control+Alt+R");
+
+    // #339: inline overlay replaces the native window.prompt
+    const input = page.getByTestId("rename-workspace-overlay-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue("Default");
+
+    await input.fill("Renamed WS");
+    await input.press("Enter");
 
     // Workspace name should be updated in the selector (normalized: whitespace → "-")
     await expect(page.getByTestId("workspace-name-ws-default")).toHaveText("Renamed-WS");
   });
 
   test("Ctrl+Alt+R cancel does not rename", async ({ appPage: page }) => {
-    page.on("dialog", async (dialog) => {
-      await dialog.dismiss();
-    });
-
     await page.keyboard.press("Control+Alt+R");
 
+    // #339: cancel via Escape on the inline overlay
+    const input = page.getByTestId("rename-workspace-overlay-input");
+    await expect(input).toBeVisible();
+    await input.fill("Should Not Apply");
+    await input.press("Escape");
+
+    await expect(page.getByTestId("rename-workspace-overlay")).toHaveCount(0);
     // Name should remain "Default"
     await expect(page.getByTestId("workspace-name-ws-default")).toHaveText("Default");
   });
