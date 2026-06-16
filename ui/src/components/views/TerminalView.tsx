@@ -106,6 +106,14 @@ const LARGE_PASTE_THRESHOLD = 5120;
 /** "separate" 스크롤바 모드에서 xterm overviewRuler가 예약하는 거터 폭(px). */
 const SCROLLBAR_SEPARATE_GUTTER_PX = 14;
 
+/**
+ * jump-to-bottom 버튼의 우측 오프셋(px). 버튼은 pane 우측 끝 기준 절대위치이고,
+ * xterm 스크롤바 슬라이더는 overlay/separate 모드 모두 우측 끝에 동일 폭으로
+ * 렌더되므로(슬라이더 폭 ~14px), 모드와 무관하게 슬라이더를 비켜가는 단일 값을 쓴다.
+ * 14px 슬라이더 + 12px 여유 = 26px (issue #361).
+ */
+const SCROLL_BTN_RIGHT_PX = SCROLLBAR_SEPARATE_GUTTER_PX + 12;
+
 const textEncoder = new TextEncoder();
 
 function markBackendInteractiveTerminal(instanceId: string, activity: TerminalActivityInfo): void {
@@ -2483,12 +2491,16 @@ export function TerminalView({
   const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
+  // Issue #361: the jump-to-bottom button is opt-out via settings (default on).
+  const showScrollToBottomButtonSetting = useSettingsStore(
+    (s) => s.terminal.showScrollToBottomButton ?? true,
+  );
+
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
-  // they do not overlap. In "separate" mode the scrollbar reserves a
-  // SCROLLBAR_SEPARATE_GUTTER_PX-wide gutter, so push the button further left
-  // (plus a 12px slider clearance); in "overlay" mode the slider is narrower
-  // and renders on top of content.
-  const scrollBtnRight = scrollbarStyle === "separate" ? SCROLLBAR_SEPARATE_GUTTER_PX + 12 : 16;
+  // they do not overlap. The slider renders at the same right-edge width in both
+  // overlay and separate modes, and the button is positioned relative to the
+  // pane edge, so the offset is mode-independent (see SCROLL_BTN_RIGHT_PX).
+  const scrollBtnRight = SCROLL_BTN_RIGHT_PX;
 
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
@@ -2547,7 +2559,7 @@ export function TerminalView({
       >
         <div className="terminal-loading-spinner" />
       </div>
-      {showScrollToBottom && (
+      {showScrollToBottom && showScrollToBottomButtonSetting && (
         <button
           type="button"
           data-testid={`terminal-scroll-to-bottom-${instanceId}`}
@@ -2562,18 +2574,17 @@ export function TerminalView({
           }}
         >
           <svg
-            width="16"
-            height="16"
+            width="24"
+            height="24"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+            strokeWidth="3"
+            strokeLinecap="butt"
             strokeLinejoin="round"
             aria-hidden
           >
-            <path d="M12 5v14" />
-            <path d="m19 12-7 7-7-7" />
+            <path d="m5 8.5 7 7 7-7" />
           </svg>
         </button>
       )}

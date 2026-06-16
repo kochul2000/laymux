@@ -222,7 +222,9 @@
       "scrollbarStyle": "Scrollbar Style",
       "scrollbarStyleDesc": "How the terminal scrollbar is shown. Overlay overlaps the content, Separate takes its own space.",
       "scrollbarOverlay": "Overlay (overlaps content)",
-      "scrollbarSeparate": "Separate (takes own space)"
+      "scrollbarSeparate": "Separate (takes own space)",
+      "scrollToBottomButton": "Jump-to-bottom Button",
+      "scrollToBottomButtonDesc": "Show the floating button that jumps to the bottom when scrolled up into the scrollback."
     },
     "interface": {
       "title": "Interface",
