@@ -288,6 +288,17 @@
   visibility: hidden !important;
 }
 
+/* #363: 검증된 파일/디렉토리 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서.
+   xterm 의 링크 hover 포인터는 활성 텍스트 선택 위에서 선택 커서에 밀리므로,
+   클릭 가능 상태에서 호스트의 xterm 레이어에 직접 적용한다(TerminalView 에서
+   클래스 토글). cursor 는 상속되므로 WebGL 캔버스 자식에도 전파된다. */
+.terminal-path-link-clickable .xterm,
+.terminal-path-link-clickable .xterm-screen,
+.terminal-path-link-clickable .xterm-rows,
+.terminal-path-link-clickable .xterm-helper-textarea {
+  cursor: pointer !important;
+}
+
 .terminal-overlay-caret {
   position: absolute;
   top: 0;

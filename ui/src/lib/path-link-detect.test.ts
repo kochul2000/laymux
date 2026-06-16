@@ -222,8 +222,15 @@ describe("trimSelectionToPath", () => {
     expect(trimSelectionToPath("ui/src a.ts")).toBeNull();
   });
 
-  it("경로처럼 안 보이는 선택은 null", () => {
-    expect(trimSelectionToPath("hello")).toBeNull();
+  it("슬래시·확장자 없는 맨이름도 후보로 받는다(선택 기반, stat 이 게이트)", () => {
+    // ls 출력의 디렉토리/확장자 없는 파일명: laymux, v3, class …
+    expect(trimSelectionToPath("laymux")).toBe("laymux");
+    expect(trimSelectionToPath("v3")).toBe("v3");
+    expect(trimSelectionToPath("  fibonacci.py  ")).toBe("fibonacci.py");
+  });
+
+  it("URL 스킴은 제외(WebLinks 담당), 빈 선택은 null", () => {
+    expect(trimSelectionToPath("https://example.com")).toBeNull();
     expect(trimSelectionToPath("")).toBeNull();
   });
 

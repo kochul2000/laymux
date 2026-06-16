@@ -250,7 +250,12 @@ export function trimSelectionToPath(selection: string): string | null {
 
   const { text } = trimPathToken(trimmedOuter);
   if (!text) return null;
-  if (!looksLikePath(text)) return null;
+  // URL 은 WebLinks/indented provider 가 담당 → 제외.
+  if (SCHEME_RE.test(text)) return null;
+  // 선택 기반(#363): 사용자가 명시적으로 고른 단일 토큰이므로 슬래시·확장자가
+  // 없는 맨이름(디렉토리/확장자 없는 파일, 예: `laymux`, `v3`)도 후보로 받는다.
+  // 형태 휴리스틱(looksLikePath)으로 거르지 않고, 실제 존재 여부는 stat_path 가
+  // 판정한다(존재하지 않으면 밑줄/링크가 켜지지 않음).
   return text;
 }
 

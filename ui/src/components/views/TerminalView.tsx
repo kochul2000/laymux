@@ -670,8 +670,17 @@ export function TerminalView({
     pathLinkControllerRef.current = pathLink;
     terminal.registerLinkProvider(pathLink.provider);
 
+    // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
+    // 적용한다. xterm 의 링크 hover 포인터는 *활성 텍스트 선택* 위에서는 선택
+    // 커서(I-beam)에 밀려 적용되지 않으므로(우리 모델은 항상 선택이 떠 있다),
+    // 검증 성공/해제 시 클래스를 토글해 결정적으로 처리한다.
+    const setPathLinkCursor = (active: boolean) => {
+      wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
+    };
+
     // 검증된 선택을 비우고(있으면) 밑줄을 거둔다. 선택 해제/변경 공통 경로.
     const clearPathLinkSelection = () => {
+      setPathLinkCursor(false);
       if (pathLink.getCurrent() === null) return;
       pathLink.clear();
       const t = terminalRef.current;
@@ -732,6 +741,7 @@ export function TerminalView({
             absPath,
             isDirectory: action === "changeDir",
           });
+          setPathLinkCursor(true);
           const term = terminalRef.current;
           if (term) term.refresh(0, term.rows - 1);
         })
