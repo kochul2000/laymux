@@ -9,6 +9,12 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
 import { createPathLinkProvider } from "@/lib/path-link-provider";
+import {
+  trimSelectionToPath,
+  isWithinPathLengthLimit,
+  joinCwdPath,
+  decidePathLinkAction,
+} from "@/lib/path-link-detect";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
@@ -28,6 +34,7 @@ import {
   updateTerminalSyncGroup,
   openExternal,
   statPath,
+  handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
 } from "@/lib/tauri-api";
@@ -470,6 +477,10 @@ export function TerminalView({
   const cwd = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.cwd);
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
+  // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
+  // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
+  const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkProvider> | null>(null);
+  const pathLinkEvaluateRef = useRef<(() => void) | null>(null);
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -623,47 +634,123 @@ export function TerminalView({
       ),
     );
 
-    // Issue #363: 터미널에 찍힌 (상대/절대) 파일 경로를 hover 시 검증해
-    // 밑줄을 긋고, 클릭하면 viewer 로 연다. 상대경로는 이 pane 의 syncGroup
-    // CWD(터미널 instance 의 cwd)와 조합해 절대 경로로 만든 뒤, 백엔드
-    // stat_path 로 실제 존재를 확인한 경로만 활성화한다(유효하면 밑줄,
-    // 무효하면 밑줄 없음). URL 은 위의 WebLinks/indented provider 가 담당한다.
-    // 리뷰 B: 한 줄에 후보가 N개면 검증 resolve 가 N회 → onValidated 도 N회
-    // 호출될 수 있다. 매번 전체 뷰포트 refresh 하면 refresh storm 이 되므로,
-    // rAF 로 coalesce 해 한 프레임에 1회만 refresh 한다.
-    let pathLinkRefreshFrame: number | null = null;
-    const schedulePathLinkRefresh = () => {
-      if (pathLinkRefreshFrame !== null) return;
-      pathLinkRefreshFrame = requestAnimationFrame(() => {
-        pathLinkRefreshFrame = null;
-        const t = terminalRef.current;
-        if (t) t.refresh(0, t.rows - 1);
-      });
+    // Issue #363 (선택 기반 재설계): 사용자가 *선택(드래그)* 한 파일/디렉토리
+    // 경로에 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로
+    // 전파한다. 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고
+    // Windows 에서 동작 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은
+    // onSelectionChange/pointerup 시점에 **선택당 1회만** 수행하고, provider 는
+    // 그때 저장된 검증 범위에만 ILink 를 돌려준다(provideLinks 에서 stat 안 함).
+    //
+    // registerLinkProvider 가 반환하는 IDisposable 은 따로 보관하지 않는다.
+    // 이 provider 는 이 effect(터미널 1회 생성) 안에서만 등록되고, cleanup 의
+    // terminal.dispose() 가 모든 link provider 를 함께 해제하므로 누수 없다.
+    const pathLink = createPathLinkProvider(terminal, {
+      onOpenPath: (absPath) => {
+        useFileViewerStore.getState().openFileViewer(absPath);
+      },
+      onChangeDir: (absPath) => {
+        // FileExplorer 와 동일한 force 1회 sync-cwd 패턴으로 이 pane 의
+        // syncGroup 에 새 cwd 를 전파한다.
+        const group = syncGroupRef.current;
+        if (!group) return;
+        handleLxMessage(
+          JSON.stringify({
+            action: "sync-cwd",
+            path: absPath,
+            terminal_id: instanceId,
+            group_id: group,
+            force: true,
+          }),
+        ).catch((err) => {
+          console.warn(`[pathLink] ${instanceId} cwd 전파 실패:`, err);
+        });
+      },
+    });
+    pathLinkControllerRef.current = pathLink;
+    terminal.registerLinkProvider(pathLink.provider);
+
+    // 검증된 선택을 비우고(있으면) 밑줄을 거둔다. 선택 해제/변경 공통 경로.
+    const clearPathLinkSelection = () => {
+      if (pathLink.getCurrent() === null) return;
+      pathLink.clear();
+      const t = terminalRef.current;
+      if (t) t.refresh(0, t.rows - 1);
     };
-    // 리뷰 G: registerLinkProvider 가 반환하는 IDisposable 은 따로 보관하지
-    // 않는다. 이 provider 는 이 effect(터미널 1회 생성) 안에서만 등록되고,
-    // cleanup 에서 terminal.dispose() 가 모든 link provider 를 함께 해제하므로
-    // 재등록/누수 경로가 없다(WebLinks·indented provider 와 동일한 패턴).
-    terminal.registerLinkProvider(
-      createPathLinkProvider(terminal, {
-        // 리뷰 C: store 전수 스캔 대신 구독해 둔 ref 를 읽는다.
-        getCwd: () => cwdRef.current,
-        validate: async (absPath) => {
-          try {
-            const info = await statPath(absPath);
-            return info.exists && !info.isDirectory;
-          } catch {
-            return false;
+
+    // 선택 settle 시점(onSelectionChange / pointerup)에 1회 호출되는 검증 흐름.
+    // 동시 호출/race 를 막기 위해 토큰으로 마지막 요청만 반영한다.
+    let pathLinkSelectionSeq = 0;
+    const evaluatePathLinkSelection = () => {
+      const settings = useSettingsStore.getState().terminal;
+      if (!settings.pathLinkEnabled) {
+        clearPathLinkSelection();
+        return;
+      }
+      const t = terminalRef.current;
+      if (!t) return;
+      const selection = t.getSelection();
+      // 비었거나 길이 초과 → 파싱 없이 기존 상태 비움.
+      if (!isWithinPathLengthLimit(selection, settings.pathLinkMaxLength)) {
+        clearPathLinkSelection();
+        return;
+      }
+      const token = trimSelectionToPath(selection);
+      if (!token) {
+        clearPathLinkSelection();
+        return;
+      }
+      const absPath = joinCwdPath(cwdRef.current, token);
+      if (!absPath) {
+        clearPathLinkSelection();
+        return;
+      }
+      const pos = t.getSelectionPosition();
+      if (!pos) {
+        clearPathLinkSelection();
+        return;
+      }
+      // 여러 줄 선택은 미지원: 첫 줄(start.y)만 밑줄 대상으로 한다.
+      // xterm 의 getSelectionPosition() 좌표는 1-based 이고 end.x 는 exclusive
+      // (선택 마지막 셀 +1)다. provider 의 ILink range/ provideLinks 도 1-based.
+      // 선택 원문(raw)에서 trim 으로 떼어낸 앞쪽 장식(공백/따옴표/괄호) 길이만큼
+      // 시작 컬럼을 밀어, 실제 경로 텍스트가 차지하는 셀에만 밑줄이 가게 한다.
+      const bufferLine = pos.start.y; // 1-based 버퍼 라인
+      const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
+      const tokenIdx = rawFirstLine.indexOf(token);
+      // 선택이 한 줄이고 토큰 위치를 찾으면 정확히 매핑, 아니면 선택 전체 폭 사용.
+      let startCol = pos.start.x;
+      let endCol = pos.start.x === pos.end.x ? pos.start.x : pos.end.x - 1;
+      if (pos.start.y === pos.end.y && tokenIdx >= 0) {
+        startCol = pos.start.x + tokenIdx;
+        endCol = startCol + token.length - 1;
+      }
+      if (endCol < startCol) endCol = startCol;
+
+      const seq = ++pathLinkSelectionSeq;
+      statPath(absPath)
+        .then((info) => {
+          if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
+          const action = decidePathLinkAction(info);
+          if (action === "none") {
+            clearPathLinkSelection();
+            return;
           }
-        },
-        onOpenPath: (absPath) => {
-          useFileViewerStore.getState().openFileViewer(absPath);
-        },
-        // 비동기 검증이 끝나면 해당 영역을 다시 그려 밑줄이 즉시 반영되게 한다.
-        // 여러 후보가 거의 동시에 resolve 돼도 한 프레임에 1회만 refresh.
-        onValidated: schedulePathLinkRefresh,
-      }),
-    );
+          pathLink.setVerifiedSelection({
+            bufferLine,
+            startCol,
+            endCol,
+            absPath,
+            isDirectory: action === "changeDir",
+          });
+          const term = terminalRef.current;
+          if (term) term.refresh(0, term.rows - 1);
+        })
+        .catch(() => {
+          if (seq !== pathLinkSelectionSeq) return;
+          clearPathLinkSelection();
+        });
+    };
+    pathLinkEvaluateRef.current = evaluatePathLinkSelection;
 
     terminalRef.current = terminal;
 
@@ -1424,6 +1511,9 @@ export function TerminalView({
       if (useSettingsStore.getState().terminal.copyOnSelect) {
         runTerminalCopy(terminal);
       }
+      // Issue #363: 선택이 바뀔 때마다 path-link 검증(선택당 stat 1회)을 갱신한다.
+      // copyOnSelect 와 독립적으로 동작(off 여도 링크는 켜질 수 있음).
+      pathLinkEvaluateRef.current?.();
     });
 
     // Issue #230: drag ending outside the terminal. xterm.js relies on
@@ -1447,6 +1537,8 @@ export function TerminalView({
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       const onWindowPointerUp = () => {
         pointerUpWatcher = null;
+        // Issue #363: 드래그 종료 시 path-link 검증을 settle(선택당 stat 1회).
+        pathLinkEvaluateRef.current?.();
         if (!useSettingsStore.getState().terminal.copyOnSelect) return;
         runTerminalCopy(terminal);
       };
@@ -2200,10 +2292,6 @@ export function TerminalView({
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
-      }
-      if (pathLinkRefreshFrame !== null) {
-        cancelAnimationFrame(pathLinkRefreshFrame);
-        pathLinkRefreshFrame = null;
       }
       clearTimeout(notifyGateTimer);
       clearParkSettleTimer();

@@ -4,6 +4,10 @@ import {
   findPathCandidatesInLine,
   joinCwdPath,
   looksLikePath,
+  normalizeMsysCwd,
+  trimSelectionToPath,
+  isWithinPathLengthLimit,
+  decidePathLinkAction,
 } from "./path-link-detect";
 
 describe("looksLikePath", () => {
@@ -146,5 +150,106 @@ describe("joinCwdPath", () => {
   it("cwd 가 없으면 null 을 반환한다", () => {
     expect(joinCwdPath(undefined, "a/b.txt")).toBeNull();
     expect(joinCwdPath("", "a/b.txt")).toBeNull();
+  });
+
+  it("MSYS/git-bash cwd(/d/proj)는 Windows 드라이브로 변환해 백슬래시 조합한다", () => {
+    expect(joinCwdPath("/d/PycharmProjects/laymux", "ui/src/index.css")).toBe(
+      "D:\\PycharmProjects\\laymux\\ui\\src\\index.css",
+    );
+    expect(joinCwdPath("/c/Users/me", "a/b.txt")).toBe("C:\\Users\\me\\a\\b.txt");
+  });
+
+  it("PowerShell cwd(D:\\...)는 백슬래시로 조합한다(end-to-end)", () => {
+    expect(joinCwdPath("D:\\PycharmProjects\\laymux", "ui/src/index.css")).toBe(
+      "D:\\PycharmProjects\\laymux\\ui\\src\\index.css",
+    );
+  });
+
+  it("POSIX cwd(/home/...)는 슬래시로 조합한다(변환하지 않음)", () => {
+    expect(joinCwdPath("/home/me/proj", "src/a.ts")).toBe("/home/me/proj/src/a.ts");
+  });
+
+  it("WSL UNC cwd(\\\\wsl.localhost\\...)는 그대로 백슬래시 조합(깨지지 않음)", () => {
+    expect(joinCwdPath("\\\\wsl.localhost\\Ubuntu\\home\\me", "a/b.txt")).toBe(
+      "\\\\wsl.localhost\\Ubuntu\\home\\me\\a\\b.txt",
+    );
+  });
+
+  it("/mnt/ 로 시작하는 WSL 마운트 cwd 는 드라이브 변환하지 않는다", () => {
+    expect(joinCwdPath("/mnt/d/proj", "a/b.txt")).toBe("/mnt/d/proj/a/b.txt");
+  });
+});
+
+describe("normalizeMsysCwd", () => {
+  it("/<drive>/... 를 X:\\... 로 변환한다", () => {
+    expect(normalizeMsysCwd("/d/PycharmProjects")).toBe("D:\\PycharmProjects");
+    expect(normalizeMsysCwd("/c/Users/me")).toBe("C:\\Users\\me");
+  });
+
+  it("드라이브 루트(/d)도 X:\\ 로 변환한다", () => {
+    expect(normalizeMsysCwd("/d")).toBe("D:");
+    expect(normalizeMsysCwd("/d/")).toBe("D:\\");
+  });
+
+  it("/mnt/ 마운트는 변환하지 않는다", () => {
+    expect(normalizeMsysCwd("/mnt/d/proj")).toBe("/mnt/d/proj");
+  });
+
+  it("일반 POSIX/Windows/UNC 경로는 그대로 둔다", () => {
+    expect(normalizeMsysCwd("/home/me/proj")).toBe("/home/me/proj");
+    expect(normalizeMsysCwd("D:\\proj")).toBe("D:\\proj");
+    expect(normalizeMsysCwd("\\\\wsl.localhost\\Ubuntu")).toBe("\\\\wsl.localhost\\Ubuntu");
+  });
+});
+
+describe("trimSelectionToPath", () => {
+  it("경로처럼 보이는 선택은 정리해 반환한다", () => {
+    expect(trimSelectionToPath("ui/src/index.css")).toBe("ui/src/index.css");
+    expect(trimSelectionToPath("  ui/src/index.css  ")).toBe("ui/src/index.css");
+  });
+
+  it("따옴표/괄호/grep 꼬리를 떼어낸다", () => {
+    expect(trimSelectionToPath('"ui/src/app.tsx"')).toBe("ui/src/app.tsx");
+    expect(trimSelectionToPath("ui/src/main.ts:42:5")).toBe("ui/src/main.ts");
+  });
+
+  it("절대 경로도 그대로 인정한다", () => {
+    expect(trimSelectionToPath("/etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("공백이 끼어 여러 토큰이면 경로 한 건으로 보지 않는다", () => {
+    expect(trimSelectionToPath("ui/src a.ts")).toBeNull();
+  });
+
+  it("경로처럼 안 보이는 선택은 null", () => {
+    expect(trimSelectionToPath("hello")).toBeNull();
+    expect(trimSelectionToPath("")).toBeNull();
+  });
+
+  it("여러 줄 선택은 첫 줄만 사용한다", () => {
+    expect(trimSelectionToPath("src/a.ts\nsrc/b.ts")).toBe("src/a.ts");
+  });
+});
+
+describe("isWithinPathLengthLimit", () => {
+  it("길이 이내면 true, 초과면 false", () => {
+    expect(isWithinPathLengthLimit("abc", 8)).toBe(true);
+    expect(isWithinPathLengthLimit("123456789", 8)).toBe(false);
+  });
+
+  it("빈 문자열은 false", () => {
+    expect(isWithinPathLengthLimit("", 8)).toBe(false);
+  });
+});
+
+describe("decidePathLinkAction", () => {
+  it("존재하지 않으면 none", () => {
+    expect(decidePathLinkAction({ exists: false, isDirectory: false })).toBe("none");
+  });
+  it("디렉토리면 changeDir", () => {
+    expect(decidePathLinkAction({ exists: true, isDirectory: true })).toBe("changeDir");
+  });
+  it("파일이면 openFile", () => {
+    expect(decidePathLinkAction({ exists: true, isDirectory: false })).toBe("openFile");
   });
 });

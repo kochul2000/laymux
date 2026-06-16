@@ -222,7 +222,12 @@
       "scrollbarStyle": "Scrollbar Style",
       "scrollbarStyleDesc": "How the terminal scrollbar is shown. Overlay overlaps the content, Separate takes its own space.",
       "scrollbarOverlay": "Overlay (overlaps content)",
-      "scrollbarSeparate": "Separate (takes own space)"
+      "scrollbarSeparate": "Separate (takes own space)",
+      "pathLinkGroup": "File Path Links",
+      "pathLink": "Path Links on Selection",
+      "pathLinkDesc": "Underline a selected file/folder path; click to open the file in the viewer or change the directory.",
+      "pathLinkMaxLength": "Max Path Length",
+      "pathLinkMaxLengthDesc": "Selections longer than this (characters) are not treated as a path."
     },
     "interface": {
       "title": "Interface",

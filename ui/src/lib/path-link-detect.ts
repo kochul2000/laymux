@@ -87,7 +87,7 @@ const TOKEN_RE = /[^\s"'`()<>[\]{}|]+/g;
  * - 후행 문장부호(`.,;:` 등) 제거.
  * 시작/끝 컬럼 보정을 위해 앞에서 떼어낸 길이도 함께 반환한다.
  */
-function trimPathToken(raw: string): { text: string; leading: number } {
+export function trimPathToken(raw: string): { text: string; leading: number } {
   let text = raw;
   let leading = 0;
 
@@ -170,17 +170,49 @@ export function findPathCandidatesInLine(lineText: string): PathCandidate[] {
 }
 
 /**
+ * MSYS/git-bash 스타일 cwd(`^/<drive>/...`)를 Windows 드라이브 경로로 변환한다.
+ *
+ * git-bash/MSYS 셸은 cwd 를 `/d/PycharmProjects/...` 처럼 POSIX 드라이브 표기로
+ * 보고한다. 이 문자열을 그대로 상대경로와 조합해 백엔드 `stat_path`
+ * (`resolve_address_path`)로 넘기면, 선행 `/` 가 `/mnt/` 가 아니므로 Windows
+ * 에서 WSL 경로(`\\wsl.localhost\...`)로 오인돼 검증이 실패한다(이슈 #363 Win 증상).
+ *
+ * 그래서 이 기능 범위 안에서만, 조합 *직전에* MSYS cwd 를 `X:\...` 로 바꾼다.
+ * 백엔드 `resolve_address_path` 는 전역 변경하지 않는다.
+ *
+ * 변환 규칙(보수적):
+ *   - `^/<단일영문자>(/...|$)` → `<대문자>:\...` (예: `/d/proj` → `D:\proj`).
+ *   - `/mnt/...`(WSL 마운트)은 변환하지 않는다 — WSL/POSIX 경로로 그대로 둔다.
+ *   - 그 외(`\\wsl.localhost\...`, `C:\...`, 일반 POSIX `/home/...`)는 그대로.
+ *
+ * `^/c/` 처럼 한 글자 디렉토리가 실제 POSIX 경로일 가능성도 있으나, MSYS 가
+ * 보고하는 cwd 맥락에서는 드라이브 표기가 압도적이고, 변환 후에도 백엔드가
+ * 실제 존재를 stat 으로 검증하므로 false positive 로 인한 오작동은 없다.
+ */
+export function normalizeMsysCwd(cwd: string): string {
+  // `/mnt/...` 은 제외(WSL 마운트). 그 외 `^/<a>/` 또는 `^/<a>$` 만 변환.
+  const m = /^\/([A-Za-z])(\/.*|)$/.exec(cwd);
+  if (!m) return cwd;
+  if (cwd.startsWith("/mnt/")) return cwd;
+  const drive = m[1].toUpperCase();
+  const rest = m[2].replace(/\//g, "\\"); // 선행 `/` 포함 → `\...`
+  return `${drive}:${rest}`;
+}
+
+/**
  * cwd 와 (상대) 경로를 조합해 절대 경로 문자열을 만든다.
  * - 입력이 이미 절대 경로면 그대로 반환.
+ * - MSYS 스타일 cwd(`^/<drive>/...`)는 먼저 Windows 드라이브 경로로 정규화한다.
  * - cwd 가 Windows 스타일(`C:\` 또는 `\\`)이면 백슬래시로, 아니면 슬래시로 조합.
  * - cwd 가 비어 있으면 null.
  *
  * 실제 경로 정규화(`..`, WSL/Windows 변환)는 백엔드 `resolve_address_path`
  * 가 담당하므로 여기서는 단순 결합만 한다.
  */
-export function joinCwdPath(cwd: string | undefined, relativePath: string): string | null {
+export function joinCwdPath(cwdRaw: string | undefined, relativePath: string): string | null {
   if (isAbsolutePath(relativePath)) return relativePath;
-  if (!cwd || cwd.length === 0) return null;
+  if (!cwdRaw || cwdRaw.length === 0) return null;
+  const cwd = normalizeMsysCwd(cwdRaw);
 
   const cwdIsWindows = /^[A-Za-z]:[\\/]/.test(cwd) || cwd.startsWith("\\\\");
   const sep = cwdIsWindows ? "\\" : "/";
@@ -191,4 +223,59 @@ export function joinCwdPath(cwd: string | undefined, relativePath: string): stri
   const rel = cwdIsWindows ? relativePath.replace(/\//g, "\\") : relativePath.replace(/\\/g, "/");
 
   return `${base}${sep}${rel}`;
+}
+
+/**
+ * 선택(드래그) 문자열을 경로 토큰으로 정리한다(선택 기반 동작, 이슈 #363 재설계).
+ *
+ * 줄 전체를 토큰별로 도는 대신, 사용자가 선택한 *한 덩어리* 문자열을 받아
+ * 기존 트림/판별 로직(`trimPathToken`/`looksLikePath`)으로 거른다. 선택은
+ * 보통 한 토큰이지만, 양끝 공백/따옴표/괄호/grep 꼬리(`:line:col`)는 정리한다.
+ *
+ * 반환:
+ *   - 경로처럼 보이면 정리된 경로 텍스트(`text`).
+ *   - 비었거나 경로처럼 안 보이면 null.
+ *
+ * 길이 가드(maxLength)는 호출부에서 *원본 선택 길이* 로 먼저 적용한다
+ * (여기서는 형태 판별만). 순수 함수라 fs 접근/설정 의존이 없다.
+ */
+export function trimSelectionToPath(selection: string): string | null {
+  if (!selection) return null;
+  // 여러 줄 선택은 미지원: 첫 줄만 본다(깨지지 않게 안전 처리).
+  const firstLine = selection.split(/\r?\n/, 1)[0] ?? "";
+  const trimmedOuter = firstLine.trim();
+  if (!trimmedOuter) return null;
+  // 선택 안에 공백이 끼어 있으면(여러 토큰) 경로 한 건으로 보지 않는다.
+  if (/\s/.test(trimmedOuter)) return null;
+
+  const { text } = trimPathToken(trimmedOuter);
+  if (!text) return null;
+  if (!looksLikePath(text)) return null;
+  return text;
+}
+
+/**
+ * 길이 가드: 선택 문자열이 비었거나 `maxLength` 를 초과하면 false.
+ * (파싱·stat 전에 호출부에서 싸게 거르는 용도. 순수 함수.)
+ */
+export function isWithinPathLengthLimit(selection: string, maxLength: number): boolean {
+  if (!selection) return false;
+  return selection.length <= maxLength;
+}
+
+/** stat 결과(`{exists,isDirectory}`)로 클릭 동작 분기를 결정한다. */
+export type PathLinkAction = "none" | "openFile" | "changeDir";
+
+/**
+ * stat 결과를 클릭 동작으로 매핑한다(순수 분기 함수).
+ *   - 존재하지 않음 → "none"(밑줄 없음).
+ *   - 디렉토리 → "changeDir"(cwd 전파).
+ *   - 파일 → "openFile"(viewer).
+ */
+export function decidePathLinkAction(stat: {
+  exists: boolean;
+  isDirectory: boolean;
+}): PathLinkAction {
+  if (!stat.exists) return "none";
+  return stat.isDirectory ? "changeDir" : "openFile";
 }
