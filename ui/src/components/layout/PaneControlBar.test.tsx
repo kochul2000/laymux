@@ -767,12 +767,11 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-control-cwd-propagate-once")).not.toBeInTheDocument();
   });
 
-  // -- Left icons excluded from overlay transparency (issue #341) --
-  // hover 오버레이 바는 평소 반투명이지만, 좌측 pane id 배지와 propagate 아이콘은
-  // 항상 불투명하게 보여야 한다. 두 요소를 자체 불투명 배경(.pane-bar-left-solid)을
-  // 가진 컨테이너로 감싸 부모 바의 투명화 영향을 받지 않게 한다.
+  // -- Left icons grouped in one container (badge + propagate) --
+  // 좌/우 아이콘 모두 바 오버레이(issue #320)를 그대로 따른다. 좌측은 별도 불투명 칩
+  // 없이 배지+전파 버튼을 한 컨테이너로만 묶는다.
 
-  it("wraps left icons (badge + propagate) in a solid-background container (issue #341)", () => {
+  it("groups left icons (badge + propagate) in one container", () => {
     render(
       <PaneControlBar
         currentView={terminalView}
@@ -785,14 +784,13 @@ describe("PaneControlBar", () => {
         <div>content</div>
       </PaneControlBar>,
     );
-    const solid = screen.getByTestId("pane-control-bar-left-solid");
-    expect(solid.className).toContain("pane-bar-left-solid");
+    const container = screen.getByTestId("pane-control-bar-left-solid");
     // 배지와 전파 버튼이 모두 그 안에 들어있어야 한다.
-    expect(solid.contains(screen.getByTestId("pane-number-badge"))).toBe(true);
-    expect(solid.contains(screen.getByTestId("pane-control-cwd-propagate-once"))).toBe(true);
+    expect(container.contains(screen.getByTestId("pane-number-badge"))).toBe(true);
+    expect(container.contains(screen.getByTestId("pane-control-cwd-propagate-once"))).toBe(true);
   });
 
-  it("renders the solid left container even with only a badge (no propagate)", () => {
+  it("renders the left container even with only a badge (no propagate)", () => {
     render(
       <PaneControlBar
         currentView={terminalView}

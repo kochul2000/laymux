@@ -217,16 +217,6 @@
     backdrop-filter: blur(8px);
   }
 
-  /* 좌측 아이콘(pane id 배지 + propagate)은 바 투명화 대상에서 제외한다 (issue #341).
-     반투명 바 위에서 터미널 내용이 비쳐 흐릿해지지 않도록 자체 불투명 배경을 깔아
-     항상 또렷하게 보이도록 한다. 바에 hover 하면 바 전체가 불투명해지므로 이 칩은
-     주변과 매끄럽게 섞인다. */
-  .pane-bar-left-solid {
-    background: var(--bar-bg-hover);
-    border-radius: var(--radius-sm);
-    padding: 0 2px;
-  }
-
   /* Toolbar (28px header bar) */
   .ui-toolbar {
     display: flex;

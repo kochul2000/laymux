@@ -701,16 +701,13 @@ export function PaneControlBar({
     [showPropagateCwd, actions.onPropagateCwdOnce],
   );
 
-  // 좌측 아이콘(pane 번호 배지 + propagate 버튼)은 컨트롤 바 투명화(issue #320)에서
-  // 제외되어 항상 불투명하게 보여야 한다 (issue #341). 반투명 배경의 바 위에서
-  // 터미널 내용이 비쳐 흐릿해지지 않도록 자체 불투명 배경(.pane-bar-left-solid)을
-  // 가진 컨테이너로 감싼다. 좌측 아이콘이 하나도 없으면 컨테이너 자체를 렌더하지 않는다.
+  // 좌측 아이콘(pane 번호 배지 + propagate 버튼)을 한 컨테이너로 묶는다. 우측 컨트롤과
+  // 동일하게 바 오버레이(issue #320: 평소 반투명, hover 시 불투명)를 그대로 따른다 —
+  // 별도 불투명 배경 칩을 두지 않아 좌/우 아이콘이 같은 방식으로 보인다.
+  // 좌측 아이콘이 하나도 없으면 컨테이너 자체를 렌더하지 않는다.
   const hasLeftIcons = paneNumber != null || showPropagateCwd;
   const leftIcons = hasLeftIcons ? (
-    <div
-      data-testid="pane-control-bar-left-solid"
-      className="pane-bar-left-solid flex shrink-0 items-center"
-    >
+    <div data-testid="pane-control-bar-left-solid" className="flex shrink-0 items-center">
       <PaneNumberBadge
         number={paneNumber}
         workspaceId={workspaceId}
