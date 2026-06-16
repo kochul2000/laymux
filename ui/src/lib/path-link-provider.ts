@@ -94,25 +94,34 @@ export function createPathLinkController(
       disposeDecoration();
       current = sel;
 
-      // registerMarker(offset) 는 커서 절대 라인 기준 상대 오프셋에 마커를 단다.
-      const buffer = terminal.buffer.active;
-      const cursorAbsY = buffer.baseY + buffer.cursorY; // 0-based 절대 라인
-      const targetAbsY = sel.bufferLine - 1; // 0-based 절대 라인
-      const m = terminal.registerMarker(targetAbsY - cursorAbsY);
-      if (!m) return; // 라인이 버퍼 밖이면 데코레이션 생략(밑줄만 없음).
-      marker = m;
+      // 데코레이션 생성은 절대 호출부 체인을 깨지 않는다(밑줄 실패해도 커서·클릭
+      // 라우팅은 동작해야 한다). registerMarker 는 정수 오프셋만 받고 throw 할 수
+      // 있으므로 방어적으로 감싼다.
+      try {
+        // registerMarker(offset) 는 커서 절대 라인 기준 상대 오프셋에 마커를 단다.
+        const buffer = terminal.buffer.active;
+        const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0); // 0-based 절대 라인
+        const targetAbsY = sel.bufferLine - 1; // 0-based 절대 라인
+        const offset = Math.trunc(targetAbsY - cursorAbsY);
+        if (!Number.isFinite(offset)) return;
+        const m = terminal.registerMarker(offset);
+        if (!m) return; // 라인이 버퍼 밖이면 데코레이션 생략(밑줄만 없음).
+        marker = m;
 
-      const width = Math.max(1, sel.endCol - sel.startCol + 1);
-      const dec = terminal.registerDecoration({
-        marker: m,
-        x: sel.startCol - 1, // 0-based 셀
-        width,
-      });
-      if (!dec) return;
-      decoration = dec;
-      // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장. 핸들러는 1회만.
-      if (dec.element) styleAndBind(dec.element);
-      dec.onRender((el) => styleAndBind(el));
+        const width = Math.max(1, sel.endCol - sel.startCol + 1);
+        const dec = terminal.registerDecoration({
+          marker: m,
+          x: Math.max(0, sel.startCol - 1), // 0-based 셀
+          width,
+        });
+        if (!dec) return;
+        decoration = dec;
+        // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장. 핸들러는 1회만.
+        if (dec.element) styleAndBind(dec.element);
+        dec.onRender((el) => styleAndBind(el));
+      } catch (err) {
+        console.warn("[pathLink] 밑줄 데코레이션 생성 실패:", err);
+      }
     },
     clear: () => {
       current = null;

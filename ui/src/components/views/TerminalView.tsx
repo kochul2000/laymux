@@ -727,6 +727,8 @@ export function TerminalView({
             clearPathLinkSelection();
             return;
           }
+          // 커서를 먼저 켜 데코레이션 생성과 분리한다(밑줄 실패해도 커서는 동작).
+          setPathLinkCursor(true);
           pathLink.setVerifiedSelection({
             bufferLine,
             startCol,
@@ -734,7 +736,6 @@ export function TerminalView({
             absPath,
             isDirectory: action === "changeDir",
           });
-          setPathLinkCursor(true);
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
