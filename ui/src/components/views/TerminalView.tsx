@@ -8,6 +8,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import { createPathLinkProvider } from "@/lib/path-link-provider";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
@@ -25,6 +27,7 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  statPath,
   markClaudeTerminal,
   markCodexTerminal,
 } from "@/lib/tauri-api";
@@ -612,6 +615,32 @@ export function TerminalView({
         (uri) => openExternal(uri).catch(() => {}),
         () => useSettingsStore.getState().paste.linkJoin,
       ),
+    );
+
+    // Issue #363: 터미널에 찍힌 (상대/절대) 파일 경로를 hover 시 검증해
+    // 밑줄을 긋고, 클릭하면 viewer 로 연다. 상대경로는 이 pane 의 syncGroup
+    // CWD(터미널 instance 의 cwd)와 조합해 절대 경로로 만든 뒤, 백엔드
+    // stat_path 로 실제 존재를 확인한 경로만 활성화한다(유효하면 밑줄,
+    // 무효하면 밑줄 없음). URL 은 위의 WebLinks/indented provider 가 담당한다.
+    terminal.registerLinkProvider(
+      createPathLinkProvider(terminal, {
+        getCwd: () => useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.cwd,
+        validate: async (absPath) => {
+          try {
+            const info = await statPath(absPath);
+            return info.exists && !info.isDirectory;
+          } catch {
+            return false;
+          }
+        },
+        onOpenPath: (absPath) => {
+          useFileViewerStore.getState().openFileViewer(absPath);
+        },
+        // 비동기 검증이 끝나면 해당 영역을 다시 그려 밑줄이 즉시 반영되게 한다.
+        onValidated: () => {
+          terminalRef.current?.refresh(0, (terminalRef.current?.rows ?? 1) - 1);
+        },
+      }),
     );
 
     terminalRef.current = terminal;
