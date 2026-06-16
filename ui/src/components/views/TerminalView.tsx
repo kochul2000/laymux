@@ -650,17 +650,22 @@ export function TerminalView({
         useFileViewerStore.getState().openFileViewer(absPath);
       },
       onChangeDir: (absPath) => {
-        // FileExplorer 와 동일한 force 1회 sync-cwd 패턴으로 이 pane 의
-        // syncGroup 에 새 cwd 를 전파한다.
+        // 클릭한 디렉토리를 새 cwd 로 **제안**해 기존 중앙화 전파 경로(do_sync_cwd)에
+        // 그대로 태운다. FileExplorer.navigateTo 와 동일하게:
+        //   - origin 으로 **비-터미널 sentinel** 을 넘긴다 → 백엔드가 소스의 tracked
+        //     cwd 를 발명(line 639)하거나 소스를 대상에서 제외하지 않는다. 클릭한
+        //     pane 도 특별취급 없이 일반 대상이 된다.
+        //   - **force 를 넣지 않는다** → cwd_receive 필터(filter_targets_cwd_receive)가
+        //     적용되어, receive 를 켠 pane(클릭한 pane 포함)만 이동한다. dock·다른
+        //     pane 도 동일 정책. (force=true 는 receive 를 무시하므로 쓰지 않는다.)
         const group = syncGroupRef.current;
         if (!group) return;
         handleLxMessage(
           JSON.stringify({
             action: "sync-cwd",
             path: absPath,
-            terminal_id: instanceId,
+            terminal_id: `${instanceId}__pathlink`,
             group_id: group,
-            force: true,
           }),
         ).catch((err) => {
           console.warn(`[pathLink] ${instanceId} cwd 전파 실패:`, err);
