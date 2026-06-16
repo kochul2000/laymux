@@ -1,9 +1,6 @@
 import { useEffect } from "react";
 import { useSettingsStore, builtinAppThemes, type AppTheme } from "@/stores/settings-store";
 
-/** Built-in UI chrome font stack — kept in sync with the `--ui-font` fallback in index.css. */
-const DEFAULT_UI_FONT_STACK = `"Consolas", "Fira Code", monospace`;
-
 /**
  * Applies the selected app theme + UI chrome font to CSS custom properties.
  * App theme is separate from terminal color schemes.
@@ -18,10 +15,11 @@ export function useAppTheme() {
   }, [appThemeId]);
 
   useEffect(() => {
-    // Prepend the chosen family to the default stack so missing glyphs degrade
+    // Prepend the chosen family to the built-in default stack (--ui-font-default,
+    // defined in index.css as the single source of truth) so missing glyphs degrade
     // gracefully (same approach as the terminal font). Empty = built-in default.
     const trimmed = uiFontFamily.trim();
-    const stack = trimmed ? `"${trimmed}", ${DEFAULT_UI_FONT_STACK}` : DEFAULT_UI_FONT_STACK;
+    const stack = trimmed ? `"${trimmed}", var(--ui-font-default)` : "var(--ui-font-default)";
     document.documentElement.style.setProperty("--ui-font", stack);
   }, [uiFontFamily]);
 }
