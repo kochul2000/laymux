@@ -1,45 +1,19 @@
 /**
- * 터미널 출력에 찍힌 (상대/절대) 파일 경로를 Ctrl+클릭으로 viewer 에서
- * 여는 기능(issue #363)의 순수 로직.
- *
- * 기존 URL 링크 처리(`terminal-link-click.ts` / `indented-link-provider.ts`)는
- * `https?://` 스킴만 다룬다. 이 모듈은 그 옆에서 "스킴 없는 파일 경로"
- * (예: `ui/src/index.css`, `Cargo.toml`, `/etc/hosts`)를 감지한다.
+ * 터미널에서 사용자가 *선택(드래그)* 한 (상대/절대) 파일/디렉토리 경로를
+ * 클릭으로 viewer 열기·cwd 이동하는 기능(issue #363, 선택 기반)의 순수 로직.
  *
  * 책임 분리:
- *   - 경로처럼 보이는지 판별(false positive 최소화)과 클릭 셀에서 토큰
- *     추출은 여기(순수 함수)에서 한다.
- *   - cwd 와 조합한 절대 경로의 *실제 존재 여부*는 백엔드 `stat_path`
- *     커맨드가 판정한다(여기서는 fs 접근하지 않는다).
- *
- * 휴리스틱(임의 단어를 경로로 오인하지 않도록):
- *   1. URL 스킴(`scheme://`)이 있으면 경로 아님 → URL provider 담당.
- *   2. 절대 경로(`/...`, `C:\...`, `\\server\...`)는 경로로 본다.
- *   3. 상대 경로는 다음 중 하나를 만족해야 한다:
- *      - 디렉토리 구분자(`/` 또는 `\`)가 1개 이상 + 파일 확장자가 있거나
- *      - 디렉토리 구분자가 2개 이상(확장자 없는 디렉토리 경로 허용) 이거나
- *      - 구분자가 없어도 알려진 파일명(확장자 보유, 예: `package.json`).
+ *   - 선택 문자열에서 경로 토큰 추출/정리(`trimSelectionToPath`)와 cwd 조합
+ *     (`joinCwdPath`, MSYS 정규화 포함), 선택 좌표→버퍼 좌표 매핑
+ *     (`mapSelectionToPathRange`), stat 결과 분기(`decidePathLinkAction`)는
+ *     여기(순수 함수)에서 한다.
+ *   - 절대 경로의 *실제 존재 여부*는 백엔드 `stat_path` 가 판정한다(여기서는
+ *     fs 접근하지 않는다). 선택 기반이라 형태 휴리스틱은 느슨하게 두고
+ *     존재 검증을 실질 게이트로 삼는다.
  */
 
-/** 한 줄에서 추출한 경로 후보(1-based 컬럼 범위 포함). */
-export interface PathCandidate {
-  /** 따옴표/괄호/후행 구두점을 제거한 경로 텍스트. */
-  text: string;
-  /** 1-based 시작 컬럼(`text` 의 첫 글자가 줄에서 차지하는 컬럼). */
-  startCol: number;
-  /** 1-based 끝 컬럼(`text` 의 마지막 글자). */
-  endCol: number;
-}
-
-/** 흔한 URL/프로토콜 스킴 — 이 스킴이 붙어 있으면 경로가 아니다. */
+/** 흔한 URL/프로토콜 스킴 — 이 스킴이 붙어 있으면 경로가 아니다(URL provider 담당). */
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
-
-/**
- * 파일 확장자: 마지막 세그먼트 끝의 `.ext`.
- * 첫 글자는 반드시 영문자여야 한다 — 그래야 `v1.2.3` 의 `.3` 같은
- * 버전 번호 꼬리를 확장자로 오인하지 않는다(false positive 방지).
- */
-const EXT_RE = /\.[A-Za-z][A-Za-z0-9]{0,7}$/;
 
 /** 절대 경로 판별: POSIX `/`, Windows 드라이브 `C:\`/`C:/`, UNC `\\`. */
 export function isAbsolutePath(path: string): boolean {
@@ -48,38 +22,6 @@ export function isAbsolutePath(path: string): boolean {
   if (path.startsWith("\\\\")) return true;
   return false;
 }
-
-/**
- * 토큰 하나가 "파일/디렉토리 경로처럼" 보이는지 판별한다.
- * fs 접근 없이 형태만 본다(실제 존재는 백엔드가 검증).
- */
-export function looksLikePath(token: string): boolean {
-  if (!token) return false;
-  // URL 은 별도 provider 가 처리한다.
-  if (SCHEME_RE.test(token)) return false;
-
-  if (isAbsolutePath(token)) return true;
-
-  const sepCount = (token.match(/[\\/]/g) ?? []).length;
-  // 의도된 트레이드오프(리뷰 F): 슬래시 1개만 있어도 경로 후보로 본다.
-  // `n/a`, `TODO/FIXME`, `and/or` 같은 비경로도 후보가 되지만, 실제 밑줄/링크는
-  // 백엔드 stat_path 존재 검증을 통과해야만 켜진다(provider 의 "valid" 게이트).
-  // 즉 형태 판별은 느슨해도 false underline 은 나지 않는다. 존재하지 않는 토큰은
-  // invalid 로 캐시되어 재검증 비용도 TTL 동안 들지 않는다.
-  if (sepCount >= 1) return true; // a/b, a/b.ext — 슬래시가 있으면 경로
-
-  // 구분자 없음: 확장자 있는 단일 파일명만 허용(예: package.json).
-  // `name.ext` 형태여야 하므로 확장자 앞에 1글자 이상 이름이 있어야 한다.
-  const extMatch = EXT_RE.exec(token);
-  if (!extMatch) return false;
-  return token.length > extMatch[0].length;
-}
-
-/** 경로 토큰을 자를 때 경계로 쓰는 문자(공백/따옴표/괄호 등). */
-const TOKEN_BOUNDARY_RE = /[\s"'`()<>[\]{}|]/;
-
-/** 토큰(비경계 문자의 연속) 추출용. `TOKEN_BOUNDARY_RE` 의 여집합. */
-const TOKEN_RE = /[^\s"'`()<>[\]{}|]+/g;
 
 /**
  * 토큰에서 경로가 아닌 장식을 떼어낸다.
@@ -110,63 +52,6 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
   text = text.replace(/(:\d+)+$/, "");
 
   return { text, leading };
-}
-
-/**
- * 한 줄 텍스트에서, 주어진 1-based 컬럼을 포함하는 경로 후보를 찾는다.
- * 경로처럼 보이지 않으면 null.
- *
- * @param lineText 줄 전체 문자열(끝쪽 패딩 공백 포함 가능)
- * @param col 1-based 컬럼(클릭/hover 한 셀)
- */
-export function findPathCandidateAtCol(lineText: string, col: number): PathCandidate | null {
-  const zeroBased = col - 1;
-  if (zeroBased < 0 || zeroBased >= lineText.length) return null;
-
-  // 공백·인용·괄호 경계로 토큰을 자른다.
-  let start = zeroBased;
-  while (start > 0 && !TOKEN_BOUNDARY_RE.test(lineText[start - 1])) start--;
-  let end = zeroBased; // inclusive
-  while (end < lineText.length - 1 && !TOKEN_BOUNDARY_RE.test(lineText[end + 1])) end++;
-
-  const rawToken = lineText.slice(start, end + 1);
-  if (rawToken.trim().length === 0) return null;
-
-  const { text, leading } = trimPathToken(rawToken);
-  if (!text) return null;
-  if (!looksLikePath(text)) return null;
-
-  // NOTE(와이드 문자 제약, 리뷰 E): 여기서 컬럼은 `translateToString()` 의
-  // *문자열 인덱스* 기준이다. CJK/이모지 같은 와이드 문자는 xterm 셀을 2칸
-  // 차지하므로(IBufferCellPosition.x), 줄에 와이드 문자가 앞서 있으면 밑줄
-  // 범위가 실제 셀 위치에서 어긋날 수 있다. 이는 기존 `indented-link-provider.ts`
-  // (offsetToPos 도 문자열 오프셋을 그대로 셀 컬럼으로 사용)와 동일한 알려진
-  // 제약이며, 두 provider 의 셀 매핑을 함께 고치는 것은 후속 이슈로 추적한다.
-  const startCol = start + leading + 1; // 1-based
-  const endCol = startCol + text.length - 1;
-
-  // 클릭 셀이 실제 경로 텍스트 범위 안인지 확인(떼어낸 장식 위 클릭은 제외).
-  if (col < startCol || col > endCol) return null;
-
-  return { text, startCol, endCol };
-}
-
-/**
- * 한 줄 전체에서 경로처럼 보이는 토큰을 모두 추출한다.
- * xterm link provider 가 줄 단위로 링크 후보를 등록할 때 사용한다.
- * 공백·인용·괄호 경계로 토큰을 나눈 뒤 각 토큰을 `findPathCandidateAtCol`
- * 과 동일한 정리/판별 로직으로 거른다.
- */
-export function findPathCandidatesInLine(lineText: string): PathCandidate[] {
-  const results: PathCandidate[] = [];
-  const re = new RegExp(TOKEN_RE.source, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(lineText)) !== null) {
-    // 토큰의 첫 글자 1-based 컬럼으로 후보를 재계산(장식 제거·범위 보정 일관).
-    const candidate = findPathCandidateAtCol(lineText, m.index + 1);
-    if (candidate) results.push(candidate);
-  }
-  return results;
 }
 
 /**
@@ -229,8 +114,8 @@ export function joinCwdPath(cwdRaw: string | undefined, relativePath: string): s
  * 선택(드래그) 문자열을 경로 토큰으로 정리한다(선택 기반 동작, 이슈 #363 재설계).
  *
  * 줄 전체를 토큰별로 도는 대신, 사용자가 선택한 *한 덩어리* 문자열을 받아
- * 기존 트림/판별 로직(`trimPathToken`/`looksLikePath`)으로 거른다. 선택은
- * 보통 한 토큰이지만, 양끝 공백/따옴표/괄호/grep 꼬리(`:line:col`)는 정리한다.
+ * `trimPathToken` 으로 양끝 공백/따옴표/괄호/grep 꼬리(`:line:col`)를 정리한다.
+ * 선택은 보통 한 토큰이다.
  *
  * 반환:
  *   - 경로처럼 보이면 정리된 경로 텍스트(`text`).
@@ -254,8 +139,8 @@ export function trimSelectionToPath(selection: string): string | null {
   if (SCHEME_RE.test(text)) return null;
   // 선택 기반(#363): 사용자가 명시적으로 고른 단일 토큰이므로 슬래시·확장자가
   // 없는 맨이름(디렉토리/확장자 없는 파일, 예: `laymux`, `v3`)도 후보로 받는다.
-  // 형태 휴리스틱(looksLikePath)으로 거르지 않고, 실제 존재 여부는 stat_path 가
-  // 판정한다(존재하지 않으면 밑줄/링크가 켜지지 않음).
+  // 형태 휴리스틱으로 거르지 않고, 실제 존재 여부는 stat_path 가 판정한다
+  // (존재하지 않으면 밑줄/링크가 켜지지 않음).
   return text;
 }
 

@@ -736,6 +736,11 @@ export function TerminalView({
             return;
           }
           // 커서를 먼저 켜 데코레이션 생성과 분리한다(밑줄 실패해도 커서는 동작).
+          // 의도적으로 hitTest 없이 켠다: 이 검증은 드래그 선택 직후에 도착하고
+          // 그 릴리스 지점은 거의 항상 선택한 경로 위이므로(=hover 중) 즉시 포인터를
+          // 보여주는 게 맞다. 마우스가 경로 밖이거나 키보드 선택인 드문 경우엔 다음
+          // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
+          // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
           setPathLinkCursor(true);
           pathLink.setVerifiedSelection({
             bufferLine,
