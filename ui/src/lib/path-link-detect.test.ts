@@ -8,6 +8,7 @@ import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
   decidePathLinkAction,
+  mapSelectionToPathRange,
 } from "./path-link-detect";
 
 describe("looksLikePath", () => {
@@ -251,5 +252,35 @@ describe("decidePathLinkAction", () => {
   });
   it("파일이면 openFile", () => {
     expect(decidePathLinkAction({ exists: true, isDirectory: false })).toBe("openFile");
+  });
+});
+
+describe("mapSelectionToPathRange", () => {
+  // 핵심 회귀(#363): xterm getSelectionPosition() 은 0-based·end exclusive,
+  // provider 는 1-based 절대 버퍼 라인 → +1 보정이 없으면 밑줄이 좌상단으로 밀린다.
+  it("0-based 선택을 1-based 절대 버퍼 좌표로 보정한다 (선택 전체)", () => {
+    // 버퍼 라인 5(0-based 4)에서 컬럼 2~9(0-based) 선택, end exclusive=10.
+    const pos = { start: { x: 2, y: 4 }, end: { x: 10, y: 4 } };
+    const r = mapSelectionToPathRange(pos, "  src/a.ts", "src/a.ts");
+    // 토큰 "src/a.ts" 가 raw 첫 줄에서 인덱스 2 → 시작 0-based 2+2=4, 1-based 5.
+    expect(r.bufferLine).toBe(5); // y 4 → 5
+    expect(r.startCol).toBe(5); // (2+2)+1
+    expect(r.endCol).toBe(12); // 4 + len(8) - 1 = 11, +1 = 12
+  });
+
+  it("토큰을 못 찾으면 선택 전체 폭을 1-based 로 매핑", () => {
+    const pos = { start: { x: 0, y: 0 }, end: { x: 5, y: 0 } };
+    const r = mapSelectionToPathRange(pos, "abc", "zzz");
+    expect(r.bufferLine).toBe(1); // y 0 → 1
+    expect(r.startCol).toBe(1); // 0 → 1
+    expect(r.endCol).toBe(5); // end exclusive 5 → 마지막 셀 4(0-based) → 1-based 5
+  });
+
+  it("여러 줄 선택이면 첫 줄(start.y)만 사용한다", () => {
+    const pos = { start: { x: 3, y: 7 }, end: { x: 2, y: 9 } };
+    const r = mapSelectionToPathRange(pos, "/etc/hosts", "/etc/hosts");
+    expect(r.bufferLine).toBe(8); // y 7 → 8
+    expect(r.startCol).toBe(4); // (3+0)+1, 토큰 인덱스 0
+    expect(r.endCol).toBe(13); // 3 + len(10) - 1 = 12, +1 = 13
   });
 });

@@ -14,6 +14,7 @@ import {
   isWithinPathLengthLimit,
   joinCwdPath,
   decidePathLinkAction,
+  mapSelectionToPathRange,
 } from "@/lib/path-link-detect";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -709,22 +710,11 @@ export function TerminalView({
         clearPathLinkSelection();
         return;
       }
-      // 여러 줄 선택은 미지원: 첫 줄(start.y)만 밑줄 대상으로 한다.
-      // xterm 의 getSelectionPosition() 좌표는 1-based 이고 end.x 는 exclusive
-      // (선택 마지막 셀 +1)다. provider 의 ILink range/ provideLinks 도 1-based.
-      // 선택 원문(raw)에서 trim 으로 떼어낸 앞쪽 장식(공백/따옴표/괄호) 길이만큼
-      // 시작 컬럼을 밀어, 실제 경로 텍스트가 차지하는 셀에만 밑줄이 가게 한다.
-      const bufferLine = pos.start.y; // 1-based 버퍼 라인
+      // 선택 좌표(0-based, end exclusive)를 1-based 절대 버퍼 좌표로 매핑한다.
+      // (getSelectionPosition 과 provideLinks/ILink.range 의 좌표계 불일치 보정 —
+      //  mapSelectionToPathRange 주석 참고. 여러 줄 선택은 첫 줄만 사용.)
       const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
-      const tokenIdx = rawFirstLine.indexOf(token);
-      // 선택이 한 줄이고 토큰 위치를 찾으면 정확히 매핑, 아니면 선택 전체 폭 사용.
-      let startCol = pos.start.x;
-      let endCol = pos.start.x === pos.end.x ? pos.start.x : pos.end.x - 1;
-      if (pos.start.y === pos.end.y && tokenIdx >= 0) {
-        startCol = pos.start.x + tokenIdx;
-        endCol = startCol + token.length - 1;
-      }
-      if (endCol < startCol) endCol = startCol;
+      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(pos, rawFirstLine, token);
 
       const seq = ++pathLinkSelectionSeq;
       statPath(absPath)

@@ -279,3 +279,66 @@ export function decidePathLinkAction(stat: {
   if (!stat.exists) return "none";
   return stat.isDirectory ? "changeDir" : "openFile";
 }
+
+/** xterm `getSelectionPosition()` 가 돌려주는 선택 좌표(모델 좌표). */
+export interface SelectionPos {
+  /** 선택 시작 셀. */
+  start: { x: number; y: number };
+  /** 선택 끝 셀. */
+  end: { x: number; y: number };
+}
+
+/** provider 에 넘길 1-based 절대 버퍼 좌표 범위. */
+export interface MappedPathRange {
+  /** 1-based 절대 버퍼 라인. */
+  bufferLine: number;
+  /** 1-based 시작 컬럼(inclusive). */
+  startCol: number;
+  /** 1-based 끝 컬럼(inclusive). */
+  endCol: number;
+}
+
+/**
+ * xterm 선택 좌표를 검증 선택 범위(1-based 절대 버퍼 좌표)로 매핑한다.
+ *
+ * 좌표계 주의: `Terminal.getSelectionPosition()` 은 SelectionService 의 모델
+ * 좌표(selectionStart/End)를 가공 없이 반환하는데, 이는 **0-based** 이고 `end`
+ * 는 **exclusive**(마지막 선택 셀 +1)다. 타입 정의의 "1-based" 주석과 실제
+ * 구현이 어긋나는 알려진 불일치. 반면 `ILinkProvider.provideLinks` 의
+ * `bufferLineNumber` 와 `ILink.range` 의 셀 좌표는 **1-based 절대 버퍼 라인**
+ * (기존 indented-link-provider 와 동일)이다. 따라서 여기서 0-based → 1-based 로
+ * 보정하지 않으면 밑줄이 한 행 위·한 칸 왼쪽에 그려진다(#363 회귀).
+ *
+ * 단일 라인 선택을 가정한다. `rawFirstLine`(선택 원문 첫 줄)에서 `token`
+ * (trim 된 경로) 위치를 찾으면, 앞쪽 장식(공백/따옴표/괄호)을 떼어낸 만큼
+ * 시작 컬럼을 밀어 실제 경로 셀에만 밑줄이 가게 한다. 여러 줄 선택이면 첫 줄만
+ * 사용한다(깨지지 않게).
+ */
+export function mapSelectionToPathRange(
+  pos: SelectionPos,
+  rawFirstLine: string,
+  token: string,
+): MappedPathRange {
+  const sameLine = pos.start.y === pos.end.y;
+  // 0-based 프레임에서 먼저 계산.
+  let startCol0 = pos.start.x;
+  // end.x 는 exclusive → 마지막 선택 셀은 end.x - 1. 시작==끝(빈 폭)이면 시작 셀.
+  let endCol0 = pos.start.x === pos.end.x ? pos.start.x : pos.end.x - 1;
+  const tokenIdx = rawFirstLine.indexOf(token);
+  if (tokenIdx >= 0) {
+    // 토큰을 첫 줄에서 찾으면 줄 수와 무관하게 첫 줄 기준으로 정확히 매핑.
+    // (rawFirstLine 은 선택 시작 컬럼부터의 첫 줄 내용 → +pos.start.x 가 절대 컬럼)
+    startCol0 = pos.start.x + tokenIdx;
+    endCol0 = startCol0 + token.length - 1;
+  } else if (!sameLine) {
+    // 여러 줄 선택인데 토큰 위치 불명: end.x 는 다른 줄 좌표라 무의미 → 시작 셀만.
+    endCol0 = startCol0;
+  }
+  if (endCol0 < startCol0) endCol0 = startCol0;
+  // 0-based → 1-based 절대 버퍼 좌표로 보정.
+  return {
+    bufferLine: pos.start.y + 1,
+    startCol: startCol0 + 1,
+    endCol: endCol0 + 1,
+  };
+}
