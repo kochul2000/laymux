@@ -8,7 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
-import { createPathLinkProvider } from "@/lib/path-link-provider";
+import { createPathLinkController } from "@/lib/path-link-provider";
 import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
@@ -480,7 +480,7 @@ export function TerminalView({
   cwdRef.current = cwd;
   // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
   // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
-  const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkProvider> | null>(null);
+  const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkController> | null>(null);
   const pathLinkEvaluateRef = useRef<(() => void) | null>(null);
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
@@ -635,17 +635,14 @@ export function TerminalView({
       ),
     );
 
-    // Issue #363 (선택 기반 재설계): 사용자가 *선택(드래그)* 한 파일/디렉토리
-    // 경로에 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로
-    // 전파한다. 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고
-    // Windows 에서 동작 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은
-    // onSelectionChange/pointerup 시점에 **선택당 1회만** 수행하고, provider 는
-    // 그때 저장된 검증 범위에만 ILink 를 돌려준다(provideLinks 에서 stat 안 함).
-    //
-    // registerLinkProvider 가 반환하는 IDisposable 은 따로 보관하지 않는다.
-    // 이 provider 는 이 effect(터미널 1회 생성) 안에서만 등록되고, cleanup 의
-    // terminal.dispose() 가 모든 link provider 를 함께 해제하므로 누수 없다.
-    const pathLink = createPathLinkProvider(terminal, {
+    // Issue #363 (선택 기반): 사용자가 *선택(드래그)* 한 파일/디렉토리 경로에
+    // 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다.
+    // 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고 Windows 에서 동작
+    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 onSelectionChange/pointerup
+    // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
+    // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
+    // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
+    const pathLink = createPathLinkController(terminal, {
       onOpenPath: (absPath) => {
         useFileViewerStore.getState().openFileViewer(absPath);
       },
@@ -668,7 +665,6 @@ export function TerminalView({
       },
     });
     pathLinkControllerRef.current = pathLink;
-    terminal.registerLinkProvider(pathLink.provider);
 
     // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
     // 적용한다. xterm 의 링크 hover 포인터는 *활성 텍스트 선택* 위에서는 선택
@@ -678,36 +674,10 @@ export function TerminalView({
       wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
     };
 
-    // 마지막 마우스 위치(viewport 좌표). 비동기 검증 완료 후 합성 mousemove 를
-    // 보내 xterm linkifier 를 즉시 재질의시키는 데 쓴다(아래 refreshPathLinkHover).
-    let lastMousePos: { clientX: number; clientY: number } | null = null;
-
-    // 검증이 끝나 밑줄/클릭을 켜야 할 때 호출. xterm Linkifier 는 mousemove 시점에만
-    // provideLinks 를 재질의하므로, refresh() 만으로는 마우스가 정지해 있는 동안
-    // 밑줄·클릭이 안 켜진다(#363: "나갔다 돌아와야 동작"). 그래서 셀을 다시 그린
-    // 뒤 현재 마우스 위치로 합성 mousemove 를 디스패치해 즉시 재질의하게 한다.
-    const refreshPathLinkHover = () => {
-      const term = terminalRef.current;
-      if (term) term.refresh(0, term.rows - 1);
-      const screenEl = term?.element?.querySelector(".xterm-screen");
-      if (screenEl && lastMousePos) {
-        screenEl.dispatchEvent(
-          new MouseEvent("mousemove", {
-            clientX: lastMousePos.clientX,
-            clientY: lastMousePos.clientY,
-            bubbles: true,
-          }),
-        );
-      }
-    };
-
-    // 검증된 선택을 비우고(있으면) 밑줄을 거둔다. 선택 해제/변경 공통 경로.
+    // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
-      if (pathLink.getCurrent() === null) return;
       pathLink.clear();
-      const t = terminalRef.current;
-      if (t) t.refresh(0, t.rows - 1);
     };
 
     // 선택 settle 시점(onSelectionChange / pointerup)에 1회 호출되는 검증 흐름.
@@ -765,7 +735,6 @@ export function TerminalView({
             isDirectory: action === "changeDir",
           });
           setPathLinkCursor(true);
-          refreshPathLinkHover();
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
@@ -1520,8 +1489,7 @@ export function TerminalView({
       if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     };
-    const handleMouseMove = (e: MouseEvent) => {
-      lastMousePos = { clientX: e.clientX, clientY: e.clientY };
+    const handleMouseMove = () => {
       if (outerEl) outerEl.style.cursor = "";
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
