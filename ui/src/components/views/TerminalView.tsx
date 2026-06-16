@@ -2480,14 +2480,22 @@ export function TerminalView({
   const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
+  // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
+  // they do not overlap. In "separate" mode the scrollbar reserves a 14px
+  // gutter, so push the button further left; in "overlay" mode the slider is
+  // narrower and renders on top of content.
+  const scrollBtnRight = scrollbarStyle === "separate" ? 14 + 12 : 16;
+
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
     "--terminal-foreground-color": string;
     "--terminal-background-color": string;
+    "--terminal-scroll-btn-right": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
     "--terminal-foreground-color": termFg,
     "--terminal-background-color": termBg,
+    "--terminal-scroll-btn-right": `${scrollBtnRight}px`,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };

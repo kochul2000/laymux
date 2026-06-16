@@ -4388,6 +4388,24 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     });
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump3")).not.toBeInTheDocument();
   });
+
+  // Issue #361: the button must clear the scrollbar slider. The right offset is
+  // exposed via the --terminal-scroll-btn-right CSS variable on the wrapper so
+  // it can be widened when the scrollbar reserves its own gutter.
+  it("uses a 16px right offset in overlay scrollbar mode", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "overlay" });
+    render(<TerminalView instanceId="t-sb-overlay" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-overlay");
+    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("16px");
+  });
+
+  it("pushes the button left past the reserved gutter in separate scrollbar mode", () => {
+    useSettingsStore.getState().setTerminal({ scrollbarStyle: "separate" });
+    render(<TerminalView instanceId="t-sb-separate" profile="PowerShell" syncGroup="" />);
+    const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
+    // 14px reserved scrollbar gutter + 12px clearance.
+    expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
+  });
 });
 
 describe("shouldEnableTerminalWebgl", () => {

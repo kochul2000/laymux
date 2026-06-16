@@ -371,10 +371,13 @@
 
 /* Issue #349: floating jump-to-bottom button, shown while scrolled up into
    scrollback. Sits above the overlay caret / loading layers so it stays
-   clickable, and clears the overlay scrollbar gutter on the right. */
+   clickable, and clears the overlay scrollbar gutter on the right.
+   Issue #361: the right offset is driven by --terminal-scroll-btn-right so the
+   button clears the scrollbar slider (wider gutter in "separate" mode) instead
+   of overlapping it. */
 .terminal-scroll-to-bottom {
   position: absolute;
-  right: 16px;
+  right: var(--terminal-scroll-btn-right, 16px);
   bottom: 16px;
   display: flex;
   align-items: center;
