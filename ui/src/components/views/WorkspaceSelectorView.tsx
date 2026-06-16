@@ -1047,7 +1047,6 @@ export function WorkspaceSelectorView() {
   const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
 
   const notifications = useNotificationStore((s) => s.notifications);
-  const markWorkspaceAsRead = useNotificationStore((s) => s.markWorkspaceAsRead);
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
 
   const hideMode = useUiStore((s) => s.hideMode);
@@ -1160,8 +1159,12 @@ export function WorkspaceSelectorView() {
   );
 
   const handleSelectWorkspace = (wsId: string) => {
-    markWorkspaceAsRead(wsId);
-    // Mark backend notifications as read for this workspace's terminals
+    // UI dismissal is NOT done here: entering the workspace funnels through
+    // setActiveWorkspace, and AppLayout's focus effect performs the read-marking
+    // per the active dismiss mode (ADR 0010, issue #365). Doing markWorkspaceAsRead
+    // here would ignore paneFocus/manual modes and re-scatter dismissal into an
+    // input handler — exactly what made dismissal key/device-dependent.
+    // Backend (OS-native) notification state is a separate concern synced below.
     const wsTerminalIds =
       workspaces
         .find((ws) => ws.id === wsId)
