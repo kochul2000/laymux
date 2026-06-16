@@ -8,6 +8,15 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
+import {
+  trimSelectionToPath,
+  isWithinPathLengthLimit,
+  joinCwdPath,
+  decidePathLinkAction,
+  mapSelectionToPathRange,
+} from "@/lib/path-link-detect";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
@@ -25,6 +34,8 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  statPath,
+  handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
 } from "@/lib/tauri-api";
@@ -472,6 +483,16 @@ export function TerminalView({
   cwdSendRef.current = cwdSend;
   const cwdReceiveRef = useRef(cwdReceive);
   cwdReceiveRef.current = cwdReceive;
+  // 리뷰 C: path-link provider 의 getCwd 가 hover(줄)마다 instances.find 로
+  // store 배열을 전수 스캔하지 않도록, 이 pane 의 cwd 를 selector 로 한 번
+  // 구독해 ref 로 유지한다(syncGroupRef 와 동일 패턴).
+  const cwd = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.cwd);
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
+  // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
+  // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
+  const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkController> | null>(null);
+  const pathLinkEvaluateRef = useRef<(() => void) | null>(null);
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -577,6 +598,9 @@ export function TerminalView({
       defaultProfileDefaults.cursorBlink;
     const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
     const terminal = new Terminal({
+      // #363: 선택한 경로 밑줄을 IDecoration(registerDecoration)으로 그린다.
+      // 데코레이션은 xterm 의 proposed API 라 이 옵션이 없으면 throw 한다.
+      allowProposedApi: true,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
       ...(cursorOptions.cursorWidth ? { cursorWidth: cursorOptions.cursorWidth } : {}),
@@ -624,6 +648,125 @@ export function TerminalView({
         () => useSettingsStore.getState().paste.linkJoin,
       ),
     );
+
+    // Issue #363 (선택 기반): 사용자가 *선택(드래그)* 한 파일/디렉토리 경로에
+    // 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다.
+    // 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고 Windows 에서 동작
+    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 onSelectionChange/pointerup
+    // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
+    // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
+    // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
+    const pathLink = createPathLinkController(terminal, {
+      onOpenPath: (absPath) => {
+        useFileViewerStore.getState().openFileViewer(absPath);
+      },
+      onChangeDir: (absPath) => {
+        // 클릭한 디렉토리를 새 cwd 로 **제안**해 기존 중앙화 전파 경로(do_sync_cwd)에
+        // 그대로 태운다. FileExplorer.navigateTo 와 동일하게:
+        //   - origin 으로 **비-터미널 sentinel** 을 넘긴다 → 백엔드가 소스의 tracked
+        //     cwd 를 발명(line 639)하거나 소스를 대상에서 제외하지 않는다. 클릭한
+        //     pane 도 특별취급 없이 일반 대상이 된다.
+        //   - **force 를 넣지 않는다** → cwd_receive 필터(filter_targets_cwd_receive)가
+        //     적용되어, receive 를 켠 pane(클릭한 pane 포함)만 이동한다. dock·다른
+        //     pane 도 동일 정책. (force=true 는 receive 를 무시하므로 쓰지 않는다.)
+        const group = syncGroupRef.current;
+        if (!group) return;
+        handleLxMessage(
+          JSON.stringify({
+            action: "sync-cwd",
+            path: absPath,
+            terminal_id: `${instanceId}__pathlink`,
+            group_id: group,
+          }),
+        ).catch((err) => {
+          console.warn(`[pathLink] ${instanceId} cwd 전파 실패:`, err);
+        });
+      },
+    });
+    pathLinkControllerRef.current = pathLink;
+
+    // 검증된 경로가 선택돼 클릭 가능할 때 포인터(손가락) 커서를 호스트에 직접
+    // 적용한다. xterm 의 링크 hover 포인터는 *활성 텍스트 선택* 위에서는 선택
+    // 커서(I-beam)에 밀려 적용되지 않으므로(우리 모델은 항상 선택이 떠 있다),
+    // 검증 성공/해제 시 클래스를 토글해 결정적으로 처리한다.
+    const setPathLinkCursor = (active: boolean) => {
+      wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
+    };
+
+    // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
+    const clearPathLinkSelection = () => {
+      setPathLinkCursor(false);
+      pathLink.clear();
+    };
+
+    // 선택 settle 시점(onSelectionChange / pointerup)에 1회 호출되는 검증 흐름.
+    // 동시 호출/race 를 막기 위해 토큰으로 마지막 요청만 반영한다.
+    let pathLinkSelectionSeq = 0;
+    const evaluatePathLinkSelection = () => {
+      const settings = useSettingsStore.getState().terminal;
+      if (!settings.pathLinkEnabled) {
+        clearPathLinkSelection();
+        return;
+      }
+      const t = terminalRef.current;
+      if (!t) return;
+      const selection = t.getSelection();
+      // 비었거나 길이 초과 → 파싱 없이 기존 상태 비움.
+      if (!isWithinPathLengthLimit(selection, settings.pathLinkMaxLength)) {
+        clearPathLinkSelection();
+        return;
+      }
+      const token = trimSelectionToPath(selection);
+      if (!token) {
+        clearPathLinkSelection();
+        return;
+      }
+      const absPath = joinCwdPath(cwdRef.current, token);
+      if (!absPath) {
+        clearPathLinkSelection();
+        return;
+      }
+      const pos = t.getSelectionPosition();
+      if (!pos) {
+        clearPathLinkSelection();
+        return;
+      }
+      // 선택 좌표(0-based, end exclusive)를 1-based 절대 버퍼 좌표로 매핑한다.
+      // (getSelectionPosition 과 provideLinks/ILink.range 의 좌표계 불일치 보정 —
+      //  mapSelectionToPathRange 주석 참고. 여러 줄 선택은 첫 줄만 사용.)
+      const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
+      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(pos, rawFirstLine, token);
+
+      const seq = ++pathLinkSelectionSeq;
+      statPath(absPath)
+        .then((info) => {
+          if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
+          const action = decidePathLinkAction(info);
+          if (action === "none") {
+            clearPathLinkSelection();
+            return;
+          }
+          // 커서를 먼저 켜 데코레이션 생성과 분리한다(밑줄 실패해도 커서는 동작).
+          // 의도적으로 hitTest 없이 켠다: 이 검증은 드래그 선택 직후에 도착하고
+          // 그 릴리스 지점은 거의 항상 선택한 경로 위이므로(=hover 중) 즉시 포인터를
+          // 보여주는 게 맞다. 마우스가 경로 밖이거나 키보드 선택인 드문 경우엔 다음
+          // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
+          // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
+          setPathLinkCursor(true);
+          pathLink.setVerifiedSelection({
+            bufferLine,
+            startCol,
+            endCol,
+            absPath,
+            isDirectory: action === "changeDir",
+          });
+        })
+        .catch(() => {
+          if (seq !== pathLinkSelectionSeq) return;
+          clearPathLinkSelection();
+        });
+    };
+    pathLinkEvaluateRef.current = evaluatePathLinkSelection;
 
     terminalRef.current = terminal;
 
@@ -1371,11 +1514,44 @@ export function TerminalView({
       if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     };
-    const handleMouseMove = () => {
+    const handleMouseMove = (e: MouseEvent) => {
       if (outerEl) outerEl.style.cursor = "";
+      // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
+      setPathLinkCursor(pathLink.hitTest(e.clientX, e.clientY));
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
+
+    // #363: 밑줄(검증된 경로) 클릭으로 열기/이동. 데코레이션은 pointer-events:none
+    // 이라 mousedown/up 은 그대로 xterm 으로 흘러가 선택/드래그가 정상 동작한다.
+    // 여기서는 관찰만 하여 — 밑줄 위에서 시작한 '클릭'(드래그 아님)이면 캡처한
+    // 경로를 연다(파일=viewer, 디렉토리=cwd 전파). 드래그면 무시해 일반 재선택이
+    // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
+    // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
+    let pathLinkPress: { sel: VerifiedPathSelection; x: number; y: number } | null = null;
+    const PATH_LINK_CLICK_SLOP = 4;
+    const handlePathLinkMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) {
+        pathLinkPress = null;
+        return;
+      }
+      const sel = pathLink.getCurrent();
+      pathLinkPress =
+        sel && pathLink.hitTest(e.clientX, e.clientY) ? { sel, x: e.clientX, y: e.clientY } : null;
+    };
+    const handlePathLinkMouseUp = (e: MouseEvent) => {
+      const press = pathLinkPress;
+      pathLinkPress = null;
+      if (!press) return;
+      const moved =
+        Math.abs(e.clientX - press.x) > PATH_LINK_CLICK_SLOP ||
+        Math.abs(e.clientY - press.y) > PATH_LINK_CLICK_SLOP;
+      if (moved) return; // 드래그 → 열지 않음(재선택 의도).
+      pathLink.activate(press.sel);
+    };
+    // capture 단계로 xterm 핸들러보다 먼저 관찰(전파는 막지 않는다).
+    outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
+    window.addEventListener("mouseup", handlePathLinkMouseUp);
 
     // Copy-on-select: auto-copy to clipboard when text is selected.
     // `runTerminalCopy` handles the has-selection guard and smart-indent
@@ -1384,6 +1560,9 @@ export function TerminalView({
       if (useSettingsStore.getState().terminal.copyOnSelect) {
         runTerminalCopy(terminal);
       }
+      // Issue #363: 선택이 바뀔 때마다 path-link 검증(선택당 stat 1회)을 갱신한다.
+      // copyOnSelect 와 독립적으로 동작(off 여도 링크는 켜질 수 있음).
+      pathLinkEvaluateRef.current?.();
     });
 
     // Issue #230: drag ending outside the terminal. xterm.js relies on
@@ -1407,6 +1586,8 @@ export function TerminalView({
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       const onWindowPointerUp = () => {
         pointerUpWatcher = null;
+        // Issue #363: 드래그 종료 시 path-link 검증을 settle(선택당 stat 1회).
+        pathLinkEvaluateRef.current?.();
         if (!useSettingsStore.getState().terminal.copyOnSelect) return;
         runTerminalCopy(terminal);
       };
@@ -2186,6 +2367,8 @@ export function TerminalView({
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
+      outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
+      window.removeEventListener("mouseup", handlePathLinkMouseUp);
       wrapperEl?.removeEventListener("mousedown", handleModifierLinkClick, true);
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();

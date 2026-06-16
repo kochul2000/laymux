@@ -1423,6 +1423,35 @@ function TerminalSection() {
           onChange={(v) => update({ showScrollToBottomButton: v })}
         />
       </div>
+
+      <SubGroup title={t("terminal.pathLinkGroup")}>
+        <ToggleRow
+          label={t("terminal.pathLink")}
+          desc={t("terminal.pathLinkDesc")}
+          testid="path-link-enabled-toggle"
+          checked={terminal.pathLinkEnabled}
+          onChange={(v) => update({ pathLinkEnabled: v })}
+        />
+
+        <SettingRow
+          label={t("terminal.pathLinkMaxLength")}
+          desc={t("terminal.pathLinkMaxLengthDesc")}
+        >
+          <FocusInput
+            data-testid="path-link-max-length-input"
+            type="number"
+            min={8}
+            max={4096}
+            step={1}
+            className={inputCls}
+            style={{ width: 90 }}
+            value={terminal.pathLinkMaxLength}
+            onChange={(e) =>
+              update({ pathLinkMaxLength: Math.max(8, Math.round(Number(e.target.value) || 0)) })
+            }
+          />
+        </SettingRow>
+      </SubGroup>
     </div>
   );
 }

@@ -110,6 +110,10 @@ export interface TerminalSettings {
   copyOnSelect: boolean;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
   scrollbarStyle: ScrollbarStyle;
+  /** Issue #363: underline selected file/dir paths so a click opens the file or changes cwd. */
+  pathLinkEnabled: boolean;
+  /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
+  pathLinkMaxLength: number;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
 }
@@ -501,6 +505,8 @@ export const DEFAULT_PASTE: PasteSettings = {
 export const DEFAULT_TERMINAL: TerminalSettings = {
   copyOnSelect: true,
   scrollbarStyle: "overlay",
+  pathLinkEnabled: true,
+  pathLinkMaxLength: 256,
   showScrollToBottomButton: true,
 };
 

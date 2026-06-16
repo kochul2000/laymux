@@ -223,6 +223,11 @@
       "scrollbarStyleDesc": "터미널 스크롤바 표시 방식. Overlay는 콘텐츠 위에 겹쳐서, Separate는 별도 공간을 차지합니다.",
       "scrollbarOverlay": "Overlay (콘텐츠 위에 겹침)",
       "scrollbarSeparate": "Separate (별도 공간 차지)",
+      "pathLinkGroup": "파일 경로 링크",
+      "pathLink": "선택 경로 링크",
+      "pathLinkDesc": "선택한 파일/폴더 경로에 밑줄을 긋고, 클릭하면 파일은 뷰어로 열고 폴더는 디렉토리를 이동합니다.",
+      "pathLinkMaxLength": "최대 경로 길이",
+      "pathLinkMaxLengthDesc": "이 길이(글자 수)를 넘는 선택은 경로로 보지 않습니다.",
       "scrollToBottomButton": "맨 아래로 이동 버튼",
       "scrollToBottomButtonDesc": "스크롤백을 위로 올렸을 때 맨 아래로 이동하는 떠 있는 버튼을 표시합니다."
     },
