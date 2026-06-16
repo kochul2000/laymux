@@ -50,6 +50,13 @@
 
   /* utility */
   --separator-bg: rgba(255, 255, 255, 0.08); /* intentionally same as --hover-bg-strong */
+
+  /* App UI chrome font (titles, buttons, lists, workspace selector).
+     --ui-font-default is the single source of truth for the built-in fallback stack
+     (referenced by useAppTheme so the literal lives in one place). --ui-font is what
+     the UI reads; useAppTheme overrides it at runtime from appearance.uiFontFamily. */
+  --ui-font-default: "Consolas", "Fira Code", monospace;
+  --ui-font: var(--ui-font-default);
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
@@ -71,11 +78,22 @@
 
 @layer base {
   body {
-    font-family: "Consolas", "Fira Code", monospace;
+    font-family: var(--ui-font);
     background: var(--bg-base);
     color: var(--text-primary);
     height: 100vh;
     overflow: hidden;
+  }
+
+  /* Form controls don't inherit font-family from the body by default (UA style),
+     so they'd ignore --ui-font. Make them follow the interface font. Elements that
+     need a specific face (terminal, memo/issue content, icon glyphs, keycaps) set
+     font-family inline, which still wins over this rule. */
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
   }
 
   #root {

@@ -76,6 +76,12 @@ export interface AppearanceSettings {
   themeId: string;
   /** App-wide default font for non-terminal views (Memo, Issue Reporter, etc.). */
   font: FontSettings;
+  /**
+   * Font family for the app UI chrome (view titles, buttons, lists, workspace
+   * selector, dock). Empty = built-in default stack. Family only — chrome sizes
+   * are token-driven (`--fs-*`), so size/weight are intentionally not exposed.
+   */
+  uiFontFamily: string;
 }
 
 /** Paste / clipboard behavior. */
@@ -476,6 +482,7 @@ export const DEFAULT_LANGUAGE: LanguageSetting = "system";
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   themeId: "catppuccin-mocha",
   font: { ...DEFAULT_APP_FONT },
+  uiFontFamily: "",
 };
 
 export const DEFAULT_PASTE: PasteSettings = {

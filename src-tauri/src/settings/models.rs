@@ -565,6 +565,11 @@ pub struct AppearanceSettings {
     /// App-wide default font for non-terminal views (Memo, Issue Reporter, etc.).
     #[serde(default)]
     pub font: FontSettings,
+    /// Font family for the app UI chrome (view titles, buttons, lists, workspace
+    /// selector, dock). Empty = built-in default stack. Family only — chrome sizes
+    /// are token-driven, so size/weight are intentionally not configurable here.
+    #[serde(default)]
+    pub ui_font_family: String,
 }
 
 impl Default for AppearanceSettings {
@@ -572,6 +577,7 @@ impl Default for AppearanceSettings {
         Self {
             theme_id: default_app_theme_id(),
             font: FontSettings::default(),
+            ui_font_family: String::new(),
         }
     }
 }
