@@ -678,6 +678,29 @@ export function TerminalView({
       wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
     };
 
+    // 마지막 마우스 위치(viewport 좌표). 비동기 검증 완료 후 합성 mousemove 를
+    // 보내 xterm linkifier 를 즉시 재질의시키는 데 쓴다(아래 refreshPathLinkHover).
+    let lastMousePos: { clientX: number; clientY: number } | null = null;
+
+    // 검증이 끝나 밑줄/클릭을 켜야 할 때 호출. xterm Linkifier 는 mousemove 시점에만
+    // provideLinks 를 재질의하므로, refresh() 만으로는 마우스가 정지해 있는 동안
+    // 밑줄·클릭이 안 켜진다(#363: "나갔다 돌아와야 동작"). 그래서 셀을 다시 그린
+    // 뒤 현재 마우스 위치로 합성 mousemove 를 디스패치해 즉시 재질의하게 한다.
+    const refreshPathLinkHover = () => {
+      const term = terminalRef.current;
+      if (term) term.refresh(0, term.rows - 1);
+      const screenEl = term?.element?.querySelector(".xterm-screen");
+      if (screenEl && lastMousePos) {
+        screenEl.dispatchEvent(
+          new MouseEvent("mousemove", {
+            clientX: lastMousePos.clientX,
+            clientY: lastMousePos.clientY,
+            bubbles: true,
+          }),
+        );
+      }
+    };
+
     // 검증된 선택을 비우고(있으면) 밑줄을 거둔다. 선택 해제/변경 공통 경로.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
@@ -742,8 +765,7 @@ export function TerminalView({
             isDirectory: action === "changeDir",
           });
           setPathLinkCursor(true);
-          const term = terminalRef.current;
-          if (term) term.refresh(0, term.rows - 1);
+          refreshPathLinkHover();
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
@@ -1498,7 +1520,8 @@ export function TerminalView({
       if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     };
-    const handleMouseMove = () => {
+    const handleMouseMove = (e: MouseEvent) => {
+      lastMousePos = { clientX: e.clientX, clientY: e.clientY };
       if (outerEl) outerEl.style.cursor = "";
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
