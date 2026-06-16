@@ -103,6 +103,9 @@ const RESIZE_FIT_DEBOUNCE_MS = 80;
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
+/** "separate" 스크롤바 모드에서 xterm overviewRuler가 예약하는 거터 폭(px). */
+const SCROLLBAR_SEPARATE_GUTTER_PX = 14;
+
 const textEncoder = new TextEncoder();
 
 function markBackendInteractiveTerminal(instanceId: string, activity: TerminalActivityInfo): void {
@@ -550,7 +553,7 @@ export function TerminalView({
     // Scrollbar overlay mode: set overviewRuler width to 0 so FitAddon
     // does not reserve space for the scrollbar — it renders on top of content.
     const sbStyle = settingsState.terminal.scrollbarStyle ?? "overlay";
-    const overviewRulerWidth = sbStyle === "overlay" ? 0 : 14;
+    const overviewRulerWidth = sbStyle === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
 
     const resolvedFont = settingsState.resolveFont(
       profile,
@@ -2447,7 +2450,7 @@ export function TerminalView({
     const term = terminalRef.current;
     if (!term?.options) return;
     try {
-      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : 14;
+      const newWidth = scrollbarStyleForEffect === "overlay" ? 0 : SCROLLBAR_SEPARATE_GUTTER_PX;
       term.options.overviewRuler = { width: newWidth };
       // The overviewRuler option update is harmless while hidden, but
       // fit() on a 0×0 container would PTY-resize to cols=0. Defer.
@@ -2480,14 +2483,23 @@ export function TerminalView({
   const scrollbarStyle = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");
   const scrollbarClass = scrollbarStyle === "overlay" ? "scrollbar-overlay" : "scrollbar-separate";
 
+  // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
+  // they do not overlap. In "separate" mode the scrollbar reserves a
+  // SCROLLBAR_SEPARATE_GUTTER_PX-wide gutter, so push the button further left
+  // (plus a 12px slider clearance); in "overlay" mode the slider is narrower
+  // and renders on top of content.
+  const scrollBtnRight = scrollbarStyle === "separate" ? SCROLLBAR_SEPARATE_GUTTER_PX + 12 : 16;
+
   const wrapperStyle: CSSProperties & {
     "--terminal-overlay-caret-color": string;
     "--terminal-foreground-color": string;
     "--terminal-background-color": string;
+    "--terminal-scroll-btn-right": string;
   } = {
     "--terminal-overlay-caret-color": overlayCaretColor,
     "--terminal-foreground-color": termFg,
     "--terminal-background-color": termBg,
+    "--terminal-scroll-btn-right": `${scrollBtnRight}px`,
     background: termBg,
     padding: `${pt}px ${pr}px ${pb}px ${pl}px`,
   };
