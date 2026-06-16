@@ -61,6 +61,11 @@ export function looksLikePath(token: string): boolean {
   if (isAbsolutePath(token)) return true;
 
   const sepCount = (token.match(/[\\/]/g) ?? []).length;
+  // 의도된 트레이드오프(리뷰 F): 슬래시 1개만 있어도 경로 후보로 본다.
+  // `n/a`, `TODO/FIXME`, `and/or` 같은 비경로도 후보가 되지만, 실제 밑줄/링크는
+  // 백엔드 stat_path 존재 검증을 통과해야만 켜진다(provider 의 "valid" 게이트).
+  // 즉 형태 판별은 느슨해도 false underline 은 나지 않는다. 존재하지 않는 토큰은
+  // invalid 로 캐시되어 재검증 비용도 TTL 동안 들지 않는다.
   if (sepCount >= 1) return true; // a/b, a/b.ext — 슬래시가 있으면 경로
 
   // 구분자 없음: 확장자 있는 단일 파일명만 허용(예: package.json).
@@ -131,6 +136,12 @@ export function findPathCandidateAtCol(lineText: string, col: number): PathCandi
   if (!text) return null;
   if (!looksLikePath(text)) return null;
 
+  // NOTE(와이드 문자 제약, 리뷰 E): 여기서 컬럼은 `translateToString()` 의
+  // *문자열 인덱스* 기준이다. CJK/이모지 같은 와이드 문자는 xterm 셀을 2칸
+  // 차지하므로(IBufferCellPosition.x), 줄에 와이드 문자가 앞서 있으면 밑줄
+  // 범위가 실제 셀 위치에서 어긋날 수 있다. 이는 기존 `indented-link-provider.ts`
+  // (offsetToPos 도 문자열 오프셋을 그대로 셀 컬럼으로 사용)와 동일한 알려진
+  // 제약이며, 두 provider 의 셀 매핑을 함께 고치는 것은 후속 이슈로 추적한다.
   const startCol = start + leading + 1; // 1-based
   const endCol = startCol + text.length - 1;
 

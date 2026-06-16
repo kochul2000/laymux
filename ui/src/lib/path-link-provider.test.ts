@@ -39,6 +39,61 @@ describe("PathValidationCache", () => {
     cache.ensure("/a", () => {});
     expect(validate).toHaveBeenCalledTimes(1);
   });
+
+  it("TTL 만료 후에는 get 이 undefined 를 주고 ensure 가 재검증한다", async () => {
+    let t = 1000;
+    const validate = vi.fn().mockResolvedValue(true);
+    const cache = new PathValidationCache(validate, { ttlMs: 100, now: () => t });
+
+    cache.ensure("/a", () => {});
+    await vi.waitFor(() => expect(cache.get("/a")).toBe("valid"));
+    expect(validate).toHaveBeenCalledTimes(1);
+
+    // TTL 경과 → 만료.
+    t += 101;
+    expect(cache.get("/a")).toBeUndefined();
+    expect(cache.ensure("/a", () => {})).toBe("pending");
+    expect(validate).toHaveBeenCalledTimes(2);
+  });
+
+  it("pending 항목은 TTL 로 만료시키지 않는다", () => {
+    let t = 0;
+    // resolve 되지 않는 validate → 영원히 pending.
+    const cache = new PathValidationCache(() => new Promise<boolean>(() => {}), {
+      ttlMs: 10,
+      now: () => t,
+    });
+    cache.ensure("/a", () => {});
+    expect(cache.get("/a")).toBe("pending");
+    t += 1000;
+    expect(cache.get("/a")).toBe("pending"); // 진행 중이므로 유지
+  });
+
+  it("maxEntries 초과 시 가장 오래된 항목부터 제거한다", async () => {
+    const cache = new PathValidationCache(vi.fn().mockResolvedValue(true), {
+      maxEntries: 2,
+      ttlMs: 10_000,
+    });
+    cache.ensure("/a", () => {});
+    cache.ensure("/b", () => {});
+    await vi.waitFor(() => {
+      expect(cache.get("/a")).toBe("valid");
+      expect(cache.get("/b")).toBe("valid");
+    });
+    // 세 번째 진입 → /a(가장 오래됨)가 밀려난다.
+    cache.ensure("/c", () => {});
+    await vi.waitFor(() => expect(cache.get("/c")).toBe("valid"));
+    expect(cache.get("/a")).toBeUndefined();
+    expect(cache.get("/b")).toBe("valid");
+  });
+
+  it("clear() 는 캐시를 전부 비운다", async () => {
+    const cache = new PathValidationCache(vi.fn().mockResolvedValue(true));
+    cache.ensure("/a", () => {});
+    await vi.waitFor(() => expect(cache.get("/a")).toBe("valid"));
+    cache.clear();
+    expect(cache.get("/a")).toBeUndefined();
+  });
 });
 
 /** getLine().translateToString() 만 제공하는 최소 Terminal mock. */
@@ -144,5 +199,30 @@ describe("createPathLinkProvider", () => {
       const links = provide(provider, 1);
       expect(links?.[0]?.text).toBe("/etc/hosts");
     });
+  });
+
+  it("cwd 가 바뀌면 검증 캐시를 무효화하고 새 cwd 로 재검증한다(리뷰 A)", async () => {
+    let cwd = "/proj-a";
+    // /proj-a/src/good.ts 만 존재, /proj-b/src/good.ts 는 없음.
+    const validate = vi.fn(async (p: string) => p === "/proj-a/src/good.ts");
+    const onValidated = vi.fn();
+    const terminal = makeTerminal("see src/good.ts");
+    const provider = createPathLinkProvider(terminal, {
+      getCwd: () => cwd,
+      validate,
+      onOpenPath: vi.fn(),
+      onValidated,
+    });
+
+    provide(provider, 1); // /proj-a 로 검증 시작
+    await vi.waitFor(() => expect(provide(provider, 1)).toHaveLength(1));
+    expect(validate).toHaveBeenCalledWith("/proj-a/src/good.ts");
+
+    // cwd 변경 → 캐시 무효화 후 새 절대경로로 재검증.
+    cwd = "/proj-b";
+    expect(provide(provider, 1)).toBeUndefined(); // 캐시 클리어 + 재검증 시작(pending)
+    await vi.waitFor(() => expect(validate).toHaveBeenCalledWith("/proj-b/src/good.ts"));
+    // /proj-b 는 존재하지 않으므로 링크 없음.
+    expect(provide(provider, 1)).toBeUndefined();
   });
 });

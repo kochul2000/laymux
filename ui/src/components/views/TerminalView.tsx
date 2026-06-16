@@ -464,6 +464,12 @@ export function TerminalView({
   cwdSendRef.current = cwdSend;
   const cwdReceiveRef = useRef(cwdReceive);
   cwdReceiveRef.current = cwdReceive;
+  // 리뷰 C: path-link provider 의 getCwd 가 hover(줄)마다 instances.find 로
+  // store 배열을 전수 스캔하지 않도록, 이 pane 의 cwd 를 selector 로 한 번
+  // 구독해 ref 로 유지한다(syncGroupRef 와 동일 패턴).
+  const cwd = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.cwd);
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -622,9 +628,26 @@ export function TerminalView({
     // CWD(터미널 instance 의 cwd)와 조합해 절대 경로로 만든 뒤, 백엔드
     // stat_path 로 실제 존재를 확인한 경로만 활성화한다(유효하면 밑줄,
     // 무효하면 밑줄 없음). URL 은 위의 WebLinks/indented provider 가 담당한다.
+    // 리뷰 B: 한 줄에 후보가 N개면 검증 resolve 가 N회 → onValidated 도 N회
+    // 호출될 수 있다. 매번 전체 뷰포트 refresh 하면 refresh storm 이 되므로,
+    // rAF 로 coalesce 해 한 프레임에 1회만 refresh 한다.
+    let pathLinkRefreshFrame: number | null = null;
+    const schedulePathLinkRefresh = () => {
+      if (pathLinkRefreshFrame !== null) return;
+      pathLinkRefreshFrame = requestAnimationFrame(() => {
+        pathLinkRefreshFrame = null;
+        const t = terminalRef.current;
+        if (t) t.refresh(0, t.rows - 1);
+      });
+    };
+    // 리뷰 G: registerLinkProvider 가 반환하는 IDisposable 은 따로 보관하지
+    // 않는다. 이 provider 는 이 effect(터미널 1회 생성) 안에서만 등록되고,
+    // cleanup 에서 terminal.dispose() 가 모든 link provider 를 함께 해제하므로
+    // 재등록/누수 경로가 없다(WebLinks·indented provider 와 동일한 패턴).
     terminal.registerLinkProvider(
       createPathLinkProvider(terminal, {
-        getCwd: () => useTerminalStore.getState().instances.find((i) => i.id === instanceId)?.cwd,
+        // 리뷰 C: store 전수 스캔 대신 구독해 둔 ref 를 읽는다.
+        getCwd: () => cwdRef.current,
         validate: async (absPath) => {
           try {
             const info = await statPath(absPath);
@@ -637,9 +660,8 @@ export function TerminalView({
           useFileViewerStore.getState().openFileViewer(absPath);
         },
         // 비동기 검증이 끝나면 해당 영역을 다시 그려 밑줄이 즉시 반영되게 한다.
-        onValidated: () => {
-          terminalRef.current?.refresh(0, (terminalRef.current?.rows ?? 1) - 1);
-        },
+        // 여러 후보가 거의 동시에 resolve 돼도 한 프레임에 1회만 refresh.
+        onValidated: schedulePathLinkRefresh,
       }),
     );
 
@@ -2178,6 +2200,10 @@ export function TerminalView({
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
+      }
+      if (pathLinkRefreshFrame !== null) {
+        cancelAnimationFrame(pathLinkRefreshFrame);
+        pathLinkRefreshFrame = null;
       }
       clearTimeout(notifyGateTimer);
       clearParkSettleTimer();

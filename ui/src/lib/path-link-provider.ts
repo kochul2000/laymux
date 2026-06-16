@@ -44,40 +44,104 @@ export interface PathLinkProviderDeps {
 /** 검증 캐시 상태. */
 type CacheState = "valid" | "invalid" | "pending";
 
+interface CacheEntry {
+  state: CacheState;
+  /** 이 항목이 만료되는 시각(epoch ms). pending 은 만료시키지 않는다. */
+  expiresAt: number;
+}
+
+/** 검증 결과 기본 TTL(ms). 세션 중 파일 생성/삭제로 인한 stale 을 짧게 제한. */
+const DEFAULT_TTL_MS = 10_000;
+/** 캐시 항목 상한. 초과 시 가장 오래된(삽입 순) 항목부터 제거(단순 LRU). */
+const DEFAULT_MAX_ENTRIES = 500;
+
+export interface PathValidationCacheOptions {
+  /** 검증 결과 TTL(ms). 만료 후 다음 hover 에서 재검증. */
+  ttlMs?: number;
+  /** 캐시 최대 항목 수. */
+  maxEntries?: number;
+  /** 현재 시각 주입(테스트용). */
+  now?: () => number;
+}
+
 /**
  * 절대 경로 검증 결과를 캐시한다. provideLinks 가 동기 콜백이므로,
  * 비동기 검증 결과를 여기 모았다가 다음 렌더에서 반영한다.
+ *
+ * 무한 증가/영구 stale 방지(리뷰 A):
+ *   - TTL: valid/invalid 결과는 `ttlMs` 후 만료 → 다음 hover 에서 재검증.
+ *     (pending 은 진행 중이므로 만료 대상 아님.)
+ *   - 크기 상한: `maxEntries` 초과 시 삽입 순으로 가장 오래된 항목부터 제거.
+ *     Map 은 삽입 순서를 보존하므로 별도 LRU 자료구조 없이 단순 cap 으로 동작.
+ *   - cwd 변경 시 `clear()` 로 전체 무효화(상대경로 해석 기준이 바뀌므로).
  */
 export class PathValidationCache {
-  private cache = new Map<string, CacheState>();
+  private cache = new Map<string, CacheEntry>();
+  private readonly ttlMs: number;
+  private readonly maxEntries: number;
+  private readonly now: () => number;
 
-  constructor(private validate: PathValidator) {}
+  constructor(
+    private validate: PathValidator,
+    options: PathValidationCacheOptions = {},
+  ) {
+    this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    this.now = options.now ?? Date.now;
+  }
 
-  /** 현재 캐시 상태(미조회면 undefined). */
-  get(absPath: string): CacheState | undefined {
-    return this.cache.get(absPath);
+  /** 캐시 전체 비우기(예: cwd 변경 시 호출). */
+  clear(): void {
+    this.cache.clear();
   }
 
   /**
-   * 검증을 보장한다. 미조회면 pending 으로 표시하고 비동기 검증을 시작,
+   * 현재 캐시 상태(미조회/만료면 undefined).
+   * 만료된 valid/invalid 항목은 제거해 다음 ensure 에서 재검증되게 한다.
+   */
+  get(absPath: string): CacheState | undefined {
+    const entry = this.cache.get(absPath);
+    if (!entry) return undefined;
+    // pending 은 만료시키지 않는다(검증 진행 중).
+    if (entry.state !== "pending" && this.now() >= entry.expiresAt) {
+      this.cache.delete(absPath);
+      return undefined;
+    }
+    return entry.state;
+  }
+
+  /**
+   * 검증을 보장한다. 미조회/만료면 pending 으로 표시하고 비동기 검증을 시작,
    * 결과 도착 시 onDone 을 부른다. 이미 결과/진행 중이면 아무것도 안 한다.
    * @returns 현재 알려진 상태(검증을 새로 시작했으면 "pending").
    */
   ensure(absPath: string, onDone: () => void): CacheState {
-    const existing = this.cache.get(absPath);
+    const existing = this.get(absPath); // 만료 항목은 여기서 제거됨
     if (existing) return existing;
-    this.cache.set(absPath, "pending");
+    this.set(absPath, "pending");
     this.validate(absPath)
       .then((exists) => {
-        this.cache.set(absPath, exists ? "valid" : "invalid");
+        this.set(absPath, exists ? "valid" : "invalid");
         onDone();
       })
       .catch(() => {
         // 검증 실패는 "없음"으로 취급(밑줄 안 긋고 조용히 무시).
-        this.cache.set(absPath, "invalid");
+        this.set(absPath, "invalid");
         onDone();
       });
     return "pending";
+  }
+
+  /** 항목 기록 + 크기 상한 적용. 갱신 시 삽입 순서를 최신으로 올린다. */
+  private set(absPath: string, state: CacheState): void {
+    // 재삽입으로 Map 삽입 순서를 갱신(최근 사용 항목을 뒤로) → 단순 LRU.
+    this.cache.delete(absPath);
+    this.cache.set(absPath, { state, expiresAt: this.now() + this.ttlMs });
+    while (this.cache.size > this.maxEntries) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
   }
 }
 
@@ -89,6 +153,8 @@ export function createPathLinkProvider(
   deps: PathLinkProviderDeps,
 ): ILinkProvider {
   const cache = new PathValidationCache(deps.validate);
+  // cwd 가 바뀌면 상대경로 해석 기준이 달라지므로 검증 캐시를 전부 무효화한다(리뷰 A).
+  let lastCwd: string | undefined;
 
   return {
     provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -98,6 +164,10 @@ export function createPathLinkProvider(
       }
 
       const cwd = deps.getCwd();
+      if (cwd !== lastCwd) {
+        cache.clear();
+        lastCwd = cwd;
+      }
       const bufLine = terminal.buffer.active.getLine(bufferLineNumber - 1); // 0-based
       if (!bufLine) {
         callback(undefined);
@@ -116,7 +186,8 @@ export function createPathLinkProvider(
         const absPath = joinCwdPath(cwd, cand.text);
         if (!absPath) continue; // 상대경로인데 cwd 가 없으면 검증 불가 → 스킵.
 
-        const state = cache.get(absPath) ?? cache.ensure(absPath, () => deps.onValidated?.());
+        // ensure() 는 이미 현재 상태를 반환하고 idempotent 하므로 단독 호출로 충분(리뷰 D).
+        const state = cache.ensure(absPath, () => deps.onValidated?.());
         if (state !== "valid") continue; // 유효할 때만 밑줄/클릭 활성화.
 
         const start: IBufferCellPosition = { x: cand.startCol, y: bufferLineNumber };
