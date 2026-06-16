@@ -209,7 +209,7 @@ export function GridEditToolbar() {
           }}
           title="Open File Viewer (Ctrl+Shift+O)"
         >
-          {"E8A5"}
+          {"\uE8A5"}
         </button>
 
         <button

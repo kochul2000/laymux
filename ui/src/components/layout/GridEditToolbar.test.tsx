@@ -69,6 +69,12 @@ describe("GridEditToolbar", () => {
     expect(screen.getByTestId("file-viewer-btn")).toBeInTheDocument();
   });
 
+  it("renders the file viewer button with the Document glyph", () => {
+    render(<GridEditToolbar />);
+    // Regression for #366: the glyph escape was a literal "E8A5" string.
+    expect(screen.getByTestId("file-viewer-btn").textContent).toBe("");
+  });
+
   it("opens the empty file viewer on click", async () => {
     const user = userEvent.setup();
     render(<GridEditToolbar />);
