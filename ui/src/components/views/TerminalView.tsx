@@ -8,7 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
-import { createPathLinkController } from "@/lib/path-link-provider";
+import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
 import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
@@ -1493,11 +1493,44 @@ export function TerminalView({
       if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     };
-    const handleMouseMove = () => {
+    const handleMouseMove = (e: MouseEvent) => {
       if (outerEl) outerEl.style.cursor = "";
+      // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
+      setPathLinkCursor(pathLink.hitTest(e.clientX, e.clientY));
     };
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
+
+    // #363: 밑줄(검증된 경로) 클릭으로 열기/이동. 데코레이션은 pointer-events:none
+    // 이라 mousedown/up 은 그대로 xterm 으로 흘러가 선택/드래그가 정상 동작한다.
+    // 여기서는 관찰만 하여 — 밑줄 위에서 시작한 '클릭'(드래그 아님)이면 캡처한
+    // 경로를 연다(파일=viewer, 디렉토리=cwd 전파). 드래그면 무시해 일반 재선택이
+    // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
+    // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
+    let pathLinkPress: { sel: VerifiedPathSelection; x: number; y: number } | null = null;
+    const PATH_LINK_CLICK_SLOP = 4;
+    const handlePathLinkMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) {
+        pathLinkPress = null;
+        return;
+      }
+      const sel = pathLink.getCurrent();
+      pathLinkPress =
+        sel && pathLink.hitTest(e.clientX, e.clientY) ? { sel, x: e.clientX, y: e.clientY } : null;
+    };
+    const handlePathLinkMouseUp = (e: MouseEvent) => {
+      const press = pathLinkPress;
+      pathLinkPress = null;
+      if (!press) return;
+      const moved =
+        Math.abs(e.clientX - press.x) > PATH_LINK_CLICK_SLOP ||
+        Math.abs(e.clientY - press.y) > PATH_LINK_CLICK_SLOP;
+      if (moved) return; // 드래그 → 열지 않음(재선택 의도).
+      pathLink.activate(press.sel);
+    };
+    // capture 단계로 xterm 핸들러보다 먼저 관찰(전파는 막지 않는다).
+    outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
+    window.addEventListener("mouseup", handlePathLinkMouseUp);
 
     // Copy-on-select: auto-copy to clipboard when text is selected.
     // `runTerminalCopy` handles the has-selection guard and smart-indent
@@ -2296,6 +2329,8 @@ export function TerminalView({
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
+      outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
+      window.removeEventListener("mouseup", handlePathLinkMouseUp);
       wrapperEl?.removeEventListener("mousedown", handleModifierLinkClick, true);
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();

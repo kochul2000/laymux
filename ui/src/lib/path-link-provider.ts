@@ -43,6 +43,10 @@ export interface PathLinkController {
   clear: () => void;
   /** 현재 검증 상태(테스트/디버그용). */
   getCurrent: () => VerifiedPathSelection | null;
+  /** viewport 좌표가 현재 밑줄(데코레이션) 영역 안인지. 없으면 false. */
+  hitTest: (clientX: number, clientY: number) => boolean;
+  /** 주어진 선택을 파일/디렉토리에 따라 onOpenPath/onChangeDir 로 라우팅. */
+  activate: (sel: VerifiedPathSelection) => void;
 }
 
 /**
@@ -65,28 +69,13 @@ export function createPathLinkController(
     marker = undefined;
   };
 
-  const styleAndBind = (el: HTMLElement) => {
-    // 밑줄(링크 느낌) + 포인터. 데코레이션 레이어는 기본 pointer-events:none 이라
-    // 클릭을 받으려면 요소에 auto 를 켠다.
+  const styleEl = (el: HTMLElement) => {
+    // 순수 시각(밑줄)만 담당. pointer-events:none 으로 두어 클릭/드래그가
+    // 그대로 xterm 으로 전달되게 한다(재드래그로 재선택 가능, 커서·클릭은
+    // TerminalView 가 hit-test 로 처리). 커서도 여기서 안 건다.
     el.style.borderBottom = "1px solid currentColor";
     el.style.boxSizing = "border-box";
-    el.style.cursor = "pointer";
-    el.style.pointerEvents = "auto";
-    if (el.dataset.pathLinkBound) return;
-    el.dataset.pathLinkBound = "1";
-    // mousedown 전파를 막아 xterm 이 선택을 지우거나 새 선택을 시작하지 않게 한다.
-    el.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const c = current;
-      if (!c) return;
-      if (c.isDirectory) deps.onChangeDir(c.absPath);
-      else deps.onOpenPath(c.absPath);
-    });
+    el.style.pointerEvents = "none";
   };
 
   return {
@@ -116,9 +105,9 @@ export function createPathLinkController(
         });
         if (!dec) return;
         decoration = dec;
-        // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장. 핸들러는 1회만.
-        if (dec.element) styleAndBind(dec.element);
-        dec.onRender((el) => styleAndBind(el));
+        // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장.
+        if (dec.element) styleEl(dec.element);
+        dec.onRender((el) => styleEl(el));
       } catch (err) {
         console.warn("[pathLink] 밑줄 데코레이션 생성 실패:", err);
       }
@@ -128,5 +117,15 @@ export function createPathLinkController(
       disposeDecoration();
     },
     getCurrent: () => current,
+    hitTest: (clientX: number, clientY: number) => {
+      const el = decoration?.element;
+      if (!current || !el) return false;
+      const r = el.getBoundingClientRect();
+      return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    },
+    activate: (sel: VerifiedPathSelection) => {
+      if (sel.isDirectory) deps.onChangeDir(sel.absPath);
+      else deps.onOpenPath(sel.absPath);
+    },
   };
 }

@@ -57,49 +57,63 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       expect.objectContaining({ x: 4, width: 16 }),
     );
     expect(t.el.style.borderBottom).not.toBe("");
-    expect(t.el.style.cursor).toBe("pointer");
+    expect(t.el.style.pointerEvents).toBe("none");
     expect(ctrl.getCurrent()?.absPath).toBe("/proj/src/a.ts");
   });
 
-  it("파일 데코레이션 클릭은 onOpenPath 로 라우팅한다", () => {
+  it("activate 는 파일이면 onOpenPath, 디렉토리면 onChangeDir 로 라우팅한다", () => {
     const onOpenPath = vi.fn();
     const onChangeDir = vi.fn();
     const t = makeTerminal();
     const ctrl = createPathLinkController(t.terminal, { onOpenPath, onChangeDir });
-    ctrl.setVerifiedSelection({
+
+    ctrl.activate({
       bufferLine: 1,
       startCol: 1,
       endCol: 10,
       absPath: "/proj/a.ts",
       isDirectory: false,
     });
-    t.el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onOpenPath).toHaveBeenCalledWith("/proj/a.ts");
     expect(onChangeDir).not.toHaveBeenCalled();
-  });
 
-  it("디렉토리 데코레이션 클릭은 onChangeDir 로 라우팅한다", () => {
-    const onOpenPath = vi.fn();
-    const onChangeDir = vi.fn();
-    const t = makeTerminal();
-    const ctrl = createPathLinkController(t.terminal, { onOpenPath, onChangeDir });
-    ctrl.setVerifiedSelection({
+    ctrl.activate({
       bufferLine: 1,
       startCol: 1,
       endCol: 10,
       absPath: "/proj/src",
       isDirectory: true,
     });
-    t.el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onChangeDir).toHaveBeenCalledWith("/proj/src");
-    expect(onOpenPath).not.toHaveBeenCalled();
   });
 
-  it("클릭 핸들러는 중복 바인딩되지 않는다(재렌더해도 1회만)", () => {
-    const onOpenPath = vi.fn();
+  it("hitTest 는 검증이 없으면 false, 있으면 데코 사각형 안일 때만 true", () => {
+    const t = makeTerminal();
+    // jsdom 은 0 사각형을 주므로 명시적으로 mock.
+    t.el.getBoundingClientRect = () => ({ left: 10, right: 50, top: 20, bottom: 36 }) as DOMRect;
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+    });
+    expect(ctrl.hitTest(20, 25)).toBe(false); // 검증 없음
+    ctrl.setVerifiedSelection({
+      bufferLine: 1,
+      startCol: 1,
+      endCol: 4,
+      absPath: "/x",
+      isDirectory: false,
+    });
+    expect(ctrl.hitTest(20, 25)).toBe(true); // 사각형 안
+    expect(ctrl.hitTest(5, 25)).toBe(false); // 왼쪽 밖
+    expect(ctrl.hitTest(20, 40)).toBe(false); // 아래 밖
+    ctrl.clear();
+    expect(ctrl.hitTest(20, 25)).toBe(false);
+  });
+
+  it("데코레이션 요소는 클릭을 가로채지 않는다(pointer-events:none)", () => {
     const t = makeTerminal();
     const ctrl = createPathLinkController(t.terminal, {
-      onOpenPath,
+      onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
     });
     ctrl.setVerifiedSelection({
@@ -109,10 +123,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       absPath: "/x",
       isDirectory: false,
     });
-    t.fireRender(); // 재렌더 시뮬레이션
-    t.fireRender();
-    t.el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(onOpenPath).toHaveBeenCalledTimes(1);
+    expect(t.el.style.pointerEvents).toBe("none");
   });
 
   it("clear() 는 데코레이션·마커를 dispose 하고 상태를 비운다", () => {
