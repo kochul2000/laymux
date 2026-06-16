@@ -9,11 +9,13 @@ vi.mock("@/lib/persist-session", () => ({
 import { GridEditToolbar } from "./GridEditToolbar";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
+    useFileViewerStore.setState(useFileViewerStore.getInitialState());
   });
 
   it("always shows export action buttons", () => {
@@ -60,6 +62,21 @@ describe("GridEditToolbar", () => {
     expect(useDockStore.getState().getDock("top")!.visible).toBe(true);
     await user.click(screen.getByTestId("dock-toggle-top"));
     expect(useDockStore.getState().getDock("top")!.visible).toBe(false);
+  });
+
+  it("renders the file viewer button", () => {
+    render(<GridEditToolbar />);
+    expect(screen.getByTestId("file-viewer-btn")).toBeInTheDocument();
+  });
+
+  it("opens the empty file viewer on click", async () => {
+    const user = userEvent.setup();
+    render(<GridEditToolbar />);
+
+    expect(useFileViewerStore.getState().open).toBe(false);
+    await user.click(screen.getByTestId("file-viewer-btn"));
+    expect(useFileViewerStore.getState().open).toBe(true);
+    expect(useFileViewerStore.getState().path).toBe("");
   });
 
   it("shows Saved! after export-new", async () => {
