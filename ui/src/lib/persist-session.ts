@@ -79,6 +79,7 @@ async function persistSessionCore(): Promise<void> {
     appearance: {
       themeId: settingsState.appearance.themeId,
       font: { ...settingsState.appearance.font },
+      uiFontFamily: settingsState.appearance.uiFontFamily,
     },
     // WARNING: Profile 필드를 추가할 때 여기에도 반드시 포함할 것.
     // 누락하면 settings.json 저장 시 해당 필드가 사라짐.

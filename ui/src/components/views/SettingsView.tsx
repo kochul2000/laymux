@@ -292,16 +292,53 @@ function StartupSection() {
 function FontSection() {
   const { t } = useTranslation("settings");
   const storeAppFont = useSettingsStore((s) => s.appearance.font);
+  const storeUiFontFamily = useSettingsStore((s) => s.appearance.uiFontFamily);
   const setAppearance = useSettingsStore((s) => s.setAppearance);
   const monoFonts = useMonospacedFonts();
   const [draftFont, setDraftFont] = useDraft("appFont", storeAppFont, (f) =>
     setAppearance({ font: f }),
   );
+  const [draftUiFont, setDraftUiFont] = useDraft("uiFontFamily", storeUiFontFamily, (v) =>
+    setAppearance({ uiFontFamily: v }),
+  );
 
   return (
     <div>
       <SectionTitle>{t("font.sectionTitle")}</SectionTitle>
-      <p className="mb-3 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+
+      {/* Interface (chrome) font — view titles, buttons, lists, workspace selector.
+          Family only; same dropdown widget as the base font. "" = built-in default. */}
+      <div style={cardStyle} className="mb-3">
+        <div className="px-4 py-2">
+          <h4 className="mb-1 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+            {t("font.uiFontTitle")}
+          </h4>
+          <p className="mb-2 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
+            {t("font.uiFontDescription")}
+          </p>
+          <SettingRow label={t("font.face")} desc={t("font.uiFontFaceDesc")}>
+            <FocusSelect
+              data-testid="ui-font-family-input"
+              value={draftUiFont}
+              onChange={(e) => setDraftUiFont(e.target.value)}
+              className={inputCls}
+            >
+              <option value="">{t("font.uiFontDefaultOption")}</option>
+              {draftUiFont && !monoFonts.includes(draftUiFont) && (
+                <option value={draftUiFont}>{draftUiFont}</option>
+              )}
+              {monoFonts.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </FocusSelect>
+          </SettingRow>
+        </div>
+      </div>
+
+      {/* Base font — default for non-terminal text views (Memo, Issue Reporter, …). */}
+      <p className="mb-3 mt-4 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.6 }}>
         {t("font.appFontDescription")}
       </p>
       <FontFields
@@ -309,6 +346,7 @@ function FontSection() {
         onChange={setDraftFont}
         monoFonts={monoFonts}
         faceDesc={t("font.faceDescDefault")}
+        cardTitle={t("font.baseFontTitle")}
       />
     </div>
   );
@@ -321,6 +359,7 @@ function FontFields({
   showReset,
   monoFonts,
   faceDesc,
+  cardTitle,
 }: {
   font: FontSettings;
   onChange: (font: FontSettings) => void;
@@ -328,6 +367,8 @@ function FontFields({
   showReset?: boolean;
   monoFonts: string[];
   faceDesc?: string;
+  /** Override the card heading. Defaults to the generic "Font" label. */
+  cardTitle?: string;
 }) {
   const { t } = useTranslation("settings");
   const isDefault = defaults && JSON.stringify(font) === JSON.stringify(defaults);
@@ -353,7 +394,7 @@ function FontFields({
       <div className="px-4 py-2">
         <div className="flex items-center gap-2 mb-2">
           <h4 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            {t("font.cardTitle")}
+            {cardTitle ?? t("font.cardTitle")}
           </h4>
           {resetBtn}
         </div>
@@ -2679,7 +2720,7 @@ const kbdStyle: React.CSSProperties = {
   borderBottom: "2px solid var(--border)",
   borderRadius: "var(--radius-md)",
   padding: "2px 8px",
-  fontFamily: "'Consolas', monospace",
+  fontFamily: "var(--ui-font)",
   fontSize: "var(--fs-sm)",
   color: "var(--text-primary)",
   whiteSpace: "nowrap" as const,
@@ -2824,7 +2865,7 @@ function KeybindingsSection() {
                       color: "var(--accent)",
                       outline: "none",
                       minWidth: 120,
-                      fontFamily: "'Consolas', monospace",
+                      fontFamily: "var(--ui-font)",
                       fontSize: "var(--fs-sm)",
                     }}
                   >
@@ -2910,7 +2951,7 @@ function KeybindingsSection() {
                   color: "var(--accent)",
                   outline: "none",
                   minWidth: 120,
-                  fontFamily: "'Consolas', monospace",
+                  fontFamily: "var(--ui-font)",
                   fontSize: "var(--fs-sm)",
                 }}
               >
