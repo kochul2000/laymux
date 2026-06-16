@@ -1212,9 +1212,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       language: _rawLanguage,
       ...rest
     } = data;
+    // Only spread keys that are actually present (not undefined). A caller that
+    // passes an explicit `key: undefined` (e.g. settings.json missing a field)
+    // must not clobber the store's initialized defaults — the guarded overrides
+    // below remain authoritative for processed fields.
+    const definedRest = Object.fromEntries(
+      Object.entries(rest).filter(([, value]) => value !== undefined),
+    );
     set((state) => ({
       ...state,
-      ...rest,
+      ...definedRest,
       ...(language ? { language } : {}),
       ...(profiles ? { profiles } : {}),
       ...(profileDefaults ? { profileDefaults } : {}),
