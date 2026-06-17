@@ -5,6 +5,7 @@ import {
   fileExtension,
   resolveViewer,
   resolveViewerProfile,
+  viewerInstanceId,
 } from "./file-viewer";
 import type { ExtensionViewer } from "@/lib/tauri-api";
 
@@ -91,6 +92,38 @@ describe("resolveViewer", () => {
 
   it("returns web for files with no extension", () => {
     expect(resolveViewer("/usr/bin/ls", viewers)).toEqual({ viewerType: "web" });
+  });
+});
+
+describe("viewerInstanceId", () => {
+  // The id is the suffix of the Tauri output channel `terminal-output-<id>`,
+  // and Tauri v2 only allows [a-zA-Z0-9-/:_] in event names. Any other char
+  // (notably the `.` in a file extension) made `listen()` throw, so the viewer
+  // terminal received no PTY output and opened to a black screen.
+  const EVENT_NAME_SAFE = /^[a-zA-Z0-9/:_-]+$/;
+
+  it("strips the dot of a file extension so the event name is valid", () => {
+    const id = viewerInstanceId("/home/me/notes.txt");
+    expect(EVENT_NAME_SAFE.test(`terminal-output-${id}`)).toBe(true);
+    expect(id).toBe("global-file-viewer:/home/me/notes_txt");
+  });
+
+  it("replaces spaces and other disallowed characters", () => {
+    const id = viewerInstanceId("C:\\Users\\me\\my report (final).md");
+    expect(EVENT_NAME_SAFE.test(`terminal-output-${id}`)).toBe(true);
+  });
+
+  it("keeps slashes and colons (allowed by Tauri)", () => {
+    expect(viewerInstanceId("/a/b/c")).toBe("global-file-viewer:/a/b/c");
+  });
+
+  it("produces valid event names for unicode paths", () => {
+    const id = viewerInstanceId("/home/사용자/메모.txt");
+    expect(EVENT_NAME_SAFE.test(`terminal-output-${id}`)).toBe(true);
+  });
+
+  it("stays distinct for paths that differ before sanitization", () => {
+    expect(viewerInstanceId("/a/x.txt")).not.toBe(viewerInstanceId("/a/y.txt"));
   });
 });
 
