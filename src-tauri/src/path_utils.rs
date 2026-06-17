@@ -207,6 +207,79 @@ pub fn resolve_address_path(path: &str, wsl_distro: Option<&str>) -> String {
     resolve_path_for_windows(path, distro.as_deref())
 }
 
+/// Like [`resolve_address_path`], but transparently follows WSL (Linux) symlinks.
+///
+/// Windows cannot follow a WSL symlink over `\\wsl.localhost`: both
+/// `std::fs::metadata` and opening the link fail with "cannot find path" even
+/// though the link is valid (the reparse tag is `IO_REPARSE_TAG_LX_SYMLINK`,
+/// which Windows does not resolve). That breaks the terminal path-link feature
+/// (#363) for symlinks — `stat_path` reports the file as missing so the link
+/// never lights up, and `read_file_for_viewer` could not open it either.
+///
+/// Fix: after the usual resolution, if the result is a reparse point, ask WSL to
+/// canonicalize the original Linux path (`readlink -f`) and rebuild the path from
+/// the real target — a regular file Windows can stat and open. The reparse check
+/// is a cheap, spawn-free guard so normal files never pay for a `wsl.exe` call;
+/// non-WSL paths (Windows symlinks/junctions, which Windows follows natively)
+/// fall through unchanged.
+pub fn resolve_address_path_following_symlinks(path: &str, wsl_distro: Option<&str>) -> String {
+    let resolved = resolve_address_path(path, wsl_distro);
+    #[cfg(windows)]
+    {
+        if is_reparse_point(&resolved) {
+            if let Some(real) = wsl_follow_symlink(path, wsl_distro) {
+                return real;
+            }
+        }
+    }
+    resolved
+}
+
+/// True if `path` is a reparse point (symlink/junction). Uses `symlink_metadata`
+/// so it inspects the link itself rather than its (unfollowable) target.
+#[cfg(windows)]
+fn is_reparse_point(path: &str) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
+}
+
+/// Resolve a WSL symlink to its real Windows-accessible path via `wsl.exe
+/// readlink -f`. Returns `None` for non-WSL paths (so Windows-native reparse
+/// points are left untouched) or when `wsl.exe` is unavailable.
+#[cfg(windows)]
+fn wsl_follow_symlink(path: &str, wsl_distro: Option<&str>) -> Option<String> {
+    let fwd = path.replace('\\', "/");
+    // `/mnt/...` is Windows-backed — let Windows handle it natively.
+    if fwd.starts_with("/mnt/") {
+        return None;
+    }
+    let (linux, distro) = if fwd.starts_with("//wsl.localhost/") || fwd.starts_with("//wsl$/") {
+        let d = extract_wsl_distro_from_path(&fwd).or_else(|| wsl_distro.map(str::to_string));
+        (normalize_wsl_path(&fwd), d)
+    } else if fwd.starts_with('/') {
+        let d = wsl_distro
+            .map(str::to_string)
+            .or_else(get_default_wsl_distro);
+        (fwd, d)
+    } else {
+        return None;
+    };
+
+    let mut cmd = crate::process::headless_command("wsl.exe");
+    if let Some(ref d) = distro {
+        cmd.args(["-d", d]);
+    }
+    let output = cmd.args(["--", "readlink", "-f", &linux]).output().ok()?;
+    let real = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if real.is_empty() {
+        return None;
+    }
+    Some(resolve_path_for_windows(&real, distro.as_deref()))
+}
+
 /// Extract WSL distro name from a raw path (before normalization).
 /// Handles `//wsl.localhost/<distro>/path` and `//wsl$/<distro>/path` formats.
 pub fn extract_wsl_distro_from_path(path: &str) -> Option<String> {
