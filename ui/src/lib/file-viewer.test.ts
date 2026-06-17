@@ -105,7 +105,7 @@ describe("viewerInstanceId", () => {
   it("strips the dot of a file extension so the event name is valid", () => {
     const id = viewerInstanceId("/home/me/notes.txt");
     expect(EVENT_NAME_SAFE.test(`terminal-output-${id}`)).toBe(true);
-    expect(id).toBe("global-file-viewer:/home/me/notes_txt");
+    expect(id).toMatch(/^global-file-viewer:\/home\/me\/notes_txt:[0-9a-f]+$/);
   });
 
   it("replaces spaces and other disallowed characters", () => {
@@ -114,7 +114,7 @@ describe("viewerInstanceId", () => {
   });
 
   it("keeps slashes and colons (allowed by Tauri)", () => {
-    expect(viewerInstanceId("/a/b/c")).toBe("global-file-viewer:/a/b/c");
+    expect(viewerInstanceId("/a/b/c")).toMatch(/^global-file-viewer:\/a\/b\/c:[0-9a-f]+$/);
   });
 
   it("produces valid event names for unicode paths", () => {
@@ -124,6 +124,17 @@ describe("viewerInstanceId", () => {
 
   it("stays distinct for paths that differ before sanitization", () => {
     expect(viewerInstanceId("/a/x.txt")).not.toBe(viewerInstanceId("/a/y.txt"));
+  });
+
+  it("stays distinct when two paths sanitize to the same string", () => {
+    // `notes.txt` and `notes_txt` both sanitize to `notes_txt`; the appended
+    // hash of the original path must keep their ids distinct so a path change
+    // still tears down the previous viewer PTY.
+    expect(viewerInstanceId("/a/notes.txt")).not.toBe(viewerInstanceId("/a/notes_txt"));
+  });
+
+  it("is deterministic for the same path", () => {
+    expect(viewerInstanceId("/a/notes.txt")).toBe(viewerInstanceId("/a/notes.txt"));
   });
 });
 
