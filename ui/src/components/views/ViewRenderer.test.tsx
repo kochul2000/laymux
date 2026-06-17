@@ -169,8 +169,8 @@ describe("ViewRenderer", () => {
     expect(onSelectView).not.toHaveBeenCalled();
   });
 
-  it("FileExplorerView defaults cwdSend/cwdReceive from syncCwdDefaults (dock=off by default)", () => {
-    // 기본 syncCwdDefaults.dock = { send: false, receive: false } → 표시·적용 모두 off
+  it("FileExplorerView defaults cwdSend off / cwdReceive on from syncCwdDefaults", () => {
+    // 기본 syncCwdDefaults.dock = { send: false, receive: true } → send off, receive on
     render(
       <ViewRenderer
         viewType="FileExplorerView"
@@ -182,7 +182,7 @@ describe("ViewRenderer", () => {
     );
     const last = fileExplorerProps.at(-1);
     expect(last?.cwdSend).toBe(false);
-    expect(last?.cwdReceive).toBe(false);
+    expect(last?.cwdReceive).toBe(true);
   });
 
   it("FileExplorerView honors custom syncCwdDefaults.dock", () => {

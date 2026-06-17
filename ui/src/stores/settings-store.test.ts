@@ -691,8 +691,8 @@ describe("settings-store", () => {
 
   it("has default syncCwdDefaults", () => {
     const { syncCwdDefaults } = useSettingsStore.getState();
-    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: false });
-    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: false });
+    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: true });
+    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: true });
   });
 
   it("loads syncCwdDefaults from settings", () => {
@@ -712,8 +712,8 @@ describe("settings-store", () => {
       defaultProfile: "WSL",
     });
     const { syncCwdDefaults } = useSettingsStore.getState();
-    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: false });
-    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: false });
+    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: true });
+    expect(syncCwdDefaults.dock).toEqual({ send: false, receive: true });
   });
 
   it("setSyncCwdDefaults updates partial values", () => {
@@ -721,7 +721,7 @@ describe("settings-store", () => {
       dock: { send: true, receive: true },
     });
     const { syncCwdDefaults } = useSettingsStore.getState();
-    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: false }); // unchanged
+    expect(syncCwdDefaults.workspace).toEqual({ send: false, receive: true }); // unchanged
     expect(syncCwdDefaults.dock).toEqual({ send: true, receive: true }); // updated
   });
 
@@ -729,12 +729,12 @@ describe("settings-store", () => {
 
   it("resolveSyncCwdForProfile returns workspace defaults for unset profile", () => {
     const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "workspace");
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("resolveSyncCwdForProfile returns dock defaults for unset profile", () => {
     const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "dock");
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("resolveSyncCwdForProfile uses profile syncCwd override", () => {
@@ -758,7 +758,7 @@ describe("settings-store", () => {
       syncCwd: "default",
     });
     const result = useSettingsStore.getState().resolveSyncCwdForProfile("WSL", "dock");
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("loads profile syncCwd from settings", () => {
