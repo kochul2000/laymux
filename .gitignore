@@ -40,6 +40,7 @@ test-results/
 .claude/worktrees/
 .claude/*.local.*
 .claude/scheduled_tasks.lock
+.claude/*-state.json
 
 # Temp files
 *~
