@@ -1668,12 +1668,12 @@ describe("SettingsView", () => {
       ).toBe(false);
       expect(
         (screen.getByTestId("sync-cwd-workspace-receive-toggle") as HTMLInputElement).checked,
-      ).toBe(false);
+      ).toBe(true);
       expect((screen.getByTestId("sync-cwd-dock-send-toggle") as HTMLInputElement).checked).toBe(
         false,
       );
       expect((screen.getByTestId("sync-cwd-dock-receive-toggle") as HTMLInputElement).checked).toBe(
-        false,
+        true,
       );
     });
 
@@ -1686,7 +1686,7 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("sync-cwd-dock-receive-toggle"));
 
       expect(useSettingsStore.getState().syncCwdDefaults.workspace.send).toBe(false);
-      expect(useSettingsStore.getState().syncCwdDefaults.dock.receive).toBe(false);
+      expect(useSettingsStore.getState().syncCwdDefaults.dock.receive).toBe(true);
     });
 
     it("saving default CWD propagation toggles updates store", async () => {
@@ -1700,11 +1700,11 @@ describe("SettingsView", () => {
 
       expect(useSettingsStore.getState().syncCwdDefaults.workspace).toEqual({
         send: true,
-        receive: false,
+        receive: true,
       });
       expect(useSettingsStore.getState().syncCwdDefaults.dock).toEqual({
         send: false,
-        receive: true,
+        receive: false,
       });
     });
   });

@@ -369,7 +369,7 @@ describe("Dock", () => {
   // 기본 syncCwdDefaults는 workspace/dock 모두 { send: false, receive: false } 이다.
   // 신규 dock 페인이 cwdSend/cwdReceive override 없이 표시될 때 OFF 아이콘이 나와야 한다.
 
-  it("single-pane dock shows CWD send/receive OFF by default (syncCwdDefaults.dock=off)", () => {
+  it("single-pane dock shows CWD send OFF, receive ON by default (syncCwdDefaults.dock)", () => {
     render(
       <Dock
         position="bottom"
@@ -393,7 +393,7 @@ describe("Dock", () => {
       "CWD Send (off)",
     );
     expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
-      "CWD Receive (off)",
+      "CWD Receive (on)",
     );
   });
 
@@ -498,7 +498,7 @@ describe("Dock", () => {
     );
   });
 
-  it("split-pane dock shows CWD send/receive OFF by default", () => {
+  it("split-pane dock shows CWD send OFF, receive ON by default", () => {
     render(
       <Dock
         position="left"
@@ -530,7 +530,7 @@ describe("Dock", () => {
       "CWD Send (off)",
     );
     expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
-      "CWD Receive (off)",
+      "CWD Receive (on)",
     );
   });
 

@@ -9,7 +9,7 @@ describe("resolveSyncCwd", () => {
       profileName: "WSL",
       location: "workspace",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("returns dock defaults when no profile override", () => {
@@ -17,7 +17,7 @@ describe("resolveSyncCwd", () => {
       profileName: "WSL",
       location: "dock",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   // --- Profile override ---
@@ -37,7 +37,7 @@ describe("resolveSyncCwd", () => {
       location: "dock",
       profileSyncCwd: "default",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   // --- profileDefaults override ---
@@ -57,7 +57,7 @@ describe("resolveSyncCwd", () => {
       location: "dock",
       profileDefaultsSyncCwd: "default",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   // --- Priority chain: profile > profileDefaults > syncCwdDefaults ---
@@ -118,7 +118,7 @@ describe("resolveSyncCwd", () => {
       profileName: "NonExistent",
       location: "workspace",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("returns location defaults when all overrides are undefined", () => {
@@ -126,7 +126,7 @@ describe("resolveSyncCwd", () => {
       profileName: "WSL",
       location: "dock",
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 
   it("handles undefined profileSyncCwd (same as no override)", () => {
@@ -135,16 +135,16 @@ describe("resolveSyncCwd", () => {
       location: "workspace",
       profileSyncCwd: undefined,
     });
-    expect(result).toEqual({ send: false, receive: false });
+    expect(result).toEqual({ send: false, receive: true });
   });
 });
 
 describe("DEFAULT_SYNC_CWD_DEFAULTS", () => {
   it("has correct workspace defaults", () => {
-    expect(DEFAULT_SYNC_CWD_DEFAULTS.workspace).toEqual({ send: false, receive: false });
+    expect(DEFAULT_SYNC_CWD_DEFAULTS.workspace).toEqual({ send: false, receive: true });
   });
 
   it("has correct dock defaults", () => {
-    expect(DEFAULT_SYNC_CWD_DEFAULTS.dock).toEqual({ send: false, receive: false });
+    expect(DEFAULT_SYNC_CWD_DEFAULTS.dock).toEqual({ send: false, receive: true });
   });
 });

@@ -28,8 +28,8 @@ export interface SyncCwdDefaults {
 export type TerminalLocation = "workspace" | "dock";
 
 export const DEFAULT_SYNC_CWD_DEFAULTS: SyncCwdDefaults = {
-  workspace: { send: false, receive: false },
-  dock: { send: false, receive: false },
+  workspace: { send: false, receive: true },
+  dock: { send: false, receive: true },
 };
 
 export interface ResolveSyncCwdParams {
