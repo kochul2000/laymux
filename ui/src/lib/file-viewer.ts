@@ -35,6 +35,34 @@ export function isOpenablePath(path: string): boolean {
   return normalizeViewerPath(path).length > 0;
 }
 
+/**
+ * Build the terminal instance id for the global file viewer.
+ *
+ * The id doubles as the suffix of the backend↔frontend output channel
+ * (`terminal-output-<id>`), and Tauri v2 only permits `[a-zA-Z0-9-/:_]` in
+ * event names. A raw file path almost always contains a `.` (the extension) —
+ * and may contain spaces or unicode — which makes the derived event name
+ * invalid, so `listen()` throws and the viewer terminal never receives any PTY
+ * output (the "opens to a black screen with a blinking cursor" bug: every
+ * extension-mapped viewer like `.txt → vi` was affected). Replacing every
+ * disallowed character keeps the id valid, and a short hash of the ORIGINAL
+ * path is appended so two paths that sanitize to the same string (e.g.
+ * `a/notes.txt` vs `a/notes_txt`) still get distinct ids — otherwise a path
+ * change wouldn't tear down the previous viewer's PTY. The hash is hex, so it
+ * stays within the allowed event-name character set.
+ */
+export function viewerInstanceId(path: string): string {
+  const safe = path.replace(/[^a-zA-Z0-9/:_-]/g, "_");
+  // FNV-1a 32-bit — deterministic, dependency-free, collision-resistant enough
+  // to disambiguate the rare sanitization clash above.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < path.length; i++) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `global-file-viewer:${safe}:${(h >>> 0).toString(16)}`;
+}
+
 /** Extract the lowercased extension (with leading dot) from a path, or "". */
 export function fileExtension(path: string): string {
   // Use the last path segment so directory dots don't count.

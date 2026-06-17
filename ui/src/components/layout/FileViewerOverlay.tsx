@@ -4,7 +4,7 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { FileViewer } from "@/components/ui/FileViewer";
 import { FocusInput } from "@/components/ui/FormControls";
-import { resolveViewer } from "@/lib/file-viewer";
+import { resolveViewer, viewerInstanceId } from "@/lib/file-viewer";
 
 /**
  * The single global floating file viewer (#277 / #279). It is rendered once at
@@ -209,7 +209,7 @@ export function FileViewerOverlay() {
               // The session-spawn effect keys off instanceId, so a fresh id tears
               // down the old PTY and runs the new startup command. Web viewers
               // ignore the id, so this is harmless for them.
-              viewerInstanceId={`global-file-viewer:${path}`}
+              viewerInstanceId={viewerInstanceId(path)}
               isFocused
               bodyStyle={bodyStyle}
             />
