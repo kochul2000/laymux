@@ -127,6 +127,19 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.getByTestId("workspace-item-ws-default")).toBeInTheDocument();
   });
 
+  it("keeps long workspace lists scrollable without flex-shrinking items (#374)", () => {
+    for (let i = 0; i < 20; i += 1) {
+      useWorkspaceStore.getState().addWorkspace(`Workspace ${i + 2}`, "default-layout");
+    }
+
+    render(<WorkspaceSelectorView />);
+
+    expect(screen.getByTestId("workspace-list")).toHaveClass("min-h-0", "overflow-y-auto");
+    for (const item of screen.getAllByTestId(/^workspace-item-/)) {
+      expect(item).toHaveClass("shrink-0");
+    }
+  });
+
   it("shows new workspace panel with layout cards", () => {
     render(<WorkspaceSelectorView />);
     expect(screen.getByTestId("new-workspace-panel")).toBeInTheDocument();
@@ -195,6 +208,55 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       expect(screen.getByTestId("unread-badge-ws-default")).toBeInTheDocument();
       expect(screen.getByTestId("unread-badge-ws-default")).toHaveTextContent("1");
+    });
+  });
+
+  it("keeps unread badge height independent from UI font metrics (#373)", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useNotificationStore.setState({
+      notifications: Array.from({ length: 128 }, (_, i) => ({
+        id: `n-${i}`,
+        terminalId: "terminal-p1",
+        workspaceId: "ws-default",
+        message: `msg ${i}`,
+        level: "info" as const,
+        createdAt: i,
+        readAt: null,
+      })),
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      const badge = screen.getByTestId("unread-badge-ws-default");
+      expect(badge).toHaveClass("workspace-count-badge");
+      expect(badge).toHaveTextContent("128");
+      expect(badge.style.fontSize).toBe("8.5px");
+      expect(badge.closest(".workspace-count-badge-frame")).not.toBeNull();
     });
   });
 
