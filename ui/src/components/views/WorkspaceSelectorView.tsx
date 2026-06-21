@@ -85,11 +85,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// 배지 폭은 고정(14px)이므로 자릿수가 늘수록 폰트를 줄여 한 줄에 맞춘다.
+// 인덱스 = 표시 문자열 길이(1~4+), 값 = 해당 길이에서 14px 폭에 들어가는 최대 폰트.
+// 폭 고정 계약의 일부라 값 변경 시 회귀 테스트도 함께 갱신해야 한다.
+const COUNT_BADGE_FONT_SIZE_BY_LENGTH = ["10px", "10px", "9.5px", "8.5px", "7.5px"] as const;
+
 function getCountBadgeFontSize(countText: string): string {
-  if (countText.length >= 4) return "7.5px";
-  if (countText.length === 3) return "8.5px";
-  if (countText.length === 2) return "9.5px";
-  return "10px";
+  const idx = Math.min(countText.length, COUNT_BADGE_FONT_SIZE_BY_LENGTH.length - 1);
+  return COUNT_BADGE_FONT_SIZE_BY_LENGTH[idx];
 }
 
 function CountBadge({ count, testId }: { count: number; testId?: string }) {
