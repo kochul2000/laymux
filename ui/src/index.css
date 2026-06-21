@@ -60,6 +60,8 @@
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
+  --workspace-count-badge-size: 14px;
+  --workspace-count-badge-px: 3px;
   --terminal-composition-underline-color: currentColor;
 }
 
@@ -165,6 +167,7 @@
 
   .workspace-item-animated {
     display: grid;
+    flex: 0 0 auto;
     grid-template-rows: 1fr;
     overflow: hidden;
     opacity: 1;
@@ -184,6 +187,34 @@
     opacity: 0;
     pointer-events: none;
     transform: translateY(-4px);
+  }
+
+  .workspace-count-badge-frame {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--workspace-count-badge-size);
+    height: var(--workspace-count-badge-size);
+    line-height: 0;
+  }
+
+  .workspace-count-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: var(--workspace-count-badge-size);
+    height: var(--workspace-count-badge-size);
+    padding: 0 var(--workspace-count-badge-px);
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: var(--bg-base);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
   }
 
   .workspace-pane-row {

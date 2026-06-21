@@ -85,20 +85,28 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// 배지는 최소 폭 14px(1~2자리는 정사각형 유지)이고, 세 자리 이상이면 콘텐츠 폭만큼 가로로 늘어난다.
+// 폭이 과도하게 커지지 않도록 표시 문자열이 길수록 폰트를 줄인다(높이는 14px 고정 유지).
+// 인덱스 = 표시 문자열 길이(1~4+), 값 = 해당 길이용 폰트 크기.
+// fontSize 값은 회귀 테스트(WorkspaceSelectorView.test.tsx)가 검증하므로 값 변경 시 함께 갱신한다.
+const COUNT_BADGE_FONT_SIZE_BY_LENGTH = ["10px", "10px", "9.5px", "8.5px", "7.5px"] as const;
+
+function getCountBadgeFontSize(countText: string): string {
+  const idx = Math.min(countText.length, COUNT_BADGE_FONT_SIZE_BY_LENGTH.length - 1);
+  return COUNT_BADGE_FONT_SIZE_BY_LENGTH[idx];
+}
+
 function CountBadge({ count, testId }: { count: number; testId?: string }) {
+  const countText = count > 999 ? "999+" : String(count);
   return (
     <span
       data-testid={testId}
-      className="inline-flex shrink-0 items-center justify-center rounded text-[12px] font-semibold"
+      className="workspace-count-badge"
       style={{
-        background: "var(--accent)",
-        color: "var(--bg-base)",
-        width: 14,
-        height: 14,
-        lineHeight: 1,
+        fontSize: getCountBadgeFontSize(countText),
       }}
     >
-      {count}
+      {countText}
     </span>
   );
 }
@@ -225,7 +233,7 @@ function WorkspaceItem({
       onDragLeave={(e) => drag.onDragLeave(e)}
       onDrop={(e) => drag.onDrop(e, ws.id)}
       onDragEnd={drag.onDragEnd}
-      className={`workspace-item-animated relative cursor-pointer${
+      className={`workspace-item-animated relative shrink-0 cursor-pointer${
         isCollapsed ? " workspace-item-collapsed" : ""
       }`}
       style={{
@@ -316,7 +324,7 @@ function WorkspaceItem({
             className="flex items-center gap-1"
             style={{ opacity: hideMode && isWsHidden ? 0.35 : undefined }}
           >
-            <ExitFade show={summary.unreadCount > 0}>
+            <ExitFade show={summary.unreadCount > 0} className="workspace-count-badge-frame">
               <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
             </ExitFade>
             {hovered && (
@@ -1319,7 +1327,7 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Workspace list */}
-      <div className="flex flex-1 flex-col overflow-y-auto">
+      <div data-testid="workspace-list" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {sortedWorkspaces.map((ws, idx) => {
           const isWsHidden = hiddenWorkspaceIds.has(ws.id);
           const isActive = ws.id === activeWorkspaceId;
@@ -1446,7 +1454,7 @@ export function WorkspaceSelectorView() {
         style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
       >
         <SectionLabel>{showNotifPanel ? t("hideNotifications") : t("notifications")}</SectionLabel>
-        <ExitFade show={totalUnread > 0}>
+        <ExitFade show={totalUnread > 0} className="workspace-count-badge-frame">
           <CountBadge count={totalUnread} />
         </ExitFade>
       </div>
