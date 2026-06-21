@@ -154,8 +154,8 @@ pub fn do_sync_cwd(
     // 모은다. force=true(사용자가 컨트롤 패널에서 직접 누른 1회성 전파)이면 그 함수가
     // 소스 측 게이트(에코 루프 가드·소스 activity·cwd_send off)를 통째로 우회한다.
     // 새 소스 측 안전 게이트는 반드시 그 함수 안에 추가해야 force 정책이 네 곳에
-    // 분산되지 않는다. 대상 측 게이트(filter_targets_not_busy)는 force 와 무관하게
-    // 항상 유지되므로 여기서 다루지 않는다(아래 참고).
+    // 분산되지 않는다. 대상 측 게이트(filter_targets_not_busy·filter_targets_cwd_receive)는
+    // force 와 무관하게 항상 유지되므로 여기서 다루지 않는다(아래 참고).
     if let Some(suppressed) =
         evaluate_source_gates(state, terminal_id, path, &normalized_path, force)?
     {
@@ -164,13 +164,11 @@ pub fn do_sync_cwd(
 
     let all_targets = resolve_target_terminals(state, terminal_id, group_id, all, target_group)?;
 
-    // force 경로는 대상의 cwd_receive off 여도 전파한다 — file explorer/viewer 처럼
-    // 평소 동기화를 끄고 있다가 필요할 때만 1회 따라오게 하는 것이 이 기능의 목적.
-    let receiving_targets = if force {
-        all_targets.clone()
-    } else {
-        filter_targets_cwd_receive(state, &all_targets)
-    };
+    // 대상 cwd_receive 필터는 force 와 무관하게 항상 적용한다 (issue #375).
+    // force(1회성 전파)는 소스 측 게이트만 우회한다 — 소스가 "지금 전파한다"고 명시적으로
+    // 누른 행위이기 때문이다. 그러나 각 대상의 cwd_receive 는 그 pane(dock 등)의 의사이므로
+    // force 라도 존중해야 한다. CWD 전파는 force/non-force 가 동일한 대상 필터 경로를 거친다.
+    let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
 
     let settings = crate::settings::load_settings();
     let (idle_targets, claude_ids) =
@@ -2051,16 +2049,17 @@ mod tests {
     }
 
     #[test]
-    fn force_bypasses_cwd_receive_filter() {
-        // 회귀(issue #293): force=true 1회 전파는 대상의 cwd_receive off 를 무시하고
-        // 모든 대상에 전파해야 한다. do_sync_cwd 의 분기
-        //   `let receiving_targets = if force { all_targets } else { filter_targets_cwd_receive(..) }`
-        // 를 직접 미러링하여 검증한다(do_sync_cwd 는 AppHandle 이 필요해 단위 테스트 곤란).
+    fn force_respects_cwd_receive_filter() {
+        // 회귀(issue #375): force=true 1회 전파도 대상의 cwd_receive off 를 존중해야 한다.
+        // 옛 동작(issue #293)은 force 시 필터를 우회했으나, 각 pane(특히 dock)의 receive
+        // 의사를 무시하고 강제 전파하는 버그가 되었다. 이제 force/non-force 가 동일한 대상
+        // 필터(filter_targets_cwd_receive) 경로를 거치므로, force 라도 cwd_receive=off 인
+        // 대상은 제외된다. do_sync_cwd 가 force 분기 없이 항상 이 필터를 호출함을 검증한다.
         let state = AppState::new();
         {
             let mut terminals = state.terminals.lock().unwrap();
             let mut t2 = TerminalSession::new("t2".into(), TerminalConfig::default());
-            t2.cwd_receive = false; // 평소 수신 비활성 (file explorer 등)
+            t2.cwd_receive = false; // 수신 비활성 (dock/file explorer 등)
             terminals.insert(
                 "t1".into(),
                 TerminalSession::new("t1".into(), TerminalConfig::default()),
@@ -2070,18 +2069,15 @@ mod tests {
 
         let all_targets: Vec<String> = vec!["t1".into(), "t2".into()];
 
-        // 일반 경로: cwd_receive off 인 t2 제외.
-        let normal = filter_targets_cwd_receive(&state, &all_targets);
+        // 통일 경로: cwd_receive on 인 t1 만 통과, off 인 t2 는 force 여부와 무관하게 제외.
+        let receiving = filter_targets_cwd_receive(&state, &all_targets);
         assert!(
-            !normal.contains(&"t2".to_string()),
-            "normal path excludes cwd_receive=off"
+            receiving.contains(&"t1".to_string()),
+            "cwd_receive=on 대상은 전파를 받아야 한다"
         );
-
-        // force 경로: 필터를 우회하므로 t2 포함.
-        let forced = all_targets.clone();
         assert!(
-            forced.contains(&"t2".to_string()),
-            "force path includes cwd_receive=off targets"
+            !receiving.contains(&"t2".to_string()),
+            "cwd_receive=off 대상(dock 등)은 force 1회 전파에도 제외돼야 한다 (issue #375)"
         );
     }
 

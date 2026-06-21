@@ -376,11 +376,36 @@ describe("FileExplorerView", () => {
     expect(listDirectory).toHaveBeenCalledWith("/home/user/other");
   });
 
-  // ── 1회성 CWD 전파 (issue #293) ──
+  // ── 1회성 CWD 전파 (issue #293, #375) ──
 
-  it("follows a force sync-cwd event even when cwdReceive is off", async () => {
-    // 평소 수신을 꺼둔 file explorer 도 force 1회 전파에는 따라와야 한다.
+  it("ignores a force sync-cwd event when cwdReceive is off (issue #375)", async () => {
+    // 평소 수신을 꺼둔 file explorer(또는 dock pane)는 force 1회 전파에도 따라오면 안 된다.
+    // CWD 전파는 force 여부와 무관하게 각 대상의 cwdReceive 의사를 존중해야 한다.
     render(<FileExplorerView {...defaultProps} cwdReceive={false} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    vi.mocked(listDirectory).mockClear();
+
+    act(() => {
+      syncCwdCallback?.({
+        path: "/home/user/forced",
+        terminalId: "terminal-source",
+        groupId: "ws-1",
+        targets: [],
+        force: true,
+      });
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("follows a force sync-cwd event when cwdReceive is on", async () => {
+    // 수신을 켜둔 대상은 force 1회 전파를 받아야 한다.
+    render(<FileExplorerView {...defaultProps} cwdReceive={true} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
@@ -426,7 +451,7 @@ describe("FileExplorerView", () => {
   });
 
   it("ignores a force sync-cwd event from a different sync group", async () => {
-    render(<FileExplorerView {...defaultProps} cwdReceive={false} />);
+    render(<FileExplorerView {...defaultProps} cwdReceive={true} />);
     await act(async () => {
       await vi.runAllTimersAsync();
     });
