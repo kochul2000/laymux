@@ -207,10 +207,12 @@ export function FileExplorerView({
 
   // --- Listen for CWD changes from syncGroup terminals ---
   //
-  // 두 이벤트를 항상 등록한다(cwdReceive 와 무관, issue #293):
+  // 두 이벤트를 모두 cwdReceive 게이트 뒤에서 처리한다(issue #375):
   //  1) terminal-cwd-changed — 일반 OSC cwd 변경. cwdReceive on + 소스 cwdSend 일 때만 따라옴.
-  //  2) sync-cwd(force) — 컨트롤 패널 "1회 전파" 버튼. cwdReceive 가 off 여도 force 면 따라옴.
-  // 리스너를 항상 등록해야 평소 동기화를 꺼둔 file explorer 도 force 1회 전파를 받는다.
+  //  2) sync-cwd(force) — 컨트롤 패널 "1회 전파" 버튼. force 라도 cwdReceive off 면 무시.
+  // 옛 동작(issue #293)은 force 시 cwdReceive 를 우회했으나, 각 pane(dock 등)의 receive
+  // 의사를 무시하는 버그가 되었다. force 는 소스 측 게이트만 우회하고, 대상의 cwdReceive 는
+  // 백엔드(filter_targets_cwd_receive)·프론트가 동일하게 존중한다.
   useEffect(() => {
     if (!syncGroup) return;
     let cancelled = false;
@@ -229,6 +231,8 @@ export function FileExplorerView({
       if (cancelled) return;
       // force 전파만 처리(일반 전파는 위 terminal-cwd-changed 경로가 담당).
       if (!data.force) return;
+      // 대상 게이트: 수신 비활성이면 force 라도 무시한다 (issue #375).
+      if (!cwdReceive) return;
       // 같은 sync group 의 다른 소스가 보낸 force 전파에만 반응(자기 자신 제외).
       if (data.groupId !== syncGroup || data.terminalId === instanceId) return;
       applyExternalCwd(data.path);
