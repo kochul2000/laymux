@@ -27,6 +27,7 @@ import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { persistSession } from "@/lib/persist-session";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
+import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -165,6 +166,10 @@ function WorkspaceItem({
   pathEllipsis,
   drag,
   dropIndicator,
+  isPaneDropTarget,
+  onPaneDragOver,
+  onPaneDragLeave,
+  onPaneDrop,
   hideMode,
   isWsHidden,
   hiddenPaneIds,
@@ -184,6 +189,11 @@ function WorkspaceItem({
   pathEllipsis: "start" | "end";
   drag: DragContext;
   dropIndicator: DropIndicator | null;
+  // Pane 을 이 워크스페이스 위로 끌어왔는지(하이라이트용)와 그 drop 핸들러 (issue #380).
+  isPaneDropTarget: boolean;
+  onPaneDragOver: (e: React.DragEvent, wsId: string) => void;
+  onPaneDragLeave: (e: React.DragEvent) => void;
+  onPaneDrop: (e: React.DragEvent, wsId: string) => void;
   hideMode: boolean;
   isWsHidden: boolean;
   hiddenPaneIds: Set<string>;
@@ -229,19 +239,37 @@ function WorkspaceItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onDragStart={(e) => drag.onDragStart(e, ws.id)}
-      onDragOver={(e) => drag.onDragOver(e, ws.id)}
-      onDragLeave={(e) => drag.onDragLeave(e)}
-      onDrop={(e) => drag.onDrop(e, ws.id)}
+      onDragOver={(e) => {
+        // Pane 드래그(이동)와 워크스페이스 재정렬 드래그를 같은 항목에서 모두 받는다.
+        // pane MIME 가 실려 있으면 이동 경로, 아니면 기존 재정렬 경로.
+        if (isPaneDrag(e)) onPaneDragOver(e, ws.id);
+        else drag.onDragOver(e, ws.id);
+      }}
+      onDragLeave={(e) => {
+        onPaneDragLeave(e);
+        drag.onDragLeave(e);
+      }}
+      onDrop={(e) => {
+        if (isPaneDrag(e)) onPaneDrop(e, ws.id);
+        else drag.onDrop(e, ws.id);
+      }}
       onDragEnd={drag.onDragEnd}
       className={`workspace-item-animated relative shrink-0 cursor-pointer${
         isCollapsed ? " workspace-item-collapsed" : ""
       }`}
       style={{
-        background: isActive ? "var(--accent-08)" : hovered ? "var(--active-bg)" : "transparent",
+        background: isPaneDropTarget
+          ? "var(--accent-12)"
+          : isActive
+            ? "var(--accent-08)"
+            : hovered
+              ? "var(--active-bg)"
+              : "transparent",
         borderLeft: isActive ? "3px solid var(--accent)" : "3px solid transparent",
         borderBottom: isCollapsed ? "0 solid transparent" : "1px solid var(--border)",
-        boxShadow:
-          dropIndicator?.wsId === ws.id
+        boxShadow: isPaneDropTarget
+          ? "inset 0 0 0 2px var(--accent)"
+          : dropIndicator?.wsId === ws.id
             ? dropIndicator.position === "top"
               ? "inset 0 2px 0 0 var(--accent)"
               : "inset 0 -2px 0 0 var(--accent)"
@@ -1045,6 +1073,8 @@ export function WorkspaceSelectorView() {
   const { t } = useTranslation("workspace");
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
+  // 어떤 워크스페이스 위로 pane 을 끌어왔는지(이동 drop 타겟 하이라이트, issue #380).
+  const [paneDropWsId, setPaneDropWsId] = useState<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -1053,6 +1083,7 @@ export function WorkspaceSelectorView() {
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
+  const movePaneToWorkspace = useWorkspaceStore((s) => s.movePaneToWorkspace);
   const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
   const workspaceDisplayOrder = useWorkspaceStore((s) => s.workspaceDisplayOrder);
   const layouts = useWorkspaceStore((s) => s.layouts);
@@ -1157,6 +1188,36 @@ export function WorkspaceSelectorView() {
     setDropIndicator(null);
     dragIdRef.current = null;
   }, []);
+
+  // -- Pane → workspace 이동 drop (issue #380) --
+  // PaneGrid 컨트롤바의 드래그 핸들에서 시작된 pane 드래그를 워크스페이스 항목 위로
+  // 드롭하면 그 워크스페이스로 pane 을 이동한다. 워크스페이스 재정렬과 달리 sort 모드와
+  // 무관하게 항상 동작한다.
+  const handlePaneDragOver = useCallback((e: React.DragEvent, wsId: string) => {
+    // preventDefault 를 호출해야 drop 이 허용된다(HTML5 DnD 규약).
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setPaneDropWsId((prev) => (prev === wsId ? prev : wsId));
+  }, []);
+
+  const handlePaneDragLeave = useCallback((e: React.DragEvent) => {
+    // 자식 요소로 이동하는 leave 는 무시(하이라이트 깜빡임 방지).
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setPaneDropWsId(null);
+  }, []);
+
+  const handlePaneDrop = useCallback(
+    (e: React.DragEvent, wsId: string) => {
+      e.preventDefault();
+      setPaneDropWsId(null);
+      const paneId = getPaneDragData(e);
+      if (paneId) {
+        movePaneToWorkspace(paneId, wsId);
+        persistSession();
+      }
+    },
+    [movePaneToWorkspace],
+  );
 
   const isManualSort = workspaceSortOrder === "manual";
 
@@ -1385,6 +1446,10 @@ export function WorkspaceSelectorView() {
               pathEllipsis={pathEllipsis}
               drag={dragContext}
               dropIndicator={dropIndicator}
+              isPaneDropTarget={paneDropWsId === ws.id}
+              onPaneDragOver={handlePaneDragOver}
+              onPaneDragLeave={handlePaneDragLeave}
+              onPaneDrop={handlePaneDrop}
               hideMode={hideMode}
               isWsHidden={isWsHidden}
               hiddenPaneIds={wsHiddenPaneIds}

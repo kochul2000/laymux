@@ -2119,4 +2119,66 @@ describe("WorkspaceSelectorView", () => {
       });
     });
   });
+
+  // 드래그한 pane 을 워크스페이스 항목으로 드롭하면 그 워크스페이스로 이동한다 (issue #380).
+  describe("pane drop onto workspace (issue #380)", () => {
+    const PANE_DND_MIME = "application/x-laymux-pane";
+
+    // jsdom dataTransfer 스텁: types/getData/dropEffect 지원.
+    const makePaneDataTransfer = (paneId: string) => ({
+      types: [PANE_DND_MIME],
+      data: { [PANE_DND_MIME]: paneId } as Record<string, string>,
+      getData(type: string) {
+        return this.data[type] ?? "";
+      },
+      setData(type: string, val: string) {
+        this.data[type] = val;
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    });
+
+    /** 활성 워크스페이스를 split(2 pane) 하고, 두 번째 워크스페이스를 추가한다. */
+    const setup = () => {
+      const srcId = useWorkspaceStore.getState().workspaces[0].id;
+      useWorkspaceStore.getState().setActiveWorkspace(srcId);
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().addWorkspace("Target", "default-layout");
+      const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      return { srcId, tgtId };
+    };
+
+    it("moves the dragged pane to the workspace it is dropped on", () => {
+      const { srcId, tgtId } = setup();
+      const movedPaneId = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!
+        .panes[1].id;
+
+      render(<WorkspaceSelectorView />);
+      const target = screen.getByTestId(`workspace-item-${tgtId}`);
+      const dataTransfer = makePaneDataTransfer(movedPaneId);
+      fireEvent.dragOver(target, { dataTransfer });
+      fireEvent.drop(target, { dataTransfer });
+
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      expect(afterSrc.panes.some((p) => p.id === movedPaneId)).toBe(false);
+      expect(afterTgt.panes.some((p) => p.id === movedPaneId)).toBe(true);
+      expect(afterTgt.panes).toHaveLength(2);
+    });
+
+    it("does nothing when dropping a pane back onto its own (source) workspace", () => {
+      const { srcId } = setup();
+      const movedPaneId = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!
+        .panes[1].id;
+
+      render(<WorkspaceSelectorView />);
+      const sourceItem = screen.getByTestId(`workspace-item-${srcId}`);
+      const dataTransfer = makePaneDataTransfer(movedPaneId);
+      fireEvent.dragOver(sourceItem, { dataTransfer });
+      fireEvent.drop(sourceItem, { dataTransfer });
+
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      expect(afterSrc.panes).toHaveLength(2);
+    });
+  });
 });

@@ -282,6 +282,113 @@ describe("WorkspaceStore", () => {
     });
   });
 
+  // 드래그한 pane 을 다른 워크스페이스로 이동 (issue #380)
+  describe("movePaneToWorkspace", () => {
+    /** 활성 워크스페이스를 split 해 2개 pane 으로 만들고, 두 번째 워크스페이스를 추가한다. */
+    const setupSourceWithTwoPanes = () => {
+      const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();
+      const srcId = workspaces[0].id;
+      useWorkspaceStore.getState().setActiveWorkspace(srcId);
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      addWorkspace("Target", layouts[0].id);
+      const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      return { srcId, tgtId };
+    };
+
+    it("removes the pane from its source workspace and appends it to the target", () => {
+      const { srcId, tgtId } = setupSourceWithTwoPanes();
+      const src = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const movedPane = src.panes[1];
+
+      useWorkspaceStore.getState().movePaneToWorkspace(movedPane.id, tgtId);
+
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      // 소스에서 제거됨
+      expect(afterSrc.panes.some((p) => p.id === movedPane.id)).toBe(false);
+      expect(afterSrc.panes).toHaveLength(1);
+      // 대상에 추가됨 (pane id 보존)
+      expect(afterTgt.panes.some((p) => p.id === movedPane.id)).toBe(true);
+      expect(afterTgt.panes).toHaveLength(2);
+    });
+
+    it("preserves the moved pane's view config", () => {
+      const { srcId, tgtId } = setupSourceWithTwoPanes();
+      const src = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const movedPane = src.panes[1];
+      // 식별 가능한 view 로 바꾼다.
+      const movedIndex = 1;
+      useWorkspaceStore.getState().setActiveWorkspace(srcId);
+      useWorkspaceStore
+        .getState()
+        .setPaneView(movedIndex, { type: "TerminalView", profile: "WSL" });
+
+      useWorkspaceStore.getState().movePaneToWorkspace(movedPane.id, tgtId);
+
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      const arrived = afterTgt.panes.find((p) => p.id === movedPane.id)!;
+      expect(arrived.view.type).toBe("TerminalView");
+      expect(arrived.view.profile).toBe("WSL");
+    });
+
+    it("keeps target panes non-overlapping (every pane fits in the unit square)", () => {
+      const { srcId, tgtId } = setupSourceWithTwoPanes();
+      const movedPane = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!
+        .panes[1];
+
+      useWorkspaceStore.getState().movePaneToWorkspace(movedPane.id, tgtId);
+
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      for (const p of afterTgt.panes) {
+        expect(p.x).toBeGreaterThanOrEqual(-0.001);
+        expect(p.y).toBeGreaterThanOrEqual(-0.001);
+        expect(p.x + p.w).toBeLessThanOrEqual(1.001);
+        expect(p.y + p.h).toBeLessThanOrEqual(1.001);
+      }
+    });
+
+    it("no-ops when the source workspace would be left empty (single pane)", () => {
+      const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();
+      const srcId = workspaces[0].id; // single pane
+      addWorkspace("Target", layouts[0].id);
+      const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      const onlyPane = workspaces[0].panes[0];
+
+      useWorkspaceStore.getState().movePaneToWorkspace(onlyPane.id, tgtId);
+
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      expect(afterSrc.panes).toHaveLength(1);
+      expect(afterTgt.panes).toHaveLength(1);
+    });
+
+    it("no-ops when target equals source workspace", () => {
+      const { srcId } = setupSourceWithTwoPanes();
+      const movedPane = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!
+        .panes[1];
+
+      useWorkspaceStore.getState().movePaneToWorkspace(movedPane.id, srcId);
+
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      expect(afterSrc.panes).toHaveLength(2);
+    });
+
+    it("no-ops for an unknown pane id or unknown target", () => {
+      const { srcId, tgtId } = setupSourceWithTwoPanes();
+      useWorkspaceStore.getState().movePaneToWorkspace("pane-does-not-exist", tgtId);
+      useWorkspaceStore
+        .getState()
+        .movePaneToWorkspace(
+          useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!.panes[1].id,
+          "ws-does-not-exist",
+        );
+      const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
+      const afterTgt = useWorkspaceStore.getState().workspaces.find((w) => w.id === tgtId)!;
+      expect(afterSrc.panes).toHaveLength(2);
+      expect(afterTgt.panes).toHaveLength(1);
+    });
+  });
+
   // Layout actions
   describe("exportAsNewLayout", () => {
     it("creates a new layout from current workspace panes", () => {

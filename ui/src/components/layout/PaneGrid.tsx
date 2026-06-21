@@ -10,9 +10,7 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
-
-/** dataTransfer MIME for pane drag-to-swap (issue #377). */
-const PANE_DND_MIME = "application/x-laymux-pane";
+import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 
 export interface GridPane {
   id: string;
@@ -123,8 +121,7 @@ export function PaneGrid({
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {
     dragSrcRef.current = paneId;
-    e.dataTransfer.setData(PANE_DND_MIME, paneId);
-    e.dataTransfer.effectAllowed = "move";
+    setPaneDragData(e, paneId);
   };
   const handleDragOver = (e: React.DragEvent, paneId: string) => {
     if (!dndEnabled || !dragSrcRef.current) return;
