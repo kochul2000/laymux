@@ -85,9 +85,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// 배지 폭은 고정(14px)이므로 자릿수가 늘수록 폰트를 줄여 한 줄에 맞춘다.
-// 인덱스 = 표시 문자열 길이(1~4+), 값 = 해당 길이에서 14px 폭에 들어가는 최대 폰트.
-// 폭 고정 계약의 일부라 값 변경 시 회귀 테스트도 함께 갱신해야 한다.
+// 배지는 최소 폭 14px(1~2자리는 정사각형 유지)이고, 세 자리 이상이면 콘텐츠 폭만큼 가로로 늘어난다.
+// 폭이 과도하게 커지지 않도록 표시 문자열이 길수록 폰트를 줄인다(높이는 14px 고정 유지).
+// 인덱스 = 표시 문자열 길이(1~4+), 값 = 해당 길이용 폰트 크기.
+// fontSize 값은 회귀 테스트(WorkspaceSelectorView.test.tsx)가 검증하므로 값 변경 시 함께 갱신한다.
 const COUNT_BADGE_FONT_SIZE_BY_LENGTH = ["10px", "10px", "9.5px", "8.5px", "7.5px"] as const;
 
 function getCountBadgeFontSize(countText: string): string {
