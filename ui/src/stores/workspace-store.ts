@@ -100,6 +100,13 @@ interface WorkspaceState {
     delta: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>,
   ) => void;
   swapPanes: (srcIndex: number, tgtIndex: number) => void;
+  /**
+   * 드래그한 pane 을 다른 워크스페이스로 이동한다 (issue #380).
+   * 소스 워크스페이스에서 제거(공간은 인접 pane 이 흡수, removePane 과 동일)하고
+   * 대상 워크스페이스의 가장 큰 pane 을 반으로 분할해 그 자리에 옮겨온 pane 을 둔다.
+   * pane id 와 view 설정은 보존된다. 소스가 1개뿐이면(빈 워크스페이스 방지) 무시.
+   */
+  movePaneToWorkspace: (paneId: string, targetWorkspaceId: string) => void;
   setPaneView: (paneIndex: number, view: ViewInstanceConfig) => void;
 
   // Layout actions
@@ -342,6 +349,64 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),
+    }));
+  },
+
+  movePaneToWorkspace: (paneId, targetWorkspaceId) => {
+    const { workspaces } = get();
+    const source = workspaces.find((w) => w.panes.some((p) => p.id === paneId));
+    const target = workspaces.find((w) => w.id === targetWorkspaceId);
+    if (!source || !target) return;
+    // 같은 워크스페이스로의 이동은 무의미하고, 소스를 비우는 이동은 막는다.
+    if (source.id === target.id) return;
+    if (source.panes.length <= 1) return;
+
+    const srcIndex = source.panes.findIndex((p) => p.id === paneId);
+    const moved = source.panes[srcIndex];
+
+    // 1) 소스에서 제거 — removePane 과 동일하게 인접 pane 이 공간을 흡수한다.
+    const newSourcePanes = removePaneAndRedistribute(source.panes, srcIndex);
+    if (!newSourcePanes) return;
+
+    // 2) 대상의 가장 큰 pane 을 반으로 나눠 그 자리에 옮겨온 pane 을 둔다.
+    //    (splitPane 과 같은 기하학: 더 긴 축을 따라 절반으로 가른다.)
+    let hostIdx = 0;
+    let hostArea = -1;
+    target.panes.forEach((p, i) => {
+      const area = p.w * p.h;
+      if (area > hostArea) {
+        hostArea = area;
+        hostIdx = i;
+      }
+    });
+    const host = target.panes[hostIdx];
+    const splitVertical = host.w >= host.h; // 가로가 더 길면 좌우로 분할
+    let hostSlot: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
+    let movedSlot: Pick<WorkspacePane, "x" | "y" | "w" | "h">;
+    if (splitVertical) {
+      const halfW = host.w / 2;
+      hostSlot = { x: host.x, y: host.y, w: halfW, h: host.h };
+      movedSlot = { x: host.x + halfW, y: host.y, w: halfW, h: host.h };
+    } else {
+      const halfH = host.h / 2;
+      hostSlot = { x: host.x, y: host.y, w: host.w, h: halfH };
+      movedSlot = { x: host.x, y: host.y + halfH, w: host.w, h: halfH };
+    }
+
+    const movedPane: WorkspacePane = {
+      id: moved.id,
+      ...movedSlot,
+      view: { ...moved.view },
+    };
+    const newTargetPanes = target.panes.map((p, i) => (i === hostIdx ? { ...p, ...hostSlot } : p));
+    newTargetPanes.splice(hostIdx + 1, 0, movedPane);
+
+    set((state) => ({
+      workspaces: state.workspaces.map((w) => {
+        if (w.id === source.id) return { ...w, panes: newSourcePanes };
+        if (w.id === target.id) return { ...w, panes: newTargetPanes };
+        return w;
+      }),
     }));
   },
 
