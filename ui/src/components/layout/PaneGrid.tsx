@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -10,6 +10,9 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
+
+/** dataTransfer MIME for pane drag-to-swap (issue #377). */
+const PANE_DND_MIME = "application/x-laymux-pane";
 
 export interface GridPane {
   id: string;
@@ -38,6 +41,13 @@ export interface PaneGridProps {
   onSetPaneView?: (paneId: string, config: ViewInstanceConfig) => void;
   onSplitPane?: (paneId: string, dir: "horizontal" | "vertical") => void;
   onRemovePane?: (paneId: string) => void;
+  /**
+   * 그리드 안에서 pane 위치를 드래그&드롭으로 교환한다 (issue #377).
+   * 제공되면 각 pane 컨트롤바에 드래그 핸들이 나타나고, 다른 pane 위로 드롭하면
+   * srcPaneId·tgtPaneId 로 호출된다. 실제 위치 교환은 workspace-store.swapPanes 가 담당.
+   * 미제공이면(예: dock) 드래그 핸들/드롭 타겟이 비활성화된다.
+   */
+  onSwapPanes?: (srcPaneId: string, tgtPaneId: string) => void;
 
   // CWD toggle defaults
   getCwdDefaults?: (view: ViewInstanceConfig) => CwdDefaults;
@@ -83,6 +93,7 @@ export function PaneGrid({
   onSetPaneView,
   onSplitPane,
   onRemovePane,
+  onSwapPanes,
   getCwdDefaults,
   workspaceId,
   workspaceName,
@@ -102,6 +113,38 @@ export function PaneGrid({
   const hover = useHoverTimer(hoverIdleSeconds);
   // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
   const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
+
+  // Drag-to-swap (issue #377). Native HTML5 DnD, same pattern as workspace reorder
+  // in WorkspaceSelectorView. dragSrcId 는 현재 드래그 중인 pane, dragOverId 는
+  // 드롭 타겟 하이라이트용. dataTransfer 에도 id 를 실어 jsdom/실제 양쪽에서 동작.
+  const dndEnabled = isActive && !!onSwapPanes;
+  const dragSrcRef = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, paneId: string) => {
+    dragSrcRef.current = paneId;
+    e.dataTransfer.setData(PANE_DND_MIME, paneId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const handleDragOver = (e: React.DragEvent, paneId: string) => {
+    if (!dndEnabled || !dragSrcRef.current) return;
+    // preventDefault 를 호출해야 drop 이 허용된다(HTML5 DnD 규약).
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragSrcRef.current !== paneId) setDragOverId(paneId);
+  };
+  const handleDrop = (e: React.DragEvent, paneId: string) => {
+    if (!dndEnabled) return;
+    e.preventDefault();
+    const srcId = dragSrcRef.current ?? (e.dataTransfer.getData(PANE_DND_MIME) || null);
+    dragSrcRef.current = null;
+    setDragOverId(null);
+    if (srcId && srcId !== paneId) onSwapPanes?.(srcId, paneId);
+  };
+  const handleDragEnd = () => {
+    dragSrcRef.current = null;
+    setDragOverId(null);
+  };
 
   return (
     <div
@@ -142,6 +185,8 @@ export function PaneGrid({
             onMouseEnter={() => isActive && hover.activate(pane.id)}
             onMouseMove={() => isActive && hover.activate(pane.id)}
             onMouseLeave={hover.clear}
+            onDragOver={dndEnabled ? (e) => handleDragOver(e, pane.id) : undefined}
+            onDrop={dndEnabled ? (e) => handleDrop(e, pane.id) : undefined}
             style={{
               left: `${pane.x * 100}%`,
               top: `${pane.y * 100}%`,
@@ -153,6 +198,49 @@ export function PaneGrid({
             }}
           >
             {focused && <FocusIndicator testId="pane-focus-indicator" />}
+            {dndEnabled && (
+              <div
+                data-testid={`pane-drag-handle-${i}`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, pane.id)}
+                onDragEnd={handleDragEnd}
+                // 핸들 자체에 mousedown 이 pane 의 focus 로 버블링되지 않도록 막는다.
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                title="Drag to swap pane position"
+                aria-label="Drag to swap pane position"
+                className={`absolute right-1 top-1 z-30 flex cursor-grab items-center justify-center rounded transition-opacity ${
+                  isActive && isHovered ? "opacity-90" : "opacity-0"
+                }`}
+                style={{
+                  width: "var(--btn-min-w)",
+                  height: "var(--btn-h)",
+                  background: "var(--bg-surface)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                  <circle cx="4" cy="2.5" r="1" />
+                  <circle cx="8" cy="2.5" r="1" />
+                  <circle cx="4" cy="6" r="1" />
+                  <circle cx="8" cy="6" r="1" />
+                  <circle cx="4" cy="9.5" r="1" />
+                  <circle cx="8" cy="9.5" r="1" />
+                </svg>
+              </div>
+            )}
+            {dndEnabled && dragOverId === pane.id && (
+              <div
+                data-testid={`pane-drop-target-${i}`}
+                className="pointer-events-none absolute inset-0 z-20"
+                style={{
+                  border: "2px solid var(--accent)",
+                  background: "var(--accent-20)",
+                }}
+              />
+            )}
             <PaneControlBar
               paneId={pane.id}
               currentView={pane.view}

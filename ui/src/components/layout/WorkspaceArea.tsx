@@ -21,6 +21,7 @@ export function WorkspaceArea() {
   const setPaneView = useWorkspaceStore((s) => s.setPaneView);
   const splitPane = useWorkspaceStore((s) => s.splitPane);
   const removePane = useWorkspaceStore((s) => s.removePane);
+  const swapPanes = useWorkspaceStore((s) => s.swapPanes);
   const location: TerminalLocation = "workspace";
   const resolveCwdDefaults = useCwdDefaultsResolver(location);
 
@@ -68,6 +69,11 @@ export function WorkspaceArea() {
             }
             onSplitPane={isActive ? (paneId, dir) => splitPane(idxOf(paneId), dir) : undefined}
             onRemovePane={isActive ? (paneId) => removePane(idxOf(paneId)) : undefined}
+            onSwapPanes={
+              isActive
+                ? (srcPaneId, tgtPaneId) => swapPanes(idxOf(srcPaneId), idxOf(tgtPaneId))
+                : undefined
+            }
             getCwdDefaults={resolveCwdDefaults}
             isHoveredOverride={
               isActive && automationHoverIndex !== null

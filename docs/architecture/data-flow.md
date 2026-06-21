@@ -37,6 +37,13 @@
 | 경계선 더블클릭                   | 작은 쪽 Pane 제거, 큰 쪽이 흡수 |
 | 편집 모드에서 Pane 선택 후 Delete | 인접 Pane 중 가장 큰 것이 흡수  |
 
+### 위치 교환 (드래그&드롭, issue #377)
+
+- 각 Pane 컨트롤바 우측 상단의 **드래그 핸들(grip)** 을 다른 Pane 위로 드래그&드롭하면 두 Pane의 `{ x, y, w, h }` 가 교환된다(view/콘텐츠는 그대로, 슬롯 위치만 swap).
+- 네이티브 HTML5 DnD(`draggable` + `dataTransfer`)를 사용 — WorkspaceSelectorView 의 워크스페이스 재정렬과 동일 패턴. 별도 DnD 라이브러리 없음.
+- UI(`PaneGrid`)는 `onSwapPanes(srcPaneId, tgtPaneId)` 콜백만 노출하고, 실제 교환은 기존 `workspace-store.swapPanes(srcIndex, tgtIndex)`(MCP `swap_panes` 와 공유) 한 곳에서 수행한다. `WorkspaceArea` 가 paneId→paneIndex 로 변환해 연결.
+- 핸들은 활성 워크스페이스에서 hover 시에만 나타나며, dock(PaneGrid 재사용)은 `onSwapPanes` 미제공으로 비활성. 같은 Pane 위로 드롭하면 무시.
+
 ---
 
 ## 8. TerminalView

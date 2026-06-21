@@ -134,6 +134,77 @@ describe("PaneGrid", () => {
     });
   });
 
+  // -- Drag-and-drop pane swap (issue #377) --
+  //
+  // 워크스페이스 그리드 안에서 pane을 드래그해 다른 pane 위로 드롭하면 두 pane의
+  // 위치가 교환된다. PaneGrid는 onSwapPanes(srcPaneId, tgtPaneId) 콜백만 노출하고
+  // 실제 위치 교환은 workspace-store.swapPanes(기존 로직)가 담당한다.
+  describe("drag-to-swap (issue #377)", () => {
+    const dndProps = {
+      ...defaultProps,
+      panes: makePanes(3),
+      testIdFn: (_p: GridPane, i: number) => `test-pane-${i}`,
+    };
+
+    // dataTransfer is not implemented in jsdom; provide a minimal stub factory.
+    const makeDataTransfer = () => ({
+      data: {} as Record<string, string>,
+      setData(type: string, val: string) {
+        this.data[type] = val;
+      },
+      getData(type: string) {
+        return this.data[type] ?? "";
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    });
+
+    it("renders a drag handle for each pane only when onSwapPanes is provided", () => {
+      const { unmount } = render(<PaneGrid {...dndProps} />);
+      expect(screen.queryByTestId("pane-drag-handle-0")).not.toBeInTheDocument();
+      unmount();
+
+      render(<PaneGrid {...dndProps} onSwapPanes={vi.fn()} />);
+      expect(screen.getByTestId("pane-drag-handle-0")).toBeInTheDocument();
+      expect(screen.getByTestId("pane-drag-handle-2")).toBeInTheDocument();
+    });
+
+    it("calls onSwapPanes with source and target pane ids on drop", () => {
+      const onSwapPanes = vi.fn();
+      render(<PaneGrid {...dndProps} onSwapPanes={onSwapPanes} />);
+
+      const handle0 = screen.getByTestId("pane-drag-handle-0");
+      const target2 = screen.getByTestId("test-pane-2");
+      const dataTransfer = makeDataTransfer();
+
+      fireEvent.dragStart(handle0, { dataTransfer });
+      fireEvent.dragOver(target2, { dataTransfer });
+      fireEvent.drop(target2, { dataTransfer });
+
+      expect(onSwapPanes).toHaveBeenCalledWith("pane-0", "pane-2");
+    });
+
+    it("does not call onSwapPanes when dropping a pane onto itself", () => {
+      const onSwapPanes = vi.fn();
+      render(<PaneGrid {...dndProps} onSwapPanes={onSwapPanes} />);
+
+      const handle1 = screen.getByTestId("pane-drag-handle-1");
+      const target1 = screen.getByTestId("test-pane-1");
+      const dataTransfer = makeDataTransfer();
+
+      fireEvent.dragStart(handle1, { dataTransfer });
+      fireEvent.dragOver(target1, { dataTransfer });
+      fireEvent.drop(target1, { dataTransfer });
+
+      expect(onSwapPanes).not.toHaveBeenCalled();
+    });
+
+    it("does not render drag handles when isActive is false", () => {
+      render(<PaneGrid {...dndProps} onSwapPanes={vi.fn()} isActive={false} />);
+      expect(screen.queryByTestId("pane-drag-handle-0")).not.toBeInTheDocument();
+    });
+  });
+
   it("calls onSplitPane via PaneControlBar split button", () => {
     const onSplitPane = vi.fn();
     render(<PaneGrid {...defaultProps} onSplitPane={onSplitPane} />);
