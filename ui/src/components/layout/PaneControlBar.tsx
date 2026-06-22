@@ -710,9 +710,11 @@ export function PaneControlBar({
     const frame = requestAnimationFrame(updateMenuPosition);
     return () => cancelAnimationFrame(frame);
   }, [narrowMenuOpen, updateMenuPosition]);
-  // 떠 있는 메뉴의 실제 가시성은 narrow 여부에서 파생한다(상태로 저장하지 않음). pane 이
-  // 리사이즈로 넓어지면(narrowBar=false) ⋯ 트리거가 사라지므로 메뉴도 숨긴다. narrowMenuOpen
-  // 은 그대로 두되 렌더에는 이 파생값만 쓰므로, 넓은 상태에서 stale-open 으로 잘못 뜨지 않는다.
+  // pane 이 리사이즈로 넓어지면(narrowBar=false) ⋯ 트리거가 사라지므로 narrowMenuOpen 도
+  // 닫는다. 그러지 않으면 다시 좁아질 때(narrowBar=true) 사용자 동작 없이 메뉴가 stale-open
+  // 으로 재출현한다. effect 대신 렌더 중 state 조정(React 권장 패턴)으로 처리한다.
+  if (!narrowBar && narrowMenuOpen) setNarrowMenuOpen(false);
+  // 떠 있는 메뉴의 실제 가시성은 narrow 여부에서 파생한다(상태로 저장하지 않음).
   const narrowMenuVisible = narrowBar && narrowMenuOpen;
 
   // 모든 모드에서 children을 동일한 DOM 위치에 유지하여

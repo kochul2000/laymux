@@ -351,6 +351,66 @@ describe("PaneControlBar", () => {
     );
   });
 
+  it("does not re-open the narrow menu after widen then re-narrow (stale-open regression, issue #385)", async () => {
+    // Open while narrow, widen (menu hides), re-narrow: the menu must stay
+    // closed until the user clicks again. Without resetting narrowMenuOpen on
+    // narrowBar=false, the derived visibility would resurface it stale-open.
+    const ros: { cb: ResizeObserverCallback; target?: Element }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        cb: ResizeObserverCallback;
+        target?: Element;
+        constructor(cb: ResizeObserverCallback) {
+          this.cb = cb;
+          ros.push(this);
+        }
+        observe(target: Element) {
+          this.target = target;
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const emitWidth = (width: number) =>
+      act(() => {
+        for (const ro of ros) {
+          ro.cb(
+            [
+              {
+                target: ro.target!,
+                contentRect: { width, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            ro as unknown as ResizeObserver,
+          );
+        }
+      });
+
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    emitWidth(200);
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument();
+
+    // Widen: trigger and menu disappear.
+    emitWidth(500);
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+
+    // Re-narrow: trigger returns but the menu must NOT be open.
+    emitWidth(200);
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+  });
+
   it("keeps unpin available in the narrow pinned menu", async () => {
     stubPaneWidth(320);
     useSettingsStore.setState((s) => ({
