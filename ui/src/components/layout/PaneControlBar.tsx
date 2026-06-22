@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -465,6 +466,17 @@ function BarContent({
   );
 }
 
+/**
+ * 좁은 pane(width < 360)의 컨트롤 메뉴 (issue #384).
+ *
+ * pane 컨테이너는 `overflow-hidden`이라 메뉴를 그 안에 렌더하면 잘려서 안 보인다.
+ * 그래서 `createPortal`로 `document.body`에 띄우고 `position: fixed`로 배치해
+ * pane 경계(및 어떤 stacking context)와 무관하게 항상 보이게 한다.
+ *
+ * 또한 이 메뉴는 PaneControlBar 루트에서 `menuOpen`만으로 렌더되므로, 사용자가
+ * 떠 있는 메뉴로 커서를 옮기다 pane hover 영역을 벗어나(hovered=false) hover 바가
+ * 사라져도 메뉴는 그대로 유지된다 — 예전엔 hover 바 내부에 있어 같이 사라졌다.
+ */
 function NarrowControlMenu({
   currentView,
   actions,
@@ -473,6 +485,8 @@ function NarrowControlMenu({
   cwdSendOn,
   cwdReceiveOn,
   position,
+  onRequestClose,
+  triggerRef,
 }: {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
@@ -481,9 +495,36 @@ function NarrowControlMenu({
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
   position: { top: number; right: number };
+  onRequestClose: () => void;
+  /** ⋯ 트리거 버튼. 트리거 클릭은 외부 클릭으로 보지 않는다(아래 toggle 이 닫기를 처리). */
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
 }) {
-  return (
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // 메뉴 밖 클릭 / Escape 로 닫기 (떠 있는 popover 표준 동작).
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      // 트리거(⋯) 클릭은 무시한다 — 그쪽 onClick(toggle)이 닫기를 담당하므로
+      // 여기서 닫으면 곧바로 다시 열려(close→toggle open) 버튼으로 못 닫게 된다.
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      onRequestClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onRequestClose();
+    };
+    // capture 단계로 등록해 메뉴를 연 ⋯ 버튼의 다음 클릭 등과 경합하지 않는다.
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [onRequestClose, triggerRef]);
+
+  return createPortal(
     <div
+      ref={menuRef}
       data-testid="pane-control-floating-menu"
       className="fixed z-50 p-1"
       style={{
@@ -507,54 +548,31 @@ function NarrowControlMenu({
         vertical
         showMinimize={false}
       />
-    </div>
+    </div>,
+    document.body,
   );
 }
 
+/**
+ * 좁은 pane 의 ⋯ 트리거 버튼. 메뉴 자체는 PaneControlBar 루트에서 portal 로 렌더한다
+ * (issue #384) — 버튼만 바 안에 두어 위치 측정 기준점(buttonRef)을 제공한다.
+ */
 function NarrowControlAnchor({
-  currentView,
-  actions,
-  mode,
   menuOpen,
   onToggleMenu,
-  onSetMode,
-  cwdSendOn,
-  cwdReceiveOn,
+  buttonRef,
 }: {
-  currentView: ViewInstanceConfig;
-  actions: PaneControlBarActions;
-  mode: ControlBarMode;
   menuOpen: boolean;
   onToggleMenu: () => void;
-  onSetMode: (m: ControlBarMode) => void;
-  cwdSendOn?: boolean;
-  cwdReceiveOn?: boolean;
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
 }) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
-  const updateMenuPosition = useCallback(() => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setMenuPosition({
-      top: rect.bottom + 2,
-      right: Math.max(0, window.innerWidth - rect.right),
-    });
-  }, []);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const frame = requestAnimationFrame(updateMenuPosition);
-    return () => cancelAnimationFrame(frame);
-  }, [menuOpen, updateMenuPosition]);
-
   return (
     <div className="flex shrink-0 justify-end" onClick={(e) => e.stopPropagation()}>
       <button
         ref={buttonRef}
         data-testid="pane-control-menu-btn"
-        onClick={() => {
-          updateMenuPosition();
-          onToggleMenu();
-        }}
+        aria-expanded={menuOpen}
+        onClick={onToggleMenu}
         className="hover-bg-strong flex cursor-pointer items-center justify-center rounded"
         style={{
           width: BTN_MIN_W,
@@ -573,17 +591,6 @@ function NarrowControlAnchor({
           <circle cx="9" cy="6" r="1" />
         </svg>
       </button>
-      {menuOpen && (
-        <NarrowControlMenu
-          currentView={currentView}
-          actions={actions}
-          mode={mode}
-          onSetMode={onSetMode}
-          cwdSendOn={cwdSendOn}
-          cwdReceiveOn={cwdReceiveOn}
-          position={menuPosition}
-        />
-      )}
     </div>
   );
 }
@@ -678,6 +685,36 @@ export function PaneControlBar({
   const isPinned = mode === "pinned";
   const narrowBar = paneWidth > 0 && paneWidth < 360;
 
+  // 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384). ⋯ 버튼(NarrowControlAnchor)이
+  // 어느 바에 있든 단 하나만 마운트되므로(pinned XOR hover XOR ViewHeader) 단일
+  // buttonRef 로 위치 기준점을 공유한다. 메뉴 자체는 컴포넌트 루트에서 portal 로
+  // 한 번만 렌더해 pane hover 생명주기와 분리한다.
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const updateMenuPosition = useCallback(() => {
+    const rect = menuBtnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPosition({
+      top: rect.bottom + 2,
+      right: Math.max(0, window.innerWidth - rect.right),
+    });
+  }, []);
+  const closeNarrowMenu = useCallback(() => setNarrowMenuOpen(false), []);
+  const toggleNarrowMenu = useCallback(() => {
+    updateMenuPosition();
+    setNarrowMenuOpen((open) => !open);
+  }, [updateMenuPosition]);
+  // 메뉴가 열려 있는 동안 버튼 위치가 바뀔 수 있으므로(레이아웃 변화) 한 프레임 뒤 재측정.
+  useEffect(() => {
+    if (!narrowMenuOpen) return;
+    const frame = requestAnimationFrame(updateMenuPosition);
+    return () => cancelAnimationFrame(frame);
+  }, [narrowMenuOpen, updateMenuPosition]);
+  // 떠 있는 메뉴의 실제 가시성은 narrow 여부에서 파생한다(상태로 저장하지 않음). pane 이
+  // 리사이즈로 넓어지면(narrowBar=false) ⋯ 트리거가 사라지므로 메뉴도 숨긴다. narrowMenuOpen
+  // 은 그대로 두되 렌더에는 이 파생값만 쓰므로, 넓은 상태에서 stale-open 으로 잘못 뜨지 않는다.
+  const narrowMenuVisible = narrowBar && narrowMenuOpen;
+
   // 모든 모드에서 children을 동일한 DOM 위치에 유지하여
   // pin/unpin 전환 시 React가 children을 리마운트하지 않도록 한다.
   const modeTestId =
@@ -726,14 +763,9 @@ export function PaneControlBar({
     () =>
       narrowBar ? (
         <NarrowControlAnchor
-          currentView={currentView}
-          actions={actions}
-          mode={mode}
           menuOpen={narrowMenuOpen}
-          onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
-          onSetMode={setMode}
-          cwdSendOn={cwdSendOn}
-          cwdReceiveOn={cwdReceiveOn}
+          onToggleMenu={toggleNarrowMenu}
+          buttonRef={menuBtnRef}
         />
       ) : (
         <BarContent
@@ -745,7 +777,17 @@ export function PaneControlBar({
           cwdReceiveOn={cwdReceiveOn}
         />
       ),
-    [currentView, actions, mode, setMode, narrowBar, narrowMenuOpen, cwdSendOn, cwdReceiveOn],
+    [
+      currentView,
+      actions,
+      mode,
+      setMode,
+      narrowBar,
+      narrowMenuOpen,
+      toggleNarrowMenu,
+      cwdSendOn,
+      cwdReceiveOn,
+    ],
   );
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
@@ -761,7 +803,11 @@ export function PaneControlBar({
       mode,
       hovered,
       onSetMode: setMode,
-      openControls: () => setNarrowMenuOpen(true),
+      openControls: () => {
+        // 다음 페인트에 ⋯ 버튼이 마운트되면 위치를 재측정한다(이 시점엔 ref 가 비어있을 수 있음).
+        requestAnimationFrame(updateMenuPosition);
+        setNarrowMenuOpen(true);
+      },
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -777,6 +823,7 @@ export function PaneControlBar({
       hovered,
       setMode,
       setNarrowMenuOpen,
+      updateMenuPosition,
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -812,14 +859,9 @@ export function PaneControlBar({
             )}
             {narrowBar ? (
               <NarrowControlAnchor
-                currentView={currentView}
-                actions={actions}
-                mode={mode}
                 menuOpen={narrowMenuOpen}
-                onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
-                onSetMode={setMode}
-                cwdSendOn={cwdSendOn}
-                cwdReceiveOn={cwdReceiveOn}
+                onToggleMenu={toggleNarrowMenu}
+                buttonRef={menuBtnRef}
               />
             ) : (
               <BarContent
@@ -869,14 +911,9 @@ export function PaneControlBar({
               )}
               {narrowBar ? (
                 <NarrowControlAnchor
-                  currentView={currentView}
-                  actions={actions}
-                  mode={mode}
                   menuOpen={narrowMenuOpen}
-                  onToggleMenu={() => setNarrowMenuOpen((open) => !open)}
-                  onSetMode={setMode}
-                  cwdSendOn={cwdSendOn}
-                  cwdReceiveOn={cwdReceiveOn}
+                  onToggleMenu={toggleNarrowMenu}
+                  buttonRef={menuBtnRef}
                 />
               ) : (
                 <BarContent
@@ -896,11 +933,32 @@ export function PaneControlBar({
             <MinimizedButton
               onExpand={() => {
                 setMode("hover");
-                setNarrowMenuOpen(narrowBar);
+                if (narrowBar) {
+                  // hover 바의 ⋯ 버튼이 마운트되면 위치를 잡아 떠 있는 메뉴를 연다.
+                  requestAnimationFrame(updateMenuPosition);
+                  setNarrowMenuOpen(true);
+                }
               }}
             />
           )}
         </div>
+
+        {/* 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384): pane 의 overflow-hidden /
+            stacking context 밖(document.body)으로 portal 되어 클리핑되지 않으며,
+            pane hover 가 풀려도(hovered=false → 바 언마운트) 유지된다. */}
+        {narrowMenuVisible && (
+          <NarrowControlMenu
+            currentView={currentView}
+            actions={actions}
+            mode={mode}
+            onSetMode={setMode}
+            cwdSendOn={cwdSendOn}
+            cwdReceiveOn={cwdReceiveOn}
+            position={menuPosition}
+            onRequestClose={closeNarrowMenu}
+            triggerRef={menuBtnRef}
+          />
+        )}
       </div>
     </PaneControlContext.Provider>
   );
