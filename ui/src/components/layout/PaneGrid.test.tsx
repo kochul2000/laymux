@@ -134,12 +134,14 @@ describe("PaneGrid", () => {
     });
   });
 
-  // -- Drag-and-drop pane swap (issue #377) --
+  // -- Drag-and-drop pane swap (issue #377, redesigned #386) --
   //
   // 워크스페이스 그리드 안에서 pane을 드래그해 다른 pane 위로 드롭하면 두 pane의
-  // 위치가 교환된다. PaneGrid는 onSwapPanes(srcPaneId, tgtPaneId) 콜백만 노출하고
-  // 실제 위치 교환은 workspace-store.swapPanes(기존 로직)가 담당한다.
-  describe("drag-to-swap (issue #377)", () => {
+  // 위치가 교환된다. 별도 드래그 핸들 대신(issue #386: 핸들이 콘텐츠와 겹침) 컨트롤바
+  // (PaneControlBar)의 버튼 없는 빈 영역을 드래그하면 swap 이 시작된다. PaneGrid는
+  // onSwapPanes(srcPaneId, tgtPaneId) 콜백만 노출하고 실제 위치 교환은
+  // workspace-store.swapPanes(기존 로직)가 담당한다.
+  describe("drag-to-swap (issue #377 / #386)", () => {
     const dndProps = {
       ...defaultProps,
       panes: makePanes(3),
@@ -159,25 +161,38 @@ describe("PaneGrid", () => {
       dropEffect: "",
     });
 
-    it("renders a drag handle for each pane only when onSwapPanes is provided", () => {
-      const { unmount } = render(<PaneGrid {...dndProps} />);
+    // 빈 영역(바 배경) 드래그를 모사하려면 dragStart 가 바 컨테이너 자신(currentTarget)을
+    // target 으로 발생해야 한다. fireEvent.dragStart(bar) 는 target===bar 로 디스패치된다.
+    const barOf = (i: number) =>
+      within(screen.getByTestId(`test-pane-${i}`)).getByTestId("pane-control-bar");
+
+    it("no longer renders the old floating drag handle (#386)", () => {
+      render(<PaneGrid {...dndProps} onSwapPanes={vi.fn()} />);
       expect(screen.queryByTestId("pane-drag-handle-0")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("pane-drag-handle-2")).not.toBeInTheDocument();
+    });
+
+    it("control bar is draggable only when onSwapPanes is provided", () => {
+      const { unmount } = render(<PaneGrid {...dndProps} />);
+      fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+      expect(barOf(0).getAttribute("draggable")).not.toBe("true");
       unmount();
 
       render(<PaneGrid {...dndProps} onSwapPanes={vi.fn()} />);
-      expect(screen.getByTestId("pane-drag-handle-0")).toBeInTheDocument();
-      expect(screen.getByTestId("pane-drag-handle-2")).toBeInTheDocument();
+      fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+      expect(barOf(0).getAttribute("draggable")).toBe("true");
     });
 
-    it("calls onSwapPanes with source and target pane ids on drop", () => {
+    it("dragging the control bar empty area swaps source and target panes on drop", () => {
       const onSwapPanes = vi.fn();
       render(<PaneGrid {...dndProps} onSwapPanes={onSwapPanes} />);
 
-      const handle0 = screen.getByTestId("pane-drag-handle-0");
+      fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+      const bar0 = barOf(0);
       const target2 = screen.getByTestId("test-pane-2");
       const dataTransfer = makeDataTransfer();
 
-      fireEvent.dragStart(handle0, { dataTransfer });
+      fireEvent.dragStart(bar0, { dataTransfer });
       fireEvent.dragOver(target2, { dataTransfer });
       fireEvent.drop(target2, { dataTransfer });
 
@@ -188,20 +203,44 @@ describe("PaneGrid", () => {
       const onSwapPanes = vi.fn();
       render(<PaneGrid {...dndProps} onSwapPanes={onSwapPanes} />);
 
-      const handle1 = screen.getByTestId("pane-drag-handle-1");
+      fireEvent.mouseEnter(screen.getByTestId("test-pane-1"));
+      const bar1 = barOf(1);
       const target1 = screen.getByTestId("test-pane-1");
       const dataTransfer = makeDataTransfer();
 
-      fireEvent.dragStart(handle1, { dataTransfer });
+      fireEvent.dragStart(bar1, { dataTransfer });
       fireEvent.dragOver(target1, { dataTransfer });
       fireEvent.drop(target1, { dataTransfer });
 
       expect(onSwapPanes).not.toHaveBeenCalled();
     });
 
-    it("does not render drag handles when isActive is false", () => {
+    it("starting the drag on a control button does not begin a pane swap (click still works)", () => {
+      const onSwapPanes = vi.fn();
+      const onSplitPane = vi.fn();
+      render(<PaneGrid {...dndProps} onSwapPanes={onSwapPanes} onSplitPane={onSplitPane} />);
+
+      fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+      const btn = screen.getAllByTestId("pane-control-split-h")[0];
+      const target2 = screen.getByTestId("test-pane-2");
+      const dataTransfer = makeDataTransfer();
+
+      // 버튼 위에서 시작한 drag: dragStart 가 currentTarget(바)이 아닌 버튼에서 발생하므로
+      // preventDefault 로 무시되어 dataTransfer 에 paneId 가 실리지 않는다.
+      fireEvent.dragStart(btn, { dataTransfer });
+      fireEvent.dragOver(target2, { dataTransfer });
+      fireEvent.drop(target2, { dataTransfer });
+      expect(onSwapPanes).not.toHaveBeenCalled();
+
+      // 버튼 클릭은 정상 동작한다.
+      fireEvent.click(btn);
+      expect(onSplitPane).toHaveBeenCalledWith("pane-0", "horizontal");
+    });
+
+    it("control bar is not draggable when isActive is false", () => {
       render(<PaneGrid {...dndProps} onSwapPanes={vi.fn()} isActive={false} />);
-      expect(screen.queryByTestId("pane-drag-handle-0")).not.toBeInTheDocument();
+      // 비활성 워크스페이스는 hover 가 동작하지 않아 바 자체가 렌더되지 않는다.
+      expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
     });
   });
 
