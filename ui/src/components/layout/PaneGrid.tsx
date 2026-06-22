@@ -195,39 +195,6 @@ export function PaneGrid({
             }}
           >
             {focused && <FocusIndicator testId="pane-focus-indicator" />}
-            {dndEnabled && (
-              <div
-                data-testid={`pane-drag-handle-${i}`}
-                draggable
-                onDragStart={(e) => handleDragStart(e, pane.id)}
-                onDragEnd={handleDragEnd}
-                // 핸들 자체에 mousedown 이 pane 의 focus 로 버블링되지 않도록 막는다.
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                title="Drag to swap pane position"
-                aria-label="Drag to swap pane position"
-                className={`absolute right-1 top-1 z-30 flex cursor-grab items-center justify-center rounded transition-opacity ${
-                  isActive && isHovered ? "opacity-90" : "opacity-0"
-                }`}
-                style={{
-                  width: "var(--btn-min-w)",
-                  height: "var(--btn-h)",
-                  background: "var(--bg-surface)",
-                  color: "var(--text-secondary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                  <circle cx="4" cy="2.5" r="1" />
-                  <circle cx="8" cy="2.5" r="1" />
-                  <circle cx="4" cy="6" r="1" />
-                  <circle cx="8" cy="6" r="1" />
-                  <circle cx="4" cy="9.5" r="1" />
-                  <circle cx="8" cy="9.5" r="1" />
-                </svg>
-              </div>
-            )}
             {dndEnabled && dragOverId === pane.id && (
               <div
                 data-testid={`pane-drop-target-${i}`}
@@ -247,6 +214,9 @@ export function PaneGrid({
               paneNumber={paneNumbers?.get(pane.id)}
               workspaceId={workspaceId}
               workspaceName={workspaceName}
+              dndEnabled={dndEnabled}
+              onPaneDragStart={(e) => handleDragStart(e, pane.id)}
+              onPaneDragEnd={handleDragEnd}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)

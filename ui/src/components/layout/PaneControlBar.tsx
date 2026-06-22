@@ -58,6 +58,15 @@ interface PaneControlBarProps {
    */
   workspaceId?: string;
   workspaceName?: string;
+  /**
+   * pane 위치 교환 드래그 활성화(issue #377, 재설계 #386). 활성 시 컨트롤 바의
+   * 버튼 없는 빈 영역을 드래그하면 pane swap DnD 가 시작된다(별도 핸들 없음).
+   */
+  dndEnabled?: boolean;
+  /** 빈 영역 드래그 시작 핸들러(paneId 는 PaneGrid 가 클로저로 주입). */
+  onPaneDragStart?: (e: React.DragEvent) => void;
+  /** 드래그 종료 핸들러. */
+  onPaneDragEnd?: () => void;
   children: React.ReactNode;
 }
 
@@ -648,6 +657,34 @@ function BarLabel({ viewType }: { viewType: ViewType }) {
 }
 
 // ─── Main component ─────────────────────────────────────
+/**
+ * 바 컨테이너에 적용할 draggable 속성을 만든다(issue #386).
+ *
+ * 빈 영역(바 배경)에서 시작한 드래그만 pane swap 으로 처리한다. 버튼/select 등
+ * 인터랙티브 요소 위에서 시작한 드래그는 `e.target !== e.currentTarget` 으로 걸러
+ * preventDefault 하여 무시한다 — 그래야 버튼 클릭/포커스가 정상 동작한다.
+ * dndEnabled 가 아니면 빈 객체를 돌려줘 평소 렌더와 동일하다.
+ */
+function barDragProps(
+  dndEnabled: boolean | undefined,
+  onPaneDragStart: ((e: React.DragEvent) => void) | undefined,
+  onPaneDragEnd: (() => void) | undefined,
+): { draggable?: boolean; onDragStart?: (e: React.DragEvent) => void; onDragEnd?: () => void } {
+  if (!dndEnabled || !onPaneDragStart) return {};
+  return {
+    draggable: true,
+    onDragStart: (e) => {
+      if (e.target !== e.currentTarget) {
+        // 버튼/select 등 자식 위에서 시작 → 드래그 개시 취소(클릭 정상 유지).
+        e.preventDefault();
+        return;
+      }
+      onPaneDragStart(e);
+    },
+    onDragEnd: onPaneDragEnd,
+  };
+}
+
 export function PaneControlBar({
   paneId,
   currentView,
@@ -658,6 +695,9 @@ export function PaneControlBar({
   paneNumber,
   workspaceId,
   workspaceName,
+  dndEnabled,
+  onPaneDragStart,
+  onPaneDragEnd,
   children,
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -716,6 +756,13 @@ export function PaneControlBar({
   if (!narrowBar && narrowMenuOpen) setNarrowMenuOpen(false);
   // 떠 있는 메뉴의 실제 가시성은 narrow 여부에서 파생한다(상태로 저장하지 않음).
   const narrowMenuVisible = narrowBar && narrowMenuOpen;
+
+  // pane swap 드래그 속성(issue #386). 현재 보이는 바 컨테이너(pinned/hover/ViewHeader)에
+  // 동일하게 적용한다. 빈 영역에서 시작한 드래그만 swap 으로 처리(아래 헬퍼 참조).
+  const dragProps = useMemo(
+    () => barDragProps(dndEnabled, onPaneDragStart, onPaneDragEnd),
+    [dndEnabled, onPaneDragStart, onPaneDragEnd],
+  );
 
   // 모든 모드에서 children을 동일한 DOM 위치에 유지하여
   // pin/unpin 전환 시 React가 children을 리마운트하지 않도록 한다.
@@ -817,6 +864,7 @@ export function PaneControlBar({
       paneNumber,
       workspaceId,
       workspaceName,
+      barDragProps: dragProps,
     }),
     [
       paneControls,
@@ -833,6 +881,7 @@ export function PaneControlBar({
       paneNumber,
       workspaceId,
       workspaceName,
+      dragProps,
     ],
   );
 
@@ -848,6 +897,7 @@ export function PaneControlBar({
               background: barBg,
               borderBottom: `1px solid ${borderClr}`,
             }}
+            {...dragProps}
           >
             {leftIcons}
             {hasBarLabel ? (
@@ -895,6 +945,7 @@ export function PaneControlBar({
                 ...(!hasLeftContent && !narrowBar ? { borderLeft: `1px solid ${sepClr}` } : {}),
                 borderRadius: 0,
               }}
+              {...dragProps}
             >
               {leftIcons}
               {hasBarLabel ? (

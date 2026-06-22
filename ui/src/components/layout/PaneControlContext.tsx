@@ -45,6 +45,16 @@ export interface PaneControlContextValue {
    */
   workspaceId?: string;
   workspaceName?: string;
+  /**
+   * pane 위치 교환 드래그 속성(issue #386). ViewHeader 를 쓰는 View 가 자신의 바
+   * 컨테이너에 펼쳐(`{...barDragProps}`) 빈 영역 드래그로 swap 을 시작하게 한다.
+   * dnd 비활성이면 빈 객체.
+   */
+  barDragProps?: {
+    draggable?: boolean;
+    onDragStart?: (e: React.DragEvent) => void;
+    onDragEnd?: () => void;
+  };
 }
 
 export const PaneControlContext = createContext<PaneControlContextValue | null>(null);

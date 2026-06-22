@@ -37,17 +37,19 @@
 | 경계선 더블클릭                   | 작은 쪽 Pane 제거, 큰 쪽이 흡수 |
 | 편집 모드에서 Pane 선택 후 Delete | 인접 Pane 중 가장 큰 것이 흡수  |
 
-### 위치 교환 (드래그&드롭, issue #377)
+### 위치 교환 (드래그&드롭, issue #377, 재설계 #386)
 
-- 각 Pane 컨트롤바 우측 상단의 **드래그 핸들(grip)** 을 다른 Pane 위로 드래그&드롭하면 두 Pane의 `{ x, y, w, h }` 가 교환된다(view/콘텐츠는 그대로, 슬롯 위치만 swap).
+- **Pane 컨트롤바(PaneControlBar)의 버튼 없는 빈 영역을 드래그**해 다른 Pane 위로 드롭하면 두 Pane의 `{ x, y, w, h }` 가 교환된다(view/콘텐츠는 그대로, 슬롯 위치만 swap). 별도 드래그 핸들 요소는 두지 않는다 — 좌하단/우상단 floating 핸들은 콘텐츠와 겹쳐(issue #386) 폐기했다.
+- 바 컨테이너 자체가 `draggable` 이며, `onDragStart` 에서 `e.target !== e.currentTarget` 이면(= 버튼/select 등 자식 위에서 시작) `preventDefault` 로 드래그를 취소한다 — 빈 영역(바 배경)에서 시작한 드래그만 swap 으로 처리하고, 버튼 클릭/포커스는 정상 동작한다.
+- 컨트롤바는 모드별로 다른 바(hover 오버레이 / pinned / narrow / minimized)와 ViewHeader 기반 바를 렌더하므로, 동일한 draggable 속성을 공통 헬퍼(`barDragProps`)로 만들어 현재 보이는 바 컨테이너에 일관 적용한다. ViewHeader 를 쓰는 View 는 `PaneControlContext.barDragProps` 로 전달받아 자기 바에 펼친다.
 - 네이티브 HTML5 DnD(`draggable` + `dataTransfer`)를 사용 — WorkspaceSelectorView 의 워크스페이스 재정렬과 동일 패턴. 별도 DnD 라이브러리 없음.
 - UI(`PaneGrid`)는 `onSwapPanes(srcPaneId, tgtPaneId)` 콜백만 노출하고, 실제 교환은 기존 `workspace-store.swapPanes(srcIndex, tgtIndex)`(MCP `swap_panes` 와 공유) 한 곳에서 수행한다. `WorkspaceArea` 가 paneId→paneIndex 로 변환해 연결.
-- 핸들은 활성 워크스페이스에서 hover 시에만 나타나며, dock(PaneGrid 재사용)은 `onSwapPanes` 미제공으로 비활성. 같은 Pane 위로 드롭하면 무시.
+- 드래그는 활성 워크스페이스(`dndEnabled = isActive && !!onSwapPanes`)에서 바가 보일 때만 동작하며, dock(PaneGrid 재사용)은 `onSwapPanes` 미제공으로 비활성. 같은 Pane 위로 드롭하면 무시. minimized(버튼 1개)처럼 빈 영역이 거의 없는 모드는 swap 시작점이 사실상 없다.
 - 드래그 페이로드는 `lib/pane-dnd.ts`(MIME `application/x-laymux-pane`, paneId 만 적재)로 공유한다 — 같은 드래그 소스가 swap·move 두 drop 타겟을 모두 먹인다.
 
 ### 다른 워크스페이스로 이동 (드래그&드롭, issue #380)
 
-- 같은 드래그 핸들을 **WorkspaceSelectorView 의 워크스페이스 항목** 위로 드롭하면, 그 Pane 이 원래 워크스페이스에서 제거되고 대상 워크스페이스로 이동(추가)된다.
+- 같은 드래그(컨트롤바 빈 영역에서 시작)를 **WorkspaceSelectorView 의 워크스페이스 항목** 위로 드롭하면, 그 Pane 이 원래 워크스페이스에서 제거되고 대상 워크스페이스로 이동(추가)된다.
 - 소스 제거는 `removePane` 과 동일한 `removePaneAndRedistribute`(인접 Pane 이 공간 흡수). 대상 추가는 대상의 **가장 큰 Pane 을 반으로 분할**(긴 축 기준)해 그 자리에 옮겨온 Pane 을 둔다 — Pane id 와 view 설정은 보존.
 - 실제 이동은 `workspace-store.movePaneToWorkspace(paneId, targetWorkspaceId)` 한 곳에서 수행한다. 소스가 Pane 1개뿐이면(워크스페이스가 비게 됨) 무시하고, 같은 워크스페이스·미존재 paneId/대상도 무시.
 - 워크스페이스 항목은 재정렬(reorder, `text/plain`)과 이동(move, `application/x-laymux-pane`) drop 을 같은 핸들러에서 MIME(`isPaneDrag`)으로 분기한다. 이동 drop 은 sort 모드와 무관하게 항상 동작하며, 끌어온 워크스페이스는 액센트 링으로 하이라이트된다.

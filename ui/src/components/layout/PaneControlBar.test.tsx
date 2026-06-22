@@ -95,6 +95,63 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
   });
 
+  // -- pane swap drag from the control bar empty area (issue #386) --
+  describe("pane swap drag (issue #386)", () => {
+    it("bar is not draggable when dnd disabled", () => {
+      render(
+        <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+          <div>content</div>
+        </PaneControlBar>,
+      );
+      expect(screen.getByTestId("pane-control-bar").getAttribute("draggable")).not.toBe("true");
+    });
+
+    it("bar is draggable and dragging the empty area fires onPaneDragStart", () => {
+      const onPaneDragStart = vi.fn();
+      render(
+        <PaneControlBar
+          currentView={defaultView}
+          actions={defaultActions}
+          hovered={true}
+          dndEnabled
+          onPaneDragStart={onPaneDragStart}
+          onPaneDragEnd={vi.fn()}
+        >
+          <div>content</div>
+        </PaneControlBar>,
+      );
+      const bar = screen.getByTestId("pane-control-bar");
+      expect(bar.getAttribute("draggable")).toBe("true");
+      // dragStart dispatched on the bar itself (target === currentTarget) → empty area.
+      const ev = new Event("dragstart", { bubbles: true, cancelable: true });
+      bar.dispatchEvent(ev);
+      expect(onPaneDragStart).toHaveBeenCalledTimes(1);
+      expect(ev.defaultPrevented).toBe(false);
+    });
+
+    it("dragging from a button (child) is ignored: preventDefault, no onPaneDragStart", () => {
+      const onPaneDragStart = vi.fn();
+      render(
+        <PaneControlBar
+          currentView={defaultView}
+          actions={defaultActions}
+          hovered={true}
+          dndEnabled
+          onPaneDragStart={onPaneDragStart}
+          onPaneDragEnd={vi.fn()}
+        >
+          <div>content</div>
+        </PaneControlBar>,
+      );
+      const btn = screen.getByTestId("pane-control-split-h");
+      // dragStart originating on the button bubbles to the bar with target === button.
+      const ev = new Event("dragstart", { bubbles: true, cancelable: true });
+      btn.dispatchEvent(ev);
+      expect(onPaneDragStart).not.toHaveBeenCalled();
+      expect(ev.defaultPrevented).toBe(true);
+    });
+  });
+
   it("renders the pane number badge in the bar when paneNumber is set", () => {
     render(
       <PaneControlBar

@@ -49,6 +49,7 @@ export function ViewHeader({
         background: "var(--bg-surface)",
         ...(borderBottom ? { borderBottom: "1px solid var(--border)" } : {}),
       }}
+      {...ctx?.barDragProps}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <PaneNumberBadge
