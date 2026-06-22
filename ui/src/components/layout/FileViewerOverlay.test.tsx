@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { FileViewerOverlay } from "./FileViewerOverlay";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { viewerInstanceId } from "@/lib/file-viewer";
 
 // Mock FileViewer so the overlay tests stay focused on overlay behaviour
 // (dismiss handling + the id it forwards), not on file reading / TerminalView.
@@ -261,7 +262,9 @@ describe("FileViewerOverlay", () => {
     });
     const { rerender } = render(<FileViewerOverlay />);
     const idA = screen.getByTestId("mock-file-viewer").getAttribute("data-instance-id");
-    expect(idA).toContain("/home/user/a.txt");
+    // The id is the sanitized viewer instance id (path with event-name-illegal
+    // chars replaced + hash suffix), not the raw path — see viewerInstanceId.
+    expect(idA).toBe(viewerInstanceId("/home/user/a.txt"));
 
     act(() => {
       // Re-open a different file WITHOUT closing first (MCP/REST/Explorer can do
@@ -271,7 +274,7 @@ describe("FileViewerOverlay", () => {
     });
     rerender(<FileViewerOverlay />);
     const idB = screen.getByTestId("mock-file-viewer").getAttribute("data-instance-id");
-    expect(idB).toContain("/home/user/b.txt");
+    expect(idB).toBe(viewerInstanceId("/home/user/b.txt"));
     expect(idB).not.toBe(idA);
   });
 });
