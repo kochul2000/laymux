@@ -19,6 +19,7 @@ import {
   type LanguageSetting,
 } from "@/stores/settings-store";
 import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
+import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import { persistSession } from "@/lib/persist-session";
 import {
   DEFAULT_KEYBINDINGS,
@@ -656,6 +657,31 @@ function CursorFields({
   );
 }
 
+/** Map a syncCwd config to a select token. */
+function syncCwdToToken(v: SyncCwdConfig | undefined): string {
+  if (v == null || v === "default") return "default";
+  if (v.send && v.receive) return "both";
+  if (!v.send && v.receive) return "receive";
+  if (v.send && !v.receive) return "send";
+  return "off";
+}
+
+/** Map a select token back to a syncCwd config. */
+function tokenToSyncCwd(tok: string): SyncCwdConfig {
+  switch (tok) {
+    case "both":
+      return { send: true, receive: true };
+    case "receive":
+      return { send: false, receive: true };
+    case "send":
+      return { send: true, receive: false };
+    case "off":
+      return { send: false, receive: false };
+    default:
+      return "default";
+  }
+}
+
 function AdvancedFields({
   data,
   onChange,
@@ -672,6 +698,7 @@ function AdvancedFields({
     | "snapOnInput"
     | "restoreCwd"
     | "restoreOutput"
+    | "syncCwd"
   >;
   onChange: (d: Partial<Profile>) => void;
   defaults?: ProfileDefaults;
@@ -831,6 +858,29 @@ function AdvancedFields({
               </span>
             </label>
             {resetBtn("restoreOutput")}
+          </div>
+        </SettingRow>
+
+        <h4 className="mb-2 mt-4 text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+          {t("advanced.cwdPropagation")}
+        </h4>
+        <SettingRow label={t("advanced.cwdPropagation")} desc={t("advanced.cwdPropagationDesc")}>
+          <div className="flex items-center">
+            <select
+              data-testid="sync-cwd-profile-select"
+              value={syncCwdToToken(data.syncCwd)}
+              onChange={(e) => onChange({ syncCwd: tokenToSyncCwd(e.target.value) })}
+              className={inputCls}
+              style={inputStyle}
+            >
+              <option value="default">
+                {defaults ? t("advanced.cwdInherit") : t("advanced.cwdInheritLocation")}
+              </option>
+              <option value="both">{t("advanced.cwdBoth")}</option>
+              <option value="receive">{t("advanced.cwdReceiveOnly")}</option>
+              <option value="send">{t("advanced.cwdSendOnly")}</option>
+              <option value="off">{t("advanced.cwdOff")}</option>
+            </select>
           </div>
         </SettingRow>
       </div>

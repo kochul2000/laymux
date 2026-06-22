@@ -143,7 +143,15 @@
       "restoreCwdEnable": "마지막으로 사용한 디렉터리에서 터미널 시작",
       "restoreOutput": "터미널 출력 복원",
       "restoreOutputDesc": "재시작 시 이전 터미널 출력 복원",
-      "restoreOutputEnable": "새 셸 위에 이전 세션 출력 표시"
+      "restoreOutputEnable": "새 셸 위에 이전 세션 출력 표시",
+      "cwdPropagation": "CWD 전파",
+      "cwdPropagationDesc": "이 프로파일의 터미널이 sync 그룹 내에서 작업 디렉터리 변경을 보낼지/받을지 결정",
+      "cwdInherit": "기본값 상속",
+      "cwdInheritLocation": "위치 기본값 사용",
+      "cwdBoth": "보내기 + 받기",
+      "cwdReceiveOnly": "받기만",
+      "cwdSendOnly": "보내기만",
+      "cwdOff": "끔"
     },
     "defaults": {
       "title": "프로필 기본값",

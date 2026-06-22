@@ -145,6 +145,37 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().profileDefaults.font.weight).toBe("bold");
   });
 
+  // -- CWD propagation (syncCwd) in Profile Defaults --
+
+  it("shows CWD propagation select defaulting to inherit in Profile Defaults", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+
+    const select = screen.getByTestId("sync-cwd-profile-select") as HTMLSelectElement;
+    // defaultProfileDefaults.syncCwd === "default" → token "default"
+    expect(select.value).toBe("default");
+  });
+
+  it("updates profileDefaults.syncCwd to a concrete pair only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+    await user.click(screen.getByTestId("nav-profile-defaults"));
+
+    const select = screen.getByTestId("sync-cwd-profile-select");
+    await user.selectOptions(select, "send");
+
+    // Not persisted until Save
+    expect(useSettingsStore.getState().profileDefaults.syncCwd).toBe("default");
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().profileDefaults.syncCwd).toEqual({
+      send: true,
+      receive: false,
+    });
+  });
+
   // -- App Theme draft --
 
   it("does NOT update appTheme in store until Save is clicked", async () => {

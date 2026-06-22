@@ -143,7 +143,15 @@
       "restoreCwdEnable": "Start terminal in last used directory",
       "restoreOutput": "Restore Terminal Output",
       "restoreOutputDesc": "Restore previous terminal output on restart",
-      "restoreOutputEnable": "Show previous session output above new shell"
+      "restoreOutputEnable": "Show previous session output above new shell",
+      "cwdPropagation": "CWD Propagation",
+      "cwdPropagationDesc": "Whether this profile's terminals send/receive working directory changes within a sync group",
+      "cwdInherit": "Inherit default",
+      "cwdInheritLocation": "Use location default",
+      "cwdBoth": "Send + Receive",
+      "cwdReceiveOnly": "Receive only",
+      "cwdSendOnly": "Send only",
+      "cwdOff": "Off"
     },
     "defaults": {
       "title": "Profile Defaults",
