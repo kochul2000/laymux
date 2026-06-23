@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>Laymux</title>
+    <style>
+      /* Applied before the JS/CSS bundle loads to avoid a white flash on
+         startup while vendor chunks are fetched. Matches --bg-base. */
+      html,
+      body {
+        margin: 0;
+        background: #1e1e2e;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
