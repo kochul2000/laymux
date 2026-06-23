@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { useUiStore } from "@/stores/ui-store";
 import {
   useSettingsStore,
@@ -3204,7 +3205,6 @@ export function SettingsView() {
 
   const handleOpenSettingsJson = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_settings_file");
     } catch {
       /* ignore — not available outside Tauri */

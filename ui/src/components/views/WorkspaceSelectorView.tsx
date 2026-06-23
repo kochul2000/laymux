@@ -28,6 +28,7 @@ import { persistSession } from "@/lib/persist-session";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
+import { markNotificationsRead } from "@/lib/tauri-api";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -1248,9 +1249,7 @@ export function WorkspaceSelectorView() {
         ?.panes.filter((p) => p.view.type === "TerminalView")
         .map((p) => `terminal-${p.id}`) ?? [];
     if (wsTerminalIds.length > 0) {
-      import("@/lib/tauri-api").then(({ markNotificationsRead }) =>
-        markNotificationsRead(wsTerminalIds).catch(() => {}),
-      );
+      markNotificationsRead(wsTerminalIds).catch(() => {});
     }
     setActiveWorkspace(wsId);
   };

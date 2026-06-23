@@ -6,6 +6,7 @@ import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
 import { openExternal } from "@/lib/tauri-api";
+import { invoke } from "@tauri-apps/api/core";
 
 type SubmitState = "idle" | "capturing" | "submitting" | "success" | "error";
 
@@ -72,7 +73,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const captureScreenshot = async () => {
     setState("capturing");
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const info = await invoke<{ port: number }>("get_automation_info");
       const res = await fetch(`http://127.0.0.1:${info.port}/api/v1/screenshot`, {
         method: "POST",
@@ -92,7 +92,6 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     setState("submitting");
     setResultMsg("");
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const url = await invoke<string>("submit_github_issue", {
         title: title.trim(),
         body,
