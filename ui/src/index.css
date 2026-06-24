@@ -256,6 +256,13 @@
     gap: 4px;
   }
 
+  .ui-toolbar-title {
+    display: flex;
+    align-self: stretch;
+    align-items: center;
+    line-height: 1;
+  }
+
   /* Focus-visible for form controls */
   .ui-focus-ring:focus-visible {
     border-color: var(--accent);

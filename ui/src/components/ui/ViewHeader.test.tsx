@@ -77,6 +77,12 @@ describe("ViewHeader with PaneControlContext", () => {
     expect(screen.getByText("My View Title")).toBeInTheDocument();
   });
 
+  it("vertically centers a title prop in the toolbar", () => {
+    const ctx = makeCtx();
+    renderWithCtx(ctx, <ViewHeader title="Memo" />);
+    expect(screen.getByText("Memo").className).toContain("ui-toolbar-title");
+  });
+
   // issue #324: 좌측(배지 우측) 컨트롤 — propagate CWD once 버튼이 여기로 주입된다.
   it("renders leftPaneControls next to the badge when controls are shown (issue #324)", () => {
     const ctx = makeCtx({

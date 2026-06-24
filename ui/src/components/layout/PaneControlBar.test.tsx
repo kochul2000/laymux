@@ -175,6 +175,15 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-number-badge")).not.toBeInTheDocument();
   });
 
+  it("vertically centers the default view label in the toolbar", () => {
+    render(
+      <PaneControlBar currentView={{ type: "MemoView" }} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByText("Memo", { selector: "span" }).className).toContain("ui-toolbar-title");
+  });
+
   it("keeps controls right-aligned with a spacer when only the badge is on the hover bar", () => {
     // paneNumber makes the hover bar full-width; without a flex-1 spacer the
     // controls would collapse next to the badge on the left and overlay content.

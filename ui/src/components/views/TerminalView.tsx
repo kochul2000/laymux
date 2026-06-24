@@ -513,7 +513,7 @@ export function TerminalView({
     setLeftBarContent(
       <span
         data-testid={`terminal-pinned-info-title-${instanceId}`}
-        className="min-w-0 flex-1 truncate text-[11px] font-medium"
+        className="ui-toolbar-title min-w-0 flex-1 truncate text-[11px] font-medium"
         style={{ color: "var(--text-primary)" }}
       >
         {rawTitle}

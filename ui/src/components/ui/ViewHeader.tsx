@@ -51,7 +51,7 @@ export function ViewHeader({
       }}
       {...ctx?.barDragProps}
     >
-      <div className="flex min-w-0 flex-1 items-center">
+      <div className="flex min-w-0 flex-1 items-center self-stretch">
         <PaneNumberBadge
           number={ctx?.paneNumber}
           workspaceId={ctx?.workspaceId}
@@ -64,6 +64,7 @@ export function ViewHeader({
         )}
         {title && (
           <span
+            className="ui-toolbar-title"
             style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
           >
             {title}

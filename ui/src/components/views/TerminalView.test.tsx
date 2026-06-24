@@ -4258,6 +4258,9 @@ describe("TerminalView", () => {
       const node = lastCall?.[0];
       expect(node).not.toBeNull();
       const { container } = render(<>{node}</>);
+      expect(screen.getByTestId("terminal-pinned-info-title-t-pin-info").className).toContain(
+        "ui-toolbar-title",
+      );
       expect(container.textContent).toContain("zsh — /home/user/proj");
       // title 만 표시: cwd/branch 는 렌더되지 않는다.
       expect(container.textContent).not.toContain("~/proj");

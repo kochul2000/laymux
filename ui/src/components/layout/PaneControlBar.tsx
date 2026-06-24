@@ -650,8 +650,10 @@ function BarLabel({ viewType }: { viewType: ViewType }) {
   const label = VIEW_LABELS[viewType] ?? null;
   if (!label) return <div className="flex-1" />;
   return (
-    <div className="flex min-w-0 flex-1 items-center text-[11px]">
-      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+    <div className="flex min-w-0 flex-1 items-center self-stretch text-[11px]">
+      <span className="ui-toolbar-title" style={{ color: "var(--text-secondary)" }}>
+        {label}
+      </span>
     </div>
   );
 }
@@ -903,7 +905,10 @@ export function PaneControlBar({
             {hasBarLabel ? (
               <BarLabel viewType={currentView.type} />
             ) : leftBarContent ? (
-              <div data-testid="pane-control-bar-left" className="flex min-w-0 flex-1 items-center">
+              <div
+                data-testid="pane-control-bar-left"
+                className="flex min-w-0 flex-1 items-center self-stretch"
+              >
                 {leftBarContent}
               </div>
             ) : (
@@ -953,7 +958,7 @@ export function PaneControlBar({
               ) : leftBarContent ? (
                 <div
                   data-testid="pane-control-bar-left"
-                  className="flex min-w-0 flex-1 items-center"
+                  className="flex min-w-0 flex-1 items-center self-stretch"
                 >
                   {leftBarContent}
                 </div>
