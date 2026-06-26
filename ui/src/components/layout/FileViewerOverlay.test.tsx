@@ -49,9 +49,7 @@ describe("FileViewerOverlay", () => {
     expect(useFileViewerStore.getState().open).toBe(false);
   });
 
-  it("does NOT close on Escape for a terminal (external command) viewer", () => {
-    // .txt is configured to open in `vi` — Escape must reach the terminal app
-    // (e.g. leave vi insert mode), not dismiss the overlay.
+  it("closes on Escape for a terminal (external command) viewer", () => {
     useTerminalViewerFor(".txt");
     act(() => {
       useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
@@ -60,7 +58,7 @@ describe("FileViewerOverlay", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
-    expect(useFileViewerStore.getState().open).toBe(true);
+    expect(useFileViewerStore.getState().open).toBe(false);
   });
 
   it("closes on backdrop click for a web viewer", () => {
