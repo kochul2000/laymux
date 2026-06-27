@@ -67,12 +67,13 @@ export function FileViewerOverlay() {
       return;
     }
     if (e.key === "Escape" && !promptMode) {
-      // While a file is loaded, Escape in the bar only cancels the draft —
-      // revert to the current path and blur. Consume the event so the global
-      // Escape handler below doesn't also dismiss the overlay. In prompt mode
-      // we let it bubble: there is nothing to revert, so Escape closes.
+      // While a file is loaded, Escape in the bar only reverts the draft to the
+      // current path and blurs — it must not close the overlay. The global
+      // Escape handler already skips this case (it ignores Escape whose target
+      // is the loaded-mode address bar), so we just do the revert here. In
+      // prompt mode there is nothing to revert, so Escape falls through to the
+      // global handler and closes.
       e.preventDefault();
-      e.stopPropagation();
       if (pathInputRef.current) {
         pathInputRef.current.value = path;
         pathInputRef.current.blur();
@@ -81,30 +82,23 @@ export function FileViewerOverlay() {
   };
 
   // When the file is shown via an external command (e.g. .txt→vi, video→mpv),
-  // FileViewer renders a live TerminalView. In that mode Esc and a backdrop
-  // click must NOT dismiss the overlay: Esc belongs to the terminal app (leaving
-  // vi insert mode, quitting less/mpv) and a stray backdrop click would discard
-  // an in-progress session. The user closes such viewers with the explicit ✕
-  // button instead. Built-in web viewers (text/image/binary) keep the
-  // convenient Esc / backdrop dismiss.
+  // FileViewer renders a live TerminalView. A stray backdrop click should still
+  // not discard that session; Escape, however, is the viewer-wide close gesture.
   const isTerminalViewer = open && resolveViewer(path, extensionViewers).viewerType === "terminal";
 
-  // Esc closes the (web) viewer globally while it is open.
+  // Esc closes the viewer globally while it is open.
   useEffect(() => {
-    if (!open || isTerminalViewer) return;
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      // The address bar consumes Escape (draft revert) with preventDefault +
-      // stopPropagation. stopPropagation alone only works because this listener
-      // is in the bubble phase, so also honor defaultPrevented as a defensive
-      // contract that survives the listener ever moving to capture.
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
-        closeFileViewer();
-      }
+      if (e.key !== "Escape") return;
+      // Loaded-file address bar Escape reverts the draft instead of closing.
+      if (e.target === pathInputRef.current && !promptMode) return;
+      e.preventDefault();
+      closeFileViewer();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, isTerminalViewer, closeFileViewer]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, promptMode, closeFileViewer]);
 
   if (!open) return null;
 
