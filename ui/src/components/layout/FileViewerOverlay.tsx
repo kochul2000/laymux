@@ -67,12 +67,13 @@ export function FileViewerOverlay() {
       return;
     }
     if (e.key === "Escape" && !promptMode) {
-      // While a file is loaded, Escape in the bar only cancels the draft —
-      // revert to the current path and blur. Consume the event so the global
-      // Escape handler below doesn't also dismiss the overlay. In prompt mode
-      // we let it bubble: there is nothing to revert, so Escape closes.
+      // While a file is loaded, Escape in the bar only reverts the draft to the
+      // current path and blurs — it must not close the overlay. The global
+      // Escape handler already skips this case (it ignores Escape whose target
+      // is the loaded-mode address bar), so we just do the revert here. In
+      // prompt mode there is nothing to revert, so Escape falls through to the
+      // global handler and closes.
       e.preventDefault();
-      e.stopPropagation();
       if (pathInputRef.current) {
         pathInputRef.current.value = path;
         pathInputRef.current.blur();
