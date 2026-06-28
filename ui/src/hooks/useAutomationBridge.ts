@@ -750,6 +750,25 @@ const handlers: HandlerMap = {
   },
 };
 
+function hasVisibleBlockingOverlay(target: HTMLElement): boolean {
+  if (target !== document.documentElement) return false;
+
+  const overlays = document.querySelectorAll<HTMLElement>(
+    "[data-testid='remote-control-overlay'], [role='dialog'][aria-modal='true']",
+  );
+  return Array.from(overlays).some((overlay) => {
+    const style = window.getComputedStyle(overlay);
+    const rect = overlay.getBoundingClientRect();
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0" &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  });
+}
+
 /** Capture a screenshot of the current UI (or a specific pane) as a base64 PNG data URL.
  *  html2canvas cannot read WebGL canvases, so after the initial capture we
  *  composite each WebGL canvas (xterm.js terminals) onto the result manually. */
@@ -775,9 +794,11 @@ export async function captureScreenshot(paneIndex?: number): Promise<string> {
     logging: false,
   });
 
-  // Composite WebGL canvases that html2canvas missed
+  // Composite WebGL canvases that html2canvas missed. When a blocking overlay
+  // or modal is visible, keep html2canvas' DOM result intact so terminal
+  // canvases are not redrawn over the dialog.
   const ctx = result.getContext("2d");
-  if (ctx) {
+  if (ctx && !hasVisibleBlockingOverlay(target)) {
     const targetRect = target.getBoundingClientRect();
     target.querySelectorAll("canvas").forEach((c) => {
       if (c.width === 0 || c.height === 0) return;

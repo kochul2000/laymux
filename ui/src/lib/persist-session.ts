@@ -184,6 +184,7 @@ async function persistSessionCore(): Promise<void> {
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },
+    remote: { ...settingsState.remote },
     syncCwdDefaults: { ...settingsState.syncCwdDefaults },
     docks: dockState.docks.map((d) => ({
       position: d.position,

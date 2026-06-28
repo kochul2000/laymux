@@ -247,6 +247,33 @@ mod tests {
     }
 
     #[test]
+    fn remote_settings_default_off_and_round_trip() {
+        let legacy: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.remote.enabled);
+        assert_eq!(legacy.remote.allowed_ips, vec!["127.0.0.1/32", "::1/128"]);
+        assert_eq!(legacy.remote.heartbeat_timeout_seconds, 15);
+
+        let json = r#"{
+          "remote": {
+            "enabled": true,
+            "allowedIps": ["100.64.0.0/10"],
+            "authToken": "secret",
+            "heartbeatTimeoutSeconds": 30
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert!(settings.remote.enabled);
+        assert_eq!(settings.remote.allowed_ips, vec!["100.64.0.0/10"]);
+        assert_eq!(settings.remote.auth_token, "secret");
+        assert_eq!(settings.remote.heartbeat_timeout_seconds, 30);
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"remote\""));
+        assert!(serialized.contains("\"allowedIps\":[\"100.64.0.0/10\"]"));
+        assert!(serialized.contains("\"authToken\":\"secret\""));
+    }
+
+    #[test]
     fn language_round_trip_and_backcompat() {
         // Explicit value survives a round trip.
         let mut settings = Settings::default();

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::activity;
 use crate::automation_server::AutomationResponse;
@@ -20,6 +20,21 @@ pub fn get_automation_info(state: State<Arc<AppState>>) -> Result<serde_json::Va
     Ok(serde_json::json!({
         "port": port,
     }))
+}
+
+#[tauri::command]
+pub fn get_remote_control_status(
+    state: State<Arc<AppState>>,
+) -> Result<crate::remote_server::RemoteControlStatus, String> {
+    crate::remote_server::get_remote_control_status(&state)
+}
+
+#[tauri::command]
+pub fn reclaim_remote_control(
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::remote_server::RemoteControlStatus, String> {
+    crate::remote_server::reclaim_remote_control(&state, &app)
 }
 
 #[tauri::command]

@@ -22,6 +22,7 @@ pub mod process;
 pub mod process_tree;
 pub mod pty;
 pub mod pty_trace;
+pub mod remote_server;
 pub mod settings;
 pub mod state;
 pub mod terminal;
@@ -167,6 +168,8 @@ pub fn run() {
             commands::load_settings_validated,
             commands::reset_settings,
             commands::get_settings_path,
+            commands::get_remote_control_status,
+            commands::reclaim_remote_control,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

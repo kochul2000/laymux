@@ -8,6 +8,13 @@
     "terminal": {
       "pasteConfirm": "붙여넣을 텍스트가 {{bytes}}바이트입니다. 계속하시겠습니까?",
       "scrollToBottom": "맨 아래로 이동"
+    },
+    "remoteControl": {
+      "title": "원격 제어 중",
+      "body": "{{controller}}에서 이 PC를 제어하고 있습니다.",
+      "fallbackController": "원격 브라우저",
+      "reclaim": "제어권 가져오기",
+      "reclaiming": "가져오는 중..."
     }
   },
   "settings": {

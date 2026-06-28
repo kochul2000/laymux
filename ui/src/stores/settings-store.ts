@@ -6,6 +6,7 @@ import type {
   FileExplorerSettings,
   IssueReporterSettings,
   MemoSettings,
+  RemoteSettings,
 } from "../lib/tauri-api";
 import {
   resolveSyncCwd,
@@ -368,6 +369,7 @@ interface SettingsState {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
+  remote: RemoteSettings;
   syncCwdDefaults: SyncCwdDefaults;
 
   setLanguage: (language: LanguageSetting) => void;
@@ -385,6 +387,7 @@ interface SettingsState {
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
+  setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
   addProfile: (profile: Profile) => void;
@@ -430,6 +433,7 @@ interface SettingsState {
         | "memo"
         | "issueReporter"
         | "fileExplorer"
+        | "remote"
         | "syncCwdDefaults"
       >
     >,
@@ -475,6 +479,15 @@ const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
   fontSize: 13,
   copyOnSelect: false,
   extensionViewers: [],
+};
+
+const DEFAULT_REMOTE: RemoteSettings = {
+  enabled: false,
+  bindAddress: "0.0.0.0",
+  allowedOrigins: [],
+  allowedIps: ["127.0.0.1/32", "::1/128"],
+  authToken: "",
+  heartbeatTimeoutSeconds: 15,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
@@ -924,6 +937,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
+  remote: { ...DEFAULT_REMOTE },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
 
   setAppearance: (data) =>
@@ -984,6 +998,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setFileExplorer: (data) =>
     set((state) => ({
       fileExplorer: { ...state.fileExplorer, ...data },
+    })),
+
+  setRemote: (data) =>
+    set((state) => ({
+      remote: { ...state.remote, ...data },
     })),
 
   setSyncCwdDefaults: (data) =>
@@ -1201,6 +1220,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const fileExplorer = data.fileExplorer
       ? { ...DEFAULT_FILE_EXPLORER, ...(data.fileExplorer as Partial<FileExplorerSettings>) }
       : undefined;
+    const remote = data.remote
+      ? { ...DEFAULT_REMOTE, ...(data.remote as Partial<RemoteSettings>) }
+      : undefined;
     // Ensure syncCwdDefaults settings have all fields (backwards compat)
     const syncCwdDefaults = data.syncCwdDefaults
       ? {
@@ -1225,6 +1247,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       dock: _rawDock,
       notifications: _rawNotifications,
       workspaceSelector: _rawWorkspaceSelector,
+      remote: _rawRemote,
       language: _rawLanguage,
       ...rest
     } = data;
@@ -1254,6 +1277,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),
+      ...(remote ? { remote } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
   },

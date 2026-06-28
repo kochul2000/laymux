@@ -150,6 +150,9 @@ export function useSessionPersistence() {
                   rawSettings.fileExplorer as import("@/lib/tauri-api").FileExplorerSettings,
               }
             : {}),
+          ...(rawSettings.remote
+            ? { remote: rawSettings.remote as import("@/lib/tauri-api").RemoteSettings }
+            : {}),
           ...(rawSettings.memo
             ? { memo: rawSettings.memo as import("@/lib/tauri-api").MemoSettings }
             : {}),

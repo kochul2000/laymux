@@ -29,6 +29,25 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - SettingsView를 Dock에 배치하여 열기 (선택, Dock only)
 - `settings.json` 직접 텍스트 편집
 
+### Direct Remote Mode 설정
+
+브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
+
+```jsonc
+{
+  "remote": {
+    "enabled": false,                  // 기본값: 비활성화
+    "bindAddress": "0.0.0.0",          // 현재 구현은 Automation 서버 listener를 공유
+    "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 헤더 필수
+    "allowedIps": ["127.0.0.1/32", "::1/128"],
+    "authToken": "",                   // enabled=true일 때 필수
+    "heartbeatTimeoutSeconds": 15       // 최소 5초로 clamp
+  }
+}
+```
+
+Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: `100.64.0.0/10`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
+
 ### Windows Terminal 호환 항목
 
 | 항목 | 설명 |
@@ -481,6 +500,41 @@ claude mcp add-json -s user laymux '{"type":"http","url":"http://<IP>:19280/mcp"
 - URL 형식: `http://<IP>:<PORT>/mcp` (trailing slash 없음)
 - 인증 헤더 불필요 — `headers` 필드가 있으면 오히려 문제 가능
 - Claude Code 재시작 필요 (MCP 설정 변경 후)
+
+## 13. Remote UI API
+
+Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Direct Remote Mode 계약이다. 같은 axum 서버에 붙지만 Automation API/MCP와 route namespace, 인증, Origin/CORS, 세션 모델을 분리한다([ADR-0013](../adr/0013-direct-remote-mode.md)). Automation API의 `REGISTERED_ROUTES`/docs 검증 대상이 아니며 `/remote/v1/*` 네임스페이스만 사용한다.
+
+### 13.1 인증과 접근 제어
+
+- `settings.remote.enabled`가 `true`일 때만 응답한다.
+- `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
+- `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 `100.64.0.0/10`을 명시해야 한다.
+- `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재하고 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
+
+### 13.2 Controller Lease
+
+원격 제어는 다중 클라이언트 동기화가 아니라 exclusive controller lease다.
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/session/status` | GET | 현재 lease 상태 조회 |
+| `/remote/v1/session/claim` | POST | remote controller lease 획득. 이미 active면 `409` |
+| `/remote/v1/session/heartbeat` | POST | lease heartbeat 갱신 |
+| `/remote/v1/session/release` | POST | remote가 lease 반납 |
+
+`claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. PC reclaim은 현재 lease를 해제하고 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다.
+
+### 13.3 Terminal Control
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/terminals` | GET | 현재 backend terminal session 목록 |
+| `/remote/v1/terminals/{id}/write` | POST | active `leaseId`로 PTY 입력 전송 |
+| `/remote/v1/terminals/{id}/resize` | POST | active `leaseId`로 PTY 크기 변경 |
+| `/remote/v1/terminals/{id}/output?leaseId=...&token=...` | WS | ring buffer tail + 이후 PTY output byte stream |
+
+`write`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다. 이는 인증된 다른 remote peer가 active controller를 우회해 입력을 주입하지 못하게 하는 서버 측 게이트다.
 
 ---
 
