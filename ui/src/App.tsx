@@ -12,6 +12,7 @@ import { useLanguageSync } from "@/hooks/useLanguageSync";
 import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
 import { closeTerminalSession } from "@/lib/tauri-api";
 import { useTerminalStore } from "@/stores/terminal-store";
+import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
 
 export function App() {
   useKeyboardShortcuts();
@@ -110,6 +111,7 @@ export function App() {
           }}
         />
       )}
+      <RemoteControlOverlay />
     </div>
   );
 }

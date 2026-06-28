@@ -15,6 +15,7 @@ pub const EVENT_TERMINAL_CWD_CHANGED: &str = "terminal-cwd-changed";
 pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
+pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -151,6 +152,7 @@ mod tests {
             EVENT_TERMINAL_TITLE_CHANGED,
             EVENT_CLAUDE_MESSAGE_CHANGED,
             EVENT_TERMINAL_OUTPUT_ACTIVITY,
+            EVENT_REMOTE_CONTROL_CHANGED,
             EVENT_WORKSPACE_STATE_CHANGED,
             EVENT_TERMINALS_LIST_CHANGED,
         ];

@@ -176,7 +176,7 @@ async fn ip_allowlist_middleware(
 }
 
 pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistry) -> Router {
-    Router::new()
+    let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
         .route("/api/v1/workspaces", get(workspaces_list))
@@ -270,16 +270,17 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
             post(ui_toggle_pane_hidden),
         )
         .layer(middleware::from_fn(ip_allowlist_middleware))
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive());
+
+    automation_routes
+        .merge(crate::remote_server::build_router())
         .with_state(state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::routing::get;
     use serial_test::serial;
-    use tower::ServiceExt;
 
     #[test]
     fn automation_port_returns_dev_in_debug() {

@@ -23,6 +23,7 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 8. `sync_groups`
 /// 9. `propagated_terminals`
 /// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 11. `remote_control`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -71,6 +72,8 @@ pub struct AppState {
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
     /// Auto-incrementing counter for notification IDs.
     pub notification_counter: AtomicU64,
+    /// Current Direct Remote Mode controller lease, if a remote browser holds control.
+    pub remote_control: Mutex<Option<crate::remote_server::RemoteControlLease>>,
 }
 
 impl AppState {
@@ -90,6 +93,7 @@ impl AppState {
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
+            remote_control: Mutex::new(None),
         }
     }
 }
@@ -160,5 +164,12 @@ mod tests {
         let state = AppState::new();
         let notifs = state.notifications.lock().unwrap();
         assert!(notifs.is_empty());
+    }
+
+    #[test]
+    fn remote_control_starts_empty() {
+        let state = AppState::new();
+        let remote = state.remote_control.lock().unwrap();
+        assert!(remote.is_none());
     }
 }

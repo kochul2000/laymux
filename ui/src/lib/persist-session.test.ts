@@ -105,6 +105,25 @@ describe("persistSession", () => {
     expect(savedArg.profileDefaults.font.size).toBe(18);
   });
 
+  it("includes remote settings in saved settings", async () => {
+    useSettingsStore.getState().setRemote({
+      enabled: true,
+      allowedIps: ["100.64.0.0/10"],
+      authToken: "secret",
+      heartbeatTimeoutSeconds: 30,
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.remote).toMatchObject({
+      enabled: true,
+      allowedIps: ["100.64.0.0/10"],
+      authToken: "secret",
+      heartbeatTimeoutSeconds: 30,
+    });
+  });
+
   it("includes per-profile font override in saved settings", async () => {
     useSettingsStore
       .getState()

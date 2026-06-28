@@ -963,6 +963,56 @@ impl Default for FileExplorerSettings {
     }
 }
 
+/// Direct Remote Mode server settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSettings {
+    /// User-facing browser remote API/UI switch. Defaults off.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Reserved for the standalone remote listener; the current server shares
+    /// the Automation API listener.
+    #[serde(default = "default_remote_bind_address")]
+    pub bind_address: String,
+    /// Exact Origin values allowed for browser requests. Empty = no Origin filter.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    /// IP/CIDR allowlist for remote clients. Add 100.64.0.0/10 for Tailscale.
+    #[serde(default = "default_remote_allowed_ips")]
+    pub allowed_ips: Vec<String>,
+    /// Bearer token for remote browser clients. Required when remote is enabled.
+    #[serde(default)]
+    pub auth_token: String,
+    /// Seconds before an inactive remote controller lease expires.
+    #[serde(default = "default_remote_heartbeat_timeout_seconds")]
+    pub heartbeat_timeout_seconds: u64,
+}
+
+fn default_remote_bind_address() -> String {
+    "0.0.0.0".into()
+}
+
+fn default_remote_allowed_ips() -> Vec<String> {
+    vec!["127.0.0.1/32".into(), "::1/128".into()]
+}
+
+fn default_remote_heartbeat_timeout_seconds() -> u64 {
+    15
+}
+
+impl Default for RemoteSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind_address: default_remote_bind_address(),
+            allowed_origins: Vec::new(),
+            allowed_ips: default_remote_allowed_ips(),
+            auth_token: String::new(),
+            heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
+        }
+    }
+}
+
 /// Dock pane definition (persisted view config with position).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -1063,6 +1113,8 @@ pub struct Settings {
     pub issue_reporter: IssueReporterSettings,
     #[serde(default)]
     pub file_explorer: FileExplorerSettings,
+    #[serde(default)]
+    pub remote: RemoteSettings,
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd_defaults: Option<serde_json::Value>,
@@ -1152,6 +1204,7 @@ impl Default for Settings {
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),
+            remote: RemoteSettings::default(),
             sync_cwd_defaults: None,
             workspace_display_order: Vec::new(),
         }

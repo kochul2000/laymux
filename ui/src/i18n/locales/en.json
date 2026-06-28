@@ -8,6 +8,13 @@
     "terminal": {
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
       "scrollToBottom": "Scroll to bottom"
+    },
+    "remoteControl": {
+      "title": "Remote control active",
+      "body": "{{controller}} is controlling this PC.",
+      "fallbackController": "Remote browser",
+      "reclaim": "Take back control",
+      "reclaiming": "Taking back..."
     }
   },
   "settings": {

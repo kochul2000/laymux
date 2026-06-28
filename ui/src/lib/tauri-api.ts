@@ -58,6 +58,22 @@ export async function getSyncGroupTerminals(groupName: string): Promise<string[]
   return invoke("get_sync_group_terminals", { groupName });
 }
 
+export interface RemoteControlStatus {
+  active: boolean;
+  leaseId?: string | null;
+  remoteAddr?: string | null;
+  clientName?: string | null;
+  heartbeatTimeoutSeconds: number;
+}
+
+export async function getRemoteControlStatus(): Promise<RemoteControlStatus> {
+  return invoke("get_remote_control_status");
+}
+
+export async function reclaimRemoteControl(): Promise<RemoteControlStatus> {
+  return invoke("reclaim_remote_control");
+}
+
 export interface TerminalStateInfo {
   activity: TerminalActivityInfo;
 }
@@ -267,6 +283,15 @@ export interface ProfileDefaults {
   syncCwd?: SyncCwdConfig;
 }
 
+export interface RemoteSettings {
+  enabled: boolean;
+  bindAddress: string;
+  allowedOrigins: string[];
+  allowedIps: string[];
+  authToken: string;
+  heartbeatTimeoutSeconds: number;
+}
+
 export interface Settings {
   /** App UI language: "system" (OS locale), "ko", or "en". */
   language?: import("@/stores/settings-store").LanguageSetting;
@@ -293,6 +318,7 @@ export interface Settings {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
+  remote?: RemoteSettings;
 }
 
 export interface ColorScheme {
@@ -632,6 +658,15 @@ export function onAutomationRequest(
   callback: (data: AutomationRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<AutomationRequest>("automation-request", (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Listen for Direct Remote Mode controller lease changes. */
+export function onRemoteControlChanged(
+  callback: (data: RemoteControlStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<RemoteControlStatus>("remote-control-changed", (event) => {
     callback(event.payload);
   });
 }
