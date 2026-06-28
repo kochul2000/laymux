@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Laymux Remote</title>
+    <link rel="stylesheet" href="/remote/vendor/xterm.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101216;
+        --panel: #181c22;
+        --panel-2: #222831;
+        --border: #343b46;
+        --text: #eef2f8;
+        --muted: #9ba6b6;
+        --accent: #5ea1ff;
+        --accent-strong: #1f64ad;
+        --danger: #ff6978;
+        --danger-bg: #652330;
+        --terminal-bg: #080a0d;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        overflow: hidden;
+      }
+      button, input, select {
+        font: inherit;
+      }
+      .app {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        height: 100%;
+      }
+      header, footer {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 12px;
+        border-color: var(--border);
+        background: var(--panel);
+      }
+      header {
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+      }
+      h1 {
+        margin: 0 10px 0 0;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+      }
+      input, select {
+        min-width: 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 8px;
+        background: #0d1015;
+        color: var(--text);
+      }
+      input[type="password"] {
+        width: 180px;
+      }
+      select {
+        width: min(360px, 100%);
+      }
+      button {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+        background: var(--panel-2);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: #3d7dd1;
+        background: var(--accent-strong);
+      }
+      button.danger {
+        border-color: #8b3440;
+        background: var(--danger-bg);
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      main {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-height: 0;
+      }
+      .status {
+        min-height: 36px;
+        padding: 8px 12px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+      }
+      .status.error {
+        color: var(--danger);
+      }
+      .terminal-shell {
+        min-width: 0;
+        min-height: 0;
+        padding: 8px;
+        background: var(--terminal-bg);
+      }
+      #terminal {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+      }
+      .xterm {
+        height: 100%;
+        padding: 4px;
+      }
+      .xterm .xterm-viewport {
+        background-color: transparent;
+      }
+      .grow {
+        flex: 1 1 auto;
+      }
+      .terminal-meta {
+        min-width: 160px;
+        max-width: min(420px, 100%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      footer .status-hint {
+        min-width: 0;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      @media (max-width: 820px) {
+        header {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          margin-right: 0;
+        }
+        label {
+          display: grid;
+          grid-template-columns: 72px minmax(0, 1fr);
+        }
+        input[type="password"], select {
+          width: 100%;
+        }
+        .actions {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .actions button {
+          min-width: 0;
+          padding-left: 6px;
+          padding-right: 6px;
+        }
+        footer {
+          align-items: stretch;
+          display: grid;
+          grid-template-columns: 1fr auto auto;
+        }
+        footer .status-hint {
+          align-self: center;
+        }
+      }
+      @media (max-width: 520px) {
+        .actions {
+          grid-template-columns: 1fr 1fr;
+        }
+        footer {
+          grid-template-columns: 1fr 1fr;
+        }
+        footer .status-hint {
+          grid-column: 1 / -1;
+        }
+        footer button {
+          min-width: 0;
+        }
+      }
+      @media (min-width: 821px) {
+        select {
+          flex: 1 1 260px;
+        }
+        .token-label input {
+          width: 180px;
+        }
+        .name-label input {
+          width: 140px;
+        }
+      }
+      @supports (height: 100dvh) {
+        .app {
+          height: 100dvh;
+        }
+      }
+      .xterm-screen .xterm-decoration-top {
+        pointer-events: none;
+      }
+      .xterm-helper-textarea {
+        font-size: 16px;
+      }
+      .xterm-helpers textarea {
+        opacity: 0;
+      }
+      .xterm-rows {
+        letter-spacing: 0;
+      }
+      .xterm .xterm-scroll-area {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>Laymux Remote</h1>
+        <label class="token-label">Token <input id="token" type="password" autocomplete="current-password" /></label>
+        <label class="name-label">Name <input id="clientName" autocomplete="nickname" value="browser" /></label>
+        <select id="terminals" disabled></select>
+        <div class="actions">
+          <button id="connect" class="primary">Connect</button>
+          <button id="release" class="danger" disabled>Release</button>
+          <button id="refresh" disabled>Refresh</button>
+        </div>
+      </header>
+      <main>
+        <div id="status" class="status">Enter the remote token, then connect.</div>
+        <div class="terminal-shell">
+          <div id="terminal" aria-label="Terminal output"></div>
+        </div>
+      </main>
+      <footer>
+        <button id="ctrlC" disabled>Ctrl+C</button>
+        <button id="focusTerminal" disabled>Keyboard</button>
+        <div id="terminalMeta" class="status-hint grow">No terminal selected.</div>
+      </footer>
+    </div>
+    <script src="/remote/vendor/xterm.js"></script>
+    <script src="/remote/vendor/addon-fit.js"></script>
+    <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const tokenInput = $("token");
+        const clientNameInput = $("clientName");
+        const connectButton = $("connect");
+        const releaseButton = $("release");
+        const refreshButton = $("refresh");
+        const terminalsSelect = $("terminals");
+        const statusEl = $("status");
+        const terminalHost = $("terminal");
+        const terminalMetaEl = $("terminalMeta");
+        const focusTerminalButton = $("focusTerminal");
+        const ctrlCButton = $("ctrlC");
+        const tokenKey = "laymux.remote.token";
+        let leaseId = null;
+        let heartbeatTimer = null;
+        let socket = null;
+        let activeTerminalId = null;
+        let terminal = null;
+        let fitAddon = null;
+        let resizeObserver = null;
+        let resizeListenerAttached = false;
+        let resizeTimer = null;
+        let lastResizeKey = "";
+        let pendingInput = "";
+        let inputFlushTimer = null;
+
+        const params = new URLSearchParams(location.search);
+        tokenInput.value = params.get("token") || localStorage.getItem(tokenKey) || "";
+
+        function setStatus(message, error = false) {
+          statusEl.textContent = message;
+          statusEl.classList.toggle("error", error);
+        }
+
+        function token() {
+          return tokenInput.value.trim();
+        }
+
+        function authHeaders() {
+          return {
+            "authorization": `Bearer ${token()}`,
+            "content-type": "application/json",
+          };
+        }
+
+        async function remoteFetch(path, options = {}) {
+          const response = await fetch(path, {
+            ...options,
+            headers: { ...authHeaders(), ...(options.headers || {}) },
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `${response.status} ${response.statusText}`);
+          }
+          return response.json();
+        }
+
+        function setConnected(connected) {
+          releaseButton.disabled = !connected;
+          terminalsSelect.disabled = !connected;
+          refreshButton.disabled = !connected;
+          ctrlCButton.disabled = !connected || !activeTerminalId;
+          focusTerminalButton.disabled = !connected || !activeTerminalId;
+          connectButton.disabled = connected;
+        }
+
+        function ensureTerminal() {
+          if (terminal) return terminal;
+          const TerminalCtor = window.Terminal;
+          const FitAddonCtor = window.FitAddon && window.FitAddon.FitAddon;
+          if (!TerminalCtor || !FitAddonCtor) {
+            throw new Error("xterm assets failed to load");
+          }
+          terminal = new TerminalCtor({
+            allowProposedApi: false,
+            cols: 80,
+            rows: 24,
+            cursorBlink: true,
+            fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
+            fontSize: 13,
+            letterSpacing: 0,
+            scrollback: 9000,
+            convertEol: false,
+            theme: {
+              background: '#080a0d',
+              foreground: '#eef2f8',
+              cursor: '#f4d35e',
+              selectionBackground: '#2f5f94',
+              black: '#111318',
+              red: '#ff6978',
+              green: '#5fcf8f',
+              yellow: '#f4d35e',
+              blue: '#5ea1ff',
+              magenta: '#c889ff',
+              cyan: '#4fd2d2',
+              white: '#eef2f8',
+              brightBlack: '#586170',
+              brightRed: '#ff8793',
+              brightGreen: '#7ee2a6',
+              brightYellow: '#ffe082',
+              brightBlue: '#82b8ff',
+              brightMagenta: '#d8a4ff',
+              brightCyan: '#7ae5e5',
+              brightWhite: '#ffffff'
+            }
+          });
+          fitAddon = new FitAddonCtor();
+          terminal.loadAddon(fitAddon);
+          terminal.open(terminalHost);
+          terminal.onData((data) => enqueueInput(data));
+          terminal.onResize(({ cols, rows }) => queueResize(cols, rows));
+          if ("ResizeObserver" in window) {
+            resizeObserver = new ResizeObserver(() => fitTerminal());
+            resizeObserver.observe(terminalHost);
+          } else if (!resizeListenerAttached) {
+            window.addEventListener("resize", () => fitTerminal());
+            resizeListenerAttached = true;
+          }
+          requestAnimationFrame(() => {
+            fitTerminal(false);
+            setTimeout(() => fitTerminal(Boolean(activeTerminalId)), 40);
+          });
+          return terminal;
+        }
+
+        function stopSocket() {
+          if (socket) {
+            const closingSocket = socket;
+            socket = null;
+            closingSocket.onclose = null;
+            closingSocket.onerror = null;
+            closingSocket.close();
+          }
+        }
+
+        function stopHeartbeat() {
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+        }
+
+        function stopInputFlush() {
+          if (inputFlushTimer) {
+            clearTimeout(inputFlushTimer);
+            inputFlushTimer = null;
+          }
+          pendingInput = "";
+        }
+
+        async function heartbeat() {
+          if (!leaseId) return;
+          await remoteFetch("/remote/v1/session/heartbeat", {
+            method: "POST",
+            body: JSON.stringify({ leaseId }),
+          });
+        }
+
+        function startHeartbeat(timeoutSeconds) {
+          stopHeartbeat();
+          const intervalMs = Math.max(1000, Math.floor(timeoutSeconds * 333));
+          heartbeatTimer = setInterval(() => {
+            heartbeat().catch((err) => {
+              setStatus(`Heartbeat failed: ${err.message}`, true);
+              disconnect(false);
+            });
+          }, intervalMs);
+        }
+
+        function terminalLabel(terminalInfo) {
+          return [terminalInfo.title || terminalInfo.id, terminalInfo.profile || "", terminalInfo.cwd || ""]
+            .filter(Boolean)
+            .join(" - ");
+        }
+
+        async function loadTerminals() {
+          const data = await remoteFetch("/remote/v1/terminals");
+          const terminals = data.terminals || [];
+          const previousTerminalId = activeTerminalId;
+          terminalsSelect.innerHTML = "";
+          for (const terminalInfo of terminals) {
+            const option = document.createElement("option");
+            option.value = terminalInfo.id;
+            option.textContent = terminalLabel(terminalInfo);
+            option.dataset.cols = String(terminalInfo.cols || "");
+            option.dataset.rows = String(terminalInfo.rows || "");
+            terminalsSelect.append(option);
+          }
+          const nextTerminal = terminals.find((terminalInfo) => terminalInfo.id === previousTerminalId) || terminals[0];
+          activeTerminalId = nextTerminal ? nextTerminal.id : null;
+          terminalsSelect.value = activeTerminalId || "";
+          setConnected(Boolean(leaseId));
+          if (activeTerminalId) {
+            terminalMetaEl.textContent = terminalLabel(nextTerminal);
+            openOutput(activeTerminalId);
+          } else {
+            terminalMetaEl.textContent = "No open terminal sessions.";
+            setStatus("No open terminal sessions.", true);
+            stopSocket();
+          }
+        }
+
+        function wsBaseUrl() {
+          const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+          return `${protocol}//${location.host}`;
+        }
+
+        function openOutput(terminalId) {
+          const term = ensureTerminal();
+          stopSocket();
+          term.reset();
+          lastResizeKey = "";
+          const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
+          const outputSocket = new WebSocket(url);
+          socket = outputSocket;
+          outputSocket.binaryType = "arraybuffer";
+          outputSocket.onopen = () => {
+            if (socket === outputSocket) {
+              setStatus(`Connected to ${terminalId}`);
+              fitTerminal(true);
+              term.focus();
+            }
+          };
+          outputSocket.onmessage = (event) => {
+            if (socket !== outputSocket) return;
+            if (event.data instanceof ArrayBuffer) {
+              term.write(new Uint8Array(event.data));
+            } else {
+              term.write(String(event.data));
+            }
+          };
+          outputSocket.onclose = () => {
+            if (socket === outputSocket) {
+              socket = null;
+              if (leaseId) setStatus("Output stream closed.", true);
+            }
+          };
+          outputSocket.onerror = () => {
+            if (socket === outputSocket) setStatus("Output stream error.", true);
+          };
+        }
+
+        async function connect() {
+          if (!token()) {
+            setStatus("Remote token is required.", true);
+            return;
+          }
+          localStorage.setItem(tokenKey, token());
+          setStatus("Claiming remote control...");
+          try {
+            const status = await remoteFetch("/remote/v1/session/claim", {
+              method: "POST",
+              body: JSON.stringify({ clientName: clientNameInput.value.trim() || "browser" }),
+            });
+            leaseId = status.leaseId;
+            ensureTerminal();
+            setConnected(true);
+            startHeartbeat(status.heartbeatTimeoutSeconds || 15);
+            await loadTerminals();
+          } catch (err) {
+            const failedLease = leaseId;
+            disconnect(false);
+            if (failedLease) await releaseLease(failedLease).catch(() => {});
+            setStatus(err.message, true);
+          }
+        }
+
+        async function write(data) {
+          if (!leaseId || !activeTerminalId) return;
+          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/write`, {
+            method: "POST",
+            body: JSON.stringify({ leaseId, data }),
+          });
+        }
+
+        function enqueueInput(data) {
+          if (!leaseId || !activeTerminalId) return;
+          pendingInput += data;
+          if (!inputFlushTimer) {
+            inputFlushTimer = setTimeout(() => {
+              inputFlushTimer = null;
+              const dataToSend = pendingInput;
+              pendingInput = "";
+              write(dataToSend).catch((err) => setStatus(err.message, true));
+            }, 12);
+          }
+        }
+
+        function fitTerminal(sendResize = true) {
+          if (!terminal || !fitAddon) return;
+          try {
+            fitAddon.fit();
+          } catch (err) {
+            setStatus(`Fit failed: ${err.message}`, true);
+            return;
+          }
+          if (sendResize) queueResize(terminal.cols, terminal.rows);
+        }
+
+        function queueResize(cols, rows) {
+          if (!leaseId || !activeTerminalId || !Number.isFinite(cols) || !Number.isFinite(rows)) return;
+          const resizeKey = `${activeTerminalId}:${cols}x${rows}`;
+          if (resizeKey === lastResizeKey) return;
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => {
+            resizeTimer = null;
+            lastResizeKey = resizeKey;
+            resize(cols, rows).catch((err) => setStatus(`Resize failed: ${err.message}`, true));
+          }, 120);
+        }
+
+        async function resize(cols, rows) {
+          if (!leaseId || !activeTerminalId) return;
+          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/resize`, {
+            method: "POST",
+            body: JSON.stringify({ leaseId, cols, rows }),
+          });
+        }
+
+        async function release() {
+          if (!leaseId) return;
+          const currentLease = leaseId;
+          await releaseLease(currentLease);
+          disconnect(false);
+          setStatus("Released remote control.");
+        }
+
+        async function releaseLease(id) {
+          await remoteFetch("/remote/v1/session/release", {
+            method: "POST",
+            body: JSON.stringify({ leaseId: id }),
+          });
+        }
+
+        function disconnect(clearStatus = true) {
+          stopSocket();
+          stopHeartbeat();
+          stopInputFlush();
+          leaseId = null;
+          activeTerminalId = null;
+          setConnected(false);
+          if (clearStatus) setStatus("Disconnected.");
+        }
+
+        connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
+        releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
+        refreshButton.addEventListener("click", () => loadTerminals().catch((err) => setStatus(err.message, true)));
+        terminalsSelect.addEventListener("change", () => {
+          activeTerminalId = terminalsSelect.value || null;
+          const selectedOption = terminalsSelect.selectedOptions[0];
+          terminalMetaEl.textContent = selectedOption ? selectedOption.textContent : "No terminal selected.";
+          setConnected(Boolean(leaseId));
+          if (activeTerminalId) openOutput(activeTerminalId);
+        });
+        ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
+        focusTerminalButton.addEventListener("click", () => terminal && terminal.focus());
+        window.addEventListener("beforeunload", () => {
+          stopSocket();
+          stopHeartbeat();
+          stopInputFlush();
+          if (resizeObserver) resizeObserver.disconnect();
+        });
+      })();
+    </script>
+  </body>
+</html>

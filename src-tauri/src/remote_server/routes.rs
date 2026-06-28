@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::automation_server::ServerState;
 use crate::lock_ext::MutexExt;
 
+use super::assets::{remote_addon_fit_js, remote_xterm_css, remote_xterm_js};
 use super::auth::remote_guard;
 use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
@@ -105,6 +106,9 @@ pub fn build_router() -> Router<ServerState> {
     Router::new()
         .route("/remote", get(remote_page_redirect))
         .route("/remote/", get(remote_page))
+        .route("/remote/vendor/xterm.js", get(remote_xterm_js))
+        .route("/remote/vendor/xterm.css", get(remote_xterm_css))
+        .route("/remote/vendor/addon-fit.js", get(remote_addon_fit_js))
         .merge(api_routes)
 }
 
