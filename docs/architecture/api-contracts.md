@@ -512,7 +512,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote` | GET | `/remote/`로 redirect |
 | `/remote/` | GET | 브라우저에서 직접 여는 Direct Remote Mode entry |
 
-`/remote/`는 remote가 켜져 있고 remote IP allowlist를 통과할 때 HTML을 반환한다. 이 문서 자체는 토큰을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
+`/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
 
 ### 13.1 인증과 접근 제어
 

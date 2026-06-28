@@ -141,16 +141,61 @@ fn origin_allowed(headers: &HeaderMap, settings: &RemoteSettings) -> bool {
     if settings.allowed_origins.is_empty() {
         return true;
     }
-    let Some(origin) = headers
+    if let Some(origin) = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-    else {
-        return false;
-    };
+    {
+        return origin_matches_allowed(origin, settings);
+    }
+
+    missing_origin_allowed_for_same_origin_fetch(headers, settings)
+}
+
+fn origin_matches_allowed(origin: &str, settings: &RemoteSettings) -> bool {
     settings
         .allowed_origins
         .iter()
         .any(|allowed| allowed == "*" || allowed == origin)
+}
+
+fn missing_origin_allowed_for_same_origin_fetch(
+    headers: &HeaderMap,
+    settings: &RemoteSettings,
+) -> bool {
+    if settings
+        .allowed_origins
+        .iter()
+        .any(|allowed| allowed == "*")
+    {
+        return true;
+    }
+
+    if !header_value(headers, "sec-fetch-site")
+        .is_some_and(|value| value.eq_ignore_ascii_case("same-origin"))
+    {
+        return false;
+    }
+
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+
+    settings.allowed_origins.iter().any(|allowed| {
+        allowed_origin_authority(allowed)
+            .as_deref()
+            .is_some_and(|authority| authority.eq_ignore_ascii_case(host))
+    })
+}
+
+fn allowed_origin_authority(origin: &str) -> Option<String> {
+    let uri = origin.parse::<Uri>().ok()?;
+    match (uri.scheme_str(), uri.authority()) {
+        (Some("http" | "https"), Some(authority)) => Some(authority.as_str().to_string()),
+        _ => None,
+    }
 }
 
 pub(crate) fn normalize_ip(ip: IpAddr) -> IpAddr {
@@ -352,6 +397,22 @@ mod tests {
         };
         let headers = HeaderMap::new();
 
+        assert!(!origin_allowed(&headers, &settings));
+    }
+
+    #[test]
+    fn origin_allowlist_accepts_same_origin_fetch_without_origin() {
+        let settings = RemoteSettings {
+            allowed_origins: vec!["http://100.64.0.2:19281".into()],
+            ..RemoteSettings::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("100.64.0.2:19281"));
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+
+        assert!(origin_allowed(&headers, &settings));
+
+        headers.insert(header::HOST, HeaderValue::from_static("example.com"));
         assert!(!origin_allowed(&headers, &settings));
     }
 }

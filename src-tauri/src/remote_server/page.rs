@@ -4,17 +4,41 @@ use axum::extract::ConnectInfo;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
+use crate::settings::models::RemoteSettings;
+
 use super::auth::{is_remote_ip_allowed, normalize_ip};
 use super::json_error;
 
-pub(crate) async fn remote_page_redirect() -> Redirect {
-    Redirect::temporary("/remote/")
+pub(crate) async fn remote_page_redirect(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
+    let settings = crate::settings::load_settings().remote;
+    if let Some(response) = remote_page_access_error(&settings, addr) {
+        return response;
+    }
+
+    Redirect::temporary("/remote/").into_response()
 }
 
 pub(crate) async fn remote_page(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let settings = crate::settings::load_settings().remote;
+    if let Some(response) = remote_page_access_error(&settings, addr) {
+        return response;
+    }
+
+    Html(remote_page_html()).into_response()
+}
+
+fn remote_page_access_error(settings: &RemoteSettings, addr: SocketAddr) -> Option<Response> {
     if !settings.enabled {
-        return json_error(StatusCode::FORBIDDEN, "direct remote mode is disabled");
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "direct remote mode is disabled",
+        ));
+    }
+    if settings.auth_token.is_empty() {
+        return Some(json_error(
+            StatusCode::UNAUTHORIZED,
+            "direct remote mode requires remote.authToken",
+        ));
     }
     let remote_ip = normalize_ip(addr.ip());
     if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
@@ -24,10 +48,13 @@ pub(crate) async fn remote_page(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> R
             allowed_ips = ?settings.allowed_ips,
             "remote page client IP denied"
         );
-        return json_error(StatusCode::FORBIDDEN, "remote client IP is not allowed");
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "remote client IP is not allowed",
+        ));
     }
 
-    Html(remote_page_html()).into_response()
+    None
 }
 
 fn remote_page_html() -> &'static str {
@@ -276,8 +303,11 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
 
         function stopSocket() {
           if (socket) {
-            socket.close();
+            const closingSocket = socket;
             socket = null;
+            closingSocket.onclose = null;
+            closingSocket.onerror = null;
+            closingSocket.close();
           }
         }
 
@@ -298,7 +328,7 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
 
         function startHeartbeat(timeoutSeconds) {
           stopHeartbeat();
-          const intervalMs = Math.max(3000, Math.floor(timeoutSeconds * 500));
+          const intervalMs = Math.max(1000, Math.floor(timeoutSeconds * 333));
           heartbeatTimer = setInterval(() => {
             heartbeat().catch((err) => {
               setStatus(`Heartbeat failed: ${err.message}`, true);
@@ -313,7 +343,9 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
           for (const terminal of data.terminals || []) {
             const option = document.createElement("option");
             option.value = terminal.id;
-            option.textContent = `${terminal.title || terminal.id} - ${terminal.profile} - ${terminal.cwd || ""}`;
+            option.textContent = [terminal.title || terminal.id, terminal.profile || "", terminal.cwd || ""]
+              .filter(Boolean)
+              .join(" - ");
             terminalsSelect.append(option);
           }
           activeTerminalId = terminalsSelect.value || null;
@@ -331,17 +363,26 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
           outputText = "";
           outputEl.textContent = "";
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
-          socket = new WebSocket(url);
-          socket.binaryType = "arraybuffer";
-          socket.onopen = () => setStatus(`Connected to ${terminalId}`);
-          socket.onmessage = (event) => {
+          const outputSocket = new WebSocket(url);
+          socket = outputSocket;
+          outputSocket.binaryType = "arraybuffer";
+          outputSocket.onopen = () => {
+            if (socket === outputSocket) setStatus(`Connected to ${terminalId}`);
+          };
+          outputSocket.onmessage = (event) => {
+            if (socket !== outputSocket) return;
             if (event.data instanceof ArrayBuffer) appendOutput(decoder.decode(event.data));
             else appendOutput(String(event.data));
           };
-          socket.onclose = () => {
-            if (leaseId) setStatus("Output stream closed.", true);
+          outputSocket.onclose = () => {
+            if (socket === outputSocket) {
+              socket = null;
+              if (leaseId) setStatus("Output stream closed.", true);
+            }
           };
-          socket.onerror = () => setStatus("Output stream error.", true);
+          outputSocket.onerror = () => {
+            if (socket === outputSocket) setStatus("Output stream error.", true);
+          };
         }
 
         async function connect() {
@@ -351,13 +392,21 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
           }
           localStorage.setItem(tokenKey, token());
           setStatus("Claiming remote control...");
-          const status = await remoteFetch("/remote/v1/session/claim", {
-            method: "POST",
-            body: JSON.stringify({ clientName: clientNameInput.value.trim() || "browser" }),
-          });
-          leaseId = status.leaseId;
-          startHeartbeat(status.heartbeatTimeoutSeconds || 15);
-          await loadTerminals();
+          try {
+            const status = await remoteFetch("/remote/v1/session/claim", {
+              method: "POST",
+              body: JSON.stringify({ clientName: clientNameInput.value.trim() || "browser" }),
+            });
+            leaseId = status.leaseId;
+            setConnected(true);
+            startHeartbeat(status.heartbeatTimeoutSeconds || 15);
+            await loadTerminals();
+          } catch (err) {
+            const failedLease = leaseId;
+            disconnect(false);
+            if (failedLease) await releaseLease(failedLease).catch(() => {});
+            setStatus(err.message, true);
+          }
         }
 
         async function write(data) {
@@ -371,12 +420,16 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
         async function release() {
           if (!leaseId) return;
           const currentLease = leaseId;
+          await releaseLease(currentLease);
           disconnect(false);
+          setStatus("Released remote control.");
+        }
+
+        async function releaseLease(id) {
           await remoteFetch("/remote/v1/session/release", {
             method: "POST",
-            body: JSON.stringify({ leaseId: currentLease }),
-          }).catch(() => {});
-          setStatus("Released remote control.");
+            body: JSON.stringify({ leaseId: id }),
+          });
         }
 
         function disconnect(clearStatus = true) {
@@ -389,7 +442,7 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
         }
 
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
-        releaseButton.addEventListener("click", () => release());
+        releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
         terminalsSelect.addEventListener("change", () => {
           activeTerminalId = terminalsSelect.value || null;
           setConnected(Boolean(leaseId));
