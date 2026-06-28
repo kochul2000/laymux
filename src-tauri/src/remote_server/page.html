@@ -291,6 +291,7 @@
         let heartbeatTimer = null;
         let socket = null;
         let activeTerminalId = null;
+        let terminalInfoById = new Map();
         let terminal = null;
         let fitAddon = null;
         let resizeObserver = null;
@@ -303,6 +304,36 @@
 
         const params = new URLSearchParams(location.search);
         tokenInput.value = params.get("token") || localStorage.getItem(tokenKey) || "";
+
+        const defaultAppearance = Object.freeze({
+          fontFamily: "'Cascadia Mono', 'Cascadia Mono', 'Consolas', monospace",
+          fontSize: 14,
+          cursorStyle: "bar",
+          cursorWidth: 1,
+          scrollback: 10000,
+          theme: Object.freeze({
+            background: "#0C0C0C",
+            foreground: "#F0F0F0",
+            cursor: "#FFFFFF",
+            selectionBackground: "#232042",
+            black: "#0C0C0C",
+            red: "#C50F1F",
+            green: "#13A10E",
+            yellow: "#C19C00",
+            blue: "#0037DA",
+            magenta: "#881798",
+            cyan: "#3A96DD",
+            white: "#F0F0F0",
+            brightBlack: "#767676",
+            brightRed: "#E74856",
+            brightGreen: "#16C60C",
+            brightYellow: "#F9F1A5",
+            brightBlue: "#3B78FF",
+            brightMagenta: "#B4009E",
+            brightCyan: "#61D6D6",
+            brightWhite: "#FFFFFF"
+          })
+        });
 
         function setStatus(message, error = false) {
           statusEl.textContent = message;
@@ -341,46 +372,69 @@
           connectButton.disabled = connected;
         }
 
-        function ensureTerminal() {
+        function normalizeAppearance(appearance = {}) {
+          const fontSize = Number(appearance.fontSize);
+          const cursorWidth = Number(appearance.cursorWidth);
+          const cursorStyle = ["bar", "underline", "block"].includes(appearance.cursorStyle)
+            ? appearance.cursorStyle
+            : defaultAppearance.cursorStyle;
+          return {
+            fontFamily: appearance.fontFamily || defaultAppearance.fontFamily,
+            fontSize: Number.isFinite(fontSize) && fontSize > 0 ? Math.floor(fontSize) : defaultAppearance.fontSize,
+            cursorStyle,
+            cursorWidth: Number.isFinite(cursorWidth) && cursorWidth > 0 ? Math.floor(cursorWidth) : undefined,
+            scrollback: defaultAppearance.scrollback,
+            theme: { ...defaultAppearance.theme, ...(appearance.theme || {}) },
+          };
+        }
+
+        function terminalOptionsForAppearance(appearance = {}) {
+          const normalized = normalizeAppearance(appearance);
+          const options = {
+            allowProposedApi: false,
+            cols: 80,
+            rows: 24,
+            cursorBlink: true,
+            cursorStyle: normalized.cursorStyle,
+            fontFamily: normalized.fontFamily,
+            fontSize: normalized.fontSize,
+            letterSpacing: 0,
+            scrollback: normalized.scrollback,
+            convertEol: false,
+            theme: normalized.theme,
+          };
+          if (normalized.cursorWidth !== undefined) {
+            options.cursorWidth = normalized.cursorWidth;
+          }
+          return options;
+        }
+
+        function applyTerminalAppearance(appearance = {}) {
+          if (!terminal) return;
+          const options = terminalOptionsForAppearance(appearance);
+          delete options.cols;
+          delete options.rows;
+          terminal.options = options;
+          if (options.cursorWidth === undefined) {
+            try {
+              delete terminal.options.cursorWidth;
+            } catch (_) {
+              terminal.options.cursorWidth = undefined;
+            }
+          }
+          if (typeof terminal.refresh === "function" && terminal.rows > 0) {
+            terminal.refresh(0, terminal.rows - 1);
+          }
+        }
+
+        function ensureTerminal(appearance = {}) {
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
           const FitAddonCtor = window.FitAddon && window.FitAddon.FitAddon;
           if (!TerminalCtor || !FitAddonCtor) {
             throw new Error("xterm assets failed to load");
           }
-          terminal = new TerminalCtor({
-            allowProposedApi: false,
-            cols: 80,
-            rows: 24,
-            cursorBlink: true,
-            fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
-            fontSize: 13,
-            letterSpacing: 0,
-            scrollback: 9000,
-            convertEol: false,
-            theme: {
-              background: '#080a0d',
-              foreground: '#eef2f8',
-              cursor: '#f4d35e',
-              selectionBackground: '#2f5f94',
-              black: '#111318',
-              red: '#ff6978',
-              green: '#5fcf8f',
-              yellow: '#f4d35e',
-              blue: '#5ea1ff',
-              magenta: '#c889ff',
-              cyan: '#4fd2d2',
-              white: '#eef2f8',
-              brightBlack: '#586170',
-              brightRed: '#ff8793',
-              brightGreen: '#7ee2a6',
-              brightYellow: '#ffe082',
-              brightBlue: '#82b8ff',
-              brightMagenta: '#d8a4ff',
-              brightCyan: '#7ae5e5',
-              brightWhite: '#ffffff'
-            }
-          });
+          terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           terminal.open(terminalHost);
@@ -460,6 +514,7 @@
         async function loadTerminals() {
           const data = await remoteFetch("/remote/v1/terminals");
           const terminals = data.terminals || [];
+          terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
           const previousTerminalId = activeTerminalId;
           terminalsSelect.innerHTML = "";
           for (const terminalInfo of terminals) {
@@ -490,10 +545,12 @@
         }
 
         function openOutput(terminalId) {
-          const term = ensureTerminal();
+          const terminalInfo = terminalInfoById.get(terminalId);
+          const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
           stopSocket();
           stopInputFlush();
           stopResizeFlush();
+          applyTerminalAppearance(terminalInfo && terminalInfo.appearance);
           term.reset();
           lastResizeKey = "";
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
