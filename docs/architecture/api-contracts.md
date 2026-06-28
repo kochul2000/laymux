@@ -38,7 +38,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
   "remote": {
     "enabled": false,                  // 기본값: 비활성화
     "bindAddress": "0.0.0.0",          // 현재 구현은 Automation 서버 listener를 공유
-    "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음
+    "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 헤더 필수
     "allowedIps": ["127.0.0.1/32", "::1/128"],
     "authToken": "",                   // enabled=true일 때 필수
     "heartbeatTimeoutSeconds": 15       // 최소 5초로 clamp
@@ -510,7 +510,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 - `settings.remote.enabled`가 `true`일 때만 응답한다.
 - `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 `?token=<token>`도 허용한다.
 - `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 `100.64.0.0/10`을 명시해야 한다.
-- `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
+- `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재하고 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
 
 ### 13.2 Controller Lease
 
@@ -523,7 +523,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/v1/session/heartbeat` | POST | lease heartbeat 갱신 |
 | `/remote/v1/session/release` | POST | remote가 lease 반납 |
 
-`claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다.
+`claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. PC reclaim은 현재 lease를 해제하고 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다.
 
 ### 13.3 Terminal Control
 

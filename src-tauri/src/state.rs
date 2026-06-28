@@ -72,8 +72,8 @@ pub struct AppState {
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
     /// Auto-incrementing counter for notification IDs.
     pub notification_counter: AtomicU64,
-    /// Current Direct Remote Mode controller lease, if a remote browser holds control.
-    pub remote_control: Mutex<Option<crate::remote_server::RemoteControlLease>>,
+    /// Current Direct Remote Mode controller lease plus local reclaim lockout state.
+    pub remote_control: Mutex<crate::remote_server::RemoteControlState>,
 }
 
 impl AppState {
@@ -93,7 +93,7 @@ impl AppState {
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
-            remote_control: Mutex::new(None),
+            remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
         }
     }
 }
@@ -170,6 +170,7 @@ mod tests {
     fn remote_control_starts_empty() {
         let state = AppState::new();
         let remote = state.remote_control.lock().unwrap();
-        assert!(remote.is_none());
+        assert!(remote.lease.is_none());
+        assert!(remote.reclaim_lockout_until.is_none());
     }
 }

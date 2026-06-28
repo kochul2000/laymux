@@ -7,7 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 pub use lease::{
-    get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlStatus,
+    get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,
+    RemoteControlStatus,
 };
 pub use routes::build_router;
 

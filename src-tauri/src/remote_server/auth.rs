@@ -77,7 +77,7 @@ fn origin_allowed(headers: &HeaderMap, settings: &RemoteSettings) -> bool {
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
     else {
-        return true;
+        return false;
     };
     settings
         .allowed_origins
@@ -239,6 +239,17 @@ mod tests {
             header::ORIGIN,
             HeaderValue::from_static("http://example.com"),
         );
+        assert!(!origin_allowed(&headers, &settings));
+    }
+
+    #[test]
+    fn origin_allowlist_rejects_missing_origin_when_configured() {
+        let settings = RemoteSettings {
+            allowed_origins: vec!["http://100.64.0.2:19281".into()],
+            ..RemoteSettings::default()
+        };
+        let headers = HeaderMap::new();
+
         assert!(!origin_allowed(&headers, &settings));
     }
 }

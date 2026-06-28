@@ -17,9 +17,9 @@ use crate::lock_ext::MutexExt;
 
 use super::auth::remote_guard;
 use super::lease::{
-    active_lease_matches, effective_heartbeat_timeout_seconds, emit_remote_control_status,
-    get_remote_control_status, prune_expired_lease, require_active_lease, status_from_lease,
-    RemoteControlLease,
+    active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
+    emit_remote_control_status, get_remote_control_status, prune_expired_lease,
+    reclaim_lockout_active, require_active_lease, status_from_state, RemoteControlLease,
 };
 use super::{internal_error, json_error};
 
@@ -129,23 +129,28 @@ async fn remote_session_claim(
             Ok(current) => current,
             Err(err) => return internal_error(err),
         };
-        prune_expired_lease(&mut current, Duration::from_secs(timeout_seconds));
+        let now = Instant::now();
+        prune_expired_lease(&mut current.lease, Duration::from_secs(timeout_seconds));
 
-        if current.is_some() {
+        if reclaim_lockout_active(&mut current, now) {
+            return json_error(StatusCode::CONFLICT, "remote control was reclaimed locally");
+        }
+
+        if current.lease.is_some() {
             return (
                 StatusCode::CONFLICT,
-                Json(status_from_lease(&current, timeout_seconds)),
+                Json(status_from_state(&current, timeout_seconds)),
             )
                 .into_response();
         }
 
-        *current = Some(RemoteControlLease {
+        current.lease = Some(RemoteControlLease {
             lease_id: Uuid::new_v4().to_string(),
             remote_addr: addr.to_string(),
             client_name: body.client_name,
-            last_heartbeat: Instant::now(),
+            last_heartbeat: now,
         });
-        status_from_lease(&current, timeout_seconds)
+        status_from_state(&current, timeout_seconds)
     };
 
     emit_remote_control_status(&server.app_handle, &status);
@@ -163,12 +168,12 @@ async fn remote_session_heartbeat(
             Ok(current) => current,
             Err(err) => return internal_error(err),
         };
-        prune_expired_lease(&mut current, Duration::from_secs(timeout_seconds));
+        prune_expired_lease(&mut current.lease, Duration::from_secs(timeout_seconds));
 
-        match current.as_mut() {
+        match current.lease.as_mut() {
             Some(lease) if lease.lease_id == body.lease_id => {
                 lease.last_heartbeat = Instant::now();
-                status_from_lease(&current, timeout_seconds)
+                status_from_state(&current, timeout_seconds)
             }
             _ => {
                 return json_error(
@@ -193,11 +198,11 @@ async fn remote_session_release(
             Ok(current) => current,
             Err(err) => return internal_error(err),
         };
-        prune_expired_lease(&mut current, Duration::from_secs(timeout_seconds));
+        prune_expired_lease(&mut current.lease, Duration::from_secs(timeout_seconds));
 
-        match current.as_ref() {
+        match current.lease.as_ref() {
             Some(lease) if lease.lease_id == body.lease_id => {
-                *current = None;
+                current.lease = None;
             }
             Some(_) => {
                 return json_error(
@@ -207,7 +212,7 @@ async fn remote_session_release(
             }
             None => {}
         }
-        status_from_lease(&current, timeout_seconds)
+        status_from_state(&current, timeout_seconds)
     };
 
     emit_remote_control_status(&server.app_handle, &status);
@@ -317,8 +322,12 @@ async fn remote_terminal_output_ws(
     if let Err(response) = require_active_lease(&server.app_state, Some(&lease_id)) {
         return response;
     }
+    let settings = crate::settings::load_settings().remote;
+    let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
 
-    ws.on_upgrade(move |socket| stream_terminal_output(socket, server.app_state, id, lease_id))
+    ws.on_upgrade(move |socket| {
+        stream_terminal_output(socket, server.app_state, id, lease_id, timeout_seconds)
+    })
 }
 
 async fn stream_terminal_output(
@@ -326,6 +335,7 @@ async fn stream_terminal_output(
     app_state: std::sync::Arc<crate::state::AppState>,
     id: String,
     lease_id: String,
+    timeout_seconds: u64,
 ) {
     let initial_snapshot = {
         let buffers = match app_state.output_buffers.lock_or_err() {
@@ -388,7 +398,11 @@ async fn stream_terminal_output(
                 }
             }
             _ = lease_check.tick() => {
-                match active_lease_matches(&app_state, &lease_id) {
+                match active_lease_matches_with_timeout(
+                    &app_state,
+                    &lease_id,
+                    Duration::from_secs(timeout_seconds),
+                ) {
                     Ok(true) => {}
                     Ok(false) => {
                         let _ = socket.send(Message::Close(None)).await;

@@ -23,6 +23,12 @@ pub struct RemoteControlLease {
     pub last_heartbeat: Instant,
 }
 
+#[derive(Debug, Default)]
+pub struct RemoteControlState {
+    pub lease: Option<RemoteControlLease>,
+    pub reclaim_lockout_until: Option<Instant>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteControlStatus {
@@ -37,8 +43,9 @@ pub fn get_remote_control_status(app_state: &AppState) -> Result<RemoteControlSt
     let settings = crate::settings::load_settings().remote;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut current = app_state.remote_control.lock_or_err()?;
-    prune_expired_lease(&mut current, Duration::from_secs(timeout_seconds));
-    Ok(status_from_lease(&current, timeout_seconds))
+    prune_expired_lease(&mut current.lease, Duration::from_secs(timeout_seconds));
+    prune_expired_reclaim_lockout(&mut current, Instant::now());
+    Ok(status_from_state(&current, timeout_seconds))
 }
 
 pub fn reclaim_remote_control(
@@ -49,8 +56,13 @@ pub fn reclaim_remote_control(
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let status = {
         let mut current = app_state.remote_control.lock_or_err()?;
-        *current = None;
-        status_from_lease(&current, timeout_seconds)
+        current.lease = None;
+        start_reclaim_lockout(
+            &mut current,
+            Duration::from_secs(timeout_seconds),
+            Instant::now(),
+        );
+        status_from_state(&current, timeout_seconds)
     };
     emit_remote_control_status(app_handle, &status);
     Ok(status)
@@ -84,12 +96,47 @@ pub(crate) fn status_from_lease(
     }
 }
 
+pub(crate) fn status_from_state(
+    state: &RemoteControlState,
+    heartbeat_timeout_seconds: u64,
+) -> RemoteControlStatus {
+    status_from_lease(&state.lease, heartbeat_timeout_seconds)
+}
+
 pub(crate) fn prune_expired_lease(lease: &mut Option<RemoteControlLease>, timeout: Duration) {
     if lease
         .as_ref()
         .is_some_and(|current| current.last_heartbeat.elapsed() > timeout)
     {
         *lease = None;
+    }
+}
+
+pub(crate) fn start_reclaim_lockout(
+    state: &mut RemoteControlState,
+    duration: Duration,
+    now: Instant,
+) {
+    state.reclaim_lockout_until = Some(now + duration);
+}
+
+pub(crate) fn reclaim_lockout_active(state: &mut RemoteControlState, now: Instant) -> bool {
+    match state.reclaim_lockout_until {
+        Some(until) if until > now => true,
+        Some(_) => {
+            state.reclaim_lockout_until = None;
+            false
+        }
+        None => false,
+    }
+}
+
+pub(crate) fn prune_expired_reclaim_lockout(state: &mut RemoteControlState, now: Instant) {
+    if state
+        .reclaim_lockout_until
+        .is_some_and(|until| until <= now)
+    {
+        state.reclaim_lockout_until = None;
     }
 }
 
@@ -123,9 +170,18 @@ pub(crate) fn require_active_lease(
 pub(crate) fn active_lease_matches(app_state: &AppState, lease_id: &str) -> Result<bool, String> {
     let settings = crate::settings::load_settings().remote;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
+    active_lease_matches_with_timeout(app_state, lease_id, Duration::from_secs(timeout_seconds))
+}
+
+pub(crate) fn active_lease_matches_with_timeout(
+    app_state: &AppState,
+    lease_id: &str,
+    timeout: Duration,
+) -> Result<bool, String> {
     let mut current = app_state.remote_control.lock_or_err()?;
-    prune_expired_lease(&mut current, Duration::from_secs(timeout_seconds));
+    prune_expired_lease(&mut current.lease, timeout);
     Ok(current
+        .lease
         .as_ref()
         .is_some_and(|current| current.lease_id == lease_id))
 }
@@ -144,5 +200,22 @@ mod tests {
         });
         prune_expired_lease(&mut lease, Duration::from_secs(5));
         assert!(lease.is_none());
+    }
+
+    #[test]
+    fn reclaim_lockout_expires_after_duration() {
+        let now = Instant::now();
+        let mut state = RemoteControlState::default();
+        start_reclaim_lockout(&mut state, Duration::from_secs(5), now);
+
+        assert!(reclaim_lockout_active(
+            &mut state,
+            now + Duration::from_secs(4)
+        ));
+        assert!(!reclaim_lockout_active(
+            &mut state,
+            now + Duration::from_secs(5)
+        ));
+        assert!(state.reclaim_lockout_until.is_none());
     }
 }
