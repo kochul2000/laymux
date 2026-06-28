@@ -508,7 +508,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 ### 13.1 인증과 접근 제어
 
 - `settings.remote.enabled`가 `true`일 때만 응답한다.
-- `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 `?token=<token>`도 허용한다.
+- `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
 - `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 `100.64.0.0/10`을 명시해야 한다.
 - `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재하고 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
 

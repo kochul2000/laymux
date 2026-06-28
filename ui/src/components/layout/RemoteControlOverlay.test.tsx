@@ -14,12 +14,24 @@ vi.mock("@/lib/tauri-api", () => ({
   reclaimRemoteControl: api.reclaimRemoteControl,
 }));
 
+import { useSettingsStore } from "@/stores/settings-store";
 import { RemoteControlOverlay } from "./RemoteControlOverlay";
 
 describe("RemoteControlOverlay", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSettingsStore.getState().setRemote({ enabled: true });
     api.onRemoteControlChanged.mockResolvedValue(() => {});
+  });
+
+  it("does not poll while direct remote mode is disabled", async () => {
+    useSettingsStore.getState().setRemote({ enabled: false });
+
+    render(<RemoteControlOverlay />);
+    await Promise.resolve();
+
+    expect(api.getRemoteControlStatus).not.toHaveBeenCalled();
+    expect(api.onRemoteControlChanged).not.toHaveBeenCalled();
   });
 
   it("renders while a remote controller is active", async () => {

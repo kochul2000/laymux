@@ -5,17 +5,24 @@ import {
   reclaimRemoteControl,
   type RemoteControlStatus,
 } from "@/lib/tauri-api";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useTranslation } from "react-i18next";
 
 const STATUS_POLL_MS = 3000;
 
 export function RemoteControlOverlay() {
   const { t } = useTranslation("common");
+  const remoteEnabled = useSettingsStore((state) => state.remote.enabled);
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
   const [reclaiming, setReclaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!remoteEnabled) {
+      setStatus(null);
+      return;
+    }
+
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
@@ -38,13 +45,32 @@ export function RemoteControlOverlay() {
       else unlisten = cleanup;
     });
 
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [remoteEnabled]);
+
+  useEffect(() => {
+    if (!remoteEnabled || !status?.active) return;
+
+    let cancelled = false;
+    const refresh = () => {
+      getRemoteControlStatus()
+        .then((next) => {
+          if (!cancelled) setStatus(next);
+        })
+        .catch(() => {
+          if (!cancelled) setStatus(null);
+        });
+    };
+
     const timer = window.setInterval(refresh, STATUS_POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-      unlisten?.();
     };
-  }, []);
+  }, [remoteEnabled, status?.active]);
 
   useEffect(() => {
     if (!status?.active) return;

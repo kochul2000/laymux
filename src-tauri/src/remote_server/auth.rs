@@ -41,10 +41,32 @@ pub(crate) async fn remote_guard(
 }
 
 fn remote_token_matches(headers: &HeaderMap, uri: &Uri, settings: &RemoteSettings) -> bool {
-    token_from_authorization(headers)
-        .or_else(|| header_value(headers, REMOTE_TOKEN_HEADER))
-        .or_else(|| query_param(uri, "token"))
-        .is_some_and(|token| token == settings.auth_token)
+    if let Some(token) =
+        token_from_authorization(headers).or_else(|| header_value(headers, REMOTE_TOKEN_HEADER))
+    {
+        return token_matches(token, &settings.auth_token);
+    }
+
+    query_param(uri, "token")
+        .as_deref()
+        .is_some_and(|token| token_matches(token, &settings.auth_token))
+}
+
+fn token_matches(token: &str, expected: &str) -> bool {
+    constant_time_eq(token.as_bytes(), expected.as_bytes())
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let max_len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+
+    for index in 0..max_len {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(left_byte ^ right_byte);
+    }
+
+    diff == 0
 }
 
 fn token_from_authorization(headers: &HeaderMap) -> Option<&str> {
@@ -62,11 +84,50 @@ fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-fn query_param<'a>(uri: &'a Uri, key: &str) -> Option<&'a str> {
+fn query_param(uri: &Uri, key: &str) -> Option<String> {
     uri.query()?.split('&').find_map(|pair| {
         let (name, value) = pair.split_once('=')?;
-        (name == key && !value.is_empty()).then_some(value)
+        if name != key || value.is_empty() {
+            return None;
+        }
+        decode_query_component(value)
     })
+}
+
+fn decode_query_component(value: &str) -> Option<String> {
+    let input = value.as_bytes();
+    let mut decoded = Vec::with_capacity(input.len());
+    let mut index = 0;
+
+    while index < input.len() {
+        match input[index] {
+            b'%' => {
+                let high = hex_value(*input.get(index + 1)?)?;
+                let low = hex_value(*input.get(index + 2)?)?;
+                decoded.push((high << 4) | low);
+                index += 3;
+            }
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn origin_allowed(headers: &HeaderMap, settings: &RemoteSettings) -> bool {
@@ -220,6 +281,29 @@ mod tests {
                 .unwrap(),
             &settings
         ));
+    }
+
+    #[test]
+    fn remote_token_decodes_query_for_websocket() {
+        let headers = HeaderMap::new();
+        let settings = RemoteSettings {
+            auth_token: "sec/ret+?".into(),
+            ..RemoteSettings::default()
+        };
+        assert!(remote_token_matches(
+            &headers,
+            &"/remote/v1/terminals/t1/output?token=sec%2Fret%2B%3F"
+                .parse::<Uri>()
+                .unwrap(),
+            &settings
+        ));
+    }
+
+    #[test]
+    fn token_match_rejects_mismatch() {
+        assert!(token_matches("secret", "secret"));
+        assert!(!token_matches("secret", "secrets"));
+        assert!(!token_matches("secret", "nope"));
     }
 
     #[test]
