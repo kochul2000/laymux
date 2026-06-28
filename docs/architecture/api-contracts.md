@@ -550,6 +550,13 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/v1/terminals/{id}/resize` | POST | active `leaseId`로 PTY 크기 변경 |
 | `/remote/v1/terminals/{id}/output?leaseId=...&token=...` | WS | ring buffer tail + 이후 PTY output byte stream |
 
+`/remote/v1/terminals` 응답의 각 terminal 항목은 `appearance`를 포함한다. 이 값은 remote
+브라우저가 settings 전체를 직접 읽지 않도록 backend가 profile/profileDefaults/colorSchemes에서
+해석한 표시 전용 계약이다. 포함 범위는 xterm option으로 바로 적용 가능한 `fontFamily`,
+`fontSize`, `cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
+`purple`/`brightPurple`은 xterm.js의 `magenta`/`brightMagenta`로 매핑한다. 색상 스킴을 찾을 수
+없으면 로컬 `TerminalView`의 기본 테마와 동일한 CampbellClear 기반 fallback을 사용한다.
+
 `write`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다. 이는 인증된 다른 remote peer가 active controller를 우회해 입력을 주입하지 못하게 하는 서버 측 게이트다.
 
 ---

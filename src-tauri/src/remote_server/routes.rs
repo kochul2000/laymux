@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::automation_server::ServerState;
 use crate::lock_ext::MutexExt;
 
+use super::appearance::{resolve_remote_terminal_appearance, RemoteTerminalAppearance};
 use super::assets::{remote_addon_fit_js, remote_xterm_css, remote_xterm_js};
 use super::auth::remote_guard;
 use super::lease::{
@@ -42,6 +43,7 @@ struct RemoteTerminalInfo {
     rows: u16,
     sync_group: String,
     command_running: bool,
+    appearance: RemoteTerminalAppearance,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,6 +232,7 @@ async fn remote_session_release(
 }
 
 async fn remote_terminals_list(State(server): State<ServerState>) -> Response {
+    let settings = crate::settings::load_settings();
     let terminals = match server.app_state.terminals.lock_or_err() {
         Ok(terminals) => terminals,
         Err(err) => return internal_error(err),
@@ -247,6 +250,7 @@ async fn remote_terminals_list(State(server): State<ServerState>) -> Response {
             rows: session.config.rows,
             sync_group: session.config.sync_group.clone(),
             command_running: session.command_running,
+            appearance: resolve_remote_terminal_appearance(&session.config.profile, &settings),
         })
         .collect();
 

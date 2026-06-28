@@ -1,3 +1,4 @@
+mod appearance;
 mod assets;
 mod auth;
 mod lease;

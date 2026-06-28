@@ -42,6 +42,8 @@ mod tests {
         assert!(html.contains("/remote/v1/terminals"));
         assert!(html.contains("new WebSocket"));
         assert!(html.contains("new TerminalCtor"));
+        assert!(html.contains("terminalOptionsForAppearance"));
+        assert!(html.contains("terminalInfo.appearance"));
         assert!(html.contains("inputWriteChain"));
         assert!(html.contains("writeToTerminal(inputTerminalId, inputLeaseId"));
         assert!(html.contains("resizeTerminal(resizeTerminalId, resizeLeaseId"));
