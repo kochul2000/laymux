@@ -1,17 +1,13 @@
 use std::net::SocketAddr;
 
 use axum::extract::ConnectInfo;
-use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
-use crate::settings::models::RemoteSettings;
-
-use super::auth::{is_remote_ip_allowed, normalize_ip};
-use super::json_error;
+use super::auth::check_remote_base_access;
 
 pub(crate) async fn remote_page_redirect(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let settings = crate::settings::load_settings().remote;
-    if let Some(response) = remote_page_access_error(&settings, addr) {
+    if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
     }
 
@@ -20,41 +16,11 @@ pub(crate) async fn remote_page_redirect(ConnectInfo(addr): ConnectInfo<SocketAd
 
 pub(crate) async fn remote_page(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let settings = crate::settings::load_settings().remote;
-    if let Some(response) = remote_page_access_error(&settings, addr) {
+    if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
     }
 
     Html(remote_page_html()).into_response()
-}
-
-fn remote_page_access_error(settings: &RemoteSettings, addr: SocketAddr) -> Option<Response> {
-    if !settings.enabled {
-        return Some(json_error(
-            StatusCode::FORBIDDEN,
-            "direct remote mode is disabled",
-        ));
-    }
-    if settings.auth_token.is_empty() {
-        return Some(json_error(
-            StatusCode::UNAUTHORIZED,
-            "direct remote mode requires remote.authToken",
-        ));
-    }
-    let remote_ip = normalize_ip(addr.ip());
-    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
-        tracing::warn!(
-            remote_addr = %addr,
-            remote_ip = %remote_ip,
-            allowed_ips = ?settings.allowed_ips,
-            "remote page client IP denied"
-        );
-        return Some(json_error(
-            StatusCode::FORBIDDEN,
-            "remote client IP is not allowed",
-        ));
-    }
-
-    None
 }
 
 fn remote_page_html() -> &'static str {

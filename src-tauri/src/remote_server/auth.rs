@@ -18,24 +18,8 @@ pub(crate) async fn remote_guard(
 ) -> Response {
     let settings = crate::settings::load_settings().remote;
 
-    if !settings.enabled {
-        return json_error(StatusCode::FORBIDDEN, "direct remote mode is disabled");
-    }
-    if settings.auth_token.is_empty() {
-        return json_error(
-            StatusCode::UNAUTHORIZED,
-            "direct remote mode requires remote.authToken",
-        );
-    }
-    let remote_ip = normalize_ip(addr.ip());
-    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
-        tracing::warn!(
-            remote_addr = %addr,
-            remote_ip = %remote_ip,
-            allowed_ips = ?settings.allowed_ips,
-            "remote API client IP denied"
-        );
-        return json_error(StatusCode::FORBIDDEN, "remote client IP is not allowed");
+    if let Some(response) = check_remote_base_access(&settings, addr) {
+        return response;
     }
     if !origin_allowed(req.headers(), &settings) {
         return json_error(StatusCode::FORBIDDEN, "remote Origin is not allowed");
@@ -45,6 +29,39 @@ pub(crate) async fn remote_guard(
     }
 
     next.run(req).await
+}
+
+pub(crate) fn check_remote_base_access(
+    settings: &RemoteSettings,
+    addr: SocketAddr,
+) -> Option<Response> {
+    if !settings.enabled {
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "direct remote mode is disabled",
+        ));
+    }
+    if settings.auth_token.is_empty() {
+        return Some(json_error(
+            StatusCode::UNAUTHORIZED,
+            "direct remote mode requires remote.authToken",
+        ));
+    }
+    let remote_ip = normalize_ip(addr.ip());
+    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            allowed_ips = ?settings.allowed_ips,
+            "remote client IP denied"
+        );
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "remote client IP is not allowed",
+        ));
+    }
+
+    None
 }
 
 fn remote_token_matches(headers: &HeaderMap, uri: &Uri, settings: &RemoteSettings) -> bool {
@@ -170,6 +187,9 @@ fn missing_origin_allowed_for_same_origin_fetch(
         return true;
     }
 
+    // Browser same-origin GET fetches can omit Origin. Sec-Fetch-Site and Host
+    // are forgeable by non-browser clients, so this is a compatibility path, not
+    // a security boundary; IP allowlist and bearer token remain authoritative.
     if !header_value(headers, "sec-fetch-site")
         .is_some_and(|value| value.eq_ignore_ascii_case("same-origin"))
     {
@@ -191,6 +211,8 @@ fn missing_origin_allowed_for_same_origin_fetch(
 }
 
 fn allowed_origin_authority(origin: &str) -> Option<String> {
+    // Compare only authority for the no-Origin browser compatibility path.
+    // The configured scheme is enforced only when an Origin header is present.
     let uri = origin.parse::<Uri>().ok()?;
     match (uri.scheme_str(), uri.authority()) {
         (Some("http" | "https"), Some(authority)) => Some(authority.as_str().to_string()),
@@ -313,6 +335,20 @@ mod tests {
     }
 
     #[test]
+    fn remote_base_access_rejects_missing_token() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: String::new(),
+            ..RemoteSettings::default()
+        };
+        let response =
+            check_remote_base_access(&settings, "127.0.0.1:1".parse::<SocketAddr>().unwrap())
+                .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
     fn remote_token_accepts_bearer_header() {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -414,5 +450,12 @@ mod tests {
 
         headers.insert(header::HOST, HeaderValue::from_static("example.com"));
         assert!(!origin_allowed(&headers, &settings));
+
+        let https_settings = RemoteSettings {
+            allowed_origins: vec!["https://100.64.0.2:19281".into()],
+            ..RemoteSettings::default()
+        };
+        headers.insert(header::HOST, HeaderValue::from_static("100.64.0.2:19281"));
+        assert!(origin_allowed(&headers, &https_settings));
     }
 }
