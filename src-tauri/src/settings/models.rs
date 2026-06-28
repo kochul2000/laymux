@@ -977,7 +977,7 @@ pub struct RemoteSettings {
     /// Exact Origin values allowed for browser requests. Empty = no Origin filter.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
-    /// IP/CIDR allowlist for remote clients. Add 100.64.0.0/10 for Tailscale.
+    /// IP/CIDR allowlist for remote clients. Add Tailscale IPv4/IPv6 CIDRs when needed.
     #[serde(default = "default_remote_allowed_ips")]
     pub allowed_ips: Vec<String>,
     /// Bearer token for remote browser clients. Required when remote is enabled.

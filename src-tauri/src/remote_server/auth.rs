@@ -18,17 +18,8 @@ pub(crate) async fn remote_guard(
 ) -> Response {
     let settings = crate::settings::load_settings().remote;
 
-    if !settings.enabled {
-        return json_error(StatusCode::FORBIDDEN, "direct remote mode is disabled");
-    }
-    if settings.auth_token.is_empty() {
-        return json_error(
-            StatusCode::UNAUTHORIZED,
-            "direct remote mode requires remote.authToken",
-        );
-    }
-    if !is_remote_ip_allowed(&normalize_ip(addr.ip()), &settings.allowed_ips) {
-        return json_error(StatusCode::FORBIDDEN, "remote client IP is not allowed");
+    if let Some(response) = check_remote_base_access(&settings, addr) {
+        return response;
     }
     if !origin_allowed(req.headers(), &settings) {
         return json_error(StatusCode::FORBIDDEN, "remote Origin is not allowed");
@@ -38,6 +29,39 @@ pub(crate) async fn remote_guard(
     }
 
     next.run(req).await
+}
+
+pub(crate) fn check_remote_base_access(
+    settings: &RemoteSettings,
+    addr: SocketAddr,
+) -> Option<Response> {
+    if !settings.enabled {
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "direct remote mode is disabled",
+        ));
+    }
+    if settings.auth_token.is_empty() {
+        return Some(json_error(
+            StatusCode::UNAUTHORIZED,
+            "direct remote mode requires remote.authToken",
+        ));
+    }
+    let remote_ip = normalize_ip(addr.ip());
+    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            allowed_ips = ?settings.allowed_ips,
+            "remote client IP denied"
+        );
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "remote client IP is not allowed",
+        ));
+    }
+
+    None
 }
 
 fn remote_token_matches(headers: &HeaderMap, uri: &Uri, settings: &RemoteSettings) -> bool {
@@ -134,19 +158,69 @@ fn origin_allowed(headers: &HeaderMap, settings: &RemoteSettings) -> bool {
     if settings.allowed_origins.is_empty() {
         return true;
     }
-    let Some(origin) = headers
+    if let Some(origin) = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-    else {
-        return false;
-    };
+    {
+        return origin_matches_allowed(origin, settings);
+    }
+
+    missing_origin_allowed_for_same_origin_fetch(headers, settings)
+}
+
+fn origin_matches_allowed(origin: &str, settings: &RemoteSettings) -> bool {
     settings
         .allowed_origins
         .iter()
         .any(|allowed| allowed == "*" || allowed == origin)
 }
 
-fn normalize_ip(ip: IpAddr) -> IpAddr {
+fn missing_origin_allowed_for_same_origin_fetch(
+    headers: &HeaderMap,
+    settings: &RemoteSettings,
+) -> bool {
+    if settings
+        .allowed_origins
+        .iter()
+        .any(|allowed| allowed == "*")
+    {
+        return true;
+    }
+
+    // Browser same-origin GET fetches can omit Origin. Sec-Fetch-Site and Host
+    // are forgeable by non-browser clients, so this is a compatibility path, not
+    // a security boundary; IP allowlist and bearer token remain authoritative.
+    if !header_value(headers, "sec-fetch-site")
+        .is_some_and(|value| value.eq_ignore_ascii_case("same-origin"))
+    {
+        return false;
+    }
+
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+
+    settings.allowed_origins.iter().any(|allowed| {
+        allowed_origin_authority(allowed)
+            .as_deref()
+            .is_some_and(|authority| authority.eq_ignore_ascii_case(host))
+    })
+}
+
+fn allowed_origin_authority(origin: &str) -> Option<String> {
+    // Compare only authority for the no-Origin browser compatibility path.
+    // The configured scheme is enforced only when an Origin header is present.
+    let uri = origin.parse::<Uri>().ok()?;
+    match (uri.scheme_str(), uri.authority()) {
+        (Some("http" | "https"), Some(authority)) => Some(authority.as_str().to_string()),
+        _ => None,
+    }
+}
+
+pub(crate) fn normalize_ip(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => v6
             .to_ipv4_mapped()
@@ -156,7 +230,7 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-fn is_remote_ip_allowed(ip: &IpAddr, allowed_ips: &[String]) -> bool {
+pub(crate) fn is_remote_ip_allowed(ip: &IpAddr, allowed_ips: &[String]) -> bool {
     if allowed_ips.is_empty() {
         return ip.is_loopback();
     }
@@ -221,8 +295,11 @@ mod tests {
     use axum::http::HeaderValue;
 
     #[test]
-    fn remote_allowlist_matches_tailscale_cidr() {
-        let allowed = vec!["100.64.0.0/10".to_string()];
+    fn remote_allowlist_matches_tailscale_cidrs() {
+        let allowed = vec![
+            "100.64.0.0/10".to_string(),
+            "fd7a:115c:a1e0::/48".to_string(),
+        ];
         assert!(is_remote_ip_allowed(
             &"100.100.10.20".parse::<IpAddr>().unwrap(),
             &allowed
@@ -233,6 +310,14 @@ mod tests {
         ));
         assert!(!is_remote_ip_allowed(
             &"100.128.0.1".parse::<IpAddr>().unwrap(),
+            &allowed
+        ));
+        assert!(is_remote_ip_allowed(
+            &"fd7a:115c:a1e0::5e37:230".parse::<IpAddr>().unwrap(),
+            &allowed
+        ));
+        assert!(!is_remote_ip_allowed(
+            &"fd7b:115c:a1e0::1".parse::<IpAddr>().unwrap(),
             &allowed
         ));
     }
@@ -247,6 +332,20 @@ mod tests {
             &"192.168.1.10".parse::<IpAddr>().unwrap(),
             &[]
         ));
+    }
+
+    #[test]
+    fn remote_base_access_rejects_missing_token() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: String::new(),
+            ..RemoteSettings::default()
+        };
+        let response =
+            check_remote_base_access(&settings, "127.0.0.1:1".parse::<SocketAddr>().unwrap())
+                .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -335,5 +434,28 @@ mod tests {
         let headers = HeaderMap::new();
 
         assert!(!origin_allowed(&headers, &settings));
+    }
+
+    #[test]
+    fn origin_allowlist_accepts_same_origin_fetch_without_origin() {
+        let settings = RemoteSettings {
+            allowed_origins: vec!["http://100.64.0.2:19281".into()],
+            ..RemoteSettings::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("100.64.0.2:19281"));
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+
+        assert!(origin_allowed(&headers, &settings));
+
+        headers.insert(header::HOST, HeaderValue::from_static("example.com"));
+        assert!(!origin_allowed(&headers, &settings));
+
+        let https_settings = RemoteSettings {
+            allowed_origins: vec!["https://100.64.0.2:19281".into()],
+            ..RemoteSettings::default()
+        };
+        headers.insert(header::HOST, HeaderValue::from_static("100.64.0.2:19281"));
+        assert!(origin_allowed(&headers, &https_settings));
     }
 }

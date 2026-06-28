@@ -1,5 +1,6 @@
 mod auth;
 mod lease;
+mod page;
 mod routes;
 
 use axum::http::StatusCode;

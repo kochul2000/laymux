@@ -38,7 +38,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
   "remote": {
     "enabled": false,                  // 기본값: 비활성화
     "bindAddress": "0.0.0.0",          // 현재 구현은 Automation 서버 listener를 공유
-    "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 헤더 필수
+    "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 일치 검사
     "allowedIps": ["127.0.0.1/32", "::1/128"],
     "authToken": "",                   // enabled=true일 때 필수
     "heartbeatTimeoutSeconds": 15       // 최소 5초로 clamp
@@ -46,7 +46,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 }
 ```
 
-Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: `100.64.0.0/10`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
+Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
 
 ### Windows Terminal 호환 항목
 
@@ -503,14 +503,23 @@ claude mcp add-json -s user laymux '{"type":"http","url":"http://<IP>:19280/mcp"
 
 ## 13. Remote UI API
 
-Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Direct Remote Mode 계약이다. 같은 axum 서버에 붙지만 Automation API/MCP와 route namespace, 인증, Origin/CORS, 세션 모델을 분리한다([ADR-0013](../adr/0013-direct-remote-mode.md)). Automation API의 `REGISTERED_ROUTES`/docs 검증 대상이 아니며 `/remote/v1/*` 네임스페이스만 사용한다.
+Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Direct Remote Mode 계약이다. 같은 axum 서버에 붙지만 Automation API/MCP와 route namespace, 인증, Origin/CORS, 세션 모델을 분리한다([ADR-0013](../adr/0013-direct-remote-mode.md)). Automation API의 `REGISTERED_ROUTES`/docs 검증 대상이 아니며 브라우저 entry는 `/remote/`, 제어 API는 `/remote/v1/*` 네임스페이스를 사용한다.
+
+### 13.0 Browser Entry
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote` | GET | `/remote/`로 redirect |
+| `/remote/` | GET | 브라우저에서 직접 여는 Direct Remote Mode entry |
+
+`/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
 
 ### 13.1 인증과 접근 제어
 
 - `settings.remote.enabled`가 `true`일 때만 응답한다.
 - `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
-- `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 `100.64.0.0/10`을 명시해야 한다.
-- `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재하고 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
+- `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`를 명시해야 한다.
+- `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재할 때 정확히 일치해야 한다. 브라우저의 same-origin fetch가 `Origin`을 생략한 경우에 한해 `Sec-Fetch-Site: same-origin`과 `Host`가 허용 origin의 authority와 맞으면 허용한다. 이 예외는 브라우저 호환성용이며 보안 경계는 IP allowlist와 bearer token이다.
 
 ### 13.2 Controller Lease
 
