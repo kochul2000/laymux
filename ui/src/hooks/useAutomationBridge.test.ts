@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
   useAutomationBridge,
+  captureScreenshot,
   handleAutomationRequest,
   handleAsyncAutomationRequest,
 } from "./useAutomationBridge";
+import html2canvas from "html2canvas";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
@@ -16,6 +18,40 @@ vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock("html2canvas", () => ({
+  default: vi.fn(),
+}));
+
+function mockScreenshotCanvas() {
+  const drawImage = vi.fn();
+  const resultCanvas = {
+    getContext: vi.fn(() => ({ drawImage })),
+    toDataURL: vi.fn(() => "data:image/png;base64,test"),
+  } as unknown as HTMLCanvasElement;
+
+  vi.mocked(html2canvas).mockResolvedValueOnce(resultCanvas);
+  return { drawImage };
+}
+
+function addCanvasElement() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 16;
+  canvas.height = 16;
+  canvas.getBoundingClientRect = () =>
+    ({
+      x: 4,
+      y: 8,
+      left: 4,
+      top: 8,
+      right: 20,
+      bottom: 24,
+      width: 16,
+      height: 16,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  document.documentElement.appendChild(canvas);
+}
 
 describe("handleAutomationRequest", () => {
   beforeEach(() => {
@@ -393,6 +429,48 @@ describe("handleAutomationRequest", () => {
 });
 
 describe("handleAsyncAutomationRequest", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    document.documentElement.querySelectorAll("canvas").forEach((node) => node.remove());
+    vi.mocked(html2canvas).mockReset();
+  });
+
+  it("composites terminal canvases when no blocking overlay is visible", async () => {
+    const { drawImage } = mockScreenshotCanvas();
+    addCanvasElement();
+
+    const dataUrl = await captureScreenshot();
+
+    expect(dataUrl).toBe("data:image/png;base64,test");
+    expect(drawImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not composite terminal canvases over visible modal overlays", async () => {
+    const { drawImage } = mockScreenshotCanvas();
+    addCanvasElement();
+    const overlay = document.createElement("div");
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 320,
+        bottom: 180,
+        width: 320,
+        height: 180,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    document.body.appendChild(overlay);
+
+    const dataUrl = await captureScreenshot();
+
+    expect(dataUrl).toBe("data:image/png;base64,test");
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
   it("falls through to sync handler for non-screenshot targets", async () => {
     const result = await handleAsyncAutomationRequest({
       requestId: "async-1",
