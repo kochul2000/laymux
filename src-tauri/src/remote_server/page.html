@@ -299,6 +299,7 @@
         let lastResizeKey = "";
         let pendingInput = "";
         let inputFlushTimer = null;
+        let inputWriteChain = Promise.resolve();
 
         const params = new URLSearchParams(location.search);
         tokenInput.value = params.get("token") || localStorage.getItem(tokenKey) || "";
@@ -424,6 +425,13 @@
           pendingInput = "";
         }
 
+        function stopResizeFlush() {
+          if (resizeTimer) {
+            clearTimeout(resizeTimer);
+            resizeTimer = null;
+          }
+        }
+
         async function heartbeat() {
           if (!leaseId) return;
           await remoteFetch("/remote/v1/session/heartbeat", {
@@ -484,6 +492,8 @@
         function openOutput(terminalId) {
           const term = ensureTerminal();
           stopSocket();
+          stopInputFlush();
+          stopResizeFlush();
           term.reset();
           lastResizeKey = "";
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
@@ -541,23 +551,35 @@
           }
         }
 
-        async function write(data) {
-          if (!leaseId || !activeTerminalId) return;
-          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/write`, {
+        async function writeToTerminal(terminalId, activeLeaseId, data) {
+          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(terminalId)}/write`, {
             method: "POST",
-            body: JSON.stringify({ leaseId, data }),
+            body: JSON.stringify({ leaseId: activeLeaseId, data }),
           });
         }
 
         function enqueueInput(data) {
           if (!leaseId || !activeTerminalId) return;
+          const inputTerminalId = activeTerminalId;
+          const inputLeaseId = leaseId;
           pendingInput += data;
           if (!inputFlushTimer) {
             inputFlushTimer = setTimeout(() => {
               inputFlushTimer = null;
               const dataToSend = pendingInput;
               pendingInput = "";
-              write(dataToSend).catch((err) => setStatus(err.message, true));
+              if (!dataToSend || inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) {
+                return;
+              }
+              inputWriteChain = inputWriteChain
+                .catch(() => {})
+                .then(() => {
+                  if (inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) {
+                    return;
+                  }
+                  return writeToTerminal(inputTerminalId, inputLeaseId, dataToSend);
+                })
+                .catch((err) => setStatus(err.message, true));
             }, 12);
           }
         }
@@ -575,21 +597,25 @@
 
         function queueResize(cols, rows) {
           if (!leaseId || !activeTerminalId || !Number.isFinite(cols) || !Number.isFinite(rows)) return;
-          const resizeKey = `${activeTerminalId}:${cols}x${rows}`;
+          const resizeTerminalId = activeTerminalId;
+          const resizeLeaseId = leaseId;
+          const resizeKey = `${resizeTerminalId}:${cols}x${rows}`;
           if (resizeKey === lastResizeKey) return;
           if (resizeTimer) clearTimeout(resizeTimer);
           resizeTimer = setTimeout(() => {
             resizeTimer = null;
+            if (resizeTerminalId !== activeTerminalId || resizeLeaseId !== leaseId) {
+              return;
+            }
             lastResizeKey = resizeKey;
-            resize(cols, rows).catch((err) => setStatus(`Resize failed: ${err.message}`, true));
+            resizeTerminal(resizeTerminalId, resizeLeaseId, cols, rows).catch((err) => setStatus(`Resize failed: ${err.message}`, true));
           }, 120);
         }
 
-        async function resize(cols, rows) {
-          if (!leaseId || !activeTerminalId) return;
-          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(activeTerminalId)}/resize`, {
+        async function resizeTerminal(terminalId, activeLeaseId, cols, rows) {
+          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(terminalId)}/resize`, {
             method: "POST",
-            body: JSON.stringify({ leaseId, cols, rows }),
+            body: JSON.stringify({ leaseId: activeLeaseId, cols, rows }),
           });
         }
 
@@ -612,6 +638,7 @@
           stopSocket();
           stopHeartbeat();
           stopInputFlush();
+          stopResizeFlush();
           leaseId = null;
           activeTerminalId = null;
           setConnected(false);
