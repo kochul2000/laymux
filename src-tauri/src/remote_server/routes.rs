@@ -7,7 +7,7 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::time;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
@@ -15,7 +15,6 @@ use uuid::Uuid;
 use crate::automation_server::ServerState;
 use crate::lock_ext::MutexExt;
 
-use super::appearance::{resolve_remote_terminal_appearance, RemoteTerminalAppearance};
 use super::assets::{remote_addon_fit_js, remote_xterm_css, remote_xterm_js};
 use super::auth::remote_guard;
 use super::lease::{
@@ -23,28 +22,17 @@ use super::lease::{
     emit_remote_control_status, get_remote_control_status, prune_expired_lease,
     reclaim_lockout_active, require_active_lease, status_from_state, RemoteControlLease,
 };
+use super::navigation_routes::{
+    remote_navigation, remote_terminal_focus, remote_workspace_switch_active,
+};
 use super::page::{remote_page, remote_page_redirect};
+use super::terminal_info::remote_terminal_infos;
 use super::{internal_error, json_error};
 
-const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
+pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
 const OUTPUT_INITIAL_BYTES: usize = 64 * 1024;
 const OUTPUT_POLL_MS: u64 = 50;
 const LEASE_CHECK_MS: u64 = 500;
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteTerminalInfo {
-    id: String,
-    title: String,
-    profile: String,
-    cwd: Option<String>,
-    branch: Option<String>,
-    cols: u16,
-    rows: u16,
-    sync_group: String,
-    command_running: bool,
-    appearance: RemoteTerminalAppearance,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,7 +77,16 @@ pub fn build_router() -> Router<ServerState> {
             post(remote_session_heartbeat),
         )
         .route("/remote/v1/session/release", post(remote_session_release))
+        .route("/remote/v1/navigation", get(remote_navigation))
+        .route(
+            "/remote/v1/workspaces/active",
+            post(remote_workspace_switch_active),
+        )
         .route("/remote/v1/terminals", get(remote_terminals_list))
+        .route(
+            "/remote/v1/terminals/{id}/focus",
+            post(remote_terminal_focus),
+        )
         .route(
             "/remote/v1/terminals/{id}/write",
             post(remote_terminal_write),
@@ -233,26 +230,10 @@ async fn remote_session_release(
 
 async fn remote_terminals_list(State(server): State<ServerState>) -> Response {
     let settings = crate::settings::load_settings();
-    let terminals = match server.app_state.terminals.lock_or_err() {
+    let result = match remote_terminal_infos(&server.app_state, &settings) {
         Ok(terminals) => terminals,
         Err(err) => return internal_error(err),
     };
-
-    let result: Vec<RemoteTerminalInfo> = terminals
-        .values()
-        .map(|session| RemoteTerminalInfo {
-            id: session.id.clone(),
-            title: session.title.clone(),
-            profile: session.config.profile.clone(),
-            cwd: session.cwd.clone(),
-            branch: session.branch.clone(),
-            cols: session.config.cols,
-            rows: session.config.rows,
-            sync_group: session.config.sync_group.clone(),
-            command_running: session.command_running,
-            appearance: resolve_remote_terminal_appearance(&session.config.profile, &settings),
-        })
-        .collect();
 
     Json(serde_json::json!({ "terminals": result })).into_response()
 }

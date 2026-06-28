@@ -2,8 +2,11 @@ mod appearance;
 mod assets;
 mod auth;
 mod lease;
+mod navigation;
+mod navigation_routes;
 mod page;
 mod routes;
+mod terminal_info;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
