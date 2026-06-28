@@ -46,7 +46,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 }
 ```
 
-Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: `100.64.0.0/10`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
+Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
 
 ### Windows Terminal 호환 항목
 
@@ -518,7 +518,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 
 - `settings.remote.enabled`가 `true`일 때만 응답한다.
 - `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
-- `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 `100.64.0.0/10`을 명시해야 한다.
+- `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`를 명시해야 한다.
 - `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재하고 정확히 일치해야 한다. 비어 있으면 token 기반 요청을 허용한다.
 
 ### 13.2 Controller Lease

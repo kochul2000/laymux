@@ -16,7 +16,14 @@ pub(crate) async fn remote_page(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> R
     if !settings.enabled {
         return json_error(StatusCode::FORBIDDEN, "direct remote mode is disabled");
     }
-    if !is_remote_ip_allowed(&normalize_ip(addr.ip()), &settings.allowed_ips) {
+    let remote_ip = normalize_ip(addr.ip());
+    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            allowed_ips = ?settings.allowed_ips,
+            "remote page client IP denied"
+        );
         return json_error(StatusCode::FORBIDDEN, "remote client IP is not allowed");
     }
 
@@ -306,7 +313,7 @@ const REMOTE_PAGE_HTML: &str = r#"<!doctype html>
           for (const terminal of data.terminals || []) {
             const option = document.createElement("option");
             option.value = terminal.id;
-            option.textContent = `${terminal.title || terminal.id} · ${terminal.profile} · ${terminal.cwd || ""}`;
+            option.textContent = `${terminal.title || terminal.id} - ${terminal.profile} - ${terminal.cwd || ""}`;
             terminalsSelect.append(option);
           }
           activeTerminalId = terminalsSelect.value || null;

@@ -27,7 +27,14 @@ pub(crate) async fn remote_guard(
             "direct remote mode requires remote.authToken",
         );
     }
-    if !is_remote_ip_allowed(&normalize_ip(addr.ip()), &settings.allowed_ips) {
+    let remote_ip = normalize_ip(addr.ip());
+    if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            allowed_ips = ?settings.allowed_ips,
+            "remote API client IP denied"
+        );
         return json_error(StatusCode::FORBIDDEN, "remote client IP is not allowed");
     }
     if !origin_allowed(req.headers(), &settings) {
@@ -221,8 +228,11 @@ mod tests {
     use axum::http::HeaderValue;
 
     #[test]
-    fn remote_allowlist_matches_tailscale_cidr() {
-        let allowed = vec!["100.64.0.0/10".to_string()];
+    fn remote_allowlist_matches_tailscale_cidrs() {
+        let allowed = vec![
+            "100.64.0.0/10".to_string(),
+            "fd7a:115c:a1e0::/48".to_string(),
+        ];
         assert!(is_remote_ip_allowed(
             &"100.100.10.20".parse::<IpAddr>().unwrap(),
             &allowed
@@ -233,6 +243,14 @@ mod tests {
         ));
         assert!(!is_remote_ip_allowed(
             &"100.128.0.1".parse::<IpAddr>().unwrap(),
+            &allowed
+        ));
+        assert!(is_remote_ip_allowed(
+            &"fd7a:115c:a1e0::5e37:230".parse::<IpAddr>().unwrap(),
+            &allowed
+        ));
+        assert!(!is_remote_ip_allowed(
+            &"fd7b:115c:a1e0::1".parse::<IpAddr>().unwrap(),
             &allowed
         ));
     }
