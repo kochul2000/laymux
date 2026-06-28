@@ -503,7 +503,16 @@ claude mcp add-json -s user laymux '{"type":"http","url":"http://<IP>:19280/mcp"
 
 ## 13. Remote UI API
 
-Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Direct Remote Mode 계약이다. 같은 axum 서버에 붙지만 Automation API/MCP와 route namespace, 인증, Origin/CORS, 세션 모델을 분리한다([ADR-0013](../adr/0013-direct-remote-mode.md)). Automation API의 `REGISTERED_ROUTES`/docs 검증 대상이 아니며 `/remote/v1/*` 네임스페이스만 사용한다.
+Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Direct Remote Mode 계약이다. 같은 axum 서버에 붙지만 Automation API/MCP와 route namespace, 인증, Origin/CORS, 세션 모델을 분리한다([ADR-0013](../adr/0013-direct-remote-mode.md)). Automation API의 `REGISTERED_ROUTES`/docs 검증 대상이 아니며 브라우저 entry는 `/remote/`, 제어 API는 `/remote/v1/*` 네임스페이스를 사용한다.
+
+### 13.0 Browser Entry
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote` | GET | `/remote/`로 redirect |
+| `/remote/` | GET | 브라우저에서 직접 여는 Direct Remote Mode entry |
+
+`/remote/`는 remote가 켜져 있고 remote IP allowlist를 통과할 때 HTML을 반환한다. 이 문서 자체는 토큰을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
 
 ### 13.1 인증과 접근 제어
 

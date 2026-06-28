@@ -146,7 +146,7 @@ fn origin_allowed(headers: &HeaderMap, settings: &RemoteSettings) -> bool {
         .any(|allowed| allowed == "*" || allowed == origin)
 }
 
-fn normalize_ip(ip: IpAddr) -> IpAddr {
+pub(crate) fn normalize_ip(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => v6
             .to_ipv4_mapped()
@@ -156,7 +156,7 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-fn is_remote_ip_allowed(ip: &IpAddr, allowed_ips: &[String]) -> bool {
+pub(crate) fn is_remote_ip_allowed(ip: &IpAddr, allowed_ips: &[String]) -> bool {
     if allowed_ips.is_empty() {
         return ip.is_loopback();
     }

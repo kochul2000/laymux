@@ -21,6 +21,7 @@ use super::lease::{
     emit_remote_control_status, get_remote_control_status, prune_expired_lease,
     reclaim_lockout_active, require_active_lease, status_from_state, RemoteControlLease,
 };
+use super::page::{remote_page, remote_page_redirect};
 use super::{internal_error, json_error};
 
 const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -76,7 +77,7 @@ struct RemoteQuery {
 }
 
 pub fn build_router() -> Router<ServerState> {
-    Router::new()
+    let api_routes = Router::new()
         .route("/remote/v1/health", get(remote_health))
         .route("/remote/v1/session/status", get(remote_session_status))
         .route("/remote/v1/session/claim", post(remote_session_claim))
@@ -99,7 +100,12 @@ pub fn build_router() -> Router<ServerState> {
             get(remote_terminal_output_ws),
         )
         .layer(middleware::from_fn(remote_guard))
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive());
+
+    Router::new()
+        .route("/remote", get(remote_page_redirect))
+        .route("/remote/", get(remote_page))
+        .merge(api_routes)
 }
 
 async fn remote_health() -> Response {
