@@ -24,7 +24,17 @@ laymux — Tauri(Rust + WebView) 기반 자유 레이아웃 터미널 IDE. Windo
 - **`docs/roadmap.md`** — 진행 상태
 - **`docs/terminal/`** — 터미널 research 문서: 커서/플리커 정본 3종([ADR-0008](docs/adr/0008-shell-cursor-shadow-cursor.md)) + Claude OSC 시퀀스 가이드 등 ([인덱스](docs/terminal/README.md))
 
-**living doc 동기화 의무.** 기능 추가/수정 전 관련 `docs/architecture/` 섹션을 읽는다. 코드가 서술과 어긋나면 **같은 PR 에서** 문서를 갱신하고, 구조가 달라지면 사용자와 논의한다. 새 설계 결정은 `docs/adr/0000-template.md` 를 복사해 ADR 로 남긴다(번복 시 옛 ADR 은 `Superseded by` 만, 본문 유지).
+**living doc 동기화 의무.** 기능 추가/수정 전 관련 `docs/architecture/` 섹션을 읽는다. 코드가 서술과 어긋나면 **같은 PR 에서** 문서를 갱신하고, 구조가 달라지면 사용자와 논의한다.
+
+**ADR 작성 의무.** 중요한 설계 결정은 git issue/PR 설명/채팅에만 남기지 않고 **반드시 ADR 로 기록**한다. 구현 전에 방향을 고정해야 하는 결정이면 먼저 ADR PR 을 열고, 구현 중 새 결정이 생기면 같은 PR 에 ADR 을 포함한다. `docs/adr/0000-template.md` 를 다음 번호로 복사해 작성하고 인덱스(`docs/adr/README.md`)를 갱신한다. Accepted 된 ADR 을 번복할 때는 새 ADR 을 추가하고 옛 ADR 은 `Superseded by` 만 표시한다.
+
+ADR 이 필요한 대표 기준:
+- Automation/Remote/API/MCP/IPC 같은 외부 계약, 인증·권한·포트·CORS·네트워크 노출 정책을 바꾸는 경우
+- PTY/OSC/터미널 렌더링, CWD 동기화, 세션 영속, 설정 스키마처럼 여러 모듈의 책임 경계를 바꾸는 경우
+- 상태의 단일 진실원, 락 순서, 프로세스 실행, 크로스플랫폼 전략처럼 이후 구현 방향을 제한하는 경우
+- 기존 ADR 과 충돌하거나 기존 ADR 을 확장·정정·폐기해야 하는 경우
+
+단순 버그 수정, 지역적 리팩터, 테스트 보강, 문구 수정처럼 새 아키텍처 결정을 만들지 않는 변경은 ADR 없이 living doc/코드 주석/테스트로 충분하다. 판단이 애매하면 ADR 을 쓰는 쪽을 기본값으로 한다.
 
 ## 개발 환경
 
