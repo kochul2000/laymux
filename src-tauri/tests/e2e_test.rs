@@ -3,8 +3,9 @@ use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
     FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
-    OutputActivityBurstSettings, Profile, ProfileDefaults, Settings, SettingsLoadResult,
-    TerminalSettings, ValidationWarning, Workspace, WorkspacePane, WorkspacePaneView,
+    OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
+    SettingsLoadResult, TerminalSettings, ValidationWarning, Workspace, WorkspacePane,
+    WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -79,6 +80,7 @@ fn settings_round_trip_with_full_config() {
                 size: 15,
                 weight: "semi-bold".into(),
             },
+            ui_font_family: "Segoe UI".into(),
         },
         default_profile: "Ubuntu".into(),
         profile_defaults: ProfileDefaults::default(),
@@ -182,6 +184,13 @@ fn settings_round_trip_with_full_config() {
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
+        remote: RemoteSettings {
+            enabled: true,
+            allowed_origins: vec!["http://100.64.0.2:19281".into()],
+            allowed_ips: vec!["100.64.0.0/10".into(), "fd7a:115c:a1e0::/48".into()],
+            auth_token: "test-remote-token".into(),
+            ..RemoteSettings::default()
+        },
         sync_cwd_defaults: None,
         workspace_display_order: Vec::new(),
     };

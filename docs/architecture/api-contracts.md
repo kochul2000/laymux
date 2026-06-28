@@ -511,8 +511,15 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 |---|---|---|
 | `/remote` | GET | `/remote/`로 redirect |
 | `/remote/` | GET | 브라우저에서 직접 여는 Direct Remote Mode entry |
+| `/remote/vendor/xterm.css` | GET | `/remote/` 전용 xterm.js 스타일 |
+| `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
+| `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
 
 `/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
+
+현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
+
+`/remote/vendor/*`도 `/remote/`와 같은 base access 조건(`enabled`, `authToken` 존재, IP allowlist)을 통과해야 응답한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
 
 ### 13.1 인증과 접근 제어
 
