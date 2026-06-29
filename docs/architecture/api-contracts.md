@@ -541,7 +541,21 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 
 `claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. PC reclaim은 현재 lease를 해제하고 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다.
 
-### 13.3 Terminal Control
+### 13.3 Navigation Metadata
+
+Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/pane 요약과 single terminal stream을 분리한다. 이 요약은 frontend Zustand store가 알고 있는 workspace/dock 구조를 Rust remote server가 bridge로 조회한 뒤 remote 전용 계약으로 축약한 값이다. Remote client는 raw settings나 전체 store를 직접 읽지 않는다.
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/navigation` | GET | workspace 목록, active workspace pane 요약, dock pane 요약, terminal 표시 메타데이터 |
+| `/remote/v1/workspaces/active` | POST | active `leaseId`로 PC WebView의 active workspace 전환 |
+| `/remote/v1/terminals/{id}/focus` | POST | active `leaseId`로 PC WebView의 terminal focus 전환 |
+
+`/remote/v1/navigation`은 bearer token과 IP/Origin gate를 통과해야 하며 lease는 요구하지 않는다. 응답의 `workspaces`는 `{id,name,isActive,paneCount,terminalPaneCount,liveTerminalCount}` 요약이고, `activeWorkspace.panes`와 `docks[].panes`는 `{id,location,workspaceId,paneIndex,paneNumber,viewType,terminalId,terminalLive,title,profile,cwd,branch,activity,outputActive,commandRunning,x,y,w,h}` 형태의 표시 전용 요약이다. `terminals`는 `/remote/v1/terminals` 항목에 frontend bridge의 `workspaceId`, `paneNumber`, `activity`, `isFocused` 등 탐색에 필요한 메타데이터를 병합한 목록이다.
+
+`/remote/v1/workspaces/active` body는 `{ "id": "...", "leaseId": "..." }`, `/remote/v1/terminals/{id}/focus` body는 `{ "leaseId": "..." }`다. 둘 다 `X-Laymux-Remote-Lease` 헤더도 허용하며, 성공 시 `workspace-state-changed` event를 발행해 MCP resource 구독자와 Automation resource cache가 stale 상태에 머물지 않게 한다.
+
+### 13.4 Terminal Control
 
 | Endpoint | Method | 용도 |
 |---|---|---|

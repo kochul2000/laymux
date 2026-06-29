@@ -118,6 +118,90 @@
         padding: 8px;
         background: var(--terminal-bg);
       }
+      .remote-body {
+        display: grid;
+        grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+        min-height: 0;
+      }
+      .navigation-panel {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 8px;
+        border-right: 1px solid var(--border);
+        background: #11151b;
+      }
+      .nav-section + .nav-section {
+        margin-top: 12px;
+      }
+      .nav-section-title {
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+      .nav-list {
+        display: grid;
+        gap: 6px;
+      }
+      .nav-item {
+        width: 100%;
+        min-width: 0;
+        display: grid;
+        gap: 3px;
+        padding: 7px 8px;
+        text-align: left;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #151a22;
+        color: var(--text);
+      }
+      .nav-item.active {
+        border-color: #3d7dd1;
+        background: #17263a;
+      }
+      .nav-item-title {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .nav-item-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .nav-badge {
+        flex: 0 0 auto;
+        color: var(--accent);
+        font-size: 12px;
+      }
+      .nav-item-meta {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .nav-empty {
+        padding: 7px 8px;
+        color: var(--muted);
+        border: 1px dashed var(--border);
+        border-radius: 6px;
+      }
+      .dock-block {
+        display: grid;
+        gap: 6px;
+      }
+      .dock-title {
+        color: var(--muted);
+        font-size: 12px;
+      }
       #terminal {
         width: 100%;
         height: 100%;
@@ -188,6 +272,15 @@
           min-width: 0;
           padding-left: 6px;
           padding-right: 6px;
+        }
+        .remote-body {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto minmax(0, 1fr);
+        }
+        .navigation-panel {
+          max-height: 32vh;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
         }
         footer {
           align-items: stretch;
@@ -260,8 +353,24 @@
       </header>
       <main>
         <div id="status" class="status">Enter the remote token, then connect.</div>
-        <div class="terminal-shell">
-          <div id="terminal" aria-label="Terminal output"></div>
+        <div class="remote-body">
+          <aside class="navigation-panel" aria-label="Remote navigation">
+            <section class="nav-section">
+              <h2 class="nav-section-title">Workspaces</h2>
+              <div id="workspaceList" class="nav-list"></div>
+            </section>
+            <section class="nav-section">
+              <h2 class="nav-section-title">Active Panes</h2>
+              <div id="paneList" class="nav-list"></div>
+            </section>
+            <section class="nav-section">
+              <h2 class="nav-section-title">Docks</h2>
+              <div id="dockList" class="nav-list"></div>
+            </section>
+          </aside>
+          <div class="terminal-shell">
+            <div id="terminal" aria-label="Terminal output"></div>
+          </div>
         </div>
       </main>
       <footer>
@@ -284,6 +393,9 @@
         const statusEl = $("status");
         const terminalHost = $("terminal");
         const terminalMetaEl = $("terminalMeta");
+        const workspaceListEl = $("workspaceList");
+        const paneListEl = $("paneList");
+        const dockListEl = $("dockList");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
         const tokenKey = "laymux.remote.token";
@@ -292,6 +404,7 @@
         let socket = null;
         let activeTerminalId = null;
         let terminalInfoById = new Map();
+        let navigationState = null;
         let terminal = null;
         let fitAddon = null;
         let resizeObserver = null;
@@ -511,11 +624,60 @@
             .join(" - ");
         }
 
-        async function loadTerminals() {
-          const data = await remoteFetch("/remote/v1/terminals");
-          const terminals = data.terminals || [];
-          terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
-          const previousTerminalId = activeTerminalId;
+        function shortPath(path) {
+          if (!path) return "";
+          const parts = String(path).split(/[\\/]+/).filter(Boolean);
+          return parts[parts.length - 1] || path;
+        }
+
+        function activityLabel(activity, commandRunning) {
+          if (activity && activity.type === "interactiveApp") return activity.name || "Interactive";
+          if (activity && activity.type === "running") return "Running";
+          if (commandRunning) return "Running";
+          return "";
+        }
+
+        function metaText(parts) {
+          return parts.filter(Boolean).join(" - ");
+        }
+
+        function emptyNav(container, text) {
+          container.innerHTML = "";
+          const item = document.createElement("div");
+          item.className = "nav-empty";
+          item.textContent = text;
+          container.append(item);
+        }
+
+        function navButton({ title, badge, meta, active = false, disabled = false, onClick }) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `nav-item${active ? " active" : ""}`;
+          button.disabled = disabled;
+          const titleRow = document.createElement("div");
+          titleRow.className = "nav-item-title";
+          const nameEl = document.createElement("span");
+          nameEl.className = "nav-item-name";
+          nameEl.textContent = title || "Untitled";
+          titleRow.append(nameEl);
+          if (badge) {
+            const badgeEl = document.createElement("span");
+            badgeEl.className = "nav-badge";
+            badgeEl.textContent = badge;
+            titleRow.append(badgeEl);
+          }
+          button.append(titleRow);
+          if (meta) {
+            const metaEl = document.createElement("div");
+            metaEl.className = "nav-item-meta";
+            metaEl.textContent = meta;
+            button.append(metaEl);
+          }
+          if (onClick) button.addEventListener("click", onClick);
+          return button;
+        }
+
+        function renderTerminalSelect(terminals) {
           terminalsSelect.innerHTML = "";
           for (const terminalInfo of terminals) {
             const option = document.createElement("option");
@@ -525,18 +687,190 @@
             option.dataset.rows = String(terminalInfo.rows || "");
             terminalsSelect.append(option);
           }
-          const nextTerminal = terminals.find((terminalInfo) => terminalInfo.id === previousTerminalId) || terminals[0];
+        }
+
+        function renderNavigation(data) {
+          renderWorkspaceList(data.workspaces || []);
+          renderPaneList((data.activeWorkspace && data.activeWorkspace.panes) || []);
+          renderDockList(data.docks || []);
+        }
+
+        function renderWorkspaceList(workspaces) {
+          workspaceListEl.innerHTML = "";
+          if (!workspaces.length) {
+            emptyNav(workspaceListEl, "No workspaces.");
+            return;
+          }
+          for (const workspace of workspaces) {
+            const meta = metaText([
+              `${workspace.paneCount || 0} panes`,
+              `${workspace.liveTerminalCount || 0} live`,
+            ]);
+            workspaceListEl.append(navButton({
+              title: workspace.name || workspace.id,
+              badge: workspace.isActive ? "active" : "",
+              meta,
+              active: Boolean(workspace.isActive),
+              disabled: !leaseId || workspace.isActive,
+              onClick: () => switchWorkspace(workspace.id).catch((err) => setStatus(err.message, true)),
+            }));
+          }
+        }
+
+        function renderPaneList(panes) {
+          paneListEl.innerHTML = "";
+          if (!panes.length) {
+            emptyNav(paneListEl, "No panes.");
+            return;
+          }
+          for (const pane of panes) {
+            const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
+            const activity = activityLabel(pane.activity, pane.commandRunning);
+            const meta = metaText([
+              pane.viewType,
+              pane.profile,
+              shortPath(pane.cwd),
+              pane.branch,
+              activity,
+            ]);
+            paneListEl.append(navButton({
+              title: pane.title || pane.terminalId || pane.viewType,
+              badge: pane.paneNumber ? `#${pane.paneNumber}` : "",
+              meta,
+              active: Boolean(pane.terminalId && pane.terminalId === activeTerminalId),
+              disabled: !leaseId || !isTerminal,
+              onClick: isTerminal
+                ? () => selectTerminal(pane.terminalId, { focusHost: true, refreshNavigation: true }).catch((err) => setStatus(err.message, true))
+                : undefined,
+            }));
+          }
+        }
+
+        function renderDockList(docks) {
+          dockListEl.innerHTML = "";
+          if (!docks.length) {
+            emptyNav(dockListEl, "No docks.");
+            return;
+          }
+          for (const dock of docks) {
+            const block = document.createElement("div");
+            block.className = "dock-block";
+            const title = document.createElement("div");
+            title.className = "dock-title";
+            title.textContent = metaText([
+              dock.position || "dock",
+              dock.visible ? "" : "hidden",
+              dock.activeView || "",
+            ]);
+            block.append(title);
+            const panes = dock.panes || [];
+            if (!panes.length) {
+              const empty = document.createElement("div");
+              empty.className = "nav-empty";
+              empty.textContent = "No panes.";
+              block.append(empty);
+            }
+            for (const pane of panes) {
+              const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
+              const meta = metaText([
+                pane.viewType,
+                pane.profile,
+                shortPath(pane.cwd),
+                activityLabel(pane.activity, pane.commandRunning),
+              ]);
+              block.append(navButton({
+                title: pane.title || pane.terminalId || pane.viewType,
+                meta,
+                active: Boolean(pane.terminalId && pane.terminalId === activeTerminalId),
+                disabled: !leaseId || !isTerminal,
+                onClick: isTerminal
+                  ? () => selectTerminal(pane.terminalId, { focusHost: false, refreshNavigation: true }).catch((err) => setStatus(err.message, true))
+                  : undefined,
+              }));
+            }
+            dockListEl.append(block);
+          }
+        }
+
+        function isDockTerminalId(terminalId) {
+          if (!terminalId || !navigationState) return false;
+          return (navigationState.docks || []).some((dock) =>
+            (dock.panes || []).some((pane) => pane.terminalId === terminalId)
+          );
+        }
+
+        function preferredTerminal(data, terminals, preferredTerminalId) {
+          if (preferredTerminalId) {
+            const existing = terminals.find((terminalInfo) => terminalInfo.id === preferredTerminalId);
+            if (existing) return existing;
+          }
+          const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
+          const focusedNumber = data.activeWorkspace && data.activeWorkspace.focusedPaneNumber;
+          const focusedPane = activePanes.find((pane) => pane.paneNumber === focusedNumber && pane.terminalId && pane.terminalLive);
+          const activePane = focusedPane || activePanes.find((pane) => pane.terminalId && pane.terminalLive);
+          if (activePane) return terminals.find((terminalInfo) => terminalInfo.id === activePane.terminalId) || null;
+          for (const dock of data.docks || []) {
+            const dockPane = (dock.panes || []).find((pane) => pane.terminalId && pane.terminalLive);
+            if (dockPane) return terminals.find((terminalInfo) => terminalInfo.id === dockPane.terminalId) || null;
+          }
+          return terminals[0] || null;
+        }
+
+        async function loadNavigation(preferredTerminalId = activeTerminalId, options = {}) {
+          const data = await remoteFetch("/remote/v1/navigation");
+          navigationState = data;
+          const terminals = data.terminals || [];
+          terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
+          renderTerminalSelect(terminals);
+          const nextTerminal = preferredTerminal(data, terminals, preferredTerminalId);
           activeTerminalId = nextTerminal ? nextTerminal.id : null;
           terminalsSelect.value = activeTerminalId || "";
+          renderNavigation(data);
           setConnected(Boolean(leaseId));
           if (activeTerminalId) {
             terminalMetaEl.textContent = terminalLabel(nextTerminal);
-            openOutput(activeTerminalId);
+            if (options.openOutput !== false) openOutput(activeTerminalId);
           } else {
             terminalMetaEl.textContent = "No open terminal sessions.";
             setStatus("No open terminal sessions.", true);
             stopSocket();
           }
+        }
+
+        async function switchWorkspace(workspaceId) {
+          if (!leaseId || !workspaceId) return;
+          setStatus("Switching workspace...");
+          await remoteFetch("/remote/v1/workspaces/active", {
+            method: "POST",
+            body: JSON.stringify({ leaseId, id: workspaceId }),
+          });
+          await loadNavigation(null);
+        }
+
+        async function focusTerminalOnHost(terminalId) {
+          if (!leaseId || !terminalId) return;
+          await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(terminalId)}/focus`, {
+            method: "POST",
+            body: JSON.stringify({ leaseId }),
+          });
+        }
+
+        async function selectTerminal(terminalId, options = {}) {
+          if (!terminalId) return;
+          activeTerminalId = terminalId;
+          terminalsSelect.value = terminalId;
+          const terminalInfo = terminalInfoById.get(terminalId);
+          terminalMetaEl.textContent = terminalInfo ? terminalLabel(terminalInfo) : terminalId;
+          setConnected(Boolean(leaseId));
+          if (options.focusHost !== false && !isDockTerminalId(terminalId)) {
+            await focusTerminalOnHost(terminalId).catch((err) => setStatus(`Focus failed: ${err.message}`, true));
+          }
+          if (options.refreshNavigation) {
+            await loadNavigation(terminalId, { openOutput: false }).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
+          } else if (navigationState) {
+            renderNavigation(navigationState);
+          }
+          openOutput(terminalId);
         }
 
         function wsBaseUrl() {
@@ -599,7 +933,7 @@
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || 15);
-            await loadTerminals();
+            await loadNavigation();
           } catch (err) {
             const failedLease = leaseId;
             disconnect(false);
@@ -699,18 +1033,19 @@
           leaseId = null;
           activeTerminalId = null;
           setConnected(false);
+          if (navigationState) renderNavigation(navigationState);
           if (clearStatus) setStatus("Disconnected.");
         }
 
+        emptyNav(workspaceListEl, "Not connected.");
+        emptyNav(paneListEl, "Not connected.");
+        emptyNav(dockListEl, "Not connected.");
+
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
-        refreshButton.addEventListener("click", () => loadTerminals().catch((err) => setStatus(err.message, true)));
+        refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
         terminalsSelect.addEventListener("change", () => {
-          activeTerminalId = terminalsSelect.value || null;
-          const selectedOption = terminalsSelect.selectedOptions[0];
-          terminalMetaEl.textContent = selectedOption ? selectedOption.textContent : "No terminal selected.";
-          setConnected(Boolean(leaseId));
-          if (activeTerminalId) openOutput(activeTerminalId);
+          selectTerminal(terminalsSelect.value || null, { focusHost: true, refreshNavigation: true }).catch((err) => setStatus(err.message, true));
         });
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => terminal && terminal.focus());

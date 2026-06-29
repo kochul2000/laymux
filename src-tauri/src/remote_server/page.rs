@@ -39,6 +39,9 @@ mod tests {
         assert!(html.contains("Laymux Remote"));
         assert!(html.contains("/remote/vendor/xterm.js"));
         assert!(html.contains("/remote/v1/session/claim"));
+        assert!(html.contains("/remote/v1/navigation"));
+        assert!(html.contains("/remote/v1/workspaces/active"));
+        assert!(html.contains("/remote/v1/terminals/${encodeURIComponent(terminalId)}/focus"));
         assert!(html.contains("/remote/v1/terminals"));
         assert!(html.contains("new WebSocket"));
         assert!(html.contains("new TerminalCtor"));
@@ -47,5 +50,10 @@ mod tests {
         assert!(html.contains("inputWriteChain"));
         assert!(html.contains("writeToTerminal(inputTerminalId, inputLeaseId"));
         assert!(html.contains("resizeTerminal(resizeTerminalId, resizeLeaseId"));
+        assert!(html.contains("function isDockTerminalId(terminalId)"));
+        assert!(html.contains(
+            "selectTerminal(pane.terminalId, { focusHost: false, refreshNavigation: true })"
+        ));
+        assert!(html.contains("options.focusHost !== false && !isDockTerminalId(terminalId)"));
     }
 }
