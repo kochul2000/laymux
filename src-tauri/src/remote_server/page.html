@@ -784,12 +784,19 @@
                 active: Boolean(pane.terminalId && pane.terminalId === activeTerminalId),
                 disabled: !leaseId || !isTerminal,
                 onClick: isTerminal
-                  ? () => selectTerminal(pane.terminalId, { focusHost: true, refreshNavigation: true }).catch((err) => setStatus(err.message, true))
+                  ? () => selectTerminal(pane.terminalId, { focusHost: false, refreshNavigation: true }).catch((err) => setStatus(err.message, true))
                   : undefined,
               }));
             }
             dockListEl.append(block);
           }
+        }
+
+        function isDockTerminalId(terminalId) {
+          if (!terminalId || !navigationState) return false;
+          return (navigationState.docks || []).some((dock) =>
+            (dock.panes || []).some((pane) => pane.terminalId === terminalId)
+          );
         }
 
         function preferredTerminal(data, terminals, preferredTerminalId) {
@@ -855,7 +862,7 @@
           const terminalInfo = terminalInfoById.get(terminalId);
           terminalMetaEl.textContent = terminalInfo ? terminalLabel(terminalInfo) : terminalId;
           setConnected(Boolean(leaseId));
-          if (options.focusHost !== false) {
+          if (options.focusHost !== false && !isDockTerminalId(terminalId)) {
             await focusTerminalOnHost(terminalId).catch((err) => setStatus(`Focus failed: ${err.message}`, true));
           }
           if (options.refreshNavigation) {

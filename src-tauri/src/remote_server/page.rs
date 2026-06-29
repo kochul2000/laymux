@@ -50,5 +50,10 @@ mod tests {
         assert!(html.contains("inputWriteChain"));
         assert!(html.contains("writeToTerminal(inputTerminalId, inputLeaseId"));
         assert!(html.contains("resizeTerminal(resizeTerminalId, resizeLeaseId"));
+        assert!(html.contains("function isDockTerminalId(terminalId)"));
+        assert!(html.contains(
+            "selectTerminal(pane.terminalId, { focusHost: false, refreshNavigation: true })"
+        ));
+        assert!(html.contains("options.focusHost !== false && !isDockTerminalId(terminalId)"));
     }
 }

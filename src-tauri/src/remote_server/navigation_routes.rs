@@ -1,3 +1,4 @@
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -133,8 +134,12 @@ pub(super) async fn remote_terminal_focus(
     State(server): State<ServerState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<TerminalFocusRequest>,
+    body: Bytes,
 ) -> Response {
+    let body = match terminal_focus_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
     let lease_id = body
         .lease_id
         .as_deref()
@@ -205,4 +210,46 @@ fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
         .get(REMOTE_LEASE_HEADER)
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
+}
+
+fn terminal_focus_request_from_body(
+    body: &[u8],
+) -> Result<TerminalFocusRequest, serde_json::Error> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(TerminalFocusRequest::default());
+    }
+    serde_json::from_slice(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::*;
+
+    #[test]
+    fn terminal_focus_request_accepts_empty_body_for_header_lease() {
+        let body = terminal_focus_request_from_body(b"").unwrap();
+        assert!(body.lease_id.is_none());
+
+        let body = terminal_focus_request_from_body(b" \n\t").unwrap();
+        assert!(body.lease_id.is_none());
+    }
+
+    #[test]
+    fn terminal_focus_request_reads_body_lease() {
+        let body = terminal_focus_request_from_body(br#"{"leaseId":"lease-body"}"#).unwrap();
+        assert_eq!(body.lease_id.as_deref(), Some("lease-body"));
+    }
+
+    #[test]
+    fn terminal_focus_header_lease_is_available_without_body_lease() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            REMOTE_LEASE_HEADER,
+            HeaderValue::from_static("lease-header"),
+        );
+
+        assert_eq!(lease_id_from_headers(&headers), Some("lease-header"));
+    }
 }
