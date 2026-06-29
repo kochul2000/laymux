@@ -557,6 +557,16 @@ Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/
 
 ### 13.4 Terminal Control
 
+Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015](../adr/0015-remote-terminal-state-ownership.md)).
+
+| 범주 | 예 | 소유/동기화 규칙 |
+|---|---|---|
+| PTY 전역 상태 | PTY process, stdin, output byte stream, CWD/title/activity, terminal escape state, 현재 `cols/rows` | 한 terminal session에 하나만 존재한다. 현재 controller owner만 변경할 수 있다. |
+| surface 로컬 상태 | DOM pixel size, devicePixelRatio, xterm canvas/WebGL atlas, cell metrics cache, scroll viewport, selection, focus, IME/composition, drawer state | PC WebView와 browser remote가 각자 보유한다. Remote API 계약에 섞지 않는다. |
+| controller owner 상태 | active input writer, active resize writer, workspace/pane focus request 권한 | active lease가 있으면 remote가 owner이고, lease가 없으면 PC가 owner다. owner가 아닌 surface는 PTY write/resize를 보내지 않는다. |
+
+`cols/rows`는 surface 로컬 값이 아니라 SIGWINCH로 process에 반영되는 PTY 전역 상태다. 따라서 remote lease가 active인 동안 browser remote의 xterm geometry가 PTY 크기를 결정하고, PC WebView는 로컬 renderer를 유지하되 backend PTY resize를 보내지 않는다. PC가 `reclaim_remote_control`로 제어권을 회수하거나 remote lease가 끝나면 visible `TerminalView`가 자기 xterm의 현재 `cols/rows`를 backend PTY에 명시적으로 다시 보내고 renderer `fit()`/atlas rebuild/`refresh()`를 실행한다. hidden `TerminalView`는 이 복구를 dirty로 보류하고 다시 visible이 되는 순간 소비한다.
+
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/terminals` | GET | 현재 backend terminal session 목록 |

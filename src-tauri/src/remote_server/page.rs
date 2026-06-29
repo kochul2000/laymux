@@ -50,10 +50,28 @@ mod tests {
         assert!(html.contains("inputWriteChain"));
         assert!(html.contains("writeToTerminal(inputTerminalId, inputLeaseId"));
         assert!(html.contains("resizeTerminal(resizeTerminalId, resizeLeaseId"));
+        assert!(html.contains("const terminalShell = document.querySelector(\".terminal-shell\")"));
+        assert!(html.contains("resizeObserver.observe(terminalShell)"));
+        assert!(html.contains("rect.width < 20 || rect.height < 20"));
+        assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
+        assert!(html.contains("function scheduleTerminalRefresh()"));
+        assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("Control returned to the host"));
+        assert!(html.contains("connection-panel.attention"));
+        assert!(html.contains("Host has control. Connect again to request control."));
+        assert!(html.contains("term.write(payload, scheduleTerminalRefresh)"));
+        assert!(html.contains("cols < 1 || rows < 1"));
+        assert!(html.contains("id=\"navToggle\""));
+        assert!(!html.contains("<h1>Laymux Remote</h1>"));
+        assert!(html.contains("class=\"drawer-header\""));
+        assert!(html.contains("class=\"connection-panel\""));
+        assert!(html.contains("Connect first to load workspaces"));
+        assert!(html.contains("id=\"workspaceSection\""));
+        assert!(html.contains("workspace-item-content"));
+        assert!(html.contains("workspace-pane-row"));
+        assert!(!html.contains("id=\"terminals\""));
+        assert!(!html.contains("id=\"dockList\""));
         assert!(html.contains("function isDockTerminalId(terminalId)"));
-        assert!(html.contains(
-            "selectTerminal(pane.terminalId, { focusHost: false, refreshNavigation: true })"
-        ));
         assert!(html.contains("options.focusHost !== false && !isDockTerminalId(terminalId)"));
     }
 }

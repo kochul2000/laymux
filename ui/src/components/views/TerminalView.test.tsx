@@ -209,6 +209,18 @@ const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
+const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
+  active: false,
+  leaseId: null,
+  remoteAddr: null,
+  clientName: null,
+  heartbeatTimeoutSeconds: 15,
+});
+let capturedRemoteControlChanged: ((data: { active: boolean }) => void) | null = null;
+const mockOnRemoteControlChanged = vi.fn((callback: (data: { active: boolean }) => void) => {
+  capturedRemoteControlChanged = callback;
+  return Promise.resolve(vi.fn());
+});
 const mockSmartPaste = vi.fn().mockResolvedValue({ pasteType: "none", content: "" });
 const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdSend = vi.fn().mockResolvedValue(undefined);
@@ -226,6 +238,8 @@ vi.mock("@/lib/tauri-api", () => ({
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
   onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
+  getRemoteControlStatus: (...args: unknown[]) => mockGetRemoteControlStatus(...args),
+  onRemoteControlChanged: (...args: unknown[]) => mockOnRemoteControlChanged(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
   clipboardWriteText: (...args: unknown[]) => mockClipboardWriteText(...args),
   setTerminalCwdSend: (...args: unknown[]) => mockSetTerminalCwdSend(...args),
@@ -252,11 +266,19 @@ describe("TerminalView", () => {
     oscHandlers.clear();
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
+    capturedRemoteControlChanged = null;
     capturedScrollHandler = null;
     mockBufferActive.cursorX = 0;
     mockBufferActive.cursorY = 0;
     mockBufferActive.baseY = 0;
     mockBufferActive.viewportY = 0;
+    mockGetRemoteControlStatus.mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    });
     _resetWebglStagger();
     vi.clearAllMocks();
   });
@@ -2880,6 +2902,73 @@ describe("TerminalView", () => {
       expect(mockClearTextureAtlas).toHaveBeenCalled();
       expect(mockRequestAnimationFrame).toHaveBeenCalled();
     });
+  });
+
+  it("reflows the renderer when remote control returns to the PC", async () => {
+    render(<TerminalView instanceId="t-remote-return" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+      expect(capturedRemoteControlChanged).toBeTruthy();
+    });
+
+    mockFit.mockClear();
+    mockClearTextureAtlas.mockClear();
+    mockRefresh.mockClear();
+    mockResizeTerminal.mockClear();
+
+    act(() => {
+      capturedRemoteControlChanged?.({ active: true });
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockFit).not.toHaveBeenCalled();
+
+    act(() => {
+      capturedRemoteControlChanged?.({ active: false });
+    });
+
+    await vi.waitFor(() => {
+      expect(mockFit).toHaveBeenCalled();
+      expect(mockClearTextureAtlas).toHaveBeenCalled();
+      expect(mockRefresh).toHaveBeenCalled();
+      expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-return", 80, 24);
+    });
+  });
+
+  it("does not write or resize the backend while remote control is active", async () => {
+    mockGetRemoteControlStatus.mockResolvedValue({
+      active: true,
+      leaseId: "remote-lease",
+      remoteAddr: "127.0.0.1:1",
+      clientName: "browser",
+      heartbeatTimeoutSeconds: 15,
+    });
+
+    render(<TerminalView instanceId="t-remote-owned" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+      expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+    });
+
+    mockWriteToTerminal.mockClear();
+    mockResizeTerminal.mockClear();
+
+    const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+    const resizeHandler = mockOnResize.mock.calls.at(-1)?.[0] as
+      | ((size: { cols: number; rows: number }) => void)
+      | undefined;
+    expect(dataHandler).toBeDefined();
+    expect(resizeHandler).toBeDefined();
+
+    act(() => {
+      dataHandler?.("x");
+      resizeHandler?.({ cols: 120, rows: 40 });
+    });
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(mockResizeTerminal).not.toHaveBeenCalled();
   });
 
   // -- Regression: reflow must NOT fire on activity / cursor changes --

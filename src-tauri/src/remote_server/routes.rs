@@ -279,6 +279,9 @@ async fn remote_terminal_resize(
     if let Err(response) = require_active_lease(&server.app_state, lease_id) {
         return response;
     }
+    if !terminal_size_is_positive(body.cols, body.rows) {
+        return json_error(StatusCode::BAD_REQUEST, "terminal size must be positive");
+    }
 
     {
         let mut terminals = match server.app_state.terminals.lock_or_err() {
@@ -418,4 +421,21 @@ fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
         .get(REMOTE_LEASE_HEADER)
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
+}
+
+fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
+    cols > 0 && rows > 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terminal_size_is_positive;
+
+    #[test]
+    fn remote_resize_rejects_zero_dimensions() {
+        assert!(!terminal_size_is_positive(0, 24));
+        assert!(!terminal_size_is_positive(80, 0));
+        assert!(!terminal_size_is_positive(0, 0));
+        assert!(terminal_size_is_positive(80, 24));
+    }
 }

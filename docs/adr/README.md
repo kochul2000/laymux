@@ -32,6 +32,7 @@ ADR 이 필요한 대표 기준:
 | [0012](0012-focus-entry-clears-requires-action.md) | focus/진입은 requiresAction 알림도 해제 (0010 예외 조항 정정) | Accepted |
 | [0013](0013-direct-remote-mode.md) | 브라우저 원격 접속 — Direct Remote Mode 와 Focused UI | Accepted |
 | [0014](0014-mcp-settings-configuration.md) | MCP 설정 구성 — 에이전트가 settings 를 읽고 쓰는 경로 | Accepted |
+| [0015](0015-remote-terminal-state-ownership.md) | Remote 터미널 상태 소유권 — PTY 전역 상태와 surface 로컬 상태 분리 | Accepted |
 
 ## 새 ADR 추가
 
