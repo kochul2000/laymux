@@ -113,6 +113,8 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
  */
 const RESIZE_FIT_DEBOUNCE_MS = 80;
 
+const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
+
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
@@ -2534,11 +2536,32 @@ export function TerminalView({
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const stopPolling = () => {
+      if (pollTimer !== undefined) {
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    };
 
     const applyRemoteControlStatus = (status: { active: boolean }) => {
       const wasActive = remoteControlActiveRef.current;
       remoteControlActiveRef.current = status.active;
-      if (status.active || !wasActive) return;
+      if (status.active) {
+        if (pollTimer === undefined) {
+          pollTimer = setInterval(() => {
+            getRemoteControlStatus()
+              .then((next) => {
+                if (!cancelled) applyRemoteControlStatus(next);
+              })
+              .catch(() => {});
+          }, REMOTE_CONTROL_STATUS_POLL_MS);
+        }
+        return;
+      }
+      stopPolling();
+      if (!wasActive) return;
       const term = terminalRef.current;
       if (!term || !openedRef.current) return;
       if (isContainerHiddenRef.current) {
@@ -2551,7 +2574,7 @@ export function TerminalView({
 
     getRemoteControlStatus()
       .then((status) => {
-        if (!cancelled) remoteControlActiveRef.current = status.active;
+        if (!cancelled) applyRemoteControlStatus(status);
       })
       .catch(() => {});
 
@@ -2564,6 +2587,7 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      stopPolling();
       unlisten?.();
     };
   }, []);

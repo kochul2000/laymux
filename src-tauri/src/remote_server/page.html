@@ -1420,11 +1420,13 @@
         }
 
         function loseRemoteControl(message) {
+          const lostLeaseId = leaseId;
           disconnect(false);
           terminalMetaEl.textContent = "Host has control.";
           setConnectionHint("Host has control. Connect again to request control.", true);
           setStatus(message, true);
           setNavigationOpen(true);
+          if (lostLeaseId) releaseLease(lostLeaseId).catch(() => {});
         }
 
         emptyNav(workspaceListEl, "Not connected.");

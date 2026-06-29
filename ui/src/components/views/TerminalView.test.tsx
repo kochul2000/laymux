@@ -2936,6 +2936,63 @@ describe("TerminalView", () => {
     });
   });
 
+  it("polls active remote control status and reflows after lease expiration", async () => {
+    vi.useFakeTimers();
+    mockGetRemoteControlStatus
+      .mockResolvedValueOnce({
+        active: true,
+        leaseId: "expired-lease",
+        remoteAddr: "127.0.0.1:1",
+        clientName: "browser",
+        heartbeatTimeoutSeconds: 15,
+      })
+      .mockResolvedValueOnce({
+        active: false,
+        leaseId: null,
+        remoteAddr: null,
+        clientName: null,
+        heartbeatTimeoutSeconds: 15,
+      });
+
+    try {
+      render(<TerminalView instanceId="t-remote-expired" profile="PowerShell" syncGroup="" />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1);
+      });
+
+      mockFit.mockClear();
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+      mockResizeTerminal.mockClear();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(2);
+      expect(mockFit).toHaveBeenCalled();
+      expect(mockClearTextureAtlas).toHaveBeenCalled();
+      expect(mockRefresh).toHaveBeenCalled();
+      expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-expired", 80, 24);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not write or resize the backend while remote control is active", async () => {
     mockGetRemoteControlStatus.mockResolvedValue({
       active: true,

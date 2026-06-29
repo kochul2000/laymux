@@ -56,6 +56,8 @@ mod tests {
         assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
         assert!(html.contains("function scheduleTerminalRefresh()"));
         assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("const lostLeaseId = leaseId"));
+        assert!(html.contains("releaseLease(lostLeaseId).catch(() => {})"));
         assert!(html.contains("Control returned to the host"));
         assert!(html.contains("connection-panel.attention"));
         assert!(html.contains("Host has control. Connect again to request control."));
