@@ -38,6 +38,8 @@ import {
   handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
+  getRemoteControlStatus,
+  onRemoteControlChanged,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
@@ -110,6 +112,8 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
  * interleaving. Kept short so a settled resize still feels immediate.
  */
 const RESIZE_FIT_DEBOUNCE_MS = 80;
+
+const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
 
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
@@ -444,11 +448,13 @@ export function TerminalView({
   // container — which would propagate cols/rows=0 through a PTY resize and
   // leave inactive workspaces with garbled glyphs on next show.
   const isContainerHiddenRef = useRef(false);
+  const remoteControlActiveRef = useRef(false);
   // Marks that a reflow trigger fired while the container was hidden. The
   // ResizeObserver's hidden→visible branch consumes this in addition to
   // `prevWasHidden` so the deferred fit() + atlas rebuild fires exactly
   // once when the workspace becomes visible again.
   const reflowDirtyRef = useRef(false);
+  const remoteReturnResizeDirtyRef = useRef(false);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
   // Each xterm rebuild gets a fresh generation, bumped at render time when
@@ -1650,6 +1656,7 @@ export function TerminalView({
 
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
+      if (remoteControlActiveRef.current) return;
       trace("terminal-onData", {
         bytes: data.length,
         preview: JSON.stringify(data.slice(0, 80)),
@@ -1678,6 +1685,7 @@ export function TerminalView({
 
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
+      if (remoteControlActiveRef.current) return;
       resizeTerminal(instanceId, cols, rows).catch(() => {});
     });
 
@@ -1980,9 +1988,10 @@ export function TerminalView({
               }
               const message =
                 useSettingsStore.getState().claude.sessionLimitResumeMessage || "go on";
+              if (remoteControlActiveRef.current) return;
               void writeToTerminal(instanceId, message);
               sessionLimitSubmitTimer = setTimeout(() => {
-                void writeToTerminal(instanceId, "\r");
+                if (!remoteControlActiveRef.current) void writeToTerminal(instanceId, "\r");
               }, SESSION_LIMIT_SUBMIT_CR_DELAY_MS);
               useNotificationStore.getState().addNotification({
                 terminalId: instanceId,
@@ -2300,6 +2309,10 @@ export function TerminalView({
         const applyFit = () => {
           if (cancelled) return;
           fitAddon.fit();
+          if (remoteReturnResizeDirtyRef.current) {
+            remoteReturnResizeDirtyRef.current = false;
+            syncBackendSizeFromTerminal(terminal);
+          }
           if (recoveringFromHidden || consumeDirty) {
             // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
             // atlas can go stale while the container is display:none (a DPR
@@ -2498,13 +2511,19 @@ export function TerminalView({
   // back-to-back) compounds with TUI exit bursts (e.g. Codex's `ESC[?1049l`,
   // scrollback re-emit) and is what makes the WebGL atlas race manifest as
   // glyph corruption in adjacent panes.
-  const runTerminalRendererReflow = (term: Terminal) => {
+  const syncBackendSizeFromTerminal = (term: Terminal) => {
+    if (!remoteControlActiveRef.current && term.cols > 0 && term.rows > 0) {
+      resizeTerminal(instanceId, term.cols, term.rows).catch(() => {});
+    }
+  };
+  const runTerminalRendererReflow = (term: Terminal, syncBackendResize = false) => {
     if (terminalReflowFrameRef.current !== null) {
       cancelAnimationFrame(terminalReflowFrameRef.current);
     }
     terminalReflowFrameRef.current = requestAnimationFrame(() => {
       terminalReflowFrameRef.current = null;
       fitAddonRef.current?.fit();
+      if (syncBackendResize) syncBackendSizeFromTerminal(term);
       try {
         (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
       } catch {
@@ -2514,6 +2533,64 @@ export function TerminalView({
       overlayCaretUpdaterRef.current?.();
     });
   };
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const stopPolling = () => {
+      if (pollTimer !== undefined) {
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    };
+
+    const applyRemoteControlStatus = (status: { active: boolean }) => {
+      const wasActive = remoteControlActiveRef.current;
+      remoteControlActiveRef.current = status.active;
+      if (status.active) {
+        if (pollTimer === undefined) {
+          pollTimer = setInterval(() => {
+            getRemoteControlStatus()
+              .then((next) => {
+                if (!cancelled) applyRemoteControlStatus(next);
+              })
+              .catch(() => {});
+          }, REMOTE_CONTROL_STATUS_POLL_MS);
+        }
+        return;
+      }
+      stopPolling();
+      if (!wasActive) return;
+      const term = terminalRef.current;
+      if (!term || !openedRef.current) return;
+      if (isContainerHiddenRef.current) {
+        reflowDirtyRef.current = true;
+        remoteReturnResizeDirtyRef.current = true;
+        return;
+      }
+      runTerminalRendererReflow(term, true);
+    };
+
+    getRemoteControlStatus()
+      .then((status) => {
+        if (!cancelled) applyRemoteControlStatus(status);
+      })
+      .catch(() => {});
+
+    onRemoteControlChanged(applyRemoteControlStatus)
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+      unlisten?.();
+    };
+  }, []);
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
