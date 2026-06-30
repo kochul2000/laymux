@@ -15,6 +15,37 @@
       "fallbackController": "Remote browser",
       "reclaim": "Take back control",
       "reclaiming": "Taking back..."
+    },
+    "remoteAccess": {
+      "state": {
+        "active": "{{controller}} is controlling this PC.",
+        "ready": "Remote is ready.",
+        "needsToken": "Remote token is missing.",
+        "disabled": "Remote is off."
+      },
+      "fallbackController": "Remote browser",
+      "enabled": "Enabled",
+      "token": "Token",
+      "remoteUrl": "Remote URL",
+      "remoteUrlWithToken": "Remote URL + token",
+      "localUrl": "Local URL",
+      "localUrlWithToken": "Local URL + token",
+      "allowedIps": "Allowed IPs",
+      "allowedOrigins": "Origins",
+      "lease": "Controller",
+      "yes": "Yes",
+      "no": "No",
+      "configured": "Configured",
+      "missing": "Missing",
+      "none": "None",
+      "loading": "Loading...",
+      "activeLease": "{{controller}}",
+      "noLease": "No active controller.",
+      "refresh": "Refresh",
+      "copy": "Copy",
+      "copied": "Copied",
+      "reclaim": "Take back control",
+      "reclaiming": "Taking back..."
     }
   },
   "settings": {

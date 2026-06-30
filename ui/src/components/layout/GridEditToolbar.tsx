@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type { DockPosition } from "@/stores/types";
 import logoSvg from "@/assets/logo.svg";
 
@@ -15,8 +16,9 @@ async function getWindow() {
 export function GridEditToolbar() {
   const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
-  const toggleConnectionInfoModal = useUiStore((s) => s.toggleConnectionInfoModal);
+  const toggleRemoteAccessModal = useUiStore((s) => s.toggleRemoteAccessModal);
   const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
+  const remote = useSettingsStore((s) => s.remote);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
   const layoutMode = useDockStore((s) => s.layoutMode);
@@ -24,6 +26,17 @@ export function GridEditToolbar() {
 
   const [maximized, setMaximized] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
+  const remoteTokenConfigured = remote.authToken.trim().length > 0;
+  const remoteButtonColor = remote.enabled
+    ? remoteTokenConfigured
+      ? "var(--accent)"
+      : "var(--claude)"
+    : "var(--text-secondary)";
+  const remoteButtonTitle = remote.enabled
+    ? remoteTokenConfigured
+      ? "Remote Access"
+      : "Remote Access (token missing)"
+    : "Remote Access (disabled)";
 
   const flashSaved = useCallback(() => {
     setShowSaved(true);
@@ -213,19 +226,21 @@ export function GridEditToolbar() {
         </button>
 
         <button
-          data-testid="connection-info-btn"
-          onClick={toggleConnectionInfoModal}
+          data-testid="remote-access-btn"
+          onClick={toggleRemoteAccessModal}
           className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
           style={{
-            color: "var(--text-secondary)",
+            color: remoteButtonColor,
             background: "transparent",
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
             fontSize: "var(--fs-xs)",
+            opacity: remote.enabled ? 1 : 0.65,
           }}
-          title="Connection Info"
+          title={remoteButtonTitle}
+          aria-label="Remote Access"
         >
-          {"\uE192"}
+          {"\uE703"}
         </button>
 
         <button
