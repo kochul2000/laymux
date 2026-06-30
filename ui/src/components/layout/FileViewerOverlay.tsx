@@ -116,6 +116,7 @@ export function FileViewerOverlay() {
   return createPortal(
     <div
       data-testid="file-viewer-overlay"
+      data-screenshot-occluder="true"
       className="fixed inset-0 flex items-center justify-center"
       style={{ zIndex: 9997 }}
     >
@@ -184,7 +185,10 @@ export function FileViewerOverlay() {
             &#10005;
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          className="flex min-h-0 flex-1 overflow-auto"
+          style={{ background: "var(--bg-surface, #181825)" }}
+        >
           {promptMode ? (
             <div
               className="flex h-full items-center justify-center px-6 text-center text-xs"

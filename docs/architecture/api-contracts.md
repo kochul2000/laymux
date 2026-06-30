@@ -264,7 +264,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | GET | `/api/v1/notifications` | 알림 목록 |
 | GET | `/api/v1/layouts` | 레이아웃 목록 |
 | POST | `/api/v1/screenshot` | 스크린샷 캡처 → `.screenshots/`에 저장 |
-| POST | `/api/v1/ui/file-viewer` | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `newWindow` 선택) — #277/#279 |
+| POST | `/api/v1/ui/file-viewer` | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `newWindow` 선택) — #277/#279/#404 |
 | POST | `/api/v1/workspaces/reorder` | 워크스페이스 순서 변경 |
 | POST | `/api/v1/grid/hover` | hover 시뮬레이션 |
 | POST | `/api/v1/panes/:index/resize` | Pane 크기 조정 (상대 delta) |
@@ -291,6 +291,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 ### 12.5 스크린샷
 
 - `POST /api/v1/screenshot` → 프론트엔드 `html2canvas`로 DOM 캡처
+- xterm WebGL canvas는 후처리로 합성하되, `data-screenshot-occluder="true"` 오버레이와 겹치는 canvas는 다시 그리지 않는다
 - `.screenshots/` 디렉터리에 `screenshot_{timestamp}.png`로 저장
 - 응답: `{ "path": ".../.screenshots/screenshot_xxx.png", "size": 12345 }`
 - `.screenshots/*.png`는 `.gitignore`에 의해 버전 관리 제외
@@ -375,6 +376,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `list_profiles` | AppState 직접 | 사용 가능한 터미널 프로필 목록 |
 | `open_file_viewer` | bridge_request | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `new_window` 선택). File Explorer·Ctrl+Shift+O와 동일한 뷰어 (#277/#279) |
 | `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
+
+**FileViewer preview 정책 (#404)** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다. `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리며, 같은 화면의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용하고, Markdown은 프론트에서 HTML로 변환한 뒤 동일 sanitizer/iframe 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
 **메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
 

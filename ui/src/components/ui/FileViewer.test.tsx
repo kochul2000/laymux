@@ -1,10 +1,11 @@
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
-import { readFileForViewer } from "@/lib/tauri-api";
+import { openExternal, readFileForViewer } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 
 vi.mock("@/lib/tauri-api", () => ({
+  openExternal: vi.fn().mockResolvedValue(undefined),
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
@@ -29,6 +30,7 @@ const baseProps = {
 
 describe("FileViewer", () => {
   beforeEach(() => {
+    vi.mocked(openExternal).mockClear();
     vi.mocked(readFileForViewer).mockClear();
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "text",
@@ -49,6 +51,62 @@ describe("FileViewer", () => {
     });
     expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
     expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("hello world");
+  });
+
+  it("renders html files in preview mode by default and can switch to source", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "<h1>Report</h1><script>window.__ran = true</script>",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/report.html" />);
+    });
+
+    const iframe = screen.getByTestId("file-viewer-preview") as HTMLIFrameElement;
+    expect(iframe).toHaveAttribute("sandbox", "allow-same-origin");
+    expect(iframe.getAttribute("srcdoc")).toContain("<h1>Report</h1>");
+    expect(iframe.getAttribute("srcdoc")).not.toContain("<script");
+
+    fireEvent.click(screen.getByTestId("file-viewer-source-mode"));
+    expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("<h1>Report</h1>");
+  });
+
+  it("opens preview links through the host shell", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '<a href="https://example.com/docs">Docs</a>',
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/report.html" />);
+    });
+
+    const iframe = screen.getByTestId("file-viewer-preview") as HTMLIFrameElement;
+    const doc = iframe.contentDocument!;
+    doc.body.innerHTML = '<a href="https://example.com/docs">Docs</a>';
+    fireEvent.load(iframe);
+    doc
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("renders markdown files in preview mode by default", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "# Notes\n\n- one\n\n| A | B |\n| --- | --- |\n| C | D |",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/README.md" />);
+    });
+
+    const iframe = screen.getByTestId("file-viewer-preview") as HTMLIFrameElement;
+    expect(iframe.getAttribute("srcdoc")).toContain("<h1>Notes</h1>");
+    expect(iframe.getAttribute("srcdoc")).toContain("<li>one</li>");
+    expect(iframe.getAttribute("srcdoc")).toContain("<table>");
   });
 
   it("renders an image for image content", async () => {

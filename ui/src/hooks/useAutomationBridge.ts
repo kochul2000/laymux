@@ -29,6 +29,7 @@ interface HandlerResult {
 type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
+const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -170,6 +171,24 @@ function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, nu
     paneNumber: paneNumbers.get(p.id) ?? null,
     terminalId: p.view.type === "TerminalView" ? toTerminalId(p.id) : null,
   };
+}
+
+function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function isCanvasCoveredByScreenshotOccluder(rect: DOMRect): boolean {
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  return Array.from(document.querySelectorAll<HTMLElement>(SCREENSHOT_OCCLUDER_SELECTOR)).some(
+    (element) => {
+      const style = window.getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+        return false;
+      }
+      const overlayRect = element.getBoundingClientRect();
+      return overlayRect.width > 0 && overlayRect.height > 0 && rectsOverlap(rect, overlayRect);
+    },
+  );
 }
 
 const handlers: HandlerMap = {
@@ -803,6 +822,7 @@ export async function captureScreenshot(paneIndex?: number): Promise<string> {
     target.querySelectorAll("canvas").forEach((c) => {
       if (c.width === 0 || c.height === 0) return;
       const rect = c.getBoundingClientRect();
+      if (isCanvasCoveredByScreenshotOccluder(rect)) return;
       try {
         ctx.drawImage(
           c,
