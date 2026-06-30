@@ -2,6 +2,11 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  getRemoteControlStatus,
+  reclaimRemoteControl,
+  type RemoteControlStatus,
+} from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -27,6 +32,9 @@ export function RemoteAccessModal() {
   const { t } = useTranslation("common");
   const remote = useSettingsStore((state) => state.remote);
   const [port, setPort] = useState<number | null>(null);
+  const [status, setStatus] = useState<RemoteControlStatus | null>(null);
+  const [reclaiming, setReclaiming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const token = remote.authToken.trim();
@@ -49,6 +57,32 @@ export function RemoteAccessModal() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRemoteControlStatus()
+      .then((next) => {
+        if (!cancelled) setStatus(next);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleReclaim = async () => {
+    setReclaiming(true);
+    setError(null);
+    try {
+      setStatus(await reclaimRemoteControl());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReclaiming(false);
+    }
+  };
 
   const handleCopy = async (key: string, value: string) => {
     await navigator.clipboard?.writeText(value);
@@ -100,6 +134,31 @@ export function RemoteAccessModal() {
           )}
         </Row>
       </div>
+      {status?.active && (
+        <div className="mt-3">
+          <button
+            type="button"
+            data-testid="remote-access-reclaim"
+            onClick={() => void handleReclaim()}
+            disabled={reclaiming}
+            className="rounded px-3 py-1.5 text-xs"
+            style={{
+              color: "var(--bg-base)",
+              background: "var(--accent)",
+              border: "1px solid var(--accent)",
+              cursor: reclaiming ? "default" : "pointer",
+              opacity: reclaiming ? 0.7 : 1,
+            }}
+          >
+            {reclaiming ? t("remoteControl.reclaiming") : t("remoteControl.reclaim")}
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3 text-xs" style={{ color: "var(--red)" }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }

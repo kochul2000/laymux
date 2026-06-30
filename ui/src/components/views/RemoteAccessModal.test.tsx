@@ -31,7 +31,16 @@ describe("RemoteAccessModal", () => {
       value: { writeText },
       configurable: true,
     });
-    mockInvoke.mockResolvedValue({ port: 19281 });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
+      if (cmd === "get_remote_control_status") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      if (cmd === "reclaim_remote_control") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      return Promise.resolve(null);
+    });
     setRemote({});
   });
 
@@ -65,5 +74,29 @@ describe("RemoteAccessModal", () => {
 
     expect(writeText).toHaveBeenNthCalledWith(1, "http://<laymux-host>:19281/remote/#token=secret");
     expect(writeText).toHaveBeenNthCalledWith(2, "secret");
+  });
+
+  it("offers host control reclaim when a remote controller owns the lease", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
+      if (cmd === "get_remote_control_status") {
+        return Promise.resolve({ active: true, heartbeatTimeoutSeconds: 15 });
+      }
+      if (cmd === "reclaim_remote_control") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      return Promise.resolve(null);
+    });
+    setRemote({ enabled: true, authToken: "secret" });
+
+    render(<RemoteAccessModal />);
+
+    const reclaim = await screen.findByTestId("remote-access-reclaim");
+    await userEvent.click(reclaim);
+
+    expect(mockInvoke).toHaveBeenCalledWith("reclaim_remote_control");
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId("remote-access-reclaim")).not.toBeInTheDocument();
+    });
   });
 });
