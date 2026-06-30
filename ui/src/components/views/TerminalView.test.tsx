@@ -2051,10 +2051,18 @@ describe("TerminalView", () => {
       const calls = mockOnData.mock.calls;
       return calls[calls.length - 1]?.[0] as ((data: string) => void) | undefined;
     };
+    const waitForLocalControl = async () => {
+      await vi.waitFor(() => {
+        expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+    };
     const setDismiss = (mode: "workspace" | "paneFocus" | "manual") =>
       useSettingsStore.setState((s) => ({ notifications: { ...s.notifications, dismiss: mode } }));
 
-    it("clears the typed pane's requiresAction alert (paneFocus mode)", () => {
+    it("clears the typed pane's requiresAction alert (paneFocus mode)", async () => {
       setDismiss("paneFocus");
       const wsId = useWorkspaceStore.getState().activeWorkspaceId;
       useNotificationStore.getState().addNotification({
@@ -2066,6 +2074,7 @@ describe("TerminalView", () => {
       expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
 
       render(<TerminalView instanceId="t-input-pf" profile="PowerShell" syncGroup="" />);
+      await waitForLocalControl();
       const onData = latestOnData();
       expect(onData).toBeTypeOf("function");
       act(() => onData!("a"));
@@ -2073,7 +2082,7 @@ describe("TerminalView", () => {
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
 
-    it("clears the whole workspace's alerts, even one on another pane (workspace mode)", () => {
+    it("clears the whole workspace's alerts, even one on another pane (workspace mode)", async () => {
       setDismiss("workspace");
       const wsId = useWorkspaceStore.getState().activeWorkspaceId;
       // Alert belongs to a *different* pane in the same workspace.
@@ -2085,12 +2094,13 @@ describe("TerminalView", () => {
       });
 
       render(<TerminalView instanceId="t-input-ws" profile="PowerShell" syncGroup="" />);
+      await waitForLocalControl();
       act(() => latestOnData()!("x"));
 
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
 
-    it("does not clear alerts on input in manual dismiss mode", () => {
+    it("does not clear alerts on input in manual dismiss mode", async () => {
       setDismiss("manual");
       const wsId = useWorkspaceStore.getState().activeWorkspaceId;
       useNotificationStore.getState().addNotification({
@@ -2101,6 +2111,7 @@ describe("TerminalView", () => {
       });
 
       render(<TerminalView instanceId="t-input-manual" profile="PowerShell" syncGroup="" />);
+      await waitForLocalControl();
       act(() => latestOnData()!("z"));
 
       expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
@@ -3026,6 +3037,46 @@ describe("TerminalView", () => {
 
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
     expect(mockResizeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("does not resize the backend before the initial remote status is known", async () => {
+    let resolveStatus: ((status: { active: boolean }) => void) | undefined;
+    mockGetRemoteControlStatus.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+
+    render(<TerminalView instanceId="t-remote-pending" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+      expect(mockOnResize).toHaveBeenCalled();
+    });
+
+    const resizeHandler = mockOnResize.mock.calls.at(-1)?.[0] as
+      | ((size: { cols: number; rows: number }) => void)
+      | undefined;
+    expect(resizeHandler).toBeDefined();
+
+    mockResizeTerminal.mockClear();
+
+    act(() => {
+      resizeHandler?.({ cols: 120, rows: 40 });
+    });
+
+    expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveStatus?.({ active: false });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      resizeHandler?.({ cols: 120, rows: 40 });
+    });
+
+    expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-pending", 120, 40);
   });
 
   // -- Regression: reflow must NOT fire on activity / cursor changes --

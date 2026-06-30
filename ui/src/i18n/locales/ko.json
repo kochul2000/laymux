@@ -19,7 +19,9 @@
     "remoteAccess": {
       "urlWithToken": "URL + 토큰",
       "token": "토큰",
-      "missing": "없음"
+      "missing": "없음",
+      "copy": "복사",
+      "copied": "복사됨"
     }
   },
   "settings": {

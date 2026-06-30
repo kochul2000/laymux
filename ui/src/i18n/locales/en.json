@@ -19,7 +19,9 @@
     "remoteAccess": {
       "urlWithToken": "URL + token",
       "token": "Token",
-      "missing": "Missing"
+      "missing": "Missing",
+      "copy": "Copy",
+      "copied": "Copied"
     }
   },
   "settings": {
