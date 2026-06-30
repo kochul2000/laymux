@@ -15,6 +15,13 @@
       "fallbackController": "Remote browser",
       "reclaim": "Take back control",
       "reclaiming": "Taking back..."
+    },
+    "remoteAccess": {
+      "urlWithToken": "URL + token",
+      "token": "Token",
+      "missing": "Missing",
+      "copy": "Copy",
+      "copied": "Copied"
     }
   },
   "settings": {

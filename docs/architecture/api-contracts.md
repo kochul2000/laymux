@@ -518,7 +518,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
 
-`/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다.
+`/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다. 편의를 위해 `/remote/#token=<url-encoded-token>`도 허용하며, 이 값은 remote 페이지의 token 입력란을 미리 채우는 용도다. fragment는 HTTP 요청에 포함되지 않으므로 링크 공유용 prefill에는 query string보다 이 형태를 우선 사용한다.
 
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 

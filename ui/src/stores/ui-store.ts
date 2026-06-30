@@ -31,7 +31,7 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
 interface UiState {
   settingsModalOpen: boolean;
   notificationPanelOpen: boolean;
-  connectionInfoModalOpen: boolean;
+  remoteAccessModalOpen: boolean;
   /** External navigation target for SettingsView (e.g. "startup", "profile-0", "colorSchemes") */
   settingsNavTarget: string | null;
   /** Whether the app window is currently focused (not blurred to another app). */
@@ -55,8 +55,8 @@ interface UiState {
   toggleSettingsModal: () => void;
   toggleNotificationPanel: () => void;
   closeNotificationPanel: () => void;
-  toggleConnectionInfoModal: () => void;
-  closeConnectionInfoModal: () => void;
+  toggleRemoteAccessModal: () => void;
+  closeRemoteAccessModal: () => void;
   setSettingsNavTarget: (target: string | null) => void;
   setAppFocused: (focused: boolean) => void;
   toggleHideMode: () => void;
@@ -87,7 +87,7 @@ interface UiState {
 export const useUiStore = create<UiState>()((set) => ({
   settingsModalOpen: false,
   notificationPanelOpen: false,
-  connectionInfoModalOpen: false,
+  remoteAccessModalOpen: false,
   settingsNavTarget: null,
   isAppFocused: true,
   hideMode: false,
@@ -108,13 +108,13 @@ export const useUiStore = create<UiState>()((set) => ({
       settingsModalOpen: !state.notificationPanelOpen ? false : state.settingsModalOpen,
     })),
   closeNotificationPanel: () => set({ notificationPanelOpen: false }),
-  toggleConnectionInfoModal: () =>
+  toggleRemoteAccessModal: () =>
     set((state) => ({
-      connectionInfoModalOpen: !state.connectionInfoModalOpen,
-      settingsModalOpen: !state.connectionInfoModalOpen ? false : state.settingsModalOpen,
-      notificationPanelOpen: !state.connectionInfoModalOpen ? false : state.notificationPanelOpen,
+      remoteAccessModalOpen: !state.remoteAccessModalOpen,
+      settingsModalOpen: !state.remoteAccessModalOpen ? false : state.settingsModalOpen,
+      notificationPanelOpen: !state.remoteAccessModalOpen ? false : state.notificationPanelOpen,
     })),
-  closeConnectionInfoModal: () => set({ connectionInfoModalOpen: false }),
+  closeRemoteAccessModal: () => set({ remoteAccessModalOpen: false }),
   setSettingsNavTarget: (target) => set({ settingsNavTarget: target }),
   setAppFocused: (focused) => set({ isAppFocused: focused }),
   toggleHideMode: () => set((state) => ({ hideMode: !state.hideMode })),

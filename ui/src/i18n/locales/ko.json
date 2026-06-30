@@ -15,6 +15,13 @@
       "fallbackController": "원격 브라우저",
       "reclaim": "제어권 가져오기",
       "reclaiming": "가져오는 중..."
+    },
+    "remoteAccess": {
+      "urlWithToken": "URL + 토큰",
+      "token": "토큰",
+      "missing": "없음",
+      "copy": "복사",
+      "copied": "복사됨"
     }
   },
   "settings": {

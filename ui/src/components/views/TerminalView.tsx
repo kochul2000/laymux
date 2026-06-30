@@ -449,6 +449,11 @@ export function TerminalView({
   // leave inactive workspaces with garbled glyphs on next show.
   const isContainerHiddenRef = useRef(false);
   const remoteControlActiveRef = useRef(false);
+  // Until the initial lease status is known, do not let this local surface
+  // write or resize the shared PTY. A remote controller may already own it.
+  const remoteControlStatusKnownRef = useRef(false);
+  const localTerminalControlAllowed = () =>
+    remoteControlStatusKnownRef.current && !remoteControlActiveRef.current;
   // Marks that a reflow trigger fired while the container was hidden. The
   // ResizeObserver's hidden→visible branch consumes this in addition to
   // `prevWasHidden` so the deferred fit() + atlas rebuild fires exactly
@@ -1656,7 +1661,7 @@ export function TerminalView({
 
     // Handle terminal data (user input) — send to backend PTY
     terminal.onData((data) => {
-      if (remoteControlActiveRef.current) return;
+      if (!localTerminalControlAllowed()) return;
       trace("terminal-onData", {
         bytes: data.length,
         preview: JSON.stringify(data.slice(0, 80)),
@@ -1685,7 +1690,7 @@ export function TerminalView({
 
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
-      if (remoteControlActiveRef.current) return;
+      if (!localTerminalControlAllowed()) return;
       resizeTerminal(instanceId, cols, rows).catch(() => {});
     });
 
@@ -1988,10 +1993,10 @@ export function TerminalView({
               }
               const message =
                 useSettingsStore.getState().claude.sessionLimitResumeMessage || "go on";
-              if (remoteControlActiveRef.current) return;
+              if (!localTerminalControlAllowed()) return;
               void writeToTerminal(instanceId, message);
               sessionLimitSubmitTimer = setTimeout(() => {
-                if (!remoteControlActiveRef.current) void writeToTerminal(instanceId, "\r");
+                if (localTerminalControlAllowed()) void writeToTerminal(instanceId, "\r");
               }, SESSION_LIMIT_SUBMIT_CR_DELAY_MS);
               useNotificationStore.getState().addNotification({
                 terminalId: instanceId,
@@ -2512,7 +2517,7 @@ export function TerminalView({
   // scrollback re-emit) and is what makes the WebGL atlas race manifest as
   // glyph corruption in adjacent panes.
   const syncBackendSizeFromTerminal = (term: Terminal) => {
-    if (!remoteControlActiveRef.current && term.cols > 0 && term.rows > 0) {
+    if (localTerminalControlAllowed() && term.cols > 0 && term.rows > 0) {
       resizeTerminal(instanceId, term.cols, term.rows).catch(() => {});
     }
   };
@@ -2547,6 +2552,7 @@ export function TerminalView({
 
     const applyRemoteControlStatus = (status: { active: boolean }) => {
       const wasActive = remoteControlActiveRef.current;
+      remoteControlStatusKnownRef.current = true;
       remoteControlActiveRef.current = status.active;
       if (status.active) {
         if (pollTimer === undefined) {
@@ -2576,7 +2582,9 @@ export function TerminalView({
       .then((status) => {
         if (!cancelled) applyRemoteControlStatus(status);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) remoteControlStatusKnownRef.current = true;
+      });
 
     onRemoteControlChanged(applyRemoteControlStatus)
       .then((cleanup) => {

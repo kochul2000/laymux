@@ -709,8 +709,13 @@
         let inputFlushTimer = null;
         let inputWriteChain = Promise.resolve();
 
-        const params = new URLSearchParams(location.search);
-        tokenInput.value = params.get("token") || localStorage.getItem(tokenKey) || "";
+        const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+        const searchParams = new URLSearchParams(location.search);
+        tokenInput.value =
+          hashParams.get("token") ||
+          searchParams.get("token") ||
+          localStorage.getItem(tokenKey) ||
+          "";
 
         const defaultAppearance = Object.freeze({
           fontFamily: "'Cascadia Mono', 'Cascadia Mono', 'Consolas', monospace",

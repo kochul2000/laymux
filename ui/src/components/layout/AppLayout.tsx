@@ -10,7 +10,7 @@ import { GridEditToolbar } from "./GridEditToolbar";
 import { WorkspaceArea } from "./WorkspaceArea";
 import { SettingsView } from "@/components/views/SettingsView";
 import { NotificationPanel } from "@/components/views/NotificationPanel";
-import { ConnectionInfoModal } from "@/components/views/ConnectionInfoModal";
+import { RemoteAccessModal } from "@/components/views/RemoteAccessModal";
 import { FileViewerOverlay } from "./FileViewerOverlay";
 import { RenameWorkspaceOverlay } from "./RenameWorkspaceOverlay";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -167,8 +167,8 @@ export function AppLayout() {
   const closeSettingsModal = useUiStore((s) => s.closeSettingsModal);
   const notificationPanelOpen = useUiStore((s) => s.notificationPanelOpen);
   const closeNotificationPanel = useUiStore((s) => s.closeNotificationPanel);
-  const connectionInfoModalOpen = useUiStore((s) => s.connectionInfoModalOpen);
-  const closeConnectionInfoModal = useUiStore((s) => s.closeConnectionInfoModal);
+  const remoteAccessModalOpen = useUiStore((s) => s.remoteAccessModalOpen);
+  const closeRemoteAccessModal = useUiStore((s) => s.closeRemoteAccessModal);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
   const notificationDismiss = useSettingsStore((s) => s.notifications.dismiss);
@@ -387,15 +387,15 @@ export function AppLayout() {
         </ModalOverlay>
       )}
 
-      {/* Connection Info Modal */}
-      {connectionInfoModalOpen && (
+      {/* Remote Access Modal */}
+      {remoteAccessModalOpen && (
         <ModalOverlay
-          testIdPrefix="connection-info-modal"
-          title="Connection Info"
-          onClose={closeConnectionInfoModal}
+          testIdPrefix="remote-access-modal"
+          title="Remote Access"
+          onClose={closeRemoteAccessModal}
           size="w-[480px]"
         >
-          <ConnectionInfoModal />
+          <RemoteAccessModal />
         </ModalOverlay>
       )}
 
