@@ -1,6 +1,11 @@
-import { useEffect, useState } from "react";
-import { readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
 import { resolveViewer, resolveViewerProfile } from "@/lib/file-viewer";
+import {
+  filePreviewKind,
+  htmlToSafePreviewDocument,
+  markdownToSafePreviewDocument,
+} from "@/lib/file-preview";
 import { shellEscape, parentPath } from "@/lib/file-explorer-parse";
 import { useSettingsStore } from "@/stores/settings-store";
 import { TerminalView } from "@/components/views/TerminalView";
@@ -38,6 +43,12 @@ export function FileViewer({
   const profiles = useSettingsStore((s) => s.profiles);
 
   const resolution = resolveViewer(path, extensionViewers);
+  const previewKind = filePreviewKind(path);
+  const [renderModeState, setRenderModeState] = useState<{
+    path: string;
+    previewKind: typeof previewKind;
+    mode: "preview" | "source";
+  }>({ path, previewKind, mode: "preview" });
 
   // A single result object tagged with the path it belongs to. We never reset
   // state synchronously inside the effect (which would be a render-time
@@ -68,6 +79,14 @@ export function FileViewer({
   const current = loaded && loaded.path === path ? loaded : null;
   const content = current?.content ?? null;
   const error = current?.error ?? null;
+  const renderMode =
+    renderModeState.path === path && renderModeState.previewKind === previewKind
+      ? renderModeState.mode
+      : "preview";
+  const setRenderMode = useCallback(
+    (mode: "preview" | "source") => setRenderModeState({ path, previewKind, mode }),
+    [path, previewKind],
+  );
 
   if (resolution.viewerType === "terminal") {
     const viewerProfile = resolveViewerProfile(path, profile, profiles);
@@ -136,6 +155,150 @@ export function FileViewer({
     );
   }
 
+  if (previewKind) {
+    return (
+      <PreviewableTextFile
+        content={content}
+        previewKind={previewKind}
+        renderMode={renderMode}
+        setRenderMode={setRenderMode}
+        bodyStyle={bodyStyle}
+      />
+    );
+  }
+
+  return <SourceText content={content} bodyStyle={bodyStyle} />;
+}
+
+interface PreviewableTextFileProps {
+  content: Extract<FileViewerContent, { kind: "text" }>;
+  previewKind: "html" | "markdown";
+  renderMode: "preview" | "source";
+  setRenderMode: (mode: "preview" | "source") => void;
+  bodyStyle?: React.CSSProperties;
+}
+
+function PreviewableTextFile({
+  content,
+  previewKind,
+  renderMode,
+  setRenderMode,
+  bodyStyle,
+}: PreviewableTextFileProps) {
+  const previewDocument = useMemo(() => {
+    if (previewKind === "markdown") return markdownToSafePreviewDocument(content.content);
+    return htmlToSafePreviewDocument(content.content);
+  }, [content.content, previewKind]);
+
+  return (
+    <div
+      className="flex h-full min-h-0 flex-1 flex-col"
+      style={{ background: "var(--bg-surface)" }}
+    >
+      <div
+        className="flex items-center gap-1 px-2 py-1"
+        style={{
+          background: "var(--bg-surface)",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
+        <button
+          type="button"
+          className="hover-bg-strong rounded px-2 py-1 text-xs"
+          style={{
+            background: renderMode === "preview" ? "var(--accent-20)" : "transparent",
+            color: renderMode === "preview" ? "var(--text-primary)" : "var(--text-secondary)",
+            border: "1px solid var(--border)",
+            cursor: "pointer",
+          }}
+          onClick={() => setRenderMode("preview")}
+          data-testid="file-viewer-preview-mode"
+        >
+          Preview
+        </button>
+        <button
+          type="button"
+          className="hover-bg-strong rounded px-2 py-1 text-xs"
+          style={{
+            background: renderMode === "source" ? "var(--accent-20)" : "transparent",
+            color: renderMode === "source" ? "var(--text-primary)" : "var(--text-secondary)",
+            border: "1px solid var(--border)",
+            cursor: "pointer",
+          }}
+          onClick={() => setRenderMode("source")}
+          data-testid="file-viewer-source-mode"
+        >
+          Source
+        </button>
+      </div>
+      <div
+        className="flex min-h-0 flex-1 overflow-auto"
+        style={{ background: "var(--bg-surface)" }}
+      >
+        {renderMode === "preview" ? (
+          <PreviewFrame documentHtml={previewDocument} bodyStyle={bodyStyle} />
+        ) : (
+          <SourceText content={content} bodyStyle={bodyStyle} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PreviewFrame({
+  documentHtml,
+  bodyStyle,
+}: {
+  documentHtml: string;
+  bodyStyle?: React.CSSProperties;
+}) {
+  const handleLoad = (event: React.SyntheticEvent<HTMLIFrameElement>) => {
+    const doc = event.currentTarget.contentDocument;
+    if (!doc) return;
+    doc.addEventListener("click", (clickEvent) => {
+      const view = doc.defaultView;
+      if (!view) return;
+      const target = clickEvent.target;
+      if (!(target instanceof view.Element)) return;
+      const link = target.closest("a[href]");
+      if (!(link instanceof view.HTMLAnchorElement)) return;
+      const href = link.getAttribute("href") ?? "";
+      if (href.startsWith("#")) return;
+      clickEvent.preventDefault();
+      void openExternal(link.href || href);
+    });
+  };
+
+  return (
+    <div
+      className="relative flex min-h-0 flex-1"
+      style={{ background: "var(--bg-surface)", ...bodyStyle }}
+    >
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{ background: "var(--bg-surface)" }}
+      />
+      <iframe
+        title="File preview"
+        sandbox="allow-same-origin"
+        srcDoc={documentHtml}
+        className="relative z-10 min-h-0 flex-1 w-full"
+        style={{ height: "100%", border: "none", background: "var(--bg-surface)" }}
+        onLoad={handleLoad}
+        data-testid="file-viewer-preview"
+      />
+    </div>
+  );
+}
+
+function SourceText({
+  content,
+  bodyStyle,
+}: {
+  content: Extract<FileViewerContent, { kind: "text" }>;
+  bodyStyle?: React.CSSProperties;
+}) {
   return (
     <pre
       className="whitespace-pre-wrap break-words"

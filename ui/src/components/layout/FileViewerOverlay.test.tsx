@@ -255,6 +255,7 @@ describe("FileViewerOverlay", () => {
   });
 
   it("forwards a per-path viewer instance id so a new path remounts the viewer terminal", () => {
+    const eventNameSafe = /^[a-zA-Z0-9/:_-]+$/;
     act(() => {
       useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
     });
@@ -263,6 +264,7 @@ describe("FileViewerOverlay", () => {
     // The id is the sanitized viewer instance id (path with event-name-illegal
     // chars replaced + hash suffix), not the raw path — see viewerInstanceId.
     expect(idA).toBe(viewerInstanceId("/home/user/a.txt"));
+    expect(eventNameSafe.test(`terminal-output-${idA}`)).toBe(true);
 
     act(() => {
       // Re-open a different file WITHOUT closing first (MCP/REST/Explorer can do
@@ -273,6 +275,7 @@ describe("FileViewerOverlay", () => {
     rerender(<FileViewerOverlay />);
     const idB = screen.getByTestId("mock-file-viewer").getAttribute("data-instance-id");
     expect(idB).toBe(viewerInstanceId("/home/user/b.txt"));
+    expect(eventNameSafe.test(`terminal-output-${idB}`)).toBe(true);
     expect(idB).not.toBe(idA);
   });
 });

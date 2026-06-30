@@ -18,6 +18,9 @@ vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("html2canvas", () => ({
+  default: vi.fn(),
+}));
 
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -495,6 +498,49 @@ describe("handleAsyncAutomationRequest", () => {
     });
     // In jsdom, html2canvas may fail or return empty — either way, no crash
     expect(result).toHaveProperty("success");
+  });
+});
+
+describe("captureScreenshot", () => {
+  function rect(left: number, top: number, width: number, height: number): DOMRect {
+    return {
+      x: left,
+      y: top,
+      left,
+      top,
+      width,
+      height,
+      right: left + width,
+      bottom: top + height,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  it("skips canvas compositing when a screenshot occluder covers it", async () => {
+    document.body.innerHTML = "";
+    const drawImage = vi.fn();
+    const resultCanvas = document.createElement("canvas");
+    Object.defineProperty(resultCanvas, "getContext", {
+      value: vi.fn(() => ({ drawImage })),
+    });
+    Object.defineProperty(resultCanvas, "toDataURL", {
+      value: vi.fn(() => "data:image/png;base64,abc"),
+    });
+    vi.mocked(html2canvas).mockResolvedValueOnce(resultCanvas);
+
+    const terminalCanvas = document.createElement("canvas");
+    terminalCanvas.width = 100;
+    terminalCanvas.height = 100;
+    terminalCanvas.getBoundingClientRect = vi.fn(() => rect(10, 10, 100, 100));
+
+    const overlay = document.createElement("div");
+    overlay.setAttribute("data-screenshot-occluder", "true");
+    overlay.getBoundingClientRect = vi.fn(() => rect(0, 0, 200, 200));
+
+    document.body.append(terminalCanvas, overlay);
+
+    await expect(captureScreenshot()).resolves.toBe("data:image/png;base64,abc");
+    expect(drawImage).not.toHaveBeenCalled();
   });
 });
 
