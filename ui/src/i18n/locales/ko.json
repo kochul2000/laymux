@@ -17,35 +17,9 @@
       "reclaiming": "가져오는 중..."
     },
     "remoteAccess": {
-      "state": {
-        "active": "{{controller}}에서 이 PC를 제어하고 있습니다.",
-        "ready": "원격 접속 준비됨",
-        "needsToken": "원격 토큰이 없습니다.",
-        "disabled": "원격 접속 꺼짐"
-      },
-      "fallbackController": "원격 브라우저",
-      "enabled": "사용",
+      "urlWithToken": "URL + 토큰",
       "token": "토큰",
-      "remoteUrl": "원격 URL",
-      "remoteUrlWithToken": "원격 URL + 토큰",
-      "localUrl": "로컬 URL",
-      "localUrlWithToken": "로컬 URL + 토큰",
-      "allowedIps": "허용 IP",
-      "allowedOrigins": "Origin",
-      "lease": "제어권",
-      "yes": "예",
-      "no": "아니오",
-      "configured": "설정됨",
-      "missing": "없음",
-      "none": "없음",
-      "loading": "불러오는 중...",
-      "activeLease": "{{controller}}",
-      "noLease": "활성 제어자 없음",
-      "refresh": "새로고침",
-      "copy": "복사",
-      "copied": "복사됨",
-      "reclaim": "제어권 가져오기",
-      "reclaiming": "가져오는 중..."
+      "missing": "없음"
     }
   },
   "settings": {
