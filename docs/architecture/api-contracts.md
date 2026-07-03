@@ -336,19 +336,18 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | Tool 정의 | `#[tool]` derive 매크로 — JSON Schema 자동 생성 |
 | 인증 | IP allowlist 미들웨어 자동 적용 (인증 헤더 불필요) |
 
-#### Tool 목록 (33개)
+#### Tool 목록 (31개)
 
-**터미널 (9)**:
+**터미널 (8)**:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `list_terminals` | bridge_request | 터미널 목록 조회 (워크스페이스 필터) |
-| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 |
-| `get_terminal` | bridge_request | 단일 터미널 상세 조회 |
+| `identify_caller` | bridge_request | 터미널 위치·이웃 정보 조회 (단일 터미널 상세는 `list_terminals`/`terminal://{id}` 리소스로 대체) |
 | `write_to_terminal` | AppState 직접 | PTY 입력 전송 (기본 `enter: true`로 제출, 타이핑만 하려면 `enter: false`). 에이전트 간 메시징은 `reply_to`에 발신자 terminal ID를 주면 표준 회신 푸터를 본문 뒤에 부착 |
 | `write_to_neighbor` | bridge + AppState | 방향 기반 이웃 팬에 입력 전송 (identify + write 단축). `reply_to` 동일 지원 |
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
-| `focus_terminal` | bridge_request | 터미널 포커스 (`terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus`). 인덱스 기반 `focus_pane`과 달리 안정 식별자 기반 |
+| `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반) |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
 | `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number) |
 
@@ -363,19 +362,17 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `delete_workspace` | bridge_request | 워크스페이스 삭제 |
 | `rename_workspace` | bridge_request | 워크스페이스 이름 변경 |
 
-**그리드/팬 (7)**:
+**그리드/팬 (5)**:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
-| `get_grid_state` | bridge_request | 그리드 상태 (editMode, focusedPane) |
-| `focus_pane` | bridge_request | 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시) |
 | `remove_pane` | bridge_request | 팬 제거 |
 | `resize_pane` | bridge_request | 팬 크기 조정 (상대 delta) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
-**유틸리티 (9)**:
+**유틸리티 (10)**:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
@@ -384,10 +381,11 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `send_notification` | bridge_request | 알림 생성 (terminal→workspace 자동 매핑) |
 | `clear_notifications` | bridge_request | 알림 제거 — `ids` 또는 `before`(타임스탬프) 중 정확히 하나, `read_only` 옵션 (읽음 처리만) |
 | `search_terminal_output` | AppState 직접 | 출력 패턴 검색 (`max_lines` 조절 가능) |
-| `broadcast_write` | AppState 직접 | 다중 터미널 동시 입력 |
+| `broadcast_write` | AppState 직접 | 다중 터미널 동시 입력 — 각 터미널을 `write_to_terminal`과 동일 경로(`write_input`)로 전송하므로 `enter`(기본 true) 제출 시 #314 paste-burst 방지 body→CR 지연·per-terminal 직렬화 적용 |
 | `list_profiles` | AppState 직접 | 사용 가능한 터미널 프로필 목록 |
 | `open_file_viewer` | bridge_request | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `new_window` 선택). File Explorer·Ctrl+Shift+O와 동일한 뷰어 (#277/#279) |
 | `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
+| `close_file_viewer` | bridge_request | 파일 뷰어 오버레이 닫기 (`ui.closeFileViewer`). 열려 있지 않으면 no-op — `open_file_viewer`/`show_image`와 짝 |
 
 **FileViewer preview 정책 (#404)** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다. `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리며, 같은 화면의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용하고, Markdown은 프론트에서 HTML로 변환한 뒤 동일 sanitizer/iframe 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
