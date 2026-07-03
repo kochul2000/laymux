@@ -34,6 +34,7 @@ ADR 이 필요한 대표 기준:
 | [0014](0014-mcp-settings-configuration.md) | MCP 설정 구성 — 에이전트가 settings 를 읽고 쓰는 경로 | Accepted |
 | [0015](0015-remote-terminal-state-ownership.md) | Remote 터미널 상태 소유권 — PTY 전역 상태와 surface 로컬 상태 분리 | Accepted |
 | [0016](0016-remote-access-runtime-vs-startup-enable.md) | Remote Access 활성화 — 런타임 허용과 시작 시 허용 분리 | Accepted |
+| [0017](0017-mcp-dev-only-tools.md) | MCP dev 전용 툴 노출 정책 | Accepted |
 
 ## 새 ADR 추가
 

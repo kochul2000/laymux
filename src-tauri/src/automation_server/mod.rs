@@ -98,9 +98,10 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     let subscriptions = SubscriptionRegistry::new();
     mcp_resources::spawn_resource_event_bridge(app_handle.clone(), subscriptions.clone());
 
-    let app = build_router(server_state, subscriptions);
-
     let port = automation_port();
+    let is_dev = port == DEV_PORT;
+    let app = build_router(server_state, subscriptions, is_dev);
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr)
         .await
@@ -193,7 +194,11 @@ async fn ip_allowlist_middleware(
     }
 }
 
-pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistry) -> Router {
+pub fn build_router(
+    state: ServerState,
+    subscriptions: SharedSubscriptionRegistry,
+    is_dev: bool,
+) -> Router {
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
@@ -260,7 +265,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .route("/api/v1/screenshot", post(screenshot_capture))
         .nest_service(
             "/mcp",
-            mcp::create_service(state.clone(), subscriptions.clone()),
+            mcp::create_service(state.clone(), subscriptions.clone(), is_dev),
         )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
         .route("/api/v1/ui/remote-access", post(ui_remote_access))
