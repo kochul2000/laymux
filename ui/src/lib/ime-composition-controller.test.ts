@@ -449,6 +449,36 @@ describe("createImeCompositionController", () => {
     expect(controller.getState().active).toBe(false);
   });
 
+  it("still clears residue when the commit's own input event arrives after compositionend", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "지";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "지" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "지" }));
+
+    // WebView2/Chromium can deliver the commit's own input event after
+    // compositionend. It is composition-side (isComposing=true), not new
+    // user input — it must not defeat the residue clear.
+    const commitInput = new Event("input");
+    Object.defineProperty(commitInput, "isComposing", { value: true });
+    textarea.dispatchEvent(commitInput);
+
+    const commitInsert = new Event("beforeinput");
+    Object.defineProperty(commitInsert, "inputType", { value: "insertCompositionText" });
+    textarea.dispatchEvent(commitInsert);
+    await tick();
+
+    expect(textarea.value).toBe("");
+    expect(controller.getState().active).toBe(false);
+  });
+
   it("keeps the textarea untouched when input races in after compositionend", async () => {
     const controller = createImeCompositionController({
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
