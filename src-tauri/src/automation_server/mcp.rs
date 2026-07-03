@@ -275,6 +275,12 @@ struct BroadcastWriteParam {
     /// When true, process C-style escape sequences
     #[serde(default)]
     escape: bool,
+    /// When true (default), append CR after data to submit (simulate Enter) —
+    /// same submit semantics as `write_to_terminal`, including the #314
+    /// paste-burst-safe delay between body and CR. Set false to type without
+    /// submitting.
+    #[serde(default = "default_true")]
+    enter: bool,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -1061,16 +1067,6 @@ impl McpHandler {
         .await
     }
 
-    /// Get details for a single terminal by ID, including pane position and workspace info.
-    #[tool]
-    async fn get_terminal(
-        &self,
-        Parameters(p): Parameters<TerminalIdParam>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "terminals", "get", json!({ "id": p.terminal_id }))
-            .await
-    }
-
     /// Send input to a terminal. Target it with `terminal_id` (stable, preferred)
     /// or `pane_number` (1-based screen reading order, same as the control bar
     /// badge — convenient but changes with layout). By default the input is
@@ -1558,27 +1554,6 @@ impl McpHandler {
 
     // ── Grid/Pane ──
 
-    /// Get grid state: editMode, focusedPaneIndex, and activeWorkspaceId.
-    #[tool]
-    async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("query", "grid", "getState", json!({})).await
-    }
-
-    /// Focus a specific pane by index.
-    #[tool]
-    async fn focus_pane(
-        &self,
-        Parameters(p): Parameters<PaneIndexParam>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.bridge(
-            "action",
-            "grid",
-            "focusPane",
-            json!({ "index": p.pane_index }),
-        )
-        .await
-    }
-
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
     /// The response includes a `ready` field: when false, the terminal is allocated but
     /// not yet registered (React render pending). Poll `list_terminals` or wait ~500ms
@@ -1899,33 +1874,21 @@ impl McpHandler {
         })))
     }
 
-    /// Send the same input to multiple terminals at once.
+    /// Send the same input to multiple terminals at once. Each terminal is
+    /// written via the same path as `write_to_terminal`, so `enter` submits with
+    /// the #314 paste-burst-safe body→CR delay and per-terminal serialization.
     #[tool]
     async fn broadcast_write(
         &self,
         Parameters(p): Parameters<BroadcastWriteParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let data = if p.escape {
-            super::helpers::unescape_terminal_input(&p.data)
-        } else {
-            p.data.clone()
-        };
-
-        let ptys = match self.state.app_state.pty_handles.lock_or_err() {
-            Ok(g) => g,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
-        };
-
         let mut written = Vec::new();
         let mut failed = Vec::new();
 
         for id in &p.terminal_ids {
-            match ptys.get(id) {
-                Some(handle) => match handle.write(data.as_bytes()) {
-                    Ok(_) => written.push(id.clone()),
-                    Err(e) => failed.push(json!({ "id": id, "error": e })),
-                },
-                None => failed.push(json!({ "id": id, "error": "not found" })),
+            match self.write_input(id, &p.data, p.escape, p.enter, None).await {
+                Ok(_) => written.push(id.clone()),
+                Err(_) => failed.push(json!({ "id": id, "error": "not found or write failed" })),
             }
         }
 
@@ -2085,6 +2048,14 @@ impl McpHandler {
             json!({ "path": path_str, "newWindow": p.new_window }),
         )
         .await
+    }
+
+    /// Close the file viewer overlay opened by `open_file_viewer` / `show_image`.
+    /// No-op if the viewer is not open.
+    #[tool]
+    async fn close_file_viewer(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "closeFileViewer", json!({}))
+            .await
     }
 }
 
