@@ -3,11 +3,12 @@
 //! Uses `#[tool]` derive macros for automatic tool definition and JSON-RPC 2.0
 //! handling. Mounted via `nest_service("/mcp", ...)` in the existing axum router.
 
-use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
+use rmcp::handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters};
 use rmcp::model::{
-    CallToolResult, Content, ListResourceTemplatesResult, ListResourcesResult,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
-    ServerInfo, SubscribeRequestParams, UnsubscribeRequestParams,
+    CallToolRequestParams, CallToolResult, Content, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResult, ServerCapabilities, ServerInfo, SubscribeRequestParams, Tool,
+    UnsubscribeRequestParams,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleServer};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -375,6 +376,26 @@ struct ScreenshotParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetEditModeParam {
+    /// Enable or disable grid edit mode.
+    enabled: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SimulateHoverParam {
+    /// Pane index to mark as hovered. Omit or pass null to clear automation hover.
+    pane_index: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetPaneViewParam {
+    /// Pane index (0-based)
+    pane_index: u64,
+    /// View config object, e.g. {"type":"TerminalView","profile":"PowerShell"}.
+    view: Value,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SendNotificationParam {
     /// Terminal ID (optional — omit for workspace-level notification)
     terminal_id: Option<String>,
@@ -436,6 +457,64 @@ struct ExecuteCommandParam {
     format: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetAppThemeParam {
+    /// App theme ID, e.g. "catppuccin-mocha" or "dracula".
+    theme_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct UpdateProfileParam {
+    /// Profile index in settings.profiles.
+    index: u64,
+    /// Partial profile object to merge into the selected profile.
+    data: Value,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetProfileDefaultsParam {
+    /// Partial profileDefaults object to merge into settings.profileDefaults.
+    data: Value,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct NavigateSettingsParam {
+    /// Settings section key. Defaults to "startup" when omitted.
+    section: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ToggleWorkspaceHiddenParam {
+    /// Workspace ID to toggle in hide mode.
+    workspace_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct TogglePaneHiddenParam {
+    /// Pane ID to toggle in hide mode.
+    pane_id: String,
+}
+
+const DEV_ONLY_TOOLS: &[&str] = &[
+    "set_app_theme",
+    "update_profile",
+    "set_profile_defaults",
+    "open_settings",
+    "close_settings",
+    "toggle_settings",
+    "navigate_settings",
+    "toggle_remote_access",
+    "open_remote_access",
+    "close_remote_access",
+    "toggle_notification_panel",
+    "toggle_hide_mode",
+    "toggle_pane_hidden",
+    "toggle_workspace_hidden",
+    "simulate_hover",
+    "set_edit_mode",
+    "set_pane_view",
+];
+
 // ── MCP Handler ───────────────────────────────────────────────────
 
 /// MCP server handler embedded in the Automation API.
@@ -448,6 +527,7 @@ pub struct McpHandler {
     state: ServerState,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
+    is_dev: bool,
     /// Per-terminal mutex to serialize execute_command calls on the same terminal.
     exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,
     /// Shared subscription registry: tracks `resources/subscribe` requests so
@@ -460,10 +540,15 @@ pub struct McpHandler {
 }
 
 impl McpHandler {
-    pub fn new(state: ServerState, subscriptions: SharedSubscriptionRegistry) -> Self {
+    pub fn new(
+        state: ServerState,
+        subscriptions: SharedSubscriptionRegistry,
+        is_dev: bool,
+    ) -> Self {
         Self {
             state,
             tool_router: Self::tool_router(),
+            is_dev,
             exec_locks: Arc::new(TokioMutex::new(HashMap::new())),
             subscriptions,
             peer_id: new_peer_id(),
@@ -547,6 +632,40 @@ impl McpHandler {
             chunks.push(b"\r".to_vec());
         }
         chunks
+    }
+
+    fn require_object_param(value: Value, field: &str) -> Result<Value, CallToolResult> {
+        if value.is_object() {
+            Ok(value)
+        } else {
+            Err(CallToolResult::error(vec![Content::text(format!(
+                "'{field}' must be a JSON object"
+            ))]))
+        }
+    }
+
+    fn is_dev_only_tool(name: &str) -> bool {
+        DEV_ONLY_TOOLS.contains(&name)
+    }
+
+    fn is_tool_visible(&self, name: &str) -> bool {
+        self.is_dev || !Self::is_dev_only_tool(name)
+    }
+
+    fn visible_tools_from_router(router: &ToolRouter<Self>, is_dev: bool) -> Vec<Tool> {
+        let mut tools = router.list_all();
+        if !is_dev {
+            tools.retain(|tool| !Self::is_dev_only_tool(tool.name.as_ref()));
+        }
+        tools
+    }
+
+    fn visible_tools(&self) -> Vec<Tool> {
+        Self::visible_tools_from_router(&self.tool_router, self.is_dev)
+    }
+
+    fn tool_not_found() -> ErrorData {
+        ErrorData::invalid_params("tool not found", None)
     }
 
     /// 터미널에 입력을 보낸다. 본문 텍스트와 제출용 CR을 **분리된 write**로 보내며,
@@ -921,7 +1040,7 @@ impl McpHandler {
     /// The inserted value is the flat `TerminalActivity` shape, not `TerminalStateInfo`.
     fn enrich_with_activity(
         app_state: &crate::state::AppState,
-        items: &mut Vec<Value>,
+        items: &mut [Value],
         id_field: &str,
         activity_field: &str,
     ) {
@@ -966,9 +1085,16 @@ impl Drop for McpHandler {
 pub fn create_service(
     state: ServerState,
     subscriptions: SharedSubscriptionRegistry,
+    is_dev: bool,
 ) -> StreamableHttpService<McpHandler, LocalSessionManager> {
     StreamableHttpService::new(
-        move || Ok(McpHandler::new(state.clone(), subscriptions.clone())),
+        move || {
+            Ok(McpHandler::new(
+                state.clone(),
+                subscriptions.clone(),
+                is_dev,
+            ))
+        },
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default().with_allowed_hosts(mcp_allowed_hosts()),
     )
@@ -1554,6 +1680,58 @@ impl McpHandler {
 
     // ── Grid/Pane ──
 
+    /// Get grid state: editMode, focusedPaneIndex, and activeWorkspaceId.
+    #[tool]
+    async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("query", "grid", "getState", json!({})).await
+    }
+
+    /// Dev-only: enable or disable grid edit mode for automated layout tests.
+    #[tool]
+    async fn set_edit_mode(
+        &self,
+        Parameters(p): Parameters<SetEditModeParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "grid",
+            "setEditMode",
+            json!({ "enabled": p.enabled }),
+        )
+        .await
+    }
+
+    /// Focus a specific pane by index.
+    #[tool]
+    async fn focus_pane(
+        &self,
+        Parameters(p): Parameters<PaneIndexParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "grid",
+            "focusPane",
+            json!({ "index": p.pane_index }),
+        )
+        .await
+    }
+
+    /// Dev-only: simulate pane hover state for screenshot/UI verification.
+    /// Pass no pane_index (or null) to clear automation hover.
+    #[tool]
+    async fn simulate_hover(
+        &self,
+        Parameters(p): Parameters<SimulateHoverParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "grid",
+            "simulateHover",
+            json!({ "index": p.pane_index }),
+        )
+        .await
+    }
+
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
     /// The response includes a `ready` field: when false, the terminal is allocated but
     /// not yet registered (React render pending). Poll `list_terminals` or wait ~500ms
@@ -1630,6 +1808,35 @@ impl McpHandler {
             "panes",
             "swap",
             json!({ "sourceIndex": p.source_index, "targetIndex": p.target_index }),
+        )
+        .await
+    }
+
+    /// Dev-only: set a pane's view config directly through the frontend bridge.
+    #[tool]
+    async fn set_pane_view(
+        &self,
+        Parameters(p): Parameters<SetPaneViewParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let view = match Self::require_object_param(p.view, "view") {
+            Ok(view) => view,
+            Err(err) => return Ok(err),
+        };
+        if view
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty()
+        {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'view.type' is required and must be a non-empty string",
+            )]));
+        }
+        self.bridge(
+            "action",
+            "panes",
+            "setView",
+            json!({ "paneIndex": p.pane_index, "view": view }),
         )
         .await
     }
@@ -1987,6 +2194,171 @@ impl McpHandler {
         }
     }
 
+    // ── Dev-only frontend controls ──
+
+    /// Dev-only: set the app theme by theme ID.
+    #[tool]
+    async fn set_app_theme(
+        &self,
+        Parameters(p): Parameters<SetAppThemeParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.theme_id.trim().is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'theme_id' is required and must be non-empty",
+            )]));
+        }
+        self.bridge(
+            "action",
+            "settings",
+            "setAppTheme",
+            json!({ "themeId": p.theme_id }),
+        )
+        .await
+    }
+
+    /// Dev-only: merge profile defaults into settings.profileDefaults.
+    #[tool]
+    async fn set_profile_defaults(
+        &self,
+        Parameters(p): Parameters<SetProfileDefaultsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let data = match Self::require_object_param(p.data, "data") {
+            Ok(data) => data,
+            Err(err) => return Ok(err),
+        };
+        self.bridge("action", "settings", "setProfileDefaults", data)
+            .await
+    }
+
+    /// Dev-only: merge a partial profile object into settings.profiles[index].
+    #[tool]
+    async fn update_profile(
+        &self,
+        Parameters(p): Parameters<UpdateProfileParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let data = match Self::require_object_param(p.data, "data") {
+            Ok(data) => data,
+            Err(err) => return Ok(err),
+        };
+        self.bridge(
+            "action",
+            "settings",
+            "updateProfile",
+            json!({ "index": p.index, "data": data }),
+        )
+        .await
+    }
+
+    /// Dev-only: open the settings modal.
+    #[tool]
+    async fn open_settings(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "openSettings", json!({})).await
+    }
+
+    /// Dev-only: close the settings modal.
+    #[tool]
+    async fn close_settings(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "closeSettings", json!({}))
+            .await
+    }
+
+    /// Dev-only: toggle the settings modal.
+    #[tool]
+    async fn toggle_settings(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "toggleSettings", json!({}))
+            .await
+    }
+
+    /// Dev-only: navigate the settings modal to a specific section.
+    #[tool]
+    async fn navigate_settings(
+        &self,
+        Parameters(p): Parameters<NavigateSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "ui",
+            "navigateSettings",
+            json!({ "section": p.section.unwrap_or_else(|| "startup".to_string()) }),
+        )
+        .await
+    }
+
+    /// Dev-only: toggle the Remote Access modal.
+    #[tool]
+    async fn toggle_remote_access(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "toggleRemoteAccess", json!({}))
+            .await
+    }
+
+    /// Dev-only: open the Remote Access modal.
+    #[tool]
+    async fn open_remote_access(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "openRemoteAccess", json!({}))
+            .await
+    }
+
+    /// Dev-only: close the Remote Access modal.
+    #[tool]
+    async fn close_remote_access(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "closeRemoteAccess", json!({}))
+            .await
+    }
+
+    /// Dev-only: toggle the notification panel.
+    #[tool]
+    async fn toggle_notification_panel(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "toggleNotificationPanel", json!({}))
+            .await
+    }
+
+    /// Dev-only: toggle workspace/pane hide mode.
+    #[tool]
+    async fn toggle_hide_mode(&self) -> Result<CallToolResult, ErrorData> {
+        self.bridge("action", "ui", "toggleHideMode", json!({}))
+            .await
+    }
+
+    /// Dev-only: toggle whether a workspace is hidden in hide mode.
+    #[tool]
+    async fn toggle_workspace_hidden(
+        &self,
+        Parameters(p): Parameters<ToggleWorkspaceHiddenParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.workspace_id.trim().is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'workspace_id' is required and must be non-empty",
+            )]));
+        }
+        self.bridge(
+            "action",
+            "ui",
+            "toggleWorkspaceHidden",
+            json!({ "id": p.workspace_id }),
+        )
+        .await
+    }
+
+    /// Dev-only: toggle whether a pane is hidden in hide mode.
+    #[tool]
+    async fn toggle_pane_hidden(
+        &self,
+        Parameters(p): Parameters<TogglePaneHiddenParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if p.pane_id.trim().is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "'pane_id' is required and must be non-empty",
+            )]));
+        }
+        self.bridge(
+            "action",
+            "ui",
+            "togglePaneHidden",
+            json!({ "id": p.pane_id }),
+        )
+        .await
+    }
+
     // ── File viewer ──
 
     /// Open a file in laymux's unified file viewer overlay. This is the same
@@ -2111,6 +2483,37 @@ impl ServerHandler for McpHandler {
                  reply_to=$LX_TERMINAL_ID — a standardized footer tells the agent where to reply"
                     .to_string(),
             )
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if !self.is_tool_visible(request.name.as_ref()) {
+            return Err(Self::tool_not_found());
+        }
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult {
+            tools: self.visible_tools(),
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        if !self.is_tool_visible(name) {
+            return None;
+        }
+        self.tool_router.get(name).cloned()
     }
 
     // ── Resources (MCP issue #202) ──────────────────────────────
@@ -3079,6 +3482,68 @@ mod tests {
         let p: ResizePaneParam = serde_json::from_str(json).unwrap();
         assert_eq!(p.dw, Some(0.1));
         assert!(p.dh.is_none());
+    }
+
+    #[test]
+    fn dev_only_tool_names_are_registered() {
+        let router = McpHandler::tool_router();
+        for name in DEV_ONLY_TOOLS {
+            assert!(
+                router.has_route(name),
+                "dev-only tool not registered: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_tool_list_hides_dev_only_tools() {
+        let router = McpHandler::tool_router();
+        let release_tools = McpHandler::visible_tools_from_router(&router, false);
+        let release_names: Vec<&str> = release_tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect();
+
+        for name in DEV_ONLY_TOOLS {
+            assert!(
+                !release_names.contains(name),
+                "release MCP list_tools must hide dev-only tool: {name}",
+            );
+        }
+    }
+
+    #[test]
+    fn dev_tool_list_includes_dev_only_tools() {
+        let router = McpHandler::tool_router();
+        let dev_tools = McpHandler::visible_tools_from_router(&router, true);
+        let dev_names: Vec<&str> = dev_tools.iter().map(|tool| tool.name.as_ref()).collect();
+
+        for name in DEV_ONLY_TOOLS {
+            assert!(
+                dev_names.contains(name),
+                "dev MCP list_tools must include dev-only tool: {name}",
+            );
+        }
+    }
+
+    #[test]
+    fn dev_only_param_types_deserialize() {
+        let theme: SetAppThemeParam = serde_json::from_str(r#"{"theme_id":"dracula"}"#).unwrap();
+        assert_eq!(theme.theme_id, "dracula");
+
+        let profile: UpdateProfileParam =
+            serde_json::from_str(r#"{"index":1,"data":{"cursorBlink":false}}"#).unwrap();
+        assert_eq!(profile.index, 1);
+        assert_eq!(profile.data["cursorBlink"], false);
+
+        let defaults: SetProfileDefaultsParam =
+            serde_json::from_str(r#"{"data":{"font":{"size":15}}}"#).unwrap();
+        assert_eq!(defaults.data["font"]["size"], 15);
+
+        let view: SetPaneViewParam =
+            serde_json::from_str(r#"{"pane_index":0,"view":{"type":"MemoView"}}"#).unwrap();
+        assert_eq!(view.pane_index, 0);
+        assert_eq!(view.view["type"], "MemoView");
     }
 
     // ── Resource capability tests (issue #202) ─────────────────────

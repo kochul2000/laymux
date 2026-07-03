@@ -336,7 +336,11 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | Tool 정의 | `#[tool]` derive 매크로 — JSON Schema 자동 생성 |
 | 인증 | IP allowlist 미들웨어 자동 적용 (인증 헤더 불필요) |
 
-#### Tool 목록 (31개)
+#### Tool 노출 정책
+
+MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
+
+#### Tool 목록 (release 33개 + dev 전용 17개)
 
 **터미널 (8)**:
 
@@ -362,10 +366,12 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `delete_workspace` | bridge_request | 워크스페이스 삭제 |
 | `rename_workspace` | bridge_request | 워크스페이스 이름 변경 |
 
-**그리드/팬 (5)**:
+**그리드/팬 (7)**:
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
+| `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
+| `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시) |
 | `remove_pane` | bridge_request | 팬 제거 |
 | `resize_pane` | bridge_request | 팬 크기 조정 (상대 delta) |
@@ -396,6 +402,28 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
+**Dev 전용 (17)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
+
+| Tool | bridge method | 설명 |
+|------|---------------|------|
+| `set_app_theme` | `settings.setAppTheme` | 앱 테마 변경 |
+| `update_profile` | `settings.updateProfile` | 특정 프로필 부분 갱신 |
+| `set_profile_defaults` | `settings.setProfileDefaults` | 프로필 기본값 부분 갱신 |
+| `open_settings` | `ui.openSettings` | Settings 모달 열기 |
+| `close_settings` | `ui.closeSettings` | Settings 모달 닫기 |
+| `toggle_settings` | `ui.toggleSettings` | Settings 모달 토글 |
+| `navigate_settings` | `ui.navigateSettings` | Settings 내부 섹션 이동 |
+| `toggle_remote_access` | `ui.toggleRemoteAccess` | Remote Access 모달 토글 |
+| `open_remote_access` | `ui.openRemoteAccess` | Remote Access 모달 열기 |
+| `close_remote_access` | `ui.closeRemoteAccess` | Remote Access 모달 닫기 |
+| `toggle_notification_panel` | `ui.toggleNotificationPanel` | 알림 패널 토글 |
+| `toggle_hide_mode` | `ui.toggleHideMode` | hide mode 토글 |
+| `toggle_pane_hidden` | `ui.togglePaneHidden` | pane hide 상태 토글 |
+| `toggle_workspace_hidden` | `ui.toggleWorkspaceHidden` | workspace hide 상태 토글 |
+| `simulate_hover` | `grid.simulateHover` | hover UI 검증용 pane hover 상태 시뮬레이션 |
+| `set_edit_mode` | `grid.setEditMode` | grid edit mode 설정 |
+| `set_pane_view` | `panes.setView` | pane view config 직접 변경 |
+
 #### MCP Resources — 구독형 read-only 상태 (issue #202)
 
 tool 폴링 대신 구독 가능한 read-only 상태를 MCP Resources 로 노출한다. 구현은 `automation_server/mcp_resources.rs`(URI 모델·구독 레지스트리) + `mcp.rs`(list/read/subscribe 핸들러).
@@ -418,6 +446,7 @@ tool 폴링 대신 구독 가능한 read-only 상태를 MCP Resources 로 노출
 pub struct McpHandler {
     state: ServerState,           // Arc<AppState> + AppHandle
     tool_router: ToolRouter<Self>,
+    is_dev: bool,                 // release/dev tool gating
     exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,  // per-terminal 세마포어
 }
 
