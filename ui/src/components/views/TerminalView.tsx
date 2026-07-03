@@ -52,7 +52,7 @@ import {
   resolveVisualCaretOwner,
   type CompositionPreviewState,
 } from "@/lib/ime-composition-controller";
-import { shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
 import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
@@ -1471,6 +1471,14 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
+
+      // 한/영·한자 등 IME 모드 전환 키가 조합 중 xterm 에 들어가면
+      // CompositionHelper 가 stale 범위로 강제 finalize 해 이미 커밋된
+      // 음절을 재전송한다(한글 중복 입력). xterm 진입 자체를 차단한다 —
+      // preventDefault 는 하지 않으므로 OS IME 모드 전환은 그대로 동작.
+      if (shouldBlockTerminalKeyDuringIme(compositionPreviewRef.current.active, e)) {
+        return false;
+      }
 
       if (shouldDeferTerminalKeyToIme(compositionPreviewRef.current.active, e)) {
         return true;

@@ -428,6 +428,109 @@ describe("createImeCompositionController", () => {
     });
   });
 
+  it("clears helper-textarea residue after the deferred finalize", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "지";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "지" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "지" }));
+    await tick();
+
+    // Residue removed: the accumulated value is what desyncs xterm's
+    // substring bookkeeping and re-sends committed syllables.
+    expect(textarea.value).toBe("");
+    expect(controller.getState().active).toBe(false);
+  });
+
+  it("still clears residue when the commit's own input event arrives after compositionend", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "지";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "지" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "지" }));
+
+    // WebView2/Chromium can deliver the commit's own input event after
+    // compositionend. It is composition-side (isComposing=true), not new
+    // user input — it must not defeat the residue clear.
+    const commitInput = new Event("input");
+    Object.defineProperty(commitInput, "isComposing", { value: true });
+    textarea.dispatchEvent(commitInput);
+
+    const commitInsert = new Event("beforeinput");
+    Object.defineProperty(commitInsert, "inputType", { value: "insertCompositionText" });
+    textarea.dispatchEvent(commitInsert);
+    await tick();
+
+    expect(textarea.value).toBe("");
+    expect(controller.getState().active).toBe(false);
+  });
+
+  it("keeps the textarea untouched when input races in after compositionend", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "지";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "지" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "지" }));
+
+    // Keydown before the deferred finalize — xterm's keydown-229 diff path
+    // may hold a snapshot of the current value; clearing would corrupt it.
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "2" }));
+    textarea.value = "지2";
+    textarea.dispatchEvent(new Event("input"));
+    await tick();
+
+    expect(textarea.value).toBe("지2");
+    expect(controller.getState().active).toBe(false);
+  });
+
+  it("resets when the textarea blurs mid-composition (missed compositionend defense)", async () => {
+    const controller = createImeCompositionController({
+      getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "ㅇ";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㅇ" }));
+    await tick();
+    expect(controller.getState().active).toBe(true);
+
+    // WebView2 + Windows IME can drop compositionend entirely; blur is the
+    // recovery signal (the browser force-commits the composition on blur).
+    textarea.dispatchEvent(new Event("blur"));
+
+    expect(controller.getState()).toMatchObject({
+      active: false,
+      text: "",
+      caretUtf16Index: 0,
+      caretCellOffset: 0,
+      textCellWidth: 0,
+    });
+  });
+
   it("treats consecutive same-tick compositions as carry-over", async () => {
     const controller = createImeCompositionController({
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),

@@ -401,7 +401,13 @@
   opacity: 0 !important;
 }
 
-.terminal-ime-composition-active .composition-view {
+/* xterm 네이티브 composition view 는 항상 숨긴다 — 조합 프리뷰는 laymux
+   overlay(.terminal-composition-preview)가 전담한다. 조합 활성 클래스에
+   묶으면 compositionend 누락으로 xterm 만 stuck 된 경우(blur 리셋 뒤)
+   클래스가 빠지면서 stale 네이티브 조합 텍스트가 노출된다. visibility 는
+   layout 을 유지하므로 xterm 의 textarea 위치 계산(getBoundingClientRect)은
+   영향받지 않는다. */
+.xterm .composition-view {
   visibility: hidden !important;
 }
 
