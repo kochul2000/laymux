@@ -56,6 +56,9 @@ function ModalOverlay({
         onClick={onClose}
       />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className={`relative z-10 flex flex-col overflow-hidden rounded-lg shadow-2xl ${margin} ${size}`}
         style={{
           background: "var(--bg-surface, #181825)",

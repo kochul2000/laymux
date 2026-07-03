@@ -10,12 +10,14 @@ import { GridEditToolbar } from "./GridEditToolbar";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useRemoteAccessStore } from "@/stores/remote-access-store";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
+    useRemoteAccessStore.setState(useRemoteAccessStore.getInitialState());
   });
 
   it("always shows export action buttons", () => {

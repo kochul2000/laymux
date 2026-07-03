@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { App } from "./App";
+import { loadSettingsValidated } from "@/lib/tauri-api";
+import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore } from "@/stores/ui-store";
 
 // Mock @tauri-apps/api/window for useWindowGeometry hook
 vi.mock("@tauri-apps/api/window", () => {
@@ -98,6 +102,21 @@ vi.mock("@/lib/tauri-api", () => {
     onTerminalTitleChanged: vi.fn().mockResolvedValue(unlisten),
     markClaudeTerminal: vi.fn().mockResolvedValue(true),
     onTerminalOutputActivity: vi.fn().mockResolvedValue(unlisten),
+    getRemoteControlStatus: vi.fn().mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    }),
+    onRemoteControlChanged: vi.fn().mockResolvedValue(unlisten),
+    reclaimRemoteControl: vi.fn().mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    }),
     getTerminalStates: vi.fn().mockResolvedValue({}),
     cleanTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
     loadWindowGeometry: vi.fn().mockResolvedValue(null),
@@ -105,7 +124,38 @@ vi.mock("@/lib/tauri-api", () => {
   };
 });
 
+function loadedSettings(remote?: Partial<ReturnType<typeof useSettingsStore.getState>["remote"]>) {
+  return {
+    defaultProfile: "PowerShell",
+    profiles: [],
+    colorSchemes: [],
+    keybindings: [],
+    layouts: [],
+    workspaces: [],
+    docks: [],
+    remote: {
+      ...useSettingsStore.getInitialState().remote,
+      ...remote,
+    },
+  };
+}
+
 describe("App", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    useLocalMobileModeStore.setState(useLocalMobileModeStore.getInitialState());
+    vi.mocked(loadSettingsValidated).mockResolvedValue({
+      status: "ok",
+      settings: loadedSettings(),
+      warnings: [],
+    });
+    Object.defineProperty(window, "innerWidth", {
+      value: 1200,
+      configurable: true,
+    });
+  });
+
   it("renders the app root", () => {
     render(<App />);
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
@@ -119,5 +169,23 @@ describe("App", () => {
     // After settings load (async), workspace area appears
     await screen.findByTestId("workspace-area", {}, { timeout: 3000 });
     expect(screen.getByTestId("workspace-area")).toBeInTheDocument();
+  });
+
+  it("does not auto-open Remote Access before disabled loaded settings hydrate", async () => {
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce({
+      status: "ok",
+      settings: loadedSettings({ autoMobileModeMinWidth: 0 }),
+      warnings: [],
+    });
+    Object.defineProperty(window, "innerWidth", {
+      value: 320,
+      configurable: true,
+    });
+
+    render(<App />);
+
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+    await screen.findByTestId("workspace-area", {}, { timeout: 3000 });
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
   });
 });

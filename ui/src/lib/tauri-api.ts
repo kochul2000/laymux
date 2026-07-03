@@ -66,6 +66,28 @@ export interface RemoteControlStatus {
   heartbeatTimeoutSeconds: number;
 }
 
+export interface RemoteAccessStatus {
+  effectiveEnabled: boolean;
+  persistentEnabled: boolean;
+  runtimeEnabled: boolean;
+  authTokenConfigured: boolean;
+  effectiveAuthToken: string;
+}
+
+export async function getRemoteAccessStatus(): Promise<RemoteAccessStatus> {
+  return invoke("get_remote_access_status");
+}
+
+export async function setRemoteRuntimeAccess(
+  enabled: boolean,
+  authToken?: string | null,
+): Promise<RemoteAccessStatus> {
+  return invoke("set_remote_runtime_access", {
+    enabled,
+    authToken: authToken ?? null,
+  });
+}
+
 export async function getRemoteControlStatus(): Promise<RemoteControlStatus> {
   return invoke("get_remote_control_status");
 }
@@ -290,6 +312,7 @@ export interface RemoteSettings {
   allowedIps: string[];
   authToken: string;
   heartbeatTimeoutSeconds: number;
+  autoMobileModeMinWidth: number;
 }
 
 export interface Settings {

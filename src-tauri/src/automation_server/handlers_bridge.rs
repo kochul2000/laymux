@@ -723,6 +723,26 @@ pub async fn ui_toggle_settings(AxumState(state): AxumState<ServerState>) -> imp
     }
 }
 
+pub async fn ui_remote_access(
+    AxumState(state): AxumState<ServerState>,
+    body: Option<Json<serde_json::Value>>,
+) -> impl IntoResponse {
+    let method = match body
+        .as_ref()
+        .and_then(|Json(value)| value.get("open"))
+        .and_then(|value| value.as_bool())
+    {
+        Some(true) => "openRemoteAccess",
+        Some(false) => "closeRemoteAccess",
+        None => "toggleRemoteAccess",
+    };
+
+    match bridge_request(&state, "action", "ui", method, serde_json::json!({})).await {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn ui_navigate_settings(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,

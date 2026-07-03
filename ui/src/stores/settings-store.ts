@@ -488,6 +488,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   allowedIps: ["127.0.0.1/32", "::1/128"],
   authToken: "",
   heartbeatTimeoutSeconds: 15,
+  autoMobileModeMinWidth: 720,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };

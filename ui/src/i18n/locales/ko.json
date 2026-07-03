@@ -17,11 +17,29 @@
       "reclaiming": "가져오는 중..."
     },
     "remoteAccess": {
+      "state": "상태",
+      "enabled": "켜짐",
+      "disabled": "꺼짐",
       "urlWithToken": "URL + 토큰",
       "token": "토큰",
       "missing": "없음",
       "copy": "복사",
-      "copied": "복사됨"
+      "copied": "복사됨",
+      "allowedIps": "허용 IP",
+      "allowedIpsPlaceholder": "127.0.0.1/32\n::1/128\n100.64.0.0/10",
+      "addTailscale": "Tailscale 추가",
+      "resetLoopback": "로컬로 초기화",
+      "saveAllowedIps": "IP 저장",
+      "runtimeOn": "이번 실행 동안 허용",
+      "runtimeOff": "이번 실행 허용 끄기",
+      "persistentOn": "시작 시 자동 허용",
+      "persistentOff": "시작 시 자동 허용 끄기",
+      "openMobileMode": "모바일 모드로 전환",
+      "openingMobileMode": "전환 중...",
+      "missingTokenForMobileMode": "모바일 모드에는 원격 토큰이 필요합니다.",
+      "autoMobileMinWidth": "자동 모바일 폭",
+      "autoMobileMinWidthHint": "0이면 비활성화. 앱 창 폭이 이 값 이하가 되면 Remote Access가 자동으로 열립니다.",
+      "saveAutoMobileMinWidth": "폭 저장"
     }
   },
   "settings": {

@@ -30,6 +30,23 @@ pub fn get_remote_control_status(
 }
 
 #[tauri::command]
+pub fn get_remote_access_status(
+    state: State<Arc<AppState>>,
+) -> Result<crate::remote_server::RemoteAccessStatus, String> {
+    crate::remote_server::get_remote_access_status(&state)
+}
+
+#[tauri::command]
+pub fn set_remote_runtime_access(
+    enabled: bool,
+    auth_token: Option<String>,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::remote_server::RemoteAccessStatus, String> {
+    crate::remote_server::set_remote_runtime_access(&state, &app, enabled, auth_token)
+}
+
+#[tauri::command]
 pub fn reclaim_remote_control(
     state: State<Arc<AppState>>,
     app: AppHandle,

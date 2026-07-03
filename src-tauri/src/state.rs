@@ -23,7 +23,8 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 8. `sync_groups`
 /// 9. `propagated_terminals`
 /// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
-/// 11. `remote_control`
+/// 11. `remote_access`
+/// 12. `remote_control`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -72,6 +73,8 @@ pub struct AppState {
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
     /// Auto-incrementing counter for notification IDs.
     pub notification_counter: AtomicU64,
+    /// Runtime-only Direct Remote Mode access gate, separate from persisted settings.
+    pub remote_access: Mutex<crate::remote_server::RemoteAccessRuntimeState>,
     /// Current Direct Remote Mode controller lease plus local reclaim lockout state.
     pub remote_control: Mutex<crate::remote_server::RemoteControlState>,
 }
@@ -93,6 +96,7 @@ impl AppState {
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
+            remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::default()),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
         }
     }
@@ -169,6 +173,10 @@ mod tests {
     #[test]
     fn remote_control_starts_empty() {
         let state = AppState::new();
+        let access = state.remote_access.lock().unwrap();
+        assert!(!access.enabled);
+        assert!(access.auth_token.is_none());
+        drop(access);
         let remote = state.remote_control.lock().unwrap();
         assert!(remote.lease.is_none());
         assert!(remote.reclaim_lockout_until.is_none());

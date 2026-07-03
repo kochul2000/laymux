@@ -30,7 +30,6 @@ use crate::state::AppState;
 
 use handlers_backend::*;
 use handlers_bridge::*;
-use helpers::err_json;
 use mcp_resources::{SharedSubscriptionRegistry, SubscriptionRegistry};
 
 /// Shared state for the axum server.
@@ -154,6 +153,26 @@ fn is_local_ip(ip: &IpAddr) -> bool {
     }
 }
 
+fn observed_client_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(v6)),
+        other => other,
+    }
+}
+
+fn ip_allowlist_denied_body(client_ip: IpAddr) -> serde_json::Value {
+    let message = format!(
+        "Access denied: only local/private network connections are allowed; client IP: {client_ip}"
+    );
+    serde_json::json!({
+        "error": message,
+        "clientIp": client_ip.to_string(),
+    })
+}
+
 /// IP allowlist middleware — only permits requests from local/private networks.
 /// Replaces Bearer token auth: since this is localhost/WSL communication,
 /// IP restriction provides equivalent security without key management overhead.
@@ -162,14 +181,13 @@ async fn ip_allowlist_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    if is_local_ip(&addr.ip()) {
+    let client_ip = observed_client_ip(addr.ip());
+    if is_local_ip(&client_ip) {
         next.run(req).await
     } else {
         (
             StatusCode::FORBIDDEN,
-            Json(err_json(
-                "Access denied: only local/private network connections are allowed",
-            )),
+            Json(ip_allowlist_denied_body(client_ip)),
         )
             .into_response()
     }
@@ -245,6 +263,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
             mcp::create_service(state.clone(), subscriptions.clone()),
         )
         .route("/api/v1/ui/settings", post(ui_toggle_settings))
+        .route("/api/v1/ui/remote-access", post(ui_remote_access))
         .route("/api/v1/ui/settings/navigate", post(ui_navigate_settings))
         .route("/api/v1/ui/file-viewer", post(ui_open_file_viewer))
         .route("/api/v1/settings/app-theme", put(settings_set_app_theme))
@@ -273,7 +292,7 @@ pub fn build_router(state: ServerState, subscriptions: SharedSubscriptionRegistr
         .layer(CorsLayer::permissive());
 
     automation_routes
-        .merge(crate::remote_server::build_router())
+        .merge(crate::remote_server::build_router(state.clone()))
         .with_state(state)
 }
 
@@ -337,6 +356,22 @@ mod tests {
         assert!(!is_local_ip(&"::ffff:192.168.1.1".parse().unwrap()));
         // ::ffff:8.8.8.8 → rejected (public)
         assert!(!is_local_ip(&"::ffff:8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn ip_allowlist_denied_body_includes_observed_client_ip() {
+        let body = ip_allowlist_denied_body("192.168.1.20".parse().unwrap());
+
+        assert_eq!(body["clientIp"], "192.168.1.20");
+        assert!(body["error"].as_str().unwrap().contains("192.168.1.20"));
+    }
+
+    #[test]
+    fn observed_client_ip_normalizes_ipv4_mapped_ipv6() {
+        assert_eq!(
+            observed_client_ip("::ffff:192.168.1.20".parse().unwrap()).to_string(),
+            "192.168.1.20"
+        );
     }
 
     #[test]

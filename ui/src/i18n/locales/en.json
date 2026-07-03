@@ -17,11 +17,29 @@
       "reclaiming": "Taking back..."
     },
     "remoteAccess": {
+      "state": "State",
+      "enabled": "On",
+      "disabled": "Off",
       "urlWithToken": "URL + token",
       "token": "Token",
       "missing": "Missing",
       "copy": "Copy",
-      "copied": "Copied"
+      "copied": "Copied",
+      "allowedIps": "Allowed IPs",
+      "allowedIpsPlaceholder": "127.0.0.1/32\n::1/128\n100.64.0.0/10",
+      "addTailscale": "Add Tailscale",
+      "resetLoopback": "Reset Local",
+      "saveAllowedIps": "Save IPs",
+      "runtimeOn": "Allow This Run",
+      "runtimeOff": "Stop This Run",
+      "persistentOn": "Enable on Startup",
+      "persistentOff": "Disable on Startup",
+      "openMobileMode": "Open Mobile Mode",
+      "openingMobileMode": "Opening...",
+      "missingTokenForMobileMode": "Remote token is required for mobile mode.",
+      "autoMobileMinWidth": "Auto mobile width",
+      "autoMobileMinWidthHint": "0 disables. At or below this app window width, Remote Access opens automatically.",
+      "saveAutoMobileMinWidth": "Save width"
     }
   },
   "settings": {

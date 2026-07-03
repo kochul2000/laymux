@@ -21,6 +21,8 @@ import {
   handleLxMessage,
   loadSettings,
   saveSettings,
+  getRemoteAccessStatus,
+  setRemoteRuntimeAccess,
   onTerminalOutput,
   onOpenFile,
 } from "./tauri-api";
@@ -158,6 +160,39 @@ describe("tauri-api", () => {
       await saveSettings(settings);
       expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
         settings,
+      });
+    });
+  });
+
+  describe("remote access", () => {
+    it("invokes get_remote_access_status", async () => {
+      const status = {
+        effectiveEnabled: true,
+        persistentEnabled: false,
+        runtimeEnabled: true,
+        authTokenConfigured: true,
+        effectiveAuthToken: "secret",
+      };
+      mockInvoke.mockResolvedValue(status);
+
+      await expect(getRemoteAccessStatus()).resolves.toEqual(status);
+      expect(mockInvoke).toHaveBeenCalledWith("get_remote_access_status");
+    });
+
+    it("invokes set_remote_runtime_access", async () => {
+      mockInvoke.mockResolvedValue({
+        effectiveEnabled: true,
+        persistentEnabled: false,
+        runtimeEnabled: true,
+        authTokenConfigured: true,
+        effectiveAuthToken: "secret",
+      });
+
+      await setRemoteRuntimeAccess(true, "secret");
+
+      expect(mockInvoke).toHaveBeenCalledWith("set_remote_runtime_access", {
+        enabled: true,
+        authToken: "secret",
       });
     });
   });

@@ -1,22 +1,30 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-use axum::extract::{ConnectInfo, Request};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 
 use crate::settings::models::RemoteSettings;
 
-use super::json_error;
+use crate::automation_server::ServerState;
+
+use super::access::effective_remote_settings;
+use super::{internal_error, json_error};
 
 const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
 
 pub(crate) async fn remote_guard(
+    State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
     next: Next,
 ) -> Response {
-    let settings = crate::settings::load_settings().remote;
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
 
     if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
@@ -55,10 +63,18 @@ pub(crate) fn check_remote_base_access(
             allowed_ips = ?settings.allowed_ips,
             "remote client IP denied"
         );
-        return Some(json_error(
-            StatusCode::FORBIDDEN,
-            "remote client IP is not allowed",
-        ));
+        let message = format!("remote client IP is not allowed: {remote_ip}");
+        return Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": message,
+                    "remoteIp": remote_ip.to_string(),
+                    "allowedIps": &settings.allowed_ips,
+                })),
+            )
+                .into_response(),
+        );
     }
 
     None
@@ -346,6 +362,30 @@ mod tests {
                 .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn remote_base_access_rejects_disallowed_ip_with_observed_ip() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: "secret".into(),
+            allowed_ips: vec!["127.0.0.1/32".into(), "::1/128".into()],
+            ..RemoteSettings::default()
+        };
+        let response =
+            check_remote_base_access(&settings, "100.100.10.20:1".parse::<SocketAddr>().unwrap())
+                .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["remoteIp"], "100.100.10.20");
+        assert_eq!(body["allowedIps"][0], "127.0.0.1/32");
+        assert!(body["error"].as_str().unwrap().contains("100.100.10.20"));
     }
 
     #[test]
