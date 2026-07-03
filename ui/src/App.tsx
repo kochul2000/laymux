@@ -13,6 +13,9 @@ import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal"
 import { closeTerminalSession } from "@/lib/tauri-api";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
+import { LocalMobileModeOverlay } from "@/components/layout/LocalMobileModeOverlay";
+import { useAutoRemoteAccessPrompt } from "@/hooks/useAutoRemoteAccessPrompt";
+import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 
 export function App() {
   useKeyboardShortcuts();
@@ -22,6 +25,8 @@ export function App() {
   useWindowGeometry();
   useAppFocus();
   useLanguageSync();
+  useAutoRemoteAccessPrompt();
+  const localMobileModeActive = useLocalMobileModeStore((state) => state.active);
 
   const [recoveryDismissed, setRecoveryDismissed] = useState(false);
 
@@ -111,7 +116,8 @@ export function App() {
           }}
         />
       )}
-      <RemoteControlOverlay />
+      <LocalMobileModeOverlay />
+      {!localMobileModeActive && <RemoteControlOverlay />}
     </div>
   );
 }

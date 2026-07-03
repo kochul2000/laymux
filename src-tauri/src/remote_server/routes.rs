@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::automation_server::ServerState;
 use crate::lock_ext::MutexExt;
 
+use super::access::effective_remote_settings;
 use super::assets::{remote_addon_fit_js, remote_xterm_css, remote_xterm_js};
 use super::auth::remote_guard;
 use super::lease::{
@@ -67,7 +68,7 @@ struct RemoteQuery {
     lease_id: Option<String>,
 }
 
-pub fn build_router() -> Router<ServerState> {
+pub fn build_router(state: ServerState) -> Router<ServerState> {
     let api_routes = Router::new()
         .route("/remote/v1/health", get(remote_health))
         .route("/remote/v1/session/status", get(remote_session_status))
@@ -99,7 +100,7 @@ pub fn build_router() -> Router<ServerState> {
             "/remote/v1/terminals/{id}/output",
             get(remote_terminal_output_ws),
         )
-        .layer(middleware::from_fn(remote_guard))
+        .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
         .layer(CorsLayer::permissive());
 
     Router::new()
@@ -131,7 +132,10 @@ async fn remote_session_claim(
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
-    let settings = crate::settings::load_settings().remote;
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let status = {
         let mut current = match server.app_state.remote_control.lock_or_err() {
@@ -170,7 +174,10 @@ async fn remote_session_heartbeat(
     State(server): State<ServerState>,
     Json(body): Json<LeaseRequest>,
 ) -> Response {
-    let settings = crate::settings::load_settings().remote;
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let status = {
         let mut current = match server.app_state.remote_control.lock_or_err() {
@@ -200,7 +207,10 @@ async fn remote_session_release(
     State(server): State<ServerState>,
     Json(body): Json<LeaseRequest>,
 ) -> Response {
-    let settings = crate::settings::load_settings().remote;
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let status = {
         let mut current = match server.app_state.remote_control.lock_or_err() {
@@ -320,7 +330,10 @@ async fn remote_terminal_output_ws(
     if let Err(response) = require_active_lease(&server.app_state, Some(&lease_id)) {
         return response;
     }
-    let settings = crate::settings::load_settings().remote;
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
 
     ws.on_upgrade(move |socket| {

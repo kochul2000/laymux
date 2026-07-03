@@ -208,6 +208,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Toggle the settings modal open/closed."
             },
             {
+                "method": "POST", "path": "/api/v1/ui/remote-access",
+                "description": "Toggle the Remote Access modal open/closed. Pass { open: true } or { open: false } to force a state.",
+                "body": { "open": "boolean (optional)" }
+            },
+            {
                 "method": "POST", "path": "/api/v1/ui/settings/navigate",
                 "description": "Navigate within SettingsView to a section.",
                 "body": { "section": "\"startup\" | \"profile-0\" | \"profile-1\" | \"colorSchemes\" | \"keybindings\"" }

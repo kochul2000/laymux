@@ -4,6 +4,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import type { DockPosition } from "@/stores/types";
 import logoSvg from "@/assets/logo.svg";
 
@@ -19,6 +20,7 @@ export function GridEditToolbar() {
   const toggleRemoteAccessModal = useUiStore((s) => s.toggleRemoteAccessModal);
   const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
   const remote = useSettingsStore((s) => s.remote);
+  const remoteAccessStatus = useRemoteAccessStore((s) => s.status);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
   const layoutMode = useDockStore((s) => s.layoutMode);
@@ -26,13 +28,15 @@ export function GridEditToolbar() {
 
   const [maximized, setMaximized] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
-  const remoteTokenConfigured = remote.authToken.trim().length > 0;
-  const remoteButtonColor = remote.enabled
+  const remoteEnabled = remoteAccessStatus?.effectiveEnabled ?? remote.enabled;
+  const remoteTokenConfigured =
+    remoteAccessStatus?.authTokenConfigured ?? remote.authToken.trim().length > 0;
+  const remoteButtonColor = remoteEnabled
     ? remoteTokenConfigured
       ? "var(--accent)"
       : "var(--claude)"
     : "var(--text-secondary)";
-  const remoteButtonTitle = remote.enabled
+  const remoteButtonTitle = remoteEnabled
     ? remoteTokenConfigured
       ? "Remote Access"
       : "Remote Access (token missing)"
@@ -235,7 +239,7 @@ export function GridEditToolbar() {
             border: "none",
             fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'",
             fontSize: "var(--fs-xs)",
-            opacity: remote.enabled ? 1 : 0.65,
+            opacity: remoteEnabled ? 1 : 0.65,
           }}
           title={remoteButtonTitle}
           aria-label="Remote Access"

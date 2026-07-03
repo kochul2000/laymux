@@ -1,12 +1,22 @@
 use std::net::SocketAddr;
 
-use axum::extract::ConnectInfo;
+use axum::extract::{ConnectInfo, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
-use super::auth::check_remote_base_access;
+use crate::automation_server::ServerState;
 
-pub(crate) async fn remote_page_redirect(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
-    let settings = crate::settings::load_settings().remote;
+use super::access::effective_remote_settings;
+use super::auth::check_remote_base_access;
+use super::internal_error;
+
+pub(crate) async fn remote_page_redirect(
+    State(server): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
     }
@@ -14,8 +24,14 @@ pub(crate) async fn remote_page_redirect(ConnectInfo(addr): ConnectInfo<SocketAd
     Redirect::temporary("/remote/").into_response()
 }
 
-pub(crate) async fn remote_page(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
-    let settings = crate::settings::load_settings().remote;
+pub(crate) async fn remote_page(
+    State(server): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return internal_error(err),
+    };
     if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
     }
@@ -62,6 +78,15 @@ mod tests {
         assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
         assert!(html.contains("function scheduleTerminalRefresh()"));
         assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("id=\"desktopModeHeader\""));
+        assert!(html.contains("id=\"desktopModeDrawer\""));
+        assert!(html.contains("const localAppMode ="));
+        assert!(html.contains("const autoConnectMode ="));
+        assert!(html.contains("clientNameInput.value = clientNameFromParams"));
+        assert!(html.contains("function requestDesktopMode()"));
+        assert!(
+            html.contains("window.parent.postMessage({ type: \"laymux:desktop-mode\" }, \"*\")")
+        );
         assert!(html.contains("location.hash.replace"));
         assert!(html.contains("const lostLeaseId = leaseId"));
         assert!(html.contains("releaseLease(lostLeaseId).catch(() => {})"));

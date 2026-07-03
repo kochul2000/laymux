@@ -100,6 +100,13 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("settings-modal")).toBeInTheDocument();
   });
 
+  it("exposes modal overlays as blocking dialogs", () => {
+    useUiStore.getState().openSettingsModal();
+    render(<AppLayout />);
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+  });
+
   it("closes settings modal when backdrop is clicked", async () => {
     const user = userEvent.setup();
     useUiStore.getState().openSettingsModal();

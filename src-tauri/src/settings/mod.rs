@@ -252,13 +252,15 @@ mod tests {
         assert!(!legacy.remote.enabled);
         assert_eq!(legacy.remote.allowed_ips, vec!["127.0.0.1/32", "::1/128"]);
         assert_eq!(legacy.remote.heartbeat_timeout_seconds, 15);
+        assert_eq!(legacy.remote.auto_mobile_mode_min_width, 720);
 
         let json = r#"{
           "remote": {
             "enabled": true,
             "allowedIps": ["100.64.0.0/10"],
             "authToken": "secret",
-            "heartbeatTimeoutSeconds": 30
+            "heartbeatTimeoutSeconds": 30,
+            "autoMobileModeMinWidth": 640
           }
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
@@ -266,11 +268,13 @@ mod tests {
         assert_eq!(settings.remote.allowed_ips, vec!["100.64.0.0/10"]);
         assert_eq!(settings.remote.auth_token, "secret");
         assert_eq!(settings.remote.heartbeat_timeout_seconds, 30);
+        assert_eq!(settings.remote.auto_mobile_mode_min_width, 640);
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"remote\""));
         assert!(serialized.contains("\"allowedIps\":[\"100.64.0.0/10\"]"));
         assert!(serialized.contains("\"authToken\":\"secret\""));
+        assert!(serialized.contains("\"autoMobileModeMinWidth\":640"));
     }
 
     #[test]

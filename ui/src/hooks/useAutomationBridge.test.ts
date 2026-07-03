@@ -63,6 +63,7 @@ describe("handleAutomationRequest", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -351,7 +352,6 @@ describe("handleAutomationRequest", () => {
   });
 
   it("toggles notification panel via automation API", () => {
-    useUiStore.setState(useUiStore.getInitialState());
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
 
     const result = handleAutomationRequest({
@@ -373,6 +373,45 @@ describe("handleAutomationRequest", () => {
       params: {},
     });
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  it("toggles Remote Access modal via automation API", () => {
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+
+    const result = handleAutomationRequest({
+      requestId: "ui-remote",
+      category: "action",
+      target: "ui",
+      method: "toggleRemoteAccess",
+      params: {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(true);
+  });
+
+  it("opens and closes Remote Access modal via automation API", () => {
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+
+    const openResult = handleAutomationRequest({
+      requestId: "ui-remote-open",
+      category: "action",
+      target: "ui",
+      method: "openRemoteAccess",
+      params: {},
+    });
+    expect(openResult.success).toBe(true);
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(true);
+
+    const closeResult = handleAutomationRequest({
+      requestId: "ui-remote-close",
+      category: "action",
+      target: "ui",
+      method: "closeRemoteAccess",
+      params: {},
+    });
+    expect(closeResult.success).toBe(true);
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
   });
 
   it("opens the file viewer via automation API (ui.openFileViewer)", () => {

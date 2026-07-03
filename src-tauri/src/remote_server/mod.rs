@@ -1,3 +1,4 @@
+mod access;
 mod appearance;
 mod assets;
 mod auth;
@@ -12,6 +13,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+pub use access::{
+    get_remote_access_status, set_remote_runtime_access, RemoteAccessRuntimeState,
+    RemoteAccessStatus,
+};
 pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,
     RemoteControlStatus,

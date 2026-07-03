@@ -111,6 +111,7 @@ describe("persistSession", () => {
       allowedIps: ["100.64.0.0/10"],
       authToken: "secret",
       heartbeatTimeoutSeconds: 30,
+      autoMobileModeMinWidth: 640,
     });
 
     await persistSession();
@@ -121,6 +122,7 @@ describe("persistSession", () => {
       allowedIps: ["100.64.0.0/10"],
       authToken: "secret",
       heartbeatTimeoutSeconds: 30,
+      autoMobileModeMinWidth: 640,
     });
   });
 

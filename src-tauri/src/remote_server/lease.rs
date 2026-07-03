@@ -10,6 +10,7 @@ use crate::lock_ext::MutexExt;
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 
+use super::access::effective_remote_settings;
 use super::{internal_error, json_error};
 
 const MIN_HEARTBEAT_TIMEOUT_SECONDS: u64 = 5;
@@ -40,9 +41,14 @@ pub struct RemoteControlStatus {
 }
 
 pub fn get_remote_control_status(app_state: &AppState) -> Result<RemoteControlStatus, String> {
-    let settings = crate::settings::load_settings().remote;
+    let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut current = app_state.remote_control.lock_or_err()?;
+    if !settings.enabled || settings.auth_token.trim().is_empty() {
+        current.lease = None;
+        current.reclaim_lockout_until = None;
+        return Ok(status_from_state(&current, timeout_seconds));
+    }
     prune_expired_lease(&mut current.lease, Duration::from_secs(timeout_seconds));
     prune_expired_reclaim_lockout(&mut current, Instant::now());
     Ok(status_from_state(&current, timeout_seconds))
@@ -52,7 +58,7 @@ pub fn reclaim_remote_control(
     app_state: &AppState,
     app_handle: &AppHandle,
 ) -> Result<RemoteControlStatus, String> {
-    let settings = crate::settings::load_settings().remote;
+    let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let status = {
         let mut current = app_state.remote_control.lock_or_err()?;
@@ -168,7 +174,7 @@ pub(crate) fn require_active_lease(
 }
 
 pub(crate) fn active_lease_matches(app_state: &AppState, lease_id: &str) -> Result<bool, String> {
-    let settings = crate::settings::load_settings().remote;
+    let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     active_lease_matches_with_timeout(app_state, lease_id, Duration::from_secs(timeout_seconds))
 }

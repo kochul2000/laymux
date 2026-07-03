@@ -986,6 +986,9 @@ pub struct RemoteSettings {
     /// Seconds before an inactive remote controller lease expires.
     #[serde(default = "default_remote_heartbeat_timeout_seconds")]
     pub heartbeat_timeout_seconds: u64,
+    /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
+    #[serde(default = "default_remote_auto_mobile_mode_min_width")]
+    pub auto_mobile_mode_min_width: u32,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1000,6 +1003,10 @@ fn default_remote_heartbeat_timeout_seconds() -> u64 {
     15
 }
 
+fn default_remote_auto_mobile_mode_min_width() -> u32 {
+    720
+}
+
 impl Default for RemoteSettings {
     fn default() -> Self {
         Self {
@@ -1009,6 +1016,7 @@ impl Default for RemoteSettings {
             allowed_ips: default_remote_allowed_ips(),
             auth_token: String::new(),
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
+            auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
         }
     }
 }

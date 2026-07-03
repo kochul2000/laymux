@@ -55,6 +55,7 @@ interface UiState {
   toggleSettingsModal: () => void;
   toggleNotificationPanel: () => void;
   closeNotificationPanel: () => void;
+  openRemoteAccessModal: () => void;
   toggleRemoteAccessModal: () => void;
   closeRemoteAccessModal: () => void;
   setSettingsNavTarget: (target: string | null) => void;
@@ -108,6 +109,12 @@ export const useUiStore = create<UiState>()((set) => ({
       settingsModalOpen: !state.notificationPanelOpen ? false : state.settingsModalOpen,
     })),
   closeNotificationPanel: () => set({ notificationPanelOpen: false }),
+  openRemoteAccessModal: () =>
+    set({
+      remoteAccessModalOpen: true,
+      settingsModalOpen: false,
+      notificationPanelOpen: false,
+    }),
   toggleRemoteAccessModal: () =>
     set((state) => ({
       remoteAccessModalOpen: !state.remoteAccessModalOpen,

@@ -727,6 +727,18 @@ const handlers: HandlerMap = {
       useUiStore.getState().toggleSettingsModal();
       return ok({ toggled: true });
     },
+    toggleRemoteAccess: () => {
+      useUiStore.getState().toggleRemoteAccessModal();
+      return ok({ toggled: true });
+    },
+    openRemoteAccess: () => {
+      useUiStore.getState().openRemoteAccessModal();
+      return ok({ opened: true });
+    },
+    closeRemoteAccess: () => {
+      useUiStore.getState().closeRemoteAccessModal();
+      return ok({ closed: true });
+    },
     toggleNotificationPanel: () => {
       useUiStore.getState().toggleNotificationPanel();
       return ok({ toggled: true });

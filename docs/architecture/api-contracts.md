@@ -33,15 +33,25 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
 
+활성화에는 두 경로가 있다([ADR-0016](../adr/0016-remote-access-runtime-vs-startup-enable.md)).
+
+- **이번 실행 동안 허용**: Remote Access 모달에서 켜는 런타임 상태다. `AppState` 에만 저장되며 앱 종료 시 사라지고 `settings.json` 에 기록하지 않는다.
+- **시작 시 자동 허용**: `settings.remote.enabled` 를 `true` 로 저장하는 영속 설정이다. 다음 실행부터 remote entry 가 처음부터 열린다.
+
+remote 의 실효 활성화 상태는 `settings.remote.enabled || runtimeRemoteAccess.enabled` 로 계산한다. 토큰은 `settings.remote.authToken` 을 우선 사용하고, 이 값이 비어 있을 때만 런타임 허용 토큰을 사용한다. IP allowlist, Origin 정책, heartbeat timeout 은 `settings.remote` 계약을 따른다.
+
+Remote Access 모달은 런타임/영속 활성화와 토큰 표시뿐 아니라 `settings.remote.allowedIps`, `settings.remote.autoMobileModeMinWidth` 편집을 제공한다. 변경 내용은 기존 settings store → `persistSession()` → `save_settings` 경로로 `settings.json` 에 저장된다. 데스크톱 앱 내부의 모바일 모드는 기존 `/remote/` Direct Remote UI를 `localApp=1&autoConnect=1` iframe으로 여는 로컬 전용 표시 모드이며, 외부 브라우저 지원을 새로 의미하지 않는다. 해당 iframe은 remote lease를 잡을 수 있으므로 PC WebView의 remote-control overlay는 로컬 모바일 모드가 활성인 동안 숨긴다.
+
 ```jsonc
 {
   "remote": {
-    "enabled": false,                  // 기본값: 비활성화
+    "enabled": false,                  // 시작 시 자동 허용 여부. 기본값: 비활성화
     "bindAddress": "0.0.0.0",          // 현재 구현은 Automation 서버 listener를 공유
     "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 일치 검사
     "allowedIps": ["127.0.0.1/32", "::1/128"],
     "authToken": "",                   // enabled=true일 때 필수
-    "heartbeatTimeoutSeconds": 15       // 최소 5초로 clamp
+    "heartbeatTimeoutSeconds": 15,      // 최소 5초로 clamp
+    "autoMobileModeMinWidth": 720       // 앱 창 폭이 이 값 이하이면 Remote Access 모달 자동 표시. 0 = 비활성
   }
 }
 ```
@@ -275,6 +285,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/notifications` | 알림 생성 |
 | DELETE | `/api/v1/notifications` | 알림 제거 (`ids` 또는 `before`) |
 | POST | `/api/v1/ui/settings` | 설정 모달 토글 |
+| POST | `/api/v1/ui/remote-access` | Remote Access 모달 토글. `{ "open": true/false }` 로 상태를 강제할 수 있음 |
 | POST | `/api/v1/ui/settings/navigate` | 설정 화면 내비게이션 |
 | PUT | `/api/v1/settings/app-theme` | 앱 테마 설정 |
 | POST | `/api/v1/ui/hide-mode/toggle` | hide 모드 토글 |
@@ -302,6 +313,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - IP allowlist 미들웨어: loopback, RFC 1918 사설 대역(10.x, 172.16-31.x, 192.168.x), link-local(169.254.x, fe80::)만 허용
 - 인증 헤더 불필요 — 로컬/사설 네트워크 IP 제한만으로 보안 확보 (Chrome DevTools, Jupyter 등과 동일 모델)
 - 외부 공인 IP에서 접근 시 403 Forbidden 반환
+- IP allowlist 거절 응답은 laymux 가 관측한 클라이언트 주소를 포함한다: `{ "error": "... client IP: <ip>", "clientIp": "<ip>" }`
 
 ### 12.7 내장 MCP 서버
 
@@ -518,17 +530,18 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
 
-`/remote`와 `/remote/`는 remote가 켜져 있고, `remote.authToken`이 설정되어 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다. 편의를 위해 `/remote/#token=<url-encoded-token>`도 허용하며, 이 값은 remote 페이지의 token 입력란을 미리 채우는 용도다. fragment는 HTTP 요청에 포함되지 않으므로 링크 공유용 prefill에는 query string보다 이 형태를 우선 사용한다.
+`/remote`와 `/remote/`는 remote가 실효적으로 켜져 있고(`settings.remote.enabled || runtimeRemoteAccess.enabled`), 실효 remote token이 있으며, remote IP allowlist를 통과할 때 응답한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다. 편의를 위해 `/remote/#token=<url-encoded-token>`도 허용하며, 이 값은 remote 페이지의 token 입력란을 미리 채우는 용도다. fragment는 HTTP 요청에 포함되지 않으므로 링크 공유용 prefill에는 query string보다 이 형태를 우선 사용한다.
 
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 
-`/remote/vendor/*`도 `/remote/`와 같은 base access 조건(`enabled`, `authToken` 존재, IP allowlist)을 통과해야 응답한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
+`/remote/vendor/*`도 `/remote/`와 같은 base access 조건(실효 enabled, 실효 token 존재, IP allowlist)을 통과해야 응답한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
 
 ### 13.1 인증과 접근 제어
 
-- `settings.remote.enabled`가 `true`일 때만 응답한다.
-- `settings.remote.authToken`은 필수다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
+- `settings.remote.enabled` 또는 런타임 remote 허용 상태가 `true`일 때만 응답한다.
+- 실효 remote token은 필수다. `settings.remote.authToken`을 우선 사용하고, 이 값이 비어 있을 때만 런타임 허용 토큰을 사용한다. HTTP 요청은 `Authorization: Bearer <token>` 또는 `X-Laymux-Remote-Token`을 사용할 수 있고, WebSocket은 브라우저 제약 때문에 URL-encoded `?token=<token>`도 허용한다.
 - `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`를 명시해야 한다.
+- remote IP allowlist 거절 응답은 laymux 가 관측한 주소와 현재 allowlist를 포함한다: `{ "error": "... <ip>", "remoteIp": "<ip>", "allowedIps": [...] }`
 - `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재할 때 정확히 일치해야 한다. 브라우저의 same-origin fetch가 `Origin`을 생략한 경우에 한해 `Sec-Fetch-Site: same-origin`과 `Host`가 허용 origin의 authority와 맞으면 허용한다. 이 예외는 브라우저 호환성용이며 보안 경계는 IP allowlist와 bearer token이다.
 
 ### 13.2 Controller Lease

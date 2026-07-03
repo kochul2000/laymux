@@ -868,4 +868,27 @@ describe("settings-store", () => {
     // Should keep the default, not blindly accept the invalid value
     expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
+
+  it("has default automatic mobile mode width threshold", () => {
+    expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
+  });
+
+  it("setRemote updates automatic mobile mode width threshold", () => {
+    useSettingsStore.getState().setRemote({ autoMobileModeMinWidth: 0 });
+    expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+  });
+
+  it("loadFromSettings fills missing remote automatic mobile mode width with default", () => {
+    useSettingsStore.getState().loadFromSettings({
+      remote: { enabled: true, authToken: "secret" } as any,
+    });
+    expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
+  });
+
+  it("loadFromSettings preserves explicit remote automatic mobile mode width", () => {
+    useSettingsStore.getState().loadFromSettings({
+      remote: { autoMobileModeMinWidth: 0 } as any,
+    });
+    expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+  });
 });

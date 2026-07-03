@@ -1,6 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { App } from "./App";
+import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore } from "@/stores/ui-store";
 
 // Mock @tauri-apps/api/window for useWindowGeometry hook
 vi.mock("@tauri-apps/api/window", () => {
@@ -98,6 +101,21 @@ vi.mock("@/lib/tauri-api", () => {
     onTerminalTitleChanged: vi.fn().mockResolvedValue(unlisten),
     markClaudeTerminal: vi.fn().mockResolvedValue(true),
     onTerminalOutputActivity: vi.fn().mockResolvedValue(unlisten),
+    getRemoteControlStatus: vi.fn().mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    }),
+    onRemoteControlChanged: vi.fn().mockResolvedValue(unlisten),
+    reclaimRemoteControl: vi.fn().mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    }),
     getTerminalStates: vi.fn().mockResolvedValue({}),
     cleanTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
     loadWindowGeometry: vi.fn().mockResolvedValue(null),
@@ -106,6 +124,16 @@ vi.mock("@/lib/tauri-api", () => {
 });
 
 describe("App", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    useLocalMobileModeStore.setState(useLocalMobileModeStore.getInitialState());
+    Object.defineProperty(window, "innerWidth", {
+      value: 1200,
+      configurable: true,
+    });
+  });
+
   it("renders the app root", () => {
     render(<App />);
     expect(screen.getByTestId("app-root")).toBeInTheDocument();
