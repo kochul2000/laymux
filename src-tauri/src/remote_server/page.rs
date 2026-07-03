@@ -50,6 +50,12 @@ mod tests {
         assert!(html.contains("inputWriteChain"));
         assert!(html.contains("writeToTerminal(inputTerminalId, inputLeaseId"));
         assert!(html.contains("resizeTerminal(resizeTerminalId, resizeLeaseId"));
+        assert!(html.contains("touch-action: none"));
+        assert!(html.contains("function installTouchSelectionBridge(term)"));
+        assert!(html.contains("new MouseEvent(type"));
+        assert!(html.contains("mouseTrackingMode !== \"none\""));
+        assert!(html.contains("id=\"copySelection\""));
+        assert!(html.contains("copySelectionToClipboard"));
         assert!(html.contains("const terminalShell = document.querySelector(\".terminal-shell\")"));
         assert!(html.contains("resizeObserver.observe(terminalShell)"));
         assert!(html.contains("rect.width < 20 || rect.height < 20"));

@@ -534,10 +534,12 @@
         width: 100%;
         height: 100%;
         min-height: 0;
+        touch-action: none;
       }
       .xterm {
         height: 100%;
         padding: 4px;
+        touch-action: none;
       }
       .xterm .xterm-viewport {
         background-color: transparent;
@@ -581,7 +583,7 @@
         footer {
           align-items: stretch;
           display: grid;
-          grid-template-columns: 1fr auto auto;
+          grid-template-columns: 1fr auto auto auto;
         }
         footer .status-hint {
           align-self: center;
@@ -589,7 +591,7 @@
       }
       @media (max-width: 520px) {
         footer {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 1fr 1fr 1fr;
         }
         footer .status-hint {
           grid-column: 1 / -1;
@@ -663,6 +665,7 @@
         </div>
       </main>
       <footer>
+        <button id="copySelection" disabled>Copy</button>
         <button id="ctrlC" disabled>Ctrl+C</button>
         <button id="focusTerminal" disabled>Keyboard</button>
         <div id="terminalMeta" class="status-hint grow">No terminal selected.</div>
@@ -690,6 +693,7 @@
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
         const focusTerminalButton = $("focusTerminal");
+        const copySelectionButton = $("copySelection");
         const ctrlCButton = $("ctrlC");
         const tokenKey = "laymux.remote.token";
         let leaseId = null;
@@ -781,9 +785,8 @@
           workspaceSection.classList.toggle("locked", !connected);
           releaseButton.disabled = !connected;
           refreshButton.disabled = !connected;
-          ctrlCButton.disabled = !connected || !activeTerminalId;
-          focusTerminalButton.disabled = !connected || !activeTerminalId;
           connectButton.disabled = connected;
+          updateTerminalControls();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -818,6 +821,7 @@
             fontFamily: normalized.fontFamily,
             fontSize: normalized.fontSize,
             letterSpacing: 0,
+            macOptionClickForcesSelection: true,
             scrollback: normalized.scrollback,
             convertEol: false,
             theme: normalized.theme,
@@ -846,6 +850,137 @@
           }
         }
 
+        function hasTerminalSelection() {
+          return Boolean(terminal && typeof terminal.hasSelection === "function" && terminal.hasSelection());
+        }
+
+        function updateTerminalControls() {
+          const canControl = Boolean(leaseId && activeTerminalId);
+          ctrlCButton.disabled = !canControl;
+          focusTerminalButton.disabled = !canControl;
+          copySelectionButton.disabled = !canControl || !hasTerminalSelection();
+        }
+
+        function fallbackCopyText(text) {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          textarea.style.top = "0";
+          document.body.append(textarea);
+          textarea.focus();
+          textarea.select();
+          try {
+            return Boolean(document.execCommand && document.execCommand("copy"));
+          } finally {
+            textarea.remove();
+          }
+        }
+
+        async function writeClipboardText(text) {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+          }
+          if (!fallbackCopyText(text)) {
+            throw new Error("Clipboard API unavailable");
+          }
+        }
+
+        async function copySelectionToClipboard() {
+          if (!terminal || !terminal.hasSelection()) {
+            updateTerminalControls();
+            return;
+          }
+          const text = terminal.getSelection();
+          if (!text) {
+            updateTerminalControls();
+            return;
+          }
+          try {
+            await writeClipboardText(text);
+            setStatus("Selection copied.");
+          } catch (err) {
+            setStatus(`Copy failed: ${err.message || err}`, true);
+          } finally {
+            updateTerminalControls();
+          }
+        }
+
+        function isTouchSelectionPointer(event) {
+          return event.pointerType === "touch" || event.pointerType === "pen";
+        }
+
+        function shouldForceTouchSelection(term) {
+          const mouseTrackingMode = term && term.modes && term.modes.mouseTrackingMode;
+          return Boolean(mouseTrackingMode && mouseTrackingMode !== "none");
+        }
+
+        function touchSelectionMouseEvent(type, pointerEvent, forceSelection) {
+          return new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            detail: type === "mousedown" ? 1 : 0,
+            screenX: pointerEvent.screenX,
+            screenY: pointerEvent.screenY,
+            clientX: pointerEvent.clientX,
+            clientY: pointerEvent.clientY,
+            button: 0,
+            buttons: type === "mouseup" ? 0 : 1,
+            shiftKey: forceSelection,
+            altKey: forceSelection,
+          });
+        }
+
+        function dispatchTouchSelectionMouse(target, type, pointerEvent, forceSelection) {
+          target.dispatchEvent(touchSelectionMouseEvent(type, pointerEvent, forceSelection));
+        }
+
+        function installTouchSelectionBridge(term) {
+          const element = term && term.element;
+          if (!element || element.dataset.touchSelectionBridge === "true") return;
+          element.dataset.touchSelectionBridge = "true";
+
+          let activePointerId = null;
+          let forceSelection = false;
+          const pointerOptions = { passive: false };
+
+          element.addEventListener("pointerdown", (event) => {
+            if (!isTouchSelectionPointer(event) || activePointerId !== null || event.isPrimary === false) return;
+            activePointerId = event.pointerId;
+            forceSelection = shouldForceTouchSelection(term);
+            event.preventDefault();
+            event.stopPropagation();
+            element.setPointerCapture?.(event.pointerId);
+            dispatchTouchSelectionMouse(element, "mousedown", event, forceSelection);
+          }, pointerOptions);
+
+          element.addEventListener("pointermove", (event) => {
+            if (event.pointerId !== activePointerId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchTouchSelectionMouse(document, "mousemove", event, forceSelection);
+          }, pointerOptions);
+
+          const finishTouchSelection = (event) => {
+            if (event.pointerId !== activePointerId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchTouchSelectionMouse(document, "mouseup", event, forceSelection);
+            if (element.hasPointerCapture?.(event.pointerId)) {
+              element.releasePointerCapture?.(event.pointerId);
+            }
+            activePointerId = null;
+            forceSelection = false;
+            updateTerminalControls();
+          };
+
+          element.addEventListener("pointerup", finishTouchSelection, pointerOptions);
+          element.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
+        }
+
         function ensureTerminal(appearance = {}) {
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
@@ -857,8 +992,10 @@
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           terminal.open(terminalHost);
+          installTouchSelectionBridge(terminal);
           terminal.onData((data) => enqueueInput(data));
           terminal.onResize(({ cols, rows }) => queueResize(cols, rows));
+          terminal.onSelectionChange(() => updateTerminalControls());
           if ("ResizeObserver" in window) {
             resizeObserver = new ResizeObserver(() => fitTerminal());
             resizeObserver.observe(terminalHost);
@@ -1243,6 +1380,7 @@
           stopResizeFlush();
           applyTerminalAppearance(terminalInfo && terminalInfo.appearance);
           term.reset();
+          updateTerminalControls();
           lastResizeKey = "";
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
           const outputSocket = new WebSocket(url);
@@ -1446,6 +1584,7 @@
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
+        copySelectionButton.addEventListener("click", () => copySelectionToClipboard());
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => terminal && terminal.focus());
         window.addEventListener("beforeunload", () => {
