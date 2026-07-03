@@ -237,6 +237,12 @@ export function createImeCompositionController(
   let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
   let pendingFinalizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  // Monotonic counter bumped on every keydown/beforeinput/input the textarea
+  // sees. The deferred finalize compares it against the value captured at
+  // compositionend to decide whether the textarea has been quiet since then
+  // (safe to clear residue) or new input already raced in (leave it alone).
+  let inputActivitySeq = 0;
+
   const emit = () => {
     options.onStateChange?.(state);
   };
@@ -394,13 +400,50 @@ export function createImeCompositionController(
       finalPreviewText: state.text,
     });
 
+    const seqAtEnd = inputActivitySeq;
     pendingFinalizeTimeout = setTimeout(() => {
       pendingFinalizeTimeout = null;
+      // Clear committed residue from the helper textarea. xterm binds its
+      // compositionend listener before ours (terminal.open() vs later bind),
+      // so its finalize timeout is queued first and has already read the
+      // value and sent the final text to the PTY by the time this runs.
+      // Left alone, the value accumulates across composition chains and any
+      // later event-order glitch (missed compositionend, forced finalize)
+      // makes xterm's substring bookkeeping re-send already-committed text —
+      // the Korean syllable-duplication bug. Skip when any key/input event
+      // arrived after compositionend: xterm's keydown-229 diff path may hold
+      // a pre-clear snapshot of the value, and clearing under it would emit
+      // a spurious DEL.
+      if (textarea && textarea.value && inputActivitySeq === seqAtEnd) {
+        traceComposition(options, "ime-composition-finalize-clear", {
+          clearedValue: textarea.value,
+        });
+        textarea.value = "";
+      }
       reset();
     }, 0);
   };
 
+  const handleActivityEvent = () => {
+    inputActivitySeq += 1;
+  };
+
+  const handleBlur = () => {
+    if (phase === "idle") return;
+    // A blur mid-composition means the browser force-committed or aborted
+    // the composition. compositionend normally follows, but WebView2 +
+    // Windows IME can drop it — leaving this controller (and the preview
+    // box) stuck in "composing" until the next focus cycle. Reset here;
+    // xterm clears the textarea itself on blur.
+    traceComposition(options, "ime-composition-blur-reset", {
+      phase,
+      textareaValue: textarea?.value ?? "",
+    });
+    reset();
+  };
+
   const handleInputLikeEvent = () => {
+    inputActivitySeq += 1;
     if (phase === "composing") {
       schedulePreviewSync();
     }
@@ -417,6 +460,8 @@ export function createImeCompositionController(
     textarea.removeEventListener("compositionend", handleCompositionEnd);
     textarea.removeEventListener("beforeinput", handleInputLikeEvent);
     textarea.removeEventListener("input", handleInputLikeEvent);
+    textarea.removeEventListener("keydown", handleActivityEvent);
+    textarea.removeEventListener("blur", handleBlur);
     textarea = null;
   };
 
@@ -430,6 +475,8 @@ export function createImeCompositionController(
       textarea.addEventListener("compositionend", handleCompositionEnd);
       textarea.addEventListener("beforeinput", handleInputLikeEvent);
       textarea.addEventListener("input", handleInputLikeEvent);
+      textarea.addEventListener("keydown", handleActivityEvent);
+      textarea.addEventListener("blur", handleBlur);
     },
     dispose() {
       unbind();

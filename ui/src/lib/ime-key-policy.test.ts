@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldDeferTerminalKeyToIme } from "./ime-key-policy";
+import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "./ime-key-policy";
 
 describe("shouldDeferTerminalKeyToIme", () => {
   it("returns false when composition is inactive", () => {
@@ -88,5 +88,25 @@ describe("shouldDeferTerminalKeyToIme", () => {
         shiftKey: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldBlockTerminalKeyDuringIme", () => {
+  const noMods = { ctrlKey: false, altKey: false, metaKey: false, shiftKey: false } as const;
+
+  it("blocks IME mode-switch keys while composition is active", () => {
+    for (const key of ["HangulMode", "HanjaMode", "KanaMode", "Convert", "ModeChange"]) {
+      expect(shouldBlockTerminalKeyDuringIme(true, { key, ...noMods })).toBe(true);
+    }
+  });
+
+  it("does not block mode-switch keys when composition is inactive", () => {
+    expect(shouldBlockTerminalKeyDuringIme(false, { key: "HangulMode", ...noMods })).toBe(false);
+  });
+
+  it("does not block regular keys during composition", () => {
+    expect(shouldBlockTerminalKeyDuringIme(true, { key: "a", ...noMods })).toBe(false);
+    expect(shouldBlockTerminalKeyDuringIme(true, { key: "Enter", ...noMods })).toBe(false);
+    expect(shouldBlockTerminalKeyDuringIme(true, { key: "Process", ...noMods })).toBe(false);
   });
 });
