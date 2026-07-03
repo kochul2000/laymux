@@ -25,7 +25,7 @@ export function App() {
   useWindowGeometry();
   useAppFocus();
   useLanguageSync();
-  useAutoRemoteAccessPrompt();
+  useAutoRemoteAccessPrompt(loaded);
   const localMobileModeActive = useLocalMobileModeStore((state) => state.active);
 
   const [recoveryDismissed, setRecoveryDismissed] = useState(false);

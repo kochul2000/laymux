@@ -5,8 +5,8 @@ import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 
-function Probe() {
-  useAutoRemoteAccessPrompt();
+function Probe({ enabled = true }: { enabled?: boolean }) {
+  useAutoRemoteAccessPrompt(enabled);
   return null;
 }
 
@@ -41,6 +41,19 @@ describe("useAutoRemoteAccessPrompt", () => {
     render(<Probe />);
 
     expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+  });
+
+  it("waits until explicitly enabled before checking the narrow-window threshold", () => {
+    useSettingsStore.getState().setRemote({ autoMobileModeMinWidth: 720 });
+    setInnerWidth(600);
+
+    const { rerender } = render(<Probe enabled={false} />);
+
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(false);
+
+    rerender(<Probe enabled />);
+
+    expect(useUiStore.getState().remoteAccessModalOpen).toBe(true);
   });
 
   it("does not open the modal while local mobile mode is already active", () => {

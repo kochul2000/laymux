@@ -3,12 +3,17 @@ import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 
-export function useAutoRemoteAccessPrompt() {
+export function useAutoRemoteAccessPrompt(enabled = true) {
   const threshold = useSettingsStore((state) => state.remote.autoMobileModeMinWidth);
   const localMobileModeActive = useLocalMobileModeStore((state) => state.active);
   const promptedRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) {
+      promptedRef.current = false;
+      return;
+    }
+
     const check = () => {
       const width = window.innerWidth;
       if (!Number.isFinite(threshold) || threshold <= 0) {
@@ -28,5 +33,5 @@ export function useAutoRemoteAccessPrompt() {
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
-  }, [localMobileModeActive, threshold]);
+  }, [enabled, localMobileModeActive, threshold]);
 }
