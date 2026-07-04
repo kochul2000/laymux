@@ -5,7 +5,7 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use tokio::time;
@@ -24,7 +24,8 @@ use super::lease::{
     reclaim_lockout_active, require_active_lease, status_from_state, RemoteControlLease,
 };
 use super::navigation_routes::{
-    remote_navigation, remote_terminal_focus, remote_workspace_switch_active,
+    remote_navigation, remote_notification_mark_read, remote_notifications_clear,
+    remote_notifications_mark_all_read, remote_terminal_focus, remote_workspace_switch_active,
 };
 use super::page::{remote_page, remote_page_redirect};
 use super::terminal_info::remote_terminal_infos;
@@ -79,6 +80,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
+        .route(
+            "/remote/v1/notifications/{id}/read",
+            post(remote_notification_mark_read),
+        )
+        .route(
+            "/remote/v1/notifications/mark-all-read",
+            post(remote_notifications_mark_all_read),
+        )
+        .route(
+            "/remote/v1/notifications",
+            delete(remote_notifications_clear),
+        )
         .route(
             "/remote/v1/workspaces/active",
             post(remote_workspace_switch_active),

@@ -591,12 +591,17 @@ Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/navigation` | GET | workspace 목록, active workspace pane 요약, dock pane 요약, terminal 표시 메타데이터 |
+| `/remote/v1/notifications/{id}/read` | POST | active `leaseId`로 단일 notification id를 읽음 처리 |
+| `/remote/v1/notifications/mark-all-read` | POST | active `leaseId`로 모든 unread notification을 읽음 처리 |
+| `/remote/v1/notifications` | DELETE | active `leaseId`로 모든 notification 제거 |
 | `/remote/v1/workspaces/active` | POST | active `leaseId`로 PC WebView의 active workspace 전환 |
 | `/remote/v1/terminals/{id}/focus` | POST | active `leaseId`로 PC WebView의 terminal focus 전환 |
 
 `/remote/v1/navigation`은 bearer token과 IP/Origin gate를 통과해야 하며 lease는 요구하지 않는다. 응답의 `workspaces`는 PC WebView `WorkspaceSelectorView`와 같은 `workspaceSelector.sortOrder`/`workspaceDisplayOrder` 규칙으로 정렬된 `{id,name,isActive,hidden,collapsed,paneCount,terminalPaneCount,liveTerminalCount,unreadCount,panes}` 요약이다. 숨김 워크스페이스와 숨김 pane은 목록에서 제거하지 않고 `hidden`/`collapsed` 플래그를 내려 PC selector와 같은 접힘 모델을 쓰며, 현재 active workspace는 숨김 상태여도 `collapsed=false`로 유지해 현재 터미널 문맥을 잃지 않는다. `workspaces[].panes`는 active workspace에서만 채우고 inactive workspace는 빈 배열로 둔다. 각 pane 요약은 `{id,location,workspaceId,paneIndex,paneNumber,viewType,terminalId,terminalLive,title,profile,cwd,branch,activity,outputActive,commandRunning,unreadCount,hidden,collapsed,x,y,w,h}` 형태이며, `unreadCount`는 terminal pane에만 부여하고 non-terminal pane은 항상 `0`이다. `activeWorkspace.panes`와 active `workspaces[].panes`는 같은 pane 요약을 쓰고, `docks[].panes`는 workspace 숨김 상태의 영향을 받지 않는다. 최상위 `workspaceSelector`는 remote drawer가 PC selector의 표시 토글/경로 ellipsis와 맞출 수 있게 하는 현재 selector 설정이며, `unreadNotificationCount`는 전체 unread 수다. `terminals`는 `/remote/v1/terminals` 항목에 frontend bridge의 `workspaceId`, `paneNumber`, `activity`, `isFocused` 등 탐색에 필요한 메타데이터를 병합한 목록이다.
 
 `/remote/v1/workspaces/active` body는 `{ "id": "...", "leaseId": "..." }`, `/remote/v1/terminals/{id}/focus` body는 `{ "leaseId": "..." }`다. 둘 다 `X-Laymux-Remote-Lease` 헤더도 허용하며, 성공 시 `workspace-state-changed` event를 발행해 MCP resource 구독자와 Automation resource cache가 stale 상태에 머물지 않게 한다. Remote workspace 전환은 해당 workspace의 unread notification을 읽음 처리하고, remote terminal focus는 해당 terminal의 unread notification을 읽음 처리한다. 이 처리는 focused remote UI의 명시적 navigation action에 대한 소비 동작이며, hidden-mode 편집 자체는 desktop WorkspaceSelectorView와 기존 Automation/MCP `ui.toggle*Hidden` 경로가 담당한다.
+
+`/remote/v1/navigation`은 최상위 `notifications` 목록도 포함한다. 각 항목은 `{id,title,message,level,createdAt,readAt,isRead,workspaceId,workspaceName,terminalId,terminalLabel,requiresAction}` 형태이며 desktop `NotificationPanel`과 같은 규칙으로 정렬한다. 즉 unread notification을 먼저 두고, unread/read 각 그룹 내부는 최신 삽입 순서를 따른다. Remote page는 이 정렬된 목록에서 처음 등장한 workspace 순서대로 그룹화해 표시한다. 알림 tap은 연관 대상이 있으면 기존 navigation action을 재사용한다: workspace 대상은 `/remote/v1/workspaces/active`, terminal 대상은 `/remote/v1/terminals/{id}/focus`를 호출하고, 대상이 없는 알림은 `/remote/v1/notifications/{id}/read`로 해당 id만 읽음 처리한다. Mark-all-read는 frontend bridge `notifications.markAllRead`를 사용하고, clear-all은 `notifications.list`로 id를 수집한 뒤 기존 `notifications.clear`에 ids를 넘긴다. 이 notification endpoint들은 remote controller action이므로 active lease를 요구하지만, `/remote/v1/navigation`은 계속 token-gated read-only query다.
 
 ### 13.4 Terminal Control
 

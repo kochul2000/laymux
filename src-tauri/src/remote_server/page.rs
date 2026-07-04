@@ -103,9 +103,42 @@ mod tests {
         assert!(html.contains("id=\"workspaceSection\""));
         assert!(html.contains("workspace-item-content"));
         assert!(html.contains("workspace-pane-row"));
+        assert!(html.contains("id=\"notificationSection\""));
+        assert!(html.contains("id=\"notificationToggle\""));
+        assert!(html.contains("id=\"notificationPanel\""));
+        assert!(html.contains("id=\"notificationBadge\""));
+        assert!(html.contains("renderNotificationPanel(data.notifications || []"));
+        assert!(html.contains("/remote/v1/notifications/mark-all-read"));
+        assert!(
+            html.contains("/remote/v1/notifications/${encodeURIComponent(notification.id)}/read")
+        );
+        assert!(html.contains("/remote/v1/notifications\","));
+        assert!(html.contains("function openNotification(notification)"));
         assert!(!html.contains("id=\"terminals\""));
         assert!(!html.contains("id=\"dockList\""));
         assert!(html.contains("function isDockTerminalId(terminalId)"));
         assert!(html.contains("options.focusHost !== false && !isDockTerminalId(terminalId)"));
+    }
+
+    #[test]
+    fn remote_page_terminal_notification_focuses_without_prior_workspace_switch() {
+        let html = remote_page_html();
+        let start = html.find("async function openNotification").unwrap();
+        let end = start
+            + html[start..]
+                .find("async function focusTerminalOnHost")
+                .unwrap();
+        let open_notification = &html[start..end];
+
+        let terminal_branch = open_notification
+            .find("if (notification.terminalId)")
+            .unwrap();
+        let workspace_branch = open_notification
+            .find("if (notification.workspaceId)")
+            .unwrap();
+
+        assert!(terminal_branch < workspace_branch);
+        assert!(open_notification.contains("await focusTerminalOnHost(notification.terminalId);"));
+        assert!(open_notification.contains("await activateWorkspace(notification.workspaceId);"));
     }
 }

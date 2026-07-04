@@ -660,6 +660,25 @@ const handlers: HandlerMap = {
       useNotificationStore.getState().markTerminalAsRead(terminalId);
       return ok({ marked: true });
     },
+    markIdsRead: (p) => {
+      const ids = p.ids as unknown;
+      if (!Array.isArray(ids) || !ids.every((value) => typeof value === "string")) {
+        return err("'ids' must be a string array");
+      }
+      if (ids.length === 0) return err("'ids' must not be empty");
+      useNotificationStore.getState().markNotificationsAsRead(ids);
+      return ok({ marked: ids.length });
+    },
+    markAllRead: () => {
+      const unreadIds = useNotificationStore
+        .getState()
+        .notifications.filter((notification) => notification.readAt === null)
+        .map((notification) => notification.id);
+      if (unreadIds.length > 0) {
+        useNotificationStore.getState().markNotificationsAsRead(unreadIds);
+      }
+      return ok({ marked: unreadIds.length });
+    },
     clear: (p) => {
       const ids = p.ids as unknown;
       const before = p.before as unknown;

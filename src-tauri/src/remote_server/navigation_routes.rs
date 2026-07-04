@@ -30,6 +30,12 @@ pub(super) struct TerminalFocusRequest {
     lease_id: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct NotificationActionRequest {
+    lease_id: Option<String>,
+}
+
 pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Response {
     let workspaces_data = match frontend_bridge_json(
         &server,
@@ -218,6 +224,141 @@ pub(super) async fn remote_terminal_focus(
     }
 }
 
+pub(super) async fn remote_notification_mark_read(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if id.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "notification id is required");
+    }
+    let body = match notification_action_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "notifications",
+        "markIdsRead",
+        serde_json::json!({ "ids": [id.clone()] }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.notifications.markRead",
+                serde_json::json!({ "id": id }),
+            );
+            Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
+pub(super) async fn remote_notifications_mark_all_read(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let body = match notification_action_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "notifications",
+        "markAllRead",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.notifications.markAllRead",
+                serde_json::json!({}),
+            );
+            Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
+pub(super) async fn remote_notifications_clear(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let body = match notification_action_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    let notifications_data = match frontend_bridge_json(
+        &server,
+        "query",
+        "notifications",
+        "list",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(response) => return response,
+    };
+    let ids = notification_ids(&notifications_data);
+    if ids.is_empty() {
+        return Json(serde_json::json!({ "cleared": 0 })).into_response();
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "notifications",
+        "clear",
+        serde_json::json!({ "ids": ids }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.notifications.clear",
+                serde_json::json!({}),
+            );
+            Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
 async fn frontend_bridge_json(
     server: &ServerState,
     category: &str,
@@ -270,6 +411,34 @@ fn terminal_focus_request_from_body(
     serde_json::from_slice(body)
 }
 
+fn notification_action_request_from_body(
+    body: &[u8],
+) -> Result<NotificationActionRequest, serde_json::Error> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(NotificationActionRequest::default());
+    }
+    serde_json::from_slice(body)
+}
+
+fn notification_ids(notifications_data: &Value) -> Vec<String> {
+    notifications_data
+        .get("notifications")
+        .and_then(Value::as_array)
+        .map(|notifications| {
+            notifications
+                .iter()
+                .filter_map(|notification| {
+                    notification
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
@@ -300,5 +469,28 @@ mod tests {
         );
 
         assert_eq!(lease_id_from_headers(&headers), Some("lease-header"));
+    }
+
+    #[test]
+    fn notification_action_request_accepts_empty_body_for_header_lease() {
+        let body = notification_action_request_from_body(b"").unwrap();
+        assert!(body.lease_id.is_none());
+
+        let body = notification_action_request_from_body(b" \n\t").unwrap();
+        assert!(body.lease_id.is_none());
+    }
+
+    #[test]
+    fn notification_ids_ignores_missing_and_empty_ids() {
+        let ids = notification_ids(&serde_json::json!({
+            "notifications": [
+                { "id": "n1" },
+                { "id": "" },
+                { "message": "missing" },
+                { "id": "n2" }
+            ]
+        }));
+
+        assert_eq!(ids, vec!["n1", "n2"]);
     }
 }
