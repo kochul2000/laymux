@@ -134,6 +134,7 @@ fn summarize_workspace(
     frontend_by_id: &HashMap<&str, &Value>,
 ) -> Value {
     let id = string_field(workspace, "id").unwrap_or_default();
+    let is_active = id == active_workspace_id;
     let panes = workspace
         .get("panes")
         .and_then(Value::as_array)
@@ -156,22 +157,26 @@ fn summarize_workspace(
                 .any(|terminal| string_field(terminal, "id") == Some(terminal_id.as_str()))
         })
         .count();
-    let pane_summaries = summarize_workspace_panes(
-        panes,
-        id,
-        backend_by_id,
-        frontend_by_id,
-        notifications,
-        hidden_pane_ids,
-    );
+    let pane_summaries = if is_active {
+        summarize_workspace_panes(
+            panes,
+            id,
+            backend_by_id,
+            frontend_by_id,
+            notifications,
+            hidden_pane_ids,
+        )
+    } else {
+        Vec::new()
+    };
     let hidden = hidden_workspace_ids.contains(id);
 
     json!({
         "id": id,
         "name": string_field(workspace, "name").unwrap_or("Workspace"),
-        "isActive": id == active_workspace_id,
+        "isActive": is_active,
         "hidden": hidden,
-        "collapsed": hidden && id != active_workspace_id,
+        "collapsed": hidden && !is_active,
         "paneCount": panes.len(),
         "terminalPaneCount": terminal_pane_count,
         "liveTerminalCount": live_terminal_count,
@@ -310,6 +315,10 @@ fn summarize_pane(
         .and_then(|id| frontend_by_id.get(id))
         .copied();
     let title = pane_title(&view_type, backend, frontend, terminal_id.as_deref());
+    let pane_unread_count = terminal_id
+        .as_deref()
+        .map(|terminal_id| unread_count(notifications, workspace_id, Some(terminal_id)))
+        .unwrap_or(0);
 
     json!({
         "id": pane_id,
@@ -327,7 +336,7 @@ fn summarize_pane(
         "activity": terminal_activity(backend, frontend),
         "outputActive": frontend.and_then(|terminal| optional_field(terminal, "outputActive")),
         "commandRunning": backend.map(|terminal| terminal.command_running).unwrap_or(false),
-        "unreadCount": unread_count(notifications, workspace_id, terminal_id.as_deref()),
+        "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,
         "x": optional_field(pane, "x"),
@@ -809,7 +818,19 @@ mod tests {
             &active_workspace_data,
             &json!({ "docks": [] }),
             &json!({ "instances": [] }),
-            &json!({ "notifications": [] }),
+            &json!({
+                "notifications": [
+                    {
+                        "id": "n1",
+                        "terminalId": "terminal-other",
+                        "workspaceId": "ws-1",
+                        "message": "workspace unread",
+                        "level": "info",
+                        "createdAt": 1,
+                        "readAt": null
+                    }
+                ]
+            }),
             &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
             &[],
         );
@@ -823,6 +844,8 @@ mod tests {
             false
         );
         assert_eq!(payload["activeWorkspace"]["panes"][0]["title"], "Settings");
+        assert_eq!(payload["workspaces"][0]["unreadCount"], 1);
+        assert_eq!(payload["activeWorkspace"]["panes"][0]["unreadCount"], 0);
     }
 
     #[test]
@@ -914,6 +937,10 @@ mod tests {
         assert_eq!(payload["workspaces"][0]["unreadCount"], 1);
         assert_eq!(payload["workspaces"][1]["hidden"], true);
         assert_eq!(payload["workspaces"][1]["collapsed"], true);
+        assert_eq!(
+            payload["workspaces"][1]["panes"].as_array().unwrap().len(),
+            0
+        );
         assert_eq!(payload["unreadNotificationCount"], 2);
 
         let pane_ids = payload["activeWorkspace"]["panes"]

@@ -21,7 +21,9 @@ Before this decision, `/remote/v1/navigation` summarized workspaces, panes, dock
 - workspaces are sorted with the same manual/notification sort rules used by `WorkspaceSelectorView`;
 - hidden workspaces and panes stay in the payload with `hidden`/`collapsed` flags instead of being filtered out, matching the desktop selector's collapse model;
 - the currently active workspace remains uncollapsed even if hidden so the current terminal context is not lost;
+- pane rows are included only for the active workspace; inactive workspaces stay as workspace-level summaries until remote UX has a separate inactive-pane interaction model;
 - workspace and pane summaries include unread notification counts;
+- non-terminal pane summaries always use `unreadCount=0`, because desktop WorkspaceSelectorView only shows terminal unread indicators;
 - remote drawer rendering respects WorkspaceSelector display toggles for pane minimap/environment/activity/path/result rows;
 - remote workspace switching marks that workspace's notifications read, and remote terminal focusing marks that terminal's notifications read, before the next navigation payload is fetched.
 
@@ -31,6 +33,6 @@ The remote page remains a focused terminal controller, not a full workspace edit
 
 Mobile remote navigation now matches the user's desktop selector order, hidden-row collapse behavior, and unread counts that disappear after explicit remote navigation.
 
-The remote navigation payload has additive fields (`hidden`, `collapsed`, `unreadCount`, `workspaceSelector`, `unreadNotificationCount`) and includes per-workspace pane summaries. Remote clients that want the raw workspace array should use the automation/MCP workspace APIs instead of `/remote/v1/navigation`.
+The remote navigation payload has additive fields (`hidden`, `collapsed`, `unreadCount`, `workspaceSelector`, `unreadNotificationCount`) and includes pane summaries for the active workspace only. Remote clients that want the raw workspace array should use the automation/MCP workspace APIs instead of `/remote/v1/navigation`.
 
 The Rust remote server depends on two additional frontend bridge reads for navigation. If the frontend bridge is unavailable, remote navigation already fails consistently rather than serving stale partial UI state.

@@ -1208,7 +1208,7 @@
           const activePanes = (navigationState && navigationState.activeWorkspace && navigationState.activeWorkspace.panes) || [];
           for (let index = 0; index < workspaces.length; index += 1) {
             const workspace = workspaces[index];
-            const panes = workspace.panes || (workspace.isActive ? activePanes : []);
+            const panes = workspace.isActive ? (workspace.panes || activePanes) : [];
             workspaceListEl.append(renderWorkspaceItem(workspace, index, panes));
           }
         }
