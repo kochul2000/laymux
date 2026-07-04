@@ -1741,9 +1741,6 @@
         async function openNotification(notification) {
           if (!leaseId || !notification) return;
           setStatus("Opening notification...");
-          if (notification.workspaceId) {
-            await activateWorkspace(notification.workspaceId);
-          }
           if (notification.terminalId) {
             try {
               await focusTerminalOnHost(notification.terminalId);
@@ -1756,7 +1753,10 @@
             setNavigationOpen(false);
             return;
           }
-          if (!notification.workspaceId) {
+
+          if (notification.workspaceId) {
+            await activateWorkspace(notification.workspaceId);
+          } else {
             await markNotificationRead(notification);
           }
           await loadNavigation(null);
