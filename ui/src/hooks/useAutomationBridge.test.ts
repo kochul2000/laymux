@@ -13,6 +13,7 @@ import { useDockStore } from "@/stores/dock-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
@@ -64,6 +65,7 @@ describe("handleAutomationRequest", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -78,6 +80,7 @@ describe("handleAutomationRequest", () => {
     expect(result.success).toBe(true);
     expect(result.data).toHaveProperty("workspaces");
     expect(result.data).toHaveProperty("activeWorkspaceId");
+    expect(result.data).toHaveProperty("workspaceDisplayOrder");
   });
 
   it("returns active workspace", () => {
@@ -179,6 +182,48 @@ describe("handleAutomationRequest", () => {
     });
     expect(result.success).toBe(true);
     expect(result.data).toHaveProperty("notifications");
+  });
+
+  it("marks terminal notifications as read", () => {
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-pane-1",
+      workspaceId: "ws-default",
+      message: "waiting",
+      requiresAction: true,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "r9b",
+      category: "action",
+      target: "notifications",
+      method: "markTerminalRead",
+      params: { terminalId: "terminal-pane-1" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
+  });
+
+  it("returns UI hidden state for remote navigation", () => {
+    useUiStore.getState().toggleWorkspaceHidden("ws-hidden");
+    useUiStore.getState().togglePaneHidden("pane-hidden");
+    useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
+
+    const result = handleAutomationRequest({
+      requestId: "r9c",
+      category: "query",
+      target: "ui",
+      method: "state",
+      params: {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      hiddenWorkspaceIds: ["ws-hidden"],
+      hiddenPaneIds: ["pane-hidden"],
+      hideMode: false,
+      workspaceSelector: expect.objectContaining({ sortOrder: "notification" }),
+    });
   });
 
   it("returns layout list", () => {

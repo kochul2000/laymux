@@ -194,8 +194,8 @@ function isCanvasCoveredByScreenshotOccluder(rect: DOMRect): boolean {
 const handlers: HandlerMap = {
   workspaces: {
     list: () => {
-      const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
-      return ok({ workspaces, activeWorkspaceId });
+      const { workspaces, activeWorkspaceId, workspaceDisplayOrder } = useWorkspaceStore.getState();
+      return ok({ workspaces, activeWorkspaceId, workspaceDisplayOrder });
     },
     getActive: () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
@@ -654,6 +654,12 @@ const handlers: HandlerMap = {
       useNotificationStore.getState().markWorkspaceAsRead(p.workspaceId as string);
       return ok({ marked: true });
     },
+    markTerminalRead: (p) => {
+      const terminalId = p.terminalId as string;
+      if (!terminalId) return err("terminalId required");
+      useNotificationStore.getState().markTerminalAsRead(terminalId);
+      return ok({ marked: true });
+    },
     clear: (p) => {
       const ids = p.ids as unknown;
       const before = p.before as unknown;
@@ -715,6 +721,18 @@ const handlers: HandlerMap = {
   },
 
   ui: {
+    state: () => {
+      const { hideMode, hiddenPaneIds, hiddenWorkspaceIds, notificationPanelOpen } =
+        useUiStore.getState();
+      const { workspaceSelector } = useSettingsStore.getState();
+      return ok({
+        hideMode,
+        hiddenPaneIds: [...hiddenPaneIds],
+        hiddenWorkspaceIds: [...hiddenWorkspaceIds],
+        notificationPanelOpen,
+        workspaceSelector,
+      });
+    },
     openSettings: () => {
       useUiStore.getState().openSettingsModal();
       return ok({ opened: true });
