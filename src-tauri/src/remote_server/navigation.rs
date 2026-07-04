@@ -44,11 +44,18 @@ pub(super) fn build_remote_navigation_payload(
         .get("workspaceSelector")
         .unwrap_or(&Value::Null);
     let workspace_sort_order = string_field(workspace_selector, "sortOrder").unwrap_or("manual");
+    let workspace_names = workspace_name_map(workspaces_data, active_workspace_data);
     let notifications = notifications_data
         .get("notifications")
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
+    let notification_summaries = summarize_notifications(
+        notifications,
+        &workspace_names,
+        &backend_by_id,
+        &frontend_by_id,
+    );
 
     let workspaces = workspaces_data
         .get("workspaces")
@@ -118,6 +125,7 @@ pub(super) fn build_remote_navigation_payload(
         "activeWorkspace": active_workspace,
         "docks": docks,
         "terminals": terminals,
+        "notifications": notification_summaries,
         "workspaceSelector": workspace_selector,
         "unreadNotificationCount": unread_count(notifications, None, None),
     })
@@ -373,6 +381,116 @@ fn terminal_summary_value(terminal: &RemoteTerminalInfo, frontend: Option<&Value
     }
 
     value
+}
+
+fn summarize_notifications(
+    notifications: &[Value],
+    workspace_names: &HashMap<String, String>,
+    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
+    frontend_by_id: &HashMap<&str, &Value>,
+) -> Vec<Value> {
+    let mut indexed = notifications.iter().enumerate().collect::<Vec<_>>();
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        notification_read_rank(left)
+            .cmp(&notification_read_rank(right))
+            .then_with(|| right_index.cmp(left_index))
+    });
+
+    indexed
+        .into_iter()
+        .map(|(_, notification)| {
+            let workspace_id = string_field(notification, "workspaceId");
+            let terminal_id = string_field(notification, "terminalId");
+            let workspace_name = workspace_id.and_then(|id| workspace_names.get(id));
+            let terminal_label =
+                notification_terminal_label(terminal_id, backend_by_id, frontend_by_id);
+            let title = terminal_label
+                .as_deref()
+                .or_else(|| workspace_name.map(String::as_str))
+                .unwrap_or("Notification");
+            let read_at = optional_field(notification, "readAt");
+            let is_read = read_at.is_some();
+
+            json!({
+                "id": string_field(notification, "id").unwrap_or_default(),
+                "title": title,
+                "message": string_field(notification, "message").unwrap_or_default(),
+                "level": string_field(notification, "level").unwrap_or("info"),
+                "createdAt": number_field(notification, "createdAt").unwrap_or_default(),
+                "readAt": read_at,
+                "isRead": is_read,
+                "workspaceId": workspace_id,
+                "workspaceName": workspace_name,
+                "terminalId": terminal_id,
+                "terminalLabel": terminal_label,
+                "requiresAction": bool_field(notification, "requiresAction").unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+fn notification_read_rank(notification: &Value) -> u8 {
+    if notification
+        .get("readAt")
+        .is_some_and(|value| !value.is_null())
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn notification_terminal_label(
+    terminal_id: Option<&str>,
+    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
+    frontend_by_id: &HashMap<&str, &Value>,
+) -> Option<String> {
+    let terminal_id = terminal_id?;
+    let frontend = frontend_by_id.get(terminal_id).copied();
+    let backend = backend_by_id.get(terminal_id).copied();
+    string_field(frontend.unwrap_or(&Value::Null), "label")
+        .or_else(|| string_field(frontend.unwrap_or(&Value::Null), "title"))
+        .or_else(|| {
+            backend
+                .map(|terminal| terminal.title.as_str())
+                .filter(|title| !title.is_empty())
+        })
+        .or_else(|| {
+            backend
+                .map(|terminal| terminal.profile.as_str())
+                .filter(|profile| !profile.is_empty())
+        })
+        .or(Some(terminal_id))
+        .map(str::to_string)
+}
+
+fn workspace_name_map(
+    workspaces_data: &Value,
+    active_workspace_data: &Value,
+) -> HashMap<String, String> {
+    let mut names = HashMap::new();
+    if let Some(workspaces) = workspaces_data.get("workspaces").and_then(Value::as_array) {
+        for workspace in workspaces {
+            if let (Some(id), Some(name)) = (
+                string_field(workspace, "id"),
+                string_field(workspace, "name"),
+            ) {
+                names.insert(id.to_string(), name.to_string());
+            }
+        }
+    }
+    if let Some(workspace) = active_workspace_data
+        .get("workspace")
+        .filter(|workspace| !workspace.is_null())
+    {
+        if let (Some(id), Some(name)) = (
+            string_field(workspace, "id"),
+            string_field(workspace, "name"),
+        ) {
+            names.insert(id.to_string(), name.to_string());
+        }
+    }
+    names
 }
 
 fn pane_title(
@@ -953,6 +1071,106 @@ mod tests {
         assert_eq!(payload["activeWorkspace"]["panes"][0]["unreadCount"], 1);
         assert_eq!(payload["activeWorkspace"]["panes"][1]["hidden"], true);
         assert_eq!(payload["activeWorkspace"]["panes"][1]["collapsed"], true);
+
+        let notification_ids = payload["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|notification| notification["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(notification_ids, vec!["n2", "n1", "n3"]);
+        assert_eq!(payload["notifications"][0]["workspaceName"], "Hidden");
+        assert_eq!(payload["notifications"][0]["isRead"], false);
+        assert_eq!(payload["notifications"][2]["isRead"], true);
+    }
+
+    #[test]
+    fn navigation_payload_includes_notification_list_with_desktop_order_and_targets() {
+        let workspaces_data = json!({
+            "activeWorkspaceId": "ws-a",
+            "workspaces": [
+                { "id": "ws-a", "name": "Alpha", "panes": [] },
+                { "id": "ws-b", "name": "Beta", "panes": [] }
+            ]
+        });
+        let active_workspace_data = json!({
+            "workspace": { "id": "ws-a", "name": "Alpha", "panes": [] }
+        });
+        let terminal_instances_data = json!({
+            "instances": [
+                { "id": "terminal-a", "workspaceId": "ws-a", "label": "Shell A" }
+            ]
+        });
+        let notifications = json!({
+            "notifications": [
+                {
+                    "id": "read-old",
+                    "terminalId": "terminal-a",
+                    "workspaceId": "ws-a",
+                    "message": "old read",
+                    "level": "info",
+                    "createdAt": 100,
+                    "readAt": 101
+                },
+                {
+                    "id": "unread-old",
+                    "terminalId": "terminal-a",
+                    "workspaceId": "ws-a",
+                    "message": "old unread",
+                    "level": "warning",
+                    "createdAt": 200,
+                    "readAt": null
+                },
+                {
+                    "id": "unread-new",
+                    "terminalId": "terminal-b",
+                    "workspaceId": "ws-b",
+                    "message": "new unread",
+                    "level": "error",
+                    "createdAt": 300,
+                    "readAt": null,
+                    "requiresAction": true
+                },
+                {
+                    "id": "read-new",
+                    "message": "global read",
+                    "level": "success",
+                    "createdAt": 400,
+                    "readAt": 401
+                }
+            ]
+        });
+
+        let payload = build_remote_navigation_payload(
+            &workspaces_data,
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &terminal_instances_data,
+            &notifications,
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
+            &[terminal("terminal-b", "Backend B")],
+        );
+
+        let notification_ids = payload["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|notification| notification["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            notification_ids,
+            vec!["unread-new", "unread-old", "read-new", "read-old"]
+        );
+        assert_eq!(payload["notifications"][0]["workspaceId"], "ws-b");
+        assert_eq!(payload["notifications"][0]["workspaceName"], "Beta");
+        assert_eq!(payload["notifications"][0]["terminalId"], "terminal-b");
+        assert_eq!(payload["notifications"][0]["terminalLabel"], "Backend B");
+        assert_eq!(payload["notifications"][0]["title"], "Backend B");
+        assert_eq!(payload["notifications"][0]["requiresAction"], true);
+        assert_eq!(payload["notifications"][1]["terminalLabel"], "Shell A");
+        assert_eq!(payload["notifications"][2]["workspaceId"], Value::Null);
+        assert_eq!(payload["notifications"][2]["terminalId"], Value::Null);
+        assert_eq!(payload["notifications"][2]["isRead"], true);
     }
 
     #[test]

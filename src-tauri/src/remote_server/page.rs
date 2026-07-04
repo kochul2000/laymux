@@ -103,6 +103,17 @@ mod tests {
         assert!(html.contains("id=\"workspaceSection\""));
         assert!(html.contains("workspace-item-content"));
         assert!(html.contains("workspace-pane-row"));
+        assert!(html.contains("id=\"notificationSection\""));
+        assert!(html.contains("id=\"notificationToggle\""));
+        assert!(html.contains("id=\"notificationPanel\""));
+        assert!(html.contains("id=\"notificationBadge\""));
+        assert!(html.contains("renderNotificationPanel(data.notifications || []"));
+        assert!(html.contains("/remote/v1/notifications/mark-all-read"));
+        assert!(
+            html.contains("/remote/v1/notifications/${encodeURIComponent(notification.id)}/read")
+        );
+        assert!(html.contains("/remote/v1/notifications\","));
+        assert!(html.contains("function openNotification(notification)"));
         assert!(!html.contains("id=\"terminals\""));
         assert!(!html.contains("id=\"dockList\""));
         assert!(html.contains("function isDockTerminalId(terminalId)"));

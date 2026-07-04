@@ -204,6 +204,79 @@ describe("handleAutomationRequest", () => {
     expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
   });
 
+  it("marks notification ids as read", () => {
+    const store = useNotificationStore.getState();
+    const first = store.addNotification({
+      terminalId: "terminal-pane-1",
+      workspaceId: "ws-default",
+      message: "first",
+      requiresAction: true,
+    });
+    const second = store.addNotification({
+      terminalId: "terminal-pane-2",
+      workspaceId: "ws-default",
+      message: "second",
+      requiresAction: true,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "r9c",
+      category: "action",
+      target: "notifications",
+      method: "markIdsRead",
+      params: { ids: [first.id] },
+    });
+
+    expect(result.success).toBe(true);
+    const notifications = useNotificationStore.getState().notifications;
+    expect(
+      notifications.find((notification) => notification.id === first.id)?.readAt,
+    ).not.toBeNull();
+    expect(notifications.find((notification) => notification.id === second.id)?.readAt).toBeNull();
+  });
+
+  it("marks all unread notifications as read", () => {
+    const now = Date.now();
+    useNotificationStore.setState({
+      notifications: [
+        {
+          id: "unread-1",
+          terminalId: "terminal-pane-1",
+          workspaceId: "ws-default",
+          message: "first",
+          level: "info",
+          createdAt: now - 10,
+          readAt: null,
+        },
+        {
+          id: "read-1",
+          terminalId: "terminal-pane-2",
+          workspaceId: "ws-default",
+          message: "second",
+          level: "info",
+          createdAt: now - 5,
+          readAt: now - 1,
+        },
+      ],
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "r9d",
+      category: "action",
+      target: "notifications",
+      method: "markAllRead",
+      params: {},
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { marked: number }).marked).toBe(1);
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.every((notification) => notification.readAt !== null),
+    ).toBe(true);
+  });
+
   it("returns UI hidden state for remote navigation", () => {
     useUiStore.getState().toggleWorkspaceHidden("ws-hidden");
     useUiStore.getState().togglePaneHidden("pane-hidden");

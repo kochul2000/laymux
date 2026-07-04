@@ -450,6 +450,122 @@
         font-variant-numeric: tabular-nums;
         line-height: 1;
       }
+      .notification-tab {
+        width: 100%;
+        min-height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-primary);
+        text-align: left;
+      }
+      .notification-tab:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .notification-tab[aria-expanded="true"] {
+        background: var(--accent-08);
+      }
+      .notification-tab-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--fs-sm);
+        font-weight: 650;
+      }
+      .notification-panel {
+        display: flex;
+        flex-direction: column;
+        max-height: min(46vh, 360px);
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.012);
+      }
+      .notification-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 7px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .notification-actions button {
+        min-width: 0;
+        padding-left: 6px;
+        padding-right: 6px;
+        font-size: var(--fs-sm);
+      }
+      .notification-list {
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .notification-group-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 8px 4px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .notification-item {
+        width: 100%;
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(52px, 72px) minmax(0, 1fr) auto;
+        gap: 7px;
+        align-items: center;
+        padding: 7px 8px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        text-align: left;
+      }
+      .notification-item:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .notification-item.read {
+        opacity: 0.6;
+      }
+      .notification-source,
+      .notification-message,
+      .notification-time {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--fs-sm);
+      }
+      .notification-source {
+        color: var(--text-secondary);
+        opacity: 0.84;
+      }
+      .notification-message {
+        color: var(--text-primary);
+      }
+      .notification-message.error {
+        color: var(--red);
+      }
+      .notification-message.warning {
+        color: var(--yellow);
+      }
+      .notification-message.success {
+        color: var(--green);
+      }
+      .notification-time {
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        opacity: 0.78;
+      }
       .workspace-pane-list {
         display: flex;
         flex-direction: column;
@@ -711,6 +827,19 @@
                 <button id="refresh" disabled>Refresh</button>
               </div>
             </section>
+            <section id="notificationSection" class="nav-section locked" aria-label="Notifications">
+              <button id="notificationToggle" class="notification-tab" type="button" aria-expanded="false" aria-controls="notificationPanel" disabled>
+                <span class="notification-tab-label">Notifications</span>
+                <span id="notificationBadge" class="workspace-count-badge" hidden>0</span>
+              </button>
+              <div id="notificationPanel" class="notification-panel" hidden>
+                <div class="notification-actions">
+                  <button id="markAllNotificationsRead" type="button" disabled>Mark read</button>
+                  <button id="clearNotifications" class="danger" type="button" disabled>Clear</button>
+                </div>
+                <div id="notificationList" class="notification-list"></div>
+              </div>
+            </section>
             <section id="workspaceSection" class="nav-section locked">
               <h2 class="nav-section-title">Workspaces</h2>
               <div id="workspaceList" class="nav-list"></div>
@@ -751,6 +880,13 @@
         const terminalMetaEl = $("terminalMeta");
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
+        const notificationSection = $("notificationSection");
+        const notificationToggleButton = $("notificationToggle");
+        const notificationBadge = $("notificationBadge");
+        const notificationPanel = $("notificationPanel");
+        const notificationListEl = $("notificationList");
+        const markAllNotificationsReadButton = $("markAllNotificationsRead");
+        const clearNotificationsButton = $("clearNotifications");
         const focusTerminalButton = $("focusTerminal");
         const copySelectionButton = $("copySelection");
         const ctrlCButton = $("ctrlC");
@@ -771,6 +907,7 @@
         let pendingInput = "";
         let inputFlushTimer = null;
         let inputWriteChain = Promise.resolve();
+        let notificationPanelOpen = false;
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
@@ -849,10 +986,13 @@
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
+          notificationSection.classList.toggle("locked", !connected);
+          notificationToggleButton.disabled = !connected;
           releaseButton.disabled = !connected;
           refreshButton.disabled = !connected;
           connectButton.disabled = connected;
           updateTerminalControls();
+          updateNotificationActions();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -1163,6 +1303,105 @@
           element.style.fontSize = countBadgeFontSize(text);
         }
 
+        function notificationCount() {
+          return ((navigationState && navigationState.notifications) || []).length;
+        }
+
+        function unreadNotificationCount() {
+          return Number((navigationState && navigationState.unreadNotificationCount) || 0);
+        }
+
+        function updateNotificationActions() {
+          const hasNotifications = notificationCount() > 0;
+          const hasUnread = unreadNotificationCount() > 0;
+          markAllNotificationsReadButton.disabled = !leaseId || !hasUnread;
+          clearNotificationsButton.disabled = !leaseId || !hasNotifications;
+        }
+
+        function setNotificationPanelOpen(open) {
+          notificationPanelOpen = Boolean(open);
+          notificationPanel.hidden = !notificationPanelOpen;
+          notificationToggleButton.setAttribute("aria-expanded", String(notificationPanelOpen));
+        }
+
+        function formatNotificationTime(createdAt) {
+          const timestamp = Number(createdAt);
+          if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+          const diff = Date.now() - timestamp;
+          if (diff < 60000) return "now";
+          if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+          if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+          return `${Math.floor(diff / 86400000)}d`;
+        }
+
+        function notificationSource(notification) {
+          return notification.terminalLabel || notification.title || notification.workspaceName || notification.workspaceId || "Notification";
+        }
+
+        function notificationLevelClass(level) {
+          return ["error", "warning", "success", "info"].includes(level) ? level : "info";
+        }
+
+        function renderNotificationPanel(notifications, unreadCount) {
+          const badgeCount = Number(unreadCount) || 0;
+          notificationBadge.hidden = badgeCount <= 0;
+          if (badgeCount > 0) fillCountBadge(notificationBadge, badgeCount);
+          notificationListEl.innerHTML = "";
+          if (!notifications.length) {
+            emptyNav(notificationListEl, "No notifications.");
+            updateNotificationActions();
+            return;
+          }
+
+          const workspaceKeys = [];
+          for (const notification of notifications) {
+            const workspaceKey = notification.workspaceId || "__global__";
+            if (!workspaceKeys.includes(workspaceKey)) {
+              workspaceKeys.push(workspaceKey);
+            }
+          }
+          for (const workspaceKey of workspaceKeys) {
+            const groupNotifications = notifications.filter((notification) => (notification.workspaceId || "__global__") === workspaceKey);
+            const first = groupNotifications[0] || {};
+            const title = document.createElement("div");
+            title.className = "notification-group-title";
+            title.textContent = first.workspaceName || first.workspaceId || "Notifications";
+            notificationListEl.append(title);
+            groupNotifications.forEach((notification) => {
+              notificationListEl.append(renderNotificationItem(notification));
+            });
+          }
+          updateNotificationActions();
+        }
+
+        function renderNotificationItem(notification) {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = `notification-item${notification.isRead ? " read" : ""}`;
+          item.disabled = !leaseId;
+          item.dataset.notificationId = notification.id || "";
+          item.addEventListener("click", () => {
+            openNotification(notification).catch((err) => setStatus(err.message || String(err), true));
+          });
+
+          const source = document.createElement("span");
+          source.className = "notification-source";
+          source.textContent = notificationSource(notification);
+          item.append(source);
+
+          const message = document.createElement("span");
+          message.className = `notification-message ${notificationLevelClass(notification.level)}`;
+          message.textContent = notification.message || "";
+          item.append(message);
+
+          const time = document.createElement("span");
+          time.className = "notification-time";
+          time.textContent = formatNotificationTime(notification.createdAt);
+          item.append(time);
+
+          return item;
+        }
+
         function workspaceDisplaySettings() {
           const display = navigationState && navigationState.workspaceSelector && navigationState.workspaceSelector.display;
           return {
@@ -1196,6 +1435,7 @@
         }
 
         function renderNavigation(data) {
+          renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
         }
 
@@ -1452,13 +1692,73 @@
           }
         }
 
-        async function switchWorkspace(workspaceId) {
+        async function activateWorkspace(workspaceId) {
           if (!leaseId || !workspaceId) return;
-          setStatus("Switching workspace...");
           await remoteFetch("/remote/v1/workspaces/active", {
             method: "POST",
             body: JSON.stringify({ leaseId, id: workspaceId }),
           });
+        }
+
+        async function switchWorkspace(workspaceId) {
+          if (!leaseId || !workspaceId) return;
+          setStatus("Switching workspace...");
+          await activateWorkspace(workspaceId);
+          await loadNavigation(null);
+          setNavigationOpen(false);
+        }
+
+        async function markNotificationRead(notification) {
+          if (!leaseId || !notification || !notification.id) return;
+          await remoteFetch(`/remote/v1/notifications/${encodeURIComponent(notification.id)}/read`, {
+            method: "POST",
+            body: JSON.stringify({ leaseId }),
+          });
+        }
+
+        async function markAllNotificationsRead() {
+          if (!leaseId) return;
+          setStatus("Marking notifications read...");
+          await remoteFetch("/remote/v1/notifications/mark-all-read", {
+            method: "POST",
+            body: JSON.stringify({ leaseId }),
+          });
+          await loadNavigation(activeTerminalId, { openOutput: false });
+          setStatus("Notifications marked read.");
+        }
+
+        async function clearNotifications() {
+          if (!leaseId) return;
+          setStatus("Clearing notifications...");
+          await remoteFetch("/remote/v1/notifications", {
+            method: "DELETE",
+            body: JSON.stringify({ leaseId }),
+          });
+          await loadNavigation(activeTerminalId, { openOutput: false });
+          setStatus("Notifications cleared.");
+        }
+
+        async function openNotification(notification) {
+          if (!leaseId || !notification) return;
+          setStatus("Opening notification...");
+          if (notification.workspaceId) {
+            await activateWorkspace(notification.workspaceId);
+          }
+          if (notification.terminalId) {
+            try {
+              await focusTerminalOnHost(notification.terminalId);
+            } catch (err) {
+              await markNotificationRead(notification).catch(() => {});
+              await loadNavigation(activeTerminalId, { openOutput: false }).catch(() => {});
+              throw err;
+            }
+            await loadNavigation(notification.terminalId);
+            setNavigationOpen(false);
+            return;
+          }
+          if (!notification.workspaceId) {
+            await markNotificationRead(notification);
+          }
           await loadNavigation(null);
           setNavigationOpen(false);
         }
@@ -1704,11 +2004,22 @@
         }
 
         emptyNav(workspaceListEl, "Not connected.");
+        emptyNav(notificationListEl, "Not connected.");
+        setNotificationPanelOpen(false);
         setNavigationOpen(true);
 
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);
+        });
+        notificationToggleButton.addEventListener("click", () => {
+          setNotificationPanelOpen(!notificationPanelOpen);
+        });
+        markAllNotificationsReadButton.addEventListener("click", () => {
+          markAllNotificationsRead().catch((err) => setStatus(`Mark read failed: ${err.message}`, true));
+        });
+        clearNotificationsButton.addEventListener("click", () => {
+          clearNotifications().catch((err) => setStatus(`Clear failed: ${err.message}`, true));
         });
         navCloseButton.addEventListener("click", () => setNavigationOpen(false));
         navScrim.addEventListener("click", () => setNavigationOpen(false));
