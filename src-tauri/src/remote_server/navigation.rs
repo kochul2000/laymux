@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 
@@ -11,6 +12,8 @@ pub(super) fn build_remote_navigation_payload(
     active_workspace_data: &Value,
     docks_data: &Value,
     terminal_instances_data: &Value,
+    notifications_data: &Value,
+    ui_state_data: &Value,
     terminals: &[RemoteTerminalInfo],
 ) -> Value {
     let terminal_instances = terminal_instances_data
@@ -34,17 +37,43 @@ pub(super) fn build_remote_navigation_payload(
                 .and_then(|workspace| string_field(workspace, "id"))
         })
         .unwrap_or_default();
+    let hidden_workspace_ids = string_set(ui_state_data, "hiddenWorkspaceIds");
+    let hidden_pane_ids = string_set(ui_state_data, "hiddenPaneIds");
+    let workspace_display_order = string_vec(workspaces_data, "workspaceDisplayOrder");
+    let workspace_selector = ui_state_data
+        .get("workspaceSelector")
+        .unwrap_or(&Value::Null);
+    let workspace_sort_order = string_field(workspace_selector, "sortOrder").unwrap_or("manual");
+    let notifications = notifications_data
+        .get("notifications")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
 
     let workspaces = workspaces_data
         .get("workspaces")
         .and_then(Value::as_array)
         .map(|items| {
-            items
-                .iter()
-                .map(|workspace| {
-                    summarize_workspace(workspace, active_workspace_id, terminal_instances)
-                })
-                .collect::<Vec<_>>()
+            ordered_workspaces(
+                items,
+                workspace_sort_order,
+                &workspace_display_order,
+                notifications,
+            )
+            .into_iter()
+            .map(|workspace| {
+                summarize_workspace(
+                    workspace,
+                    active_workspace_id,
+                    terminal_instances,
+                    notifications,
+                    &hidden_workspace_ids,
+                    &hidden_pane_ids,
+                    &backend_by_id,
+                    &frontend_by_id,
+                )
+            })
+            .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
@@ -57,6 +86,8 @@ pub(super) fn build_remote_navigation_payload(
                 active_workspace_id,
                 &backend_by_id,
                 &frontend_by_id,
+                notifications,
+                &hidden_pane_ids,
             )
         })
         .unwrap_or(Value::Null);
@@ -87,6 +118,8 @@ pub(super) fn build_remote_navigation_payload(
         "activeWorkspace": active_workspace,
         "docks": docks,
         "terminals": terminals,
+        "workspaceSelector": workspace_selector,
+        "unreadNotificationCount": unread_count(notifications, None, None),
     })
 }
 
@@ -94,8 +127,14 @@ fn summarize_workspace(
     workspace: &Value,
     active_workspace_id: &str,
     terminal_instances: &[Value],
+    notifications: &[Value],
+    hidden_workspace_ids: &HashSet<String>,
+    hidden_pane_ids: &HashSet<String>,
+    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
+    frontend_by_id: &HashMap<&str, &Value>,
 ) -> Value {
     let id = string_field(workspace, "id").unwrap_or_default();
+    let is_active = id == active_workspace_id;
     let panes = workspace
         .get("panes")
         .and_then(Value::as_array)
@@ -118,14 +157,31 @@ fn summarize_workspace(
                 .any(|terminal| string_field(terminal, "id") == Some(terminal_id.as_str()))
         })
         .count();
+    let pane_summaries = if is_active {
+        summarize_workspace_panes(
+            panes,
+            id,
+            backend_by_id,
+            frontend_by_id,
+            notifications,
+            hidden_pane_ids,
+        )
+    } else {
+        Vec::new()
+    };
+    let hidden = hidden_workspace_ids.contains(id);
 
     json!({
         "id": id,
         "name": string_field(workspace, "name").unwrap_or("Workspace"),
-        "isActive": id == active_workspace_id,
+        "isActive": is_active,
+        "hidden": hidden,
+        "collapsed": hidden && !is_active,
         "paneCount": panes.len(),
         "terminalPaneCount": terminal_pane_count,
         "liveTerminalCount": live_terminal_count,
+        "unreadCount": unread_count(notifications, Some(id), None),
+        "panes": pane_summaries,
     })
 }
 
@@ -134,25 +190,21 @@ fn summarize_active_workspace(
     active_workspace_id: &str,
     backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
     frontend_by_id: &HashMap<&str, &Value>,
+    notifications: &[Value],
+    hidden_pane_ids: &HashSet<String>,
 ) -> Value {
     let panes = workspace
         .get("panes")
         .and_then(Value::as_array)
         .map(|items| {
-            items
-                .iter()
-                .enumerate()
-                .map(|(index, pane)| {
-                    summarize_pane(
-                        pane,
-                        index,
-                        Some(active_workspace_id),
-                        "workspace",
-                        backend_by_id,
-                        frontend_by_id,
-                    )
-                })
-                .collect::<Vec<_>>()
+            summarize_workspace_panes(
+                items,
+                active_workspace_id,
+                backend_by_id,
+                frontend_by_id,
+                notifications,
+                hidden_pane_ids,
+            )
         })
         .unwrap_or_default();
 
@@ -164,6 +216,33 @@ fn summarize_active_workspace(
         "paneCount": panes.len(),
         "panes": panes,
     })
+}
+
+fn summarize_workspace_panes(
+    panes: &[Value],
+    workspace_id: &str,
+    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
+    frontend_by_id: &HashMap<&str, &Value>,
+    notifications: &[Value],
+    hidden_pane_ids: &HashSet<String>,
+) -> Vec<Value> {
+    panes
+        .iter()
+        .enumerate()
+        .map(|(index, pane)| {
+            let pane_id = string_field(pane, "id").unwrap_or_default();
+            summarize_pane(
+                pane,
+                index,
+                Some(workspace_id),
+                "workspace",
+                backend_by_id,
+                frontend_by_id,
+                notifications,
+                hidden_pane_ids.contains(pane_id),
+            )
+        })
+        .collect()
 }
 
 fn summarize_dock(
@@ -187,6 +266,8 @@ fn summarize_dock(
                         "dock",
                         backend_by_id,
                         frontend_by_id,
+                        &[],
+                        false,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -211,6 +292,8 @@ fn summarize_pane(
     location: &str,
     backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
     frontend_by_id: &HashMap<&str, &Value>,
+    notifications: &[Value],
+    hidden: bool,
 ) -> Value {
     let pane_id = string_field(pane, "id").unwrap_or_default();
     let view_type = view_type(pane);
@@ -232,6 +315,10 @@ fn summarize_pane(
         .and_then(|id| frontend_by_id.get(id))
         .copied();
     let title = pane_title(&view_type, backend, frontend, terminal_id.as_deref());
+    let pane_unread_count = terminal_id
+        .as_deref()
+        .map(|terminal_id| unread_count(notifications, workspace_id, Some(terminal_id)))
+        .unwrap_or(0);
 
     json!({
         "id": pane_id,
@@ -243,12 +330,15 @@ fn summarize_pane(
         "terminalId": terminal_id,
         "terminalLive": backend.is_some(),
         "title": title,
-        "profile": terminal_profile(backend, frontend),
-        "cwd": terminal_cwd(backend, frontend),
+        "profile": terminal_profile(pane, backend, frontend),
+        "cwd": terminal_cwd(pane, backend, frontend),
         "branch": terminal_branch(backend, frontend),
         "activity": terminal_activity(backend, frontend),
         "outputActive": frontend.and_then(|terminal| optional_field(terminal, "outputActive")),
         "commandRunning": backend.map(|terminal| terminal.command_running).unwrap_or(false),
+        "unreadCount": pane_unread_count,
+        "hidden": hidden,
+        "collapsed": hidden,
         "x": optional_field(pane, "x"),
         "y": optional_field(pane, "y"),
         "w": optional_field(pane, "w"),
@@ -309,18 +399,33 @@ fn pane_title(
 }
 
 fn terminal_profile(
+    pane: &Value,
     backend: Option<&RemoteTerminalInfo>,
     frontend: Option<&Value>,
 ) -> Option<String> {
     backend
         .map(|terminal| terminal.profile.clone())
         .or_else(|| string_field(frontend.unwrap_or(&Value::Null), "profile").map(str::to_string))
+        .or_else(|| {
+            pane.get("view")
+                .and_then(|view| string_field(view, "profile"))
+                .map(str::to_string)
+        })
 }
 
-fn terminal_cwd(backend: Option<&RemoteTerminalInfo>, frontend: Option<&Value>) -> Option<String> {
+fn terminal_cwd(
+    pane: &Value,
+    backend: Option<&RemoteTerminalInfo>,
+    frontend: Option<&Value>,
+) -> Option<String> {
     backend
         .and_then(|terminal| terminal.cwd.clone())
         .or_else(|| string_field(frontend.unwrap_or(&Value::Null), "cwd").map(str::to_string))
+        .or_else(|| {
+            pane.get("view")
+                .and_then(|view| string_field(view, "lastCwd"))
+                .map(str::to_string)
+        })
 }
 
 fn terminal_branch(
@@ -377,6 +482,161 @@ fn bool_field(value: &Value, key: &str) -> Option<bool> {
 
 fn optional_field(value: &Value, key: &str) -> Option<Value> {
     value.get(key).filter(|item| !item.is_null()).cloned()
+}
+
+fn ordered_workspaces<'a>(
+    workspaces: &'a [Value],
+    sort_order: &str,
+    display_order: &[String],
+    notifications: &[Value],
+) -> Vec<&'a Value> {
+    let mut indexed = workspaces.iter().enumerate().collect::<Vec<_>>();
+
+    if sort_order == "notification" {
+        let latest_by_workspace = latest_unread_by_workspace(notifications);
+        indexed.sort_by(|(left_index, left), (right_index, right)| {
+            let left_id = string_field(left, "id").unwrap_or_default();
+            let right_id = string_field(right, "id").unwrap_or_default();
+            let left_latest = latest_by_workspace.get(left_id).copied().unwrap_or(0);
+            let right_latest = latest_by_workspace.get(right_id).copied().unwrap_or(0);
+            right_latest
+                .cmp(&left_latest)
+                .then_with(|| left_index.cmp(right_index))
+        });
+        return indexed
+            .into_iter()
+            .map(|(_, workspace)| workspace)
+            .collect();
+    }
+
+    if display_order.is_empty() {
+        return indexed
+            .into_iter()
+            .map(|(_, workspace)| workspace)
+            .collect();
+    }
+
+    let order_index = display_order
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        let left_id = string_field(left, "id").unwrap_or_default();
+        let right_id = string_field(right, "id").unwrap_or_default();
+        let left_order = order_index.get(left_id).copied();
+        let right_order = order_index.get(right_id).copied();
+        match (left_order, right_order) {
+            (Some(left_order), Some(right_order)) => left_order
+                .cmp(&right_order)
+                .then_with(|| left_index.cmp(right_index)),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => left_index.cmp(right_index),
+        }
+    });
+    indexed
+        .into_iter()
+        .map(|(_, workspace)| workspace)
+        .collect()
+}
+
+fn latest_unread_by_workspace(notifications: &[Value]) -> HashMap<&str, i64> {
+    let mut latest = HashMap::new();
+    for notification in notifications {
+        if notification
+            .get("readAt")
+            .is_some_and(|value| !value.is_null())
+        {
+            continue;
+        }
+        let Some(workspace_id) = string_field(notification, "workspaceId") else {
+            continue;
+        };
+        let created_at = number_field(notification, "createdAt").unwrap_or_default();
+        let entry = latest.entry(workspace_id).or_insert(0);
+        if created_at > *entry {
+            *entry = created_at;
+        }
+    }
+    latest
+}
+
+fn string_set(value: &Value, key: &str) -> HashSet<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn string_vec(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn number_field(value: &Value, key: &str) -> Option<i64> {
+    value
+        .get(key)
+        .and_then(|item| {
+            item.as_i64()
+                .or_else(|| item.as_u64().map(|value| value as i64))
+        })
+        .or_else(|| {
+            value.get(key).and_then(|item| {
+                item.as_f64().and_then(|value| {
+                    if value.is_finite() {
+                        Some(value as i64)
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
+}
+
+fn unread_count(
+    notifications: &[Value],
+    workspace_id: Option<&str>,
+    terminal_id: Option<&str>,
+) -> usize {
+    notifications
+        .iter()
+        .filter(|notification| {
+            if notification
+                .get("readAt")
+                .is_some_and(|value| !value.is_null())
+            {
+                return false;
+            }
+            if let Some(workspace_id) = workspace_id {
+                if string_field(notification, "workspaceId") != Some(workspace_id) {
+                    return false;
+                }
+            }
+            if let Some(terminal_id) = terminal_id {
+                if string_field(notification, "terminalId") != Some(terminal_id) {
+                    return false;
+                }
+            }
+            true
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -497,6 +757,8 @@ mod tests {
             &active_workspace_data,
             &docks_data,
             &terminal_instances_data,
+            &json!({ "notifications": [] }),
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
             &terminals,
         );
 
@@ -556,6 +818,20 @@ mod tests {
             &active_workspace_data,
             &json!({ "docks": [] }),
             &json!({ "instances": [] }),
+            &json!({
+                "notifications": [
+                    {
+                        "id": "n1",
+                        "terminalId": "terminal-other",
+                        "workspaceId": "ws-1",
+                        "message": "workspace unread",
+                        "level": "info",
+                        "createdAt": 1,
+                        "readAt": null
+                    }
+                ]
+            }),
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
             &[],
         );
 
@@ -568,5 +844,184 @@ mod tests {
             false
         );
         assert_eq!(payload["activeWorkspace"]["panes"][0]["title"], "Settings");
+        assert_eq!(payload["workspaces"][0]["unreadCount"], 1);
+        assert_eq!(payload["activeWorkspace"]["panes"][0]["unreadCount"], 0);
+    }
+
+    #[test]
+    fn navigation_payload_collapses_hidden_state_and_counts_unread_notifications() {
+        let workspaces_data = json!({
+            "activeWorkspaceId": "ws-1",
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "Main",
+                    "panes": [
+                        { "id": "p1", "view": { "type": "TerminalView" } },
+                        { "id": "p2", "view": { "type": "TerminalView" } }
+                    ]
+                },
+                {
+                    "id": "ws-hidden",
+                    "name": "Hidden",
+                    "panes": [
+                        { "id": "p3", "view": { "type": "TerminalView" } }
+                    ]
+                },
+                { "id": "ws-visible", "name": "Visible", "panes": [] }
+            ]
+        });
+        let active_workspace_data = json!({
+            "workspace": {
+                "id": "ws-1",
+                "name": "Main",
+                "panes": [
+                    { "id": "p1", "view": { "type": "TerminalView" } },
+                    { "id": "p2", "view": { "type": "TerminalView" } }
+                ]
+            }
+        });
+        let notifications = json!({
+            "notifications": [
+                {
+                    "id": "n1",
+                    "terminalId": "terminal-p1",
+                    "workspaceId": "ws-1",
+                    "message": "waiting",
+                    "level": "info",
+                    "createdAt": 1,
+                    "readAt": null
+                },
+                {
+                    "id": "n2",
+                    "terminalId": "terminal-p3",
+                    "workspaceId": "ws-hidden",
+                    "message": "old",
+                    "level": "info",
+                    "createdAt": 2,
+                    "readAt": null
+                },
+                {
+                    "id": "n3",
+                    "terminalId": "terminal-p2",
+                    "workspaceId": "ws-1",
+                    "message": "read",
+                    "level": "info",
+                    "createdAt": 3,
+                    "readAt": 4
+                }
+            ]
+        });
+        let ui_state = json!({
+            "hiddenWorkspaceIds": ["ws-hidden"],
+            "hiddenPaneIds": ["p2"]
+        });
+
+        let payload = build_remote_navigation_payload(
+            &workspaces_data,
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &notifications,
+            &ui_state,
+            &[],
+        );
+
+        let workspace_ids = payload["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|workspace| workspace["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(workspace_ids, vec!["ws-1", "ws-hidden", "ws-visible"]);
+        assert_eq!(payload["workspaces"][0]["unreadCount"], 1);
+        assert_eq!(payload["workspaces"][1]["hidden"], true);
+        assert_eq!(payload["workspaces"][1]["collapsed"], true);
+        assert_eq!(
+            payload["workspaces"][1]["panes"].as_array().unwrap().len(),
+            0
+        );
+        assert_eq!(payload["unreadNotificationCount"], 2);
+
+        let pane_ids = payload["activeWorkspace"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pane| pane["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(pane_ids, vec!["p1", "p2"]);
+        assert_eq!(payload["activeWorkspace"]["panes"][0]["unreadCount"], 1);
+        assert_eq!(payload["activeWorkspace"]["panes"][1]["hidden"], true);
+        assert_eq!(payload["activeWorkspace"]["panes"][1]["collapsed"], true);
+    }
+
+    #[test]
+    fn navigation_payload_matches_workspace_selector_ordering() {
+        let base_workspaces = json!([
+            { "id": "ws-a", "name": "A", "panes": [] },
+            { "id": "ws-b", "name": "B", "panes": [] },
+            { "id": "ws-c", "name": "C", "panes": [] }
+        ]);
+        let active_workspace_data = json!({ "workspace": null });
+        let notifications = json!({
+            "notifications": [
+                { "id": "n1", "workspaceId": "ws-c", "terminalId": "terminal-c", "createdAt": 100, "readAt": null },
+                { "id": "n2", "workspaceId": "ws-a", "terminalId": "terminal-a", "createdAt": 200, "readAt": null }
+            ]
+        });
+
+        let manual_payload = build_remote_navigation_payload(
+            &json!({
+                "activeWorkspaceId": "ws-a",
+                "workspaceDisplayOrder": ["ws-c", "ws-a", "ws-b"],
+                "workspaces": base_workspaces
+            }),
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &notifications,
+            &json!({
+                "hiddenWorkspaceIds": [],
+                "hiddenPaneIds": [],
+                "workspaceSelector": { "sortOrder": "manual" }
+            }),
+            &[],
+        );
+        let manual_ids = manual_payload["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|workspace| workspace["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(manual_ids, vec!["ws-c", "ws-a", "ws-b"]);
+
+        let notification_payload = build_remote_navigation_payload(
+            &json!({
+                "activeWorkspaceId": "ws-a",
+                "workspaceDisplayOrder": ["ws-c", "ws-a", "ws-b"],
+                "workspaces": [
+                    { "id": "ws-a", "name": "A", "panes": [] },
+                    { "id": "ws-b", "name": "B", "panes": [] },
+                    { "id": "ws-c", "name": "C", "panes": [] }
+                ]
+            }),
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &notifications,
+            &json!({
+                "hiddenWorkspaceIds": [],
+                "hiddenPaneIds": [],
+                "workspaceSelector": { "sortOrder": "notification" }
+            }),
+            &[],
+        );
+        let notification_ids = notification_payload["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|workspace| workspace["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(notification_ids, vec!["ws-a", "ws-c", "ws-b"]);
     }
 }

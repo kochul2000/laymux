@@ -341,7 +341,9 @@
       .workspace-item {
         width: 100%;
         min-width: 0;
+        display: grid;
         flex: 0 0 auto;
+        grid-template-rows: 1fr;
         overflow: hidden;
         padding: 7px 10px 7px 9px;
         text-align: left;
@@ -352,6 +354,14 @@
         background: transparent;
         color: var(--text);
         cursor: pointer;
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+          grid-template-rows 160ms ease,
+          opacity 160ms ease,
+          transform 160ms ease,
+          border-bottom-width 160ms ease,
+          padding 160ms ease;
       }
       .workspace-item:hover {
         background: var(--active-bg);
@@ -359,6 +369,15 @@
       .workspace-item.active {
         border-left-color: var(--accent);
         background: var(--accent-08);
+      }
+      .workspace-item.collapsed {
+        grid-template-rows: 0fr;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-4px);
+        padding-top: 0;
+        padding-bottom: 0;
+        border-bottom-width: 0;
       }
       .workspace-item-content {
         min-height: 0;
@@ -441,6 +460,7 @@
         width: 100%;
         min-width: 0;
         min-height: 18px;
+        max-height: 18px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -453,6 +473,14 @@
         line-height: 1.25;
         text-align: left;
         cursor: pointer;
+        overflow: hidden;
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+          max-height 160ms ease,
+          opacity 160ms ease,
+          transform 160ms ease,
+          margin 160ms ease;
       }
       .workspace-pane-row:hover:not(:disabled) {
         background: var(--hover-bg);
@@ -464,6 +492,15 @@
       .workspace-pane-row.active {
         background: var(--accent-12);
         filter: brightness(1.3);
+      }
+      .workspace-pane-row.collapsed {
+        max-height: 0;
+        min-height: 0;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-3px);
+        margin-top: 0;
+        margin-bottom: 0;
       }
       .pane-minimap {
         flex: 0 0 auto;
@@ -1110,6 +1147,38 @@
           return parts.filter(Boolean).join(" - ");
         }
 
+        function countBadgeText(count) {
+          const value = Number(count) || 0;
+          return value > 999 ? "999+" : String(value);
+        }
+
+        function countBadgeFontSize(text) {
+          const sizes = ["10px", "10px", "9.5px", "8.5px", "7.5px"];
+          return sizes[Math.min(text.length, sizes.length - 1)];
+        }
+
+        function fillCountBadge(element, count) {
+          const text = countBadgeText(count);
+          element.textContent = text;
+          element.style.fontSize = countBadgeFontSize(text);
+        }
+
+        function workspaceDisplaySettings() {
+          const display = navigationState && navigationState.workspaceSelector && navigationState.workspaceSelector.display;
+          return {
+            minimap: display && typeof display.minimap === "boolean" ? display.minimap : true,
+            environment: display && typeof display.environment === "boolean" ? display.environment : true,
+            activity: display && typeof display.activity === "boolean" ? display.activity : true,
+            path: display && typeof display.path === "boolean" ? display.path : true,
+            result: display && typeof display.result === "boolean" ? display.result : true,
+          };
+        }
+
+        function pathEllipsisMode() {
+          const selector = navigationState && navigationState.workspaceSelector;
+          return selector && selector.pathEllipsis === "end" ? "end" : "start";
+        }
+
         function emptyNav(container, text) {
           container.innerHTML = "";
           const item = document.createElement("div");
@@ -1139,16 +1208,17 @@
           const activePanes = (navigationState && navigationState.activeWorkspace && navigationState.activeWorkspace.panes) || [];
           for (let index = 0; index < workspaces.length; index += 1) {
             const workspace = workspaces[index];
-            const panes = workspace.isActive ? activePanes : [];
+            const panes = workspace.isActive ? (workspace.panes || activePanes) : [];
             workspaceListEl.append(renderWorkspaceItem(workspace, index, panes));
           }
         }
 
         function renderWorkspaceItem(workspace, index, panes) {
           const item = document.createElement("div");
-          item.className = `workspace-item${workspace.isActive ? " active" : ""}`;
+          item.className = `workspace-item${workspace.isActive ? " active" : ""}${workspace.collapsed ? " collapsed" : ""}`;
+          if (workspace.collapsed) item.setAttribute("aria-hidden", "true");
           item.addEventListener("click", () => {
-            if (!leaseId) return;
+            if (!leaseId || workspace.collapsed) return;
             switchWorkspace(workspace.id).catch((err) => setStatus(err.message, true));
           });
 
@@ -1184,10 +1254,10 @@
           const right = document.createElement("span");
           right.className = "workspace-primary-right";
           row.append(right);
-          if (!workspace.isActive && (workspace.liveTerminalCount || 0) > 0) {
+          if ((workspace.unreadCount || 0) > 0) {
             const badge = document.createElement("span");
             badge.className = "workspace-count-badge";
-            badge.textContent = String(workspace.liveTerminalCount);
+            fillCountBadge(badge, workspace.unreadCount);
             right.append(badge);
           }
 
@@ -1196,7 +1266,7 @@
             paneList.className = "workspace-pane-list";
             content.append(paneList);
             panes.forEach((pane, paneIndex) => {
-              paneList.append(renderPaneRow(pane, panes, paneIndex));
+              paneList.append(renderPaneRow(pane, panes, paneIndex, workspace.isActive));
             });
           } else {
             const summary = document.createElement("div");
@@ -1204,6 +1274,7 @@
             summary.textContent = metaText([
               `${workspace.paneCount || 0} panes`,
               `${workspace.liveTerminalCount || 0} live`,
+              (workspace.unreadCount || 0) > 0 ? `${workspace.unreadCount} unread` : "",
             ]);
             content.append(summary);
           }
@@ -1211,34 +1282,43 @@
           return item;
         }
 
-        function renderPaneRow(pane, panes, paneIndex) {
+        function renderPaneRow(pane, panes, paneIndex, workspaceActive) {
           const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
           const isActive = Boolean(isTerminal && pane.terminalId === activeTerminalId);
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = `workspace-pane-row${isActive ? " active" : ""}`;
-          row.disabled = !leaseId || !isTerminal;
-          row.addEventListener("click", (event) => {
-            event.stopPropagation();
-            if (!isTerminal) return;
-            selectTerminal(pane.terminalId, { focusHost: true, refreshNavigation: true }).catch((err) => setStatus(err.message, true));
-          });
+          const canSelectTerminal = Boolean(workspaceActive && leaseId && isTerminal && !pane.collapsed);
+          const row = document.createElement(canSelectTerminal ? "button" : "div");
+          if (canSelectTerminal) row.type = "button";
+          row.className = `workspace-pane-row${isActive ? " active" : ""}${pane.collapsed ? " collapsed" : ""}`;
+          if (pane.collapsed) row.setAttribute("aria-hidden", "true");
+          if (canSelectTerminal) {
+            row.addEventListener("click", (event) => {
+              event.stopPropagation();
+              selectTerminal(pane.terminalId, { focusHost: true, refreshNavigation: true }).catch((err) => setStatus(err.message, true));
+            });
+          }
 
-          const minimap = paneMinimapElement(panes, paneIndex);
-          row.append(minimap);
+          const display = workspaceDisplaySettings();
+          if (display.minimap) {
+            const minimap = paneMinimapElement(panes, paneIndex);
+            row.append(minimap);
+          } else {
+            row.style.paddingLeft = "18px";
+          }
 
           const main = document.createElement("div");
           main.className = "pane-row-main";
           row.append(main);
 
           if (isTerminal) {
-            const env = document.createElement("span");
-            env.className = "pane-env";
-            env.textContent = shortLabel(pane.profile || pane.title || "TerminalView");
-            main.append(env);
+            if (display.environment) {
+              const env = document.createElement("span");
+              env.className = "pane-env";
+              env.textContent = shortLabel(pane.profile || pane.title || "TerminalView");
+              main.append(env);
+            }
 
             const activity = activityLabel(pane.activity, pane.commandRunning);
-            if (activity) {
+            if (display.activity && activity) {
               const activityEl = document.createElement("span");
               const activityType = pane.activity && pane.activity.type === "interactiveApp"
                 ? "interactive"
@@ -1248,17 +1328,30 @@
               main.append(activityEl);
             }
 
-            if (pane.branch) {
+            if (display.path && pane.branch) {
               const branch = document.createElement("span");
               branch.className = "pane-branch";
               branch.textContent = pane.branch;
               main.append(branch);
             }
 
-            const path = document.createElement("span");
-            path.className = "pane-path";
-            path.textContent = pane.cwd || pane.title || pane.terminalId;
-            main.append(path);
+            if (display.path) {
+              const path = document.createElement("span");
+              path.className = "pane-path";
+              path.textContent = pane.cwd || pane.title || pane.terminalId;
+              if (pathEllipsisMode() === "start") {
+                path.style.direction = "rtl";
+                path.style.textAlign = "left";
+              }
+              main.append(path);
+            }
+
+            if (display.result && (pane.unreadCount || 0) > 0) {
+              const unread = document.createElement("span");
+              unread.className = "workspace-count-badge";
+              fillCountBadge(unread, pane.unreadCount);
+              main.append(unread);
+            }
           } else {
             const label = document.createElement("span");
             label.className = "pane-view-label";

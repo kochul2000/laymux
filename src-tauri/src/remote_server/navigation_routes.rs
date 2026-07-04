@@ -74,6 +74,23 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
             Ok(data) => data,
             Err(response) => return response,
         };
+    let notifications_data = match frontend_bridge_json(
+        &server,
+        "query",
+        "notifications",
+        "list",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(response) => return response,
+    };
+    let ui_state_data =
+        match frontend_bridge_json(&server, "query", "ui", "state", serde_json::json!({})).await {
+            Ok(data) => data,
+            Err(response) => return response,
+        };
 
     let settings = crate::settings::load_settings();
     let terminals = match remote_terminal_infos(&server.app_state, &settings) {
@@ -86,6 +103,8 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
         &active_workspace_data,
         &docks_data,
         &terminal_instances_data,
+        &notifications_data,
+        &ui_state_data,
         &terminals,
     ))
     .into_response()
@@ -119,6 +138,21 @@ pub(super) async fn remote_workspace_switch_active(
     .await
     {
         Ok(data) => {
+            if let Err(response) = frontend_bridge_json(
+                &server,
+                "action",
+                "notifications",
+                "markRead",
+                serde_json::json!({ "workspaceId": workspace_id.clone() }),
+            )
+            .await
+            {
+                tracing::debug!(
+                    workspace_id,
+                    "failed to mark remote workspace notifications read: {:?}",
+                    response.status()
+                );
+            }
             emit_workspace_state_changed(
                 &server,
                 "remote.workspaces.switchActive",
@@ -158,6 +192,21 @@ pub(super) async fn remote_terminal_focus(
     .await
     {
         Ok(data) => {
+            if let Err(response) = frontend_bridge_json(
+                &server,
+                "action",
+                "notifications",
+                "markTerminalRead",
+                serde_json::json!({ "terminalId": id.clone() }),
+            )
+            .await
+            {
+                tracing::debug!(
+                    terminal_id = %id,
+                    "failed to mark remote terminal notifications read: {:?}",
+                    response.status()
+                );
+            }
             emit_workspace_state_changed(
                 &server,
                 "remote.terminals.setFocus",
