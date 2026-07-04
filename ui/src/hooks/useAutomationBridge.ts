@@ -163,6 +163,23 @@ function findTerminalContext(terminalId: string) {
   return { terminal, workspace, pane, paneIndex, activeWorkspaceId };
 }
 
+function findDockPaneContext(terminalId: string) {
+  const { docks } = useDockStore.getState();
+  for (const dock of docks) {
+    const paneIndex = dock.panes.findIndex(
+      (pane) => pane.view.type === "TerminalView" && toTerminalId(pane.id) === terminalId,
+    );
+    if (paneIndex >= 0) {
+      return {
+        dock,
+        pane: dock.panes[paneIndex],
+        paneIndex,
+      };
+    }
+  }
+  return null;
+}
+
 /** Enrich a pane with its index, spatial number, and terminal ID (null for non-terminal panes). */
 function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, number>) {
   return {
@@ -567,24 +584,31 @@ const handlers: HandlerMap = {
       const terminalId = p.id as string;
       const terminal = findTerminalInstance(terminalId);
       if (!terminal) return err(`Terminal '${terminalId}' not found`);
+      const dockCtx = findDockPaneContext(terminalId);
 
-      // Auto-switch workspace if terminal is in a different workspace
+      // Auto-switch workspace if terminal is in a different workspace.
+      // Dock terminals are app-global, so focusing them must not switch workspaces.
       const { activeWorkspaceId } = useWorkspaceStore.getState();
-      const switchedWorkspace = terminal.workspaceId !== activeWorkspaceId;
+      const switchedWorkspace = !dockCtx && terminal.workspaceId !== activeWorkspaceId;
       if (switchedWorkspace) {
         useWorkspaceStore.getState().setActiveWorkspace(terminal.workspaceId);
       }
 
       // Update focusedPaneIndex to match the target terminal's pane
       const paneIndex = resolveTerminalPaneIndex(terminalId, terminal.workspaceId);
-      if (paneIndex >= 0) {
+      if (dockCtx) {
+        useDockStore.getState().setFocusedDock(dockCtx.dock.position, dockCtx.pane.id);
+        useGridStore.getState().setFocusedPane(null);
+      } else if (paneIndex >= 0) {
         useGridStore.getState().setFocusedPane(paneIndex);
       }
 
       useTerminalStore.getState().setTerminalFocus(terminalId);
       return ok({
         focused: terminalId,
-        paneIndex: paneIndex >= 0 ? paneIndex : undefined,
+        paneIndex: !dockCtx && paneIndex >= 0 ? paneIndex : undefined,
+        dockPosition: dockCtx?.dock.position,
+        dockPaneId: dockCtx?.pane.id,
         switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined,
       });
     },

@@ -37,6 +37,7 @@ ADR 이 필요한 대표 기준:
 | [0017](0017-mcp-dev-only-tools.md) | MCP dev 전용 툴 노출 정책 | Accepted |
 | [0018](0018-remote-navigation-ui-state.md) | Remote navigation reflects UI hidden and notification state | Accepted |
 | [0019](0019-remote-notification-interactions.md) | Remote notification interactions use navigation targets and bridge dismissal | Accepted |
+| [0020](0020-remote-dock-terminal-navigation.md) | Remote dock terminal navigation stays separate from workspace navigation | Accepted |
 
 ## 새 ADR 추가
 

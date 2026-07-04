@@ -450,7 +450,8 @@
         font-variant-numeric: tabular-nums;
         line-height: 1;
       }
-      .notification-tab {
+      .notification-tab,
+      .dock-tab {
         width: 100%;
         min-height: 30px;
         display: flex;
@@ -465,13 +466,16 @@
         color: var(--text-primary);
         text-align: left;
       }
-      .notification-tab:hover:not(:disabled) {
+      .notification-tab:hover:not(:disabled),
+      .dock-tab:hover:not(:disabled) {
         background: var(--hover-bg);
       }
-      .notification-tab[aria-expanded="true"] {
+      .notification-tab[aria-expanded="true"],
+      .dock-tab[aria-expanded="true"] {
         background: var(--accent-08);
       }
-      .notification-tab-label {
+      .notification-tab-label,
+      .dock-tab-label {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -479,7 +483,8 @@
         font-size: var(--fs-sm);
         font-weight: 650;
       }
-      .notification-panel {
+      .notification-panel,
+      .dock-panel {
         display: flex;
         flex-direction: column;
         max-height: min(46vh, 360px);
@@ -566,13 +571,41 @@
         font-size: var(--fs-xs);
         opacity: 0.78;
       }
+      .dock-group-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 8px 4px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .dock-terminal-row {
+        padding-left: 8px;
+        padding-right: 8px;
+        border-radius: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .dock-position-badge {
+        flex: 0 0 auto;
+        min-width: 38px;
+        color: var(--accent);
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
       .workspace-pane-list {
         display: flex;
         flex-direction: column;
         gap: 2px;
         margin-top: 4px;
       }
-      .workspace-pane-row {
+      .workspace-pane-row,
+      .dock-terminal-row {
         width: 100%;
         min-width: 0;
         min-height: 18px;
@@ -598,14 +631,17 @@
           transform 160ms ease,
           margin 160ms ease;
       }
-      .workspace-pane-row:hover:not(:disabled) {
+      .workspace-pane-row:hover:not(:disabled),
+      .dock-terminal-row:hover:not(:disabled) {
         background: var(--hover-bg);
       }
-      .workspace-pane-row:disabled {
+      .workspace-pane-row:disabled,
+      .dock-terminal-row:disabled {
         cursor: default;
         opacity: 0.72;
       }
-      .workspace-pane-row.active {
+      .workspace-pane-row.active,
+      .dock-terminal-row.active {
         background: var(--accent-12);
         filter: brightness(1.3);
       }
@@ -844,6 +880,15 @@
               <h2 class="nav-section-title">Workspaces</h2>
               <div id="workspaceList" class="nav-list"></div>
             </section>
+            <section id="dockSection" class="nav-section locked">
+              <button id="dockToggle" class="dock-tab" type="button" aria-expanded="false" aria-controls="dockPanel" disabled>
+                <span class="dock-tab-label">Dock terminals</span>
+                <span id="dockBadge" class="workspace-terminal-count" hidden>0</span>
+              </button>
+              <div id="dockPanel" class="dock-panel" hidden>
+                <div id="dockList" class="nav-list"></div>
+              </div>
+            </section>
           </aside>
           <div class="terminal-shell">
             <div id="terminal" aria-label="Terminal output"></div>
@@ -880,6 +925,11 @@
         const terminalMetaEl = $("terminalMeta");
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
+        const dockSection = $("dockSection");
+        const dockToggleButton = $("dockToggle");
+        const dockBadge = $("dockBadge");
+        const dockPanel = $("dockPanel");
+        const dockListEl = $("dockList");
         const notificationSection = $("notificationSection");
         const notificationToggleButton = $("notificationToggle");
         const notificationBadge = $("notificationBadge");
@@ -908,6 +958,7 @@
         let inputFlushTimer = null;
         let inputWriteChain = Promise.resolve();
         let notificationPanelOpen = false;
+        let dockPanelOpen = false;
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
@@ -986,6 +1037,8 @@
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
+          dockSection.classList.toggle("locked", !connected);
+          dockToggleButton.disabled = !connected;
           notificationSection.classList.toggle("locked", !connected);
           notificationToggleButton.disabled = !connected;
           releaseButton.disabled = !connected;
@@ -1324,6 +1377,12 @@
           notificationToggleButton.setAttribute("aria-expanded", String(notificationPanelOpen));
         }
 
+        function setDockPanelOpen(open) {
+          dockPanelOpen = Boolean(open);
+          dockPanel.hidden = !dockPanelOpen;
+          dockToggleButton.setAttribute("aria-expanded", String(dockPanelOpen));
+        }
+
         function formatNotificationTime(createdAt) {
           const timestamp = Number(createdAt);
           if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
@@ -1437,6 +1496,110 @@
         function renderNavigation(data) {
           renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
+          renderDockList(data.docks || []);
+        }
+
+        function renderDockList(docks) {
+          dockListEl.innerHTML = "";
+          const visibleDocks = docks.filter((dock) => dock.visible !== false);
+          const terminalRows = visibleDocks.flatMap((dock) =>
+            (dock.panes || [])
+              .map((pane) => ({ dock, pane }))
+              .filter(({ pane }) => pane.viewType === "TerminalView" && pane.terminalId)
+          );
+          dockBadge.hidden = terminalRows.length <= 0;
+          if (terminalRows.length > 0) {
+            dockBadge.textContent = String(terminalRows.length);
+          }
+          if (!terminalRows.length) {
+            emptyNav(dockListEl, "No dock terminals.");
+            return;
+          }
+
+          for (const dock of visibleDocks) {
+            const panes = dock.panes || [];
+            const terminalPanes = panes
+              .map((pane) => ({ pane }))
+              .filter(({ pane }) => pane.viewType === "TerminalView" && pane.terminalId);
+            if (!terminalPanes.length) continue;
+
+            const title = document.createElement("div");
+            title.className = "dock-group-title";
+            title.textContent = dock.position || "dock";
+            dockListEl.append(title);
+
+            terminalPanes.forEach(({ pane }) => {
+              dockListEl.append(renderDockTerminalRow(dock, pane));
+            });
+          }
+        }
+
+        function renderDockTerminalRow(dock, pane) {
+          const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
+          const isActive = Boolean(isTerminal && (pane.terminalId === activeTerminalId || pane.isFocused));
+          const canSelectTerminal = Boolean(leaseId && isTerminal);
+          const row = document.createElement(canSelectTerminal ? "button" : "div");
+          if (canSelectTerminal) row.type = "button";
+          row.className = `dock-terminal-row${isActive ? " active" : ""}`;
+          if (canSelectTerminal) {
+            row.addEventListener("click", () => {
+              selectTerminal(pane.terminalId, {
+                focusHost: true,
+                focusDockHost: true,
+                refreshNavigation: true,
+              }).catch((err) => setStatus(err.message, true));
+            });
+          }
+
+          const position = document.createElement("span");
+          position.className = "dock-position-badge";
+          position.textContent = shortLabel(dock.position || "dock");
+          row.append(position);
+
+          const main = document.createElement("div");
+          main.className = "pane-row-main";
+          row.append(main);
+
+          const env = document.createElement("span");
+          env.className = "pane-env";
+          env.textContent = shortLabel(pane.profile || pane.title || "TerminalView");
+          main.append(env);
+
+          const activity = activityLabel(pane.activity, pane.commandRunning);
+          if (activity) {
+            const activityEl = document.createElement("span");
+            const activityType = pane.activity && pane.activity.type === "interactiveApp"
+              ? "interactive"
+              : "running";
+            activityEl.className = `pane-activity ${activityType}`;
+            activityEl.textContent = activity;
+            main.append(activityEl);
+          }
+
+          if (pane.branch) {
+            const branch = document.createElement("span");
+            branch.className = "pane-branch";
+            branch.textContent = pane.branch;
+            main.append(branch);
+          }
+
+          const path = document.createElement("span");
+          path.className = "pane-path";
+          path.textContent = pane.cwd || pane.title || pane.terminalId;
+          if (pathEllipsisMode() === "start") {
+            path.style.direction = "rtl";
+            path.style.textAlign = "left";
+          }
+          main.append(path);
+
+          if ((pane.unreadCount || 0) > 0) {
+            const unread = document.createElement("span");
+            unread.className = "workspace-count-badge";
+            fillCountBadge(unread, pane.unreadCount);
+            main.append(unread);
+          }
+
+          return row;
         }
 
         function renderWorkspaceList(workspaces) {
@@ -1777,7 +1940,9 @@
           const terminalInfo = terminalInfoById.get(terminalId);
           terminalMetaEl.textContent = terminalInfo ? terminalLabel(terminalInfo) : terminalId;
           setConnected(Boolean(leaseId));
-          if (options.focusHost !== false && !isDockTerminalId(terminalId)) {
+          const canFocusHost =
+            options.focusHost !== false && (options.focusDockHost === true || !isDockTerminalId(terminalId));
+          if (canFocusHost) {
             await focusTerminalOnHost(terminalId).catch((err) => setStatus(`Focus failed: ${err.message}`, true));
           }
           if (options.refreshNavigation) {
@@ -2004,7 +2169,9 @@
         }
 
         emptyNav(workspaceListEl, "Not connected.");
+        emptyNav(dockListEl, "Not connected.");
         emptyNav(notificationListEl, "Not connected.");
+        setDockPanelOpen(false);
         setNotificationPanelOpen(false);
         setNavigationOpen(true);
 
@@ -2014,6 +2181,9 @@
         });
         notificationToggleButton.addEventListener("click", () => {
           setNotificationPanelOpen(!notificationPanelOpen);
+        });
+        dockToggleButton.addEventListener("click", () => {
+          setDockPanelOpen(!dockPanelOpen);
         });
         markAllNotificationsReadButton.addEventListener("click", () => {
           markAllNotificationsRead().catch((err) => setStatus(`Mark read failed: ${err.message}`, true));

@@ -115,9 +115,15 @@ mod tests {
         assert!(html.contains("/remote/v1/notifications\","));
         assert!(html.contains("function openNotification(notification)"));
         assert!(!html.contains("id=\"terminals\""));
-        assert!(!html.contains("id=\"dockList\""));
+        assert!(html.contains("id=\"dockSection\""));
+        assert!(html.contains("id=\"dockToggle\""));
+        assert!(html.contains("id=\"dockPanel\""));
+        assert!(html.contains("id=\"dockList\""));
+        assert!(html.contains("renderDockList(data.docks || [])"));
+        assert!(html.contains("function renderDockTerminalRow(dock, pane)"));
+        assert!(html.contains("focusDockHost: true"));
         assert!(html.contains("function isDockTerminalId(terminalId)"));
-        assert!(html.contains("options.focusHost !== false && !isDockTerminalId(terminalId)"));
+        assert!(html.contains("options.focusDockHost === true || !isDockTerminalId(terminalId)"));
     }
 
     #[test]
@@ -140,5 +146,21 @@ mod tests {
         assert!(terminal_branch < workspace_branch);
         assert!(open_notification.contains("await focusTerminalOnHost(notification.terminalId);"));
         assert!(open_notification.contains("await activateWorkspace(notification.workspaceId);"));
+    }
+
+    #[test]
+    fn remote_page_keeps_dock_navigation_separate_from_workspace_list() {
+        let html = remote_page_html();
+        let workspace_start = html.find("id=\"workspaceSection\"").unwrap();
+        let dock_start = html.find("id=\"dockSection\"").unwrap();
+        let script_start = html.find("function renderWorkspaceList").unwrap();
+        let script_end = html.find("function renderWorkspaceItem").unwrap();
+        let render_workspace_list = &html[script_start..script_end];
+
+        assert!(workspace_start < dock_start);
+        assert!(html.contains("function renderDockList(docks)"));
+        assert!(html.contains("dockToggleButton.addEventListener"));
+        assert!(!render_workspace_list.contains("dockListEl"));
+        assert!(!render_workspace_list.contains("renderDockTerminalRow"));
     }
 }

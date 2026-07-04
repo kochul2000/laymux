@@ -105,9 +105,7 @@ pub(super) fn build_remote_navigation_payload(
         .map(|items| {
             items
                 .iter()
-                .map(|dock| {
-                    summarize_dock(dock, active_workspace_id, &backend_by_id, &frontend_by_id)
-                })
+                .map(|dock| summarize_dock(dock, &backend_by_id, &frontend_by_id, notifications))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -255,9 +253,9 @@ fn summarize_workspace_panes(
 
 fn summarize_dock(
     dock: &Value,
-    active_workspace_id: &str,
     backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
     frontend_by_id: &HashMap<&str, &Value>,
+    notifications: &[Value],
 ) -> Value {
     let panes = dock
         .get("panes")
@@ -270,11 +268,11 @@ fn summarize_dock(
                     summarize_pane(
                         pane,
                         index,
-                        Some(active_workspace_id),
+                        None,
                         "dock",
                         backend_by_id,
                         frontend_by_id,
-                        &[],
+                        notifications,
                         false,
                     )
                 })
@@ -325,7 +323,14 @@ fn summarize_pane(
     let title = pane_title(&view_type, backend, frontend, terminal_id.as_deref());
     let pane_unread_count = terminal_id
         .as_deref()
-        .map(|terminal_id| unread_count(notifications, workspace_id, Some(terminal_id)))
+        .map(|terminal_id| {
+            let count_workspace_id = if location == "dock" {
+                None
+            } else {
+                workspace_id
+            };
+            unread_count(notifications, count_workspace_id, Some(terminal_id))
+        })
         .unwrap_or(0);
 
     json!({
@@ -344,6 +349,9 @@ fn summarize_pane(
         "activity": terminal_activity(backend, frontend),
         "outputActive": frontend.and_then(|terminal| optional_field(terminal, "outputActive")),
         "commandRunning": backend.map(|terminal| terminal.command_running).unwrap_or(false),
+        "isFocused": frontend
+            .and_then(|terminal| optional_field(terminal, "isFocused"))
+            .unwrap_or_else(|| json!(false)),
         "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,
@@ -840,7 +848,8 @@ mod tests {
                     "views": ["WorkspaceSelectorView"],
                     "size": 240,
                     "panes": [
-                        { "id": "dp1", "view": { "type": "TerminalView" }, "x": 0, "y": 0, "w": 1, "h": 1 }
+                        { "id": "dp1", "view": { "type": "TerminalView" }, "x": 0, "y": 0, "w": 0.5, "h": 1 },
+                        { "id": "dp2", "view": { "type": "MemoView" }, "x": 0.5, "y": 0, "w": 0.5, "h": 1 }
                     ]
                 }
             ]
@@ -861,7 +870,8 @@ mod tests {
                     "id": "terminal-dp1",
                     "workspaceId": "ws-1",
                     "label": "Dock shell",
-                    "activity": { "type": "running" }
+                    "activity": { "type": "running" },
+                    "isFocused": true
                 }
             ]
         });
@@ -875,7 +885,19 @@ mod tests {
             &active_workspace_data,
             &docks_data,
             &terminal_instances_data,
-            &json!({ "notifications": [] }),
+            &json!({
+                "notifications": [
+                    {
+                        "id": "dock-unread",
+                        "terminalId": "terminal-dp1",
+                        "workspaceId": "ws-1",
+                        "message": "dock waiting",
+                        "level": "info",
+                        "createdAt": 5,
+                        "readAt": null
+                    }
+                ]
+            }),
             &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
             &terminals,
         );
@@ -896,10 +918,15 @@ mod tests {
             payload["docks"][0]["panes"][0]["terminalId"],
             "terminal-dp1"
         );
+        assert_eq!(payload["docks"][0]["panes"][0]["workspaceId"], Value::Null);
         assert_eq!(
             payload["docks"][0]["panes"][0]["activity"]["type"],
             "running"
         );
+        assert_eq!(payload["docks"][0]["panes"][0]["unreadCount"], 1);
+        assert_eq!(payload["docks"][0]["panes"][0]["isFocused"], true);
+        assert_eq!(payload["docks"][0]["panes"][1]["viewType"], "MemoView");
+        assert_eq!(payload["docks"][0]["panes"][1]["unreadCount"], 0);
         assert_eq!(
             payload["terminals"][0]["appearance"]["fontFamily"],
             "Cascadia Mono"
