@@ -124,6 +124,7 @@ mod tests {
         assert!(html.contains("focusDockHost: true"));
         assert!(html.contains("function isDockTerminalId(terminalId)"));
         assert!(html.contains("options.focusDockHost === true || !isDockTerminalId(terminalId)"));
+        assert!(html.contains("function isMainOutputTerminal(data, terminalId)"));
     }
 
     #[test]
@@ -171,10 +172,41 @@ mod tests {
         let end = start + html[start..].find("async function loadNavigation").unwrap();
         let preferred_terminal = &html[start..end];
 
-        assert!(preferred_terminal.contains(
-            "const visibleDocks = (data.docks || []).filter((dock) => dock.visible !== false);"
+        assert!(html.contains(
+            "function visibleDockItems(data) {\n          return (data.docks || []).filter((dock) => dock.visible !== false);"
         ));
-        assert!(preferred_terminal.contains("for (const dock of visibleDocks)"));
+        assert!(preferred_terminal.contains("for (const dock of visibleDockItems(data))"));
         assert!(!preferred_terminal.contains("for (const dock of data.docks || [])"));
+        assert!(!preferred_terminal.contains("return terminals[0] || null"));
+    }
+
+    #[test]
+    fn remote_page_rejects_hidden_dock_preferred_terminal_ids() {
+        let html = remote_page_html();
+        let start = html.find("function isMainOutputTerminal").unwrap();
+        let end = start + html[start..].find("async function loadNavigation").unwrap();
+        let main_output_selection = &html[start..end];
+        let preferred_start = html.find("function preferredTerminal").unwrap();
+        let preferred_end = preferred_start
+            + html[preferred_start..]
+                .find("async function loadNavigation")
+                .unwrap();
+        let preferred_terminal = &html[preferred_start..preferred_end];
+
+        assert!(
+            main_output_selection.contains("return visibleDockItems(data).some((dock) =>"),
+            "main output gate must inspect only visible dock items"
+        );
+        assert!(
+            main_output_selection
+                .contains("(dock.panes || []).some((pane) => pane.terminalId === terminalId && pane.terminalLive)"),
+            "hidden dock preferred ids must not bypass pane visibility checks"
+        );
+        assert!(preferred_terminal.contains(
+            "if (preferredTerminalId && isMainOutputTerminal(data, preferredTerminalId))"
+        ));
+        assert!(
+            !preferred_terminal.contains("if (preferredTerminalId) {\n            const existing")
+        );
     }
 }

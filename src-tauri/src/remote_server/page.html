@@ -1819,22 +1819,40 @@
           return known[label] || String(label).slice(0, 3).toUpperCase();
         }
 
+        function visibleDockItems(data) {
+          return (data.docks || []).filter((dock) => dock.visible !== false);
+        }
+
+        function terminalById(terminals, terminalId) {
+          return terminals.find((terminalInfo) => terminalInfo.id === terminalId) || null;
+        }
+
+        function isMainOutputTerminal(data, terminalId) {
+          if (!terminalId) return false;
+          const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
+          if (activePanes.some((pane) => pane.terminalId === terminalId && pane.terminalLive)) {
+            return true;
+          }
+          return visibleDockItems(data).some((dock) =>
+            (dock.panes || []).some((pane) => pane.terminalId === terminalId && pane.terminalLive)
+          );
+        }
+
         function preferredTerminal(data, terminals, preferredTerminalId) {
-          if (preferredTerminalId) {
-            const existing = terminals.find((terminalInfo) => terminalInfo.id === preferredTerminalId);
+          if (preferredTerminalId && isMainOutputTerminal(data, preferredTerminalId)) {
+            const existing = terminalById(terminals, preferredTerminalId);
             if (existing) return existing;
           }
           const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
           const focusedNumber = data.activeWorkspace && data.activeWorkspace.focusedPaneNumber;
           const focusedPane = activePanes.find((pane) => pane.paneNumber === focusedNumber && pane.terminalId && pane.terminalLive);
           const activePane = focusedPane || activePanes.find((pane) => pane.terminalId && pane.terminalLive);
-          if (activePane) return terminals.find((terminalInfo) => terminalInfo.id === activePane.terminalId) || null;
-          const visibleDocks = (data.docks || []).filter((dock) => dock.visible !== false);
-          for (const dock of visibleDocks) {
+          if (activePane) return terminalById(terminals, activePane.terminalId);
+          for (const dock of visibleDockItems(data)) {
             const dockPane = (dock.panes || []).find((pane) => pane.terminalId && pane.terminalLive);
-            if (dockPane) return terminals.find((terminalInfo) => terminalInfo.id === dockPane.terminalId) || null;
+            if (dockPane) return terminalById(terminals, dockPane.terminalId);
           }
-          return terminals[0] || null;
+          return null;
         }
 
         async function loadNavigation(preferredTerminalId = activeTerminalId, options = {}) {
