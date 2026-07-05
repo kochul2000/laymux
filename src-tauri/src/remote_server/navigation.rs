@@ -39,6 +39,8 @@ pub(super) fn build_remote_navigation_payload(
         .unwrap_or_default();
     let hidden_workspace_ids = string_set(ui_state_data, "hiddenWorkspaceIds");
     let hidden_pane_ids = string_set(ui_state_data, "hiddenPaneIds");
+    let focused_dock = string_field(ui_state_data, "focusedDock");
+    let focused_dock_pane_id = string_field(ui_state_data, "focusedDockPaneId");
     let workspace_display_order = string_vec(workspaces_data, "workspaceDisplayOrder");
     let workspace_selector = ui_state_data
         .get("workspaceSelector")
@@ -106,7 +108,14 @@ pub(super) fn build_remote_navigation_payload(
             items
                 .iter()
                 .map(|dock| {
-                    summarize_dock(dock, active_workspace_id, &backend_by_id, &frontend_by_id)
+                    summarize_dock(
+                        dock,
+                        &backend_by_id,
+                        &frontend_by_id,
+                        notifications,
+                        focused_dock,
+                        focused_dock_pane_id,
+                    )
                 })
                 .collect::<Vec<_>>()
         })
@@ -248,6 +257,7 @@ fn summarize_workspace_panes(
                 frontend_by_id,
                 notifications,
                 hidden_pane_ids.contains(pane_id),
+                None,
             )
         })
         .collect()
@@ -255,10 +265,13 @@ fn summarize_workspace_panes(
 
 fn summarize_dock(
     dock: &Value,
-    active_workspace_id: &str,
     backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
     frontend_by_id: &HashMap<&str, &Value>,
+    notifications: &[Value],
+    focused_dock: Option<&str>,
+    focused_dock_pane_id: Option<&str>,
 ) -> Value {
+    let dock_position = string_field(dock, "position").unwrap_or("unknown");
     let panes = dock
         .get("panes")
         .and_then(Value::as_array)
@@ -267,15 +280,19 @@ fn summarize_dock(
                 .iter()
                 .enumerate()
                 .map(|(index, pane)| {
+                    let pane_id = string_field(pane, "id").unwrap_or_default();
+                    let is_focused = focused_dock == Some(dock_position)
+                        && focused_dock_pane_id == Some(pane_id);
                     summarize_pane(
                         pane,
                         index,
-                        Some(active_workspace_id),
+                        None,
                         "dock",
                         backend_by_id,
                         frontend_by_id,
-                        &[],
+                        notifications,
                         false,
+                        Some(is_focused),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -283,7 +300,7 @@ fn summarize_dock(
         .unwrap_or_default();
 
     json!({
-        "position": string_field(dock, "position").unwrap_or("unknown"),
+        "position": dock_position,
         "visible": bool_field(dock, "visible").unwrap_or(false),
         "activeView": optional_field(dock, "activeView"),
         "views": optional_field(dock, "views"),
@@ -302,6 +319,7 @@ fn summarize_pane(
     frontend_by_id: &HashMap<&str, &Value>,
     notifications: &[Value],
     hidden: bool,
+    focused_override: Option<bool>,
 ) -> Value {
     let pane_id = string_field(pane, "id").unwrap_or_default();
     let view_type = view_type(pane);
@@ -325,7 +343,14 @@ fn summarize_pane(
     let title = pane_title(&view_type, backend, frontend, terminal_id.as_deref());
     let pane_unread_count = terminal_id
         .as_deref()
-        .map(|terminal_id| unread_count(notifications, workspace_id, Some(terminal_id)))
+        .map(|terminal_id| {
+            let count_workspace_id = if location == "dock" {
+                None
+            } else {
+                workspace_id
+            };
+            unread_count(notifications, count_workspace_id, Some(terminal_id))
+        })
         .unwrap_or(0);
 
     json!({
@@ -344,6 +369,10 @@ fn summarize_pane(
         "activity": terminal_activity(backend, frontend),
         "outputActive": frontend.and_then(|terminal| optional_field(terminal, "outputActive")),
         "commandRunning": backend.map(|terminal| terminal.command_running).unwrap_or(false),
+        "isFocused": focused_override
+            .map(|focused| json!(focused))
+            .or_else(|| frontend.and_then(|terminal| optional_field(terminal, "isFocused")))
+            .unwrap_or_else(|| json!(false)),
         "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,
@@ -840,7 +869,8 @@ mod tests {
                     "views": ["WorkspaceSelectorView"],
                     "size": 240,
                     "panes": [
-                        { "id": "dp1", "view": { "type": "TerminalView" }, "x": 0, "y": 0, "w": 1, "h": 1 }
+                        { "id": "dp1", "view": { "type": "TerminalView" }, "x": 0, "y": 0, "w": 0.5, "h": 1 },
+                        { "id": "dp2", "view": { "type": "MemoView" }, "x": 0.5, "y": 0, "w": 0.5, "h": 1 }
                     ]
                 }
             ]
@@ -861,7 +891,8 @@ mod tests {
                     "id": "terminal-dp1",
                     "workspaceId": "ws-1",
                     "label": "Dock shell",
-                    "activity": { "type": "running" }
+                    "activity": { "type": "running" },
+                    "isFocused": false
                 }
             ]
         });
@@ -875,8 +906,25 @@ mod tests {
             &active_workspace_data,
             &docks_data,
             &terminal_instances_data,
-            &json!({ "notifications": [] }),
-            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
+            &json!({
+                "notifications": [
+                    {
+                        "id": "dock-unread",
+                        "terminalId": "terminal-dp1",
+                        "workspaceId": "ws-1",
+                        "message": "dock waiting",
+                        "level": "info",
+                        "createdAt": 5,
+                        "readAt": null
+                    }
+                ]
+            }),
+            &json!({
+                "hiddenWorkspaceIds": [],
+                "hiddenPaneIds": [],
+                "focusedDock": "left",
+                "focusedDockPaneId": "dp1"
+            }),
             &terminals,
         );
 
@@ -896,10 +944,15 @@ mod tests {
             payload["docks"][0]["panes"][0]["terminalId"],
             "terminal-dp1"
         );
+        assert_eq!(payload["docks"][0]["panes"][0]["workspaceId"], Value::Null);
         assert_eq!(
             payload["docks"][0]["panes"][0]["activity"]["type"],
             "running"
         );
+        assert_eq!(payload["docks"][0]["panes"][0]["unreadCount"], 1);
+        assert_eq!(payload["docks"][0]["panes"][0]["isFocused"], true);
+        assert_eq!(payload["docks"][0]["panes"][1]["viewType"], "MemoView");
+        assert_eq!(payload["docks"][0]["panes"][1]["unreadCount"], 0);
         assert_eq!(
             payload["terminals"][0]["appearance"]["fontFamily"],
             "Cascadia Mono"

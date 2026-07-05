@@ -98,6 +98,7 @@ describe("handleAutomationRequest", () => {
     const state = useWorkspaceStore.getState();
     const wsId = state.workspaces[0]?.id;
     if (wsId) {
+      useDockStore.getState().setFocusedDock("left");
       const result = handleAutomationRequest({
         requestId: "r3",
         category: "action",
@@ -106,6 +107,8 @@ describe("handleAutomationRequest", () => {
         params: { id: wsId },
       });
       expect(result.success).toBe(true);
+      expect(useDockStore.getState().focusedDock).toBeNull();
+      expect(useDockStore.getState().focusedDockPaneId).toBeNull();
     }
   });
 
@@ -280,6 +283,8 @@ describe("handleAutomationRequest", () => {
   it("returns UI hidden state for remote navigation", () => {
     useUiStore.getState().toggleWorkspaceHidden("ws-hidden");
     useUiStore.getState().togglePaneHidden("pane-hidden");
+    useDockStore.getState().setFocusedDock("left");
+    const focusedDockPaneId = useDockStore.getState().focusedDockPaneId;
     useSettingsStore.getState().setWorkspaceSelector({ sortOrder: "notification" });
 
     const result = handleAutomationRequest({
@@ -295,6 +300,8 @@ describe("handleAutomationRequest", () => {
       hiddenWorkspaceIds: ["ws-hidden"],
       hiddenPaneIds: ["pane-hidden"],
       hideMode: false,
+      focusedDock: "left",
+      focusedDockPaneId,
       workspaceSelector: expect.objectContaining({ sortOrder: "notification" }),
     });
   });
@@ -412,8 +419,12 @@ describe("handleAutomationRequest", () => {
   });
 
   it("sets terminal focus via automation API", () => {
+    const activePane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const terminalId = `terminal-${activePane.id}`;
+    useDockStore.getState().setFocusedDock("left");
     useTerminalStore.getState().registerInstance({
-      id: "t1",
+      id: terminalId,
       profile: "WSL",
       syncGroup: "g",
       workspaceId: "ws-default",
@@ -424,10 +435,13 @@ describe("handleAutomationRequest", () => {
       category: "action",
       target: "terminals",
       method: "setFocus",
-      params: { id: "t1" },
+      params: { id: terminalId },
     });
     expect(result.success).toBe(true);
     expect(useTerminalStore.getState().instances[0].isFocused).toBe(true);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
   });
 
   it("removes pane", () => {
@@ -1224,6 +1238,43 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+  });
+
+  it("focus_terminal focuses dock terminal without switching workspace", () => {
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("WS2", layouts[0].id);
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+    useDockStore.getState().setDockActiveView("bottom", "TerminalView");
+    const dockPane = useDockStore.getState().getDock("bottom")!.panes[0];
+    const terminalId = `terminal-${dockPane.id}`;
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: ws2.id,
+    });
+    useGridStore.getState().setFocusedPane(0);
+
+    const result = handleAutomationRequest({
+      requestId: "ft-dock",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: terminalId },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      focused: terminalId,
+      dockPosition: "bottom",
+      dockPaneId: dockPane.id,
+    });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws1.id);
+    expect(useDockStore.getState().focusedDock).toBe("bottom");
+    expect(useDockStore.getState().focusedDockPaneId).toBe(dockPane.id);
+    expect(useGridStore.getState().focusedPaneIndex).toBeNull();
   });
 
   it("focus_terminal returns error for non-existent terminal", () => {
