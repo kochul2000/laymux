@@ -489,6 +489,8 @@ const DEFAULT_REMOTE: RemoteSettings = {
   authToken: "",
   heartbeatTimeoutSeconds: 15,
   autoMobileModeMinWidth: 720,
+  preferredHost: "",
+  customHosts: [],
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };

@@ -26,6 +26,7 @@ font-kit = "0.14"
 rmcp = { version = "1.4", features = ["server", "transport-streamable-http-server"] }
 rfd = { version = "0.15", default-features = false }
 base64 = "0.22"
+if-addrs = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

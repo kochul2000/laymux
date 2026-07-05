@@ -357,6 +357,13 @@
     border-color: var(--accent);
   }
 
+  .ui-switch-input:focus-visible + .ui-switch-track {
+    border-color: var(--accent) !important;
+    box-shadow:
+      0 0 0 2px var(--bg-base),
+      0 0 0 4px var(--accent-50);
+  }
+
   /* Separator */
   .ui-sep {
     width: 1px;

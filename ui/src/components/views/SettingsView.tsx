@@ -1,4 +1,12 @@
-import { useState, useRef, useEffect, createContext, useContext, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  createContext,
+  useContext,
+  useCallback,
+  useMemo,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useUiStore } from "@/stores/ui-store";
@@ -19,7 +27,15 @@ import {
   type Keybinding,
   type LanguageSetting,
 } from "@/stores/settings-store";
-import type { FileExplorerSettings, ExtensionViewer } from "@/lib/tauri-api";
+import {
+  getRemoteAccessStatus,
+  getRemoteHostCandidates,
+  setRemoteRuntimeAccess,
+  type ExtensionViewer,
+  type FileExplorerSettings,
+  type HostCandidate,
+  type RemoteSettings,
+} from "@/lib/tauri-api";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import { persistSession } from "@/lib/persist-session";
 import {
@@ -31,6 +47,19 @@ import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { useRemoteAccessStore } from "@/stores/remote-access-store";
+import {
+  appendAllowedIps,
+  buildRemoteHostOptions,
+  formatAllowedIps,
+  generateRemoteToken,
+  LOOPBACK_ALLOWED_IPS,
+  normalizeAutoMobileWidth,
+  normalizeCustomHosts,
+  parseAllowedIps,
+  TAILSCALE_ALLOWED_IPS,
+} from "@/lib/remote-hosts";
 
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
@@ -1319,17 +1348,17 @@ function ToggleRow({
   const { t } = useTranslation("settings");
   return (
     <SettingRow label={label} desc={desc}>
-      <label className="flex cursor-pointer items-center gap-2">
-        <input
+      <div className="flex items-center gap-2">
+        <ToggleSwitch
           data-testid={testid}
-          type="checkbox"
+          aria-label={label}
           checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
+          onChange={onChange}
         />
         <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
           {checked ? t("common.enabled") : t("common.disabled")}
         </span>
-      </label>
+      </div>
     </SettingRow>
   );
 }
@@ -1616,6 +1645,285 @@ function InterfaceSection() {
             <option value="workspace">{t("interface.dismissWorkspace")}</option>
             <option value="paneFocus">{t("interface.dismissPaneFocus")}</option>
             <option value="manual">{t("interface.dismissManual")}</option>
+          </FocusSelect>
+        </SettingRow>
+      </SubGroup>
+    </div>
+  );
+}
+
+// -- Section: Remote --
+
+type RemoteSectionDraft = RemoteSettings & {
+  allowedIpsText: string;
+  customHostInput: string;
+};
+
+function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
+  return {
+    ...remote,
+    allowedIpsText: formatAllowedIps(remote.allowedIps),
+    customHostInput: "",
+  };
+}
+
+function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
+  const { allowedIpsText, customHostInput: _customHostInput, ...remote } = draft;
+  const allowedIps = parseAllowedIps(allowedIpsText);
+  const customHosts = normalizeCustomHosts(remote.customHosts);
+  return {
+    ...remote,
+    authToken: remote.authToken.trim(),
+    preferredHost: remote.preferredHost.trim(),
+    customHosts,
+    allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
+    autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
+  };
+}
+
+async function reconcileRemoteAccessAfterRemoteSave(
+  previousRemoteEnabled: boolean,
+  nextRemoteEnabled: boolean,
+) {
+  const { setStatus } = useRemoteAccessStore.getState();
+  const current = await getRemoteAccessStatus();
+
+  if (
+    previousRemoteEnabled !== nextRemoteEnabled &&
+    (nextRemoteEnabled || !current.runtimeEnabled)
+  ) {
+    const reconciled = await setRemoteRuntimeAccess(false, null);
+    setStatus(reconciled);
+    return;
+  }
+
+  setStatus(current);
+}
+
+function RemoteSection() {
+  const { t } = useTranslation("settings");
+  const storeRemote = useSettingsStore((s) => s.remote);
+  const setRemote = useSettingsStore((s) => s.setRemote);
+  const storeDraft = useMemo(() => toRemoteSectionDraft(storeRemote), [storeRemote]);
+  const [remote, setDraftRemote] = useDraft<RemoteSectionDraft>("remote", storeDraft, (draft) =>
+    setRemote(toRemoteSettings(draft)),
+  );
+  const [hostCandidates, setHostCandidates] = useState<HostCandidate[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRemoteHostCandidates()
+      .then((candidates) => {
+        if (!cancelled) setHostCandidates(candidates);
+      })
+      .catch(() => {
+        if (!cancelled) setHostCandidates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hostOptions = useMemo(
+    () => buildRemoteHostOptions(hostCandidates, remote.customHosts),
+    [hostCandidates, remote.customHosts],
+  );
+  const preferredAvailable =
+    remote.preferredHost === "" ||
+    hostOptions.some((option) => option.host === remote.preferredHost);
+
+  const update = (partial: Partial<RemoteSectionDraft>) =>
+    setDraftRemote((prev) => ({ ...prev, ...partial }));
+
+  const handleToggleEnabled = (enabled: boolean) => {
+    update({
+      enabled,
+      ...(enabled && remote.authToken.trim().length === 0
+        ? { authToken: generateRemoteToken() }
+        : {}),
+    });
+  };
+
+  const handleAddCustomHost = () => {
+    const host = remote.customHostInput.trim();
+    if (!host) return;
+    update({
+      customHosts: normalizeCustomHosts([...remote.customHosts, host]),
+      customHostInput: "",
+    });
+  };
+
+  const handleRemoveCustomHost = (host: string) => {
+    const customHosts = remote.customHosts.filter((candidate) => candidate !== host);
+    update({
+      customHosts,
+      ...(remote.preferredHost === host ? { preferredHost: "" } : {}),
+    });
+  };
+
+  return (
+    <div>
+      <SectionTitle>{t("remote.title")}</SectionTitle>
+
+      <SubGroup title={t("remote.groupAccess")}>
+        <ToggleRow
+          label={t("remote.enabled")}
+          desc={t("remote.enabledDesc")}
+          testid="remote-settings-enabled-toggle"
+          checked={remote.enabled}
+          onChange={handleToggleEnabled}
+        />
+
+        <SettingRow label={t("remote.allowedIps")} desc={t("remote.allowedIpsDesc")}>
+          <div className="flex min-w-0 flex-col gap-2">
+            <textarea
+              data-testid="remote-settings-allowed-ips-input"
+              value={remote.allowedIpsText}
+              onChange={(event) => update({ allowedIpsText: event.target.value })}
+              rows={5}
+              spellCheck={false}
+              className="w-full resize-y rounded px-2 py-1.5 font-mono text-[12px] ui-focus-ring"
+              placeholder={t("remote.allowedIpsPlaceholder")}
+              style={inputStyle}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="remote-settings-add-tailscale"
+                onClick={() =>
+                  update({
+                    allowedIpsText: appendAllowedIps(remote.allowedIpsText, TAILSCALE_ALLOWED_IPS),
+                  })
+                }
+                className="hover-bg rounded px-2 py-1 text-[11px]"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("remote.addTailscale")}
+              </button>
+              <button
+                type="button"
+                data-testid="remote-settings-reset-loopback"
+                onClick={() => update({ allowedIpsText: formatAllowedIps(LOOPBACK_ALLOWED_IPS) })}
+                className="hover-bg rounded px-2 py-1 text-[11px]"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("remote.resetLoopback")}
+              </button>
+            </div>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.autoMobileMinWidth")}
+          desc={t("remote.autoMobileMinWidthDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-auto-mobile-width-input"
+              type="number"
+              min={0}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.autoMobileModeMinWidth}
+              onChange={(event) =>
+                update({ autoMobileModeMinWidth: normalizeAutoMobileWidth(event.target.value) })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              px
+            </span>
+          </div>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("remote.groupHosts")}>
+        <SettingRow label={t("remote.customHosts")} desc={t("remote.customHostsDesc")}>
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 gap-2">
+              <FocusInput
+                data-testid="remote-settings-custom-host-input"
+                className={inputCls}
+                placeholder={t("remote.customHostPlaceholder")}
+                value={remote.customHostInput}
+                onChange={(event) => update({ customHostInput: event.target.value })}
+              />
+              <button
+                type="button"
+                data-testid="remote-settings-custom-host-add"
+                onClick={handleAddCustomHost}
+                className="hover-bg shrink-0 rounded px-3 py-1.5 text-xs"
+                style={{
+                  color: "var(--accent)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {t("remote.addCustomHost")}
+              </button>
+            </div>
+            {remote.customHosts.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {remote.customHosts.map((host) => (
+                  <div key={host} className="flex items-center gap-2 text-[12px]">
+                    <code
+                      className="min-w-0 flex-1 truncate rounded px-2 py-1"
+                      style={{
+                        color: "var(--text-primary)",
+                        background: "var(--bg-base)",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      {host}
+                    </code>
+                    <button
+                      type="button"
+                      data-testid={`remote-settings-custom-host-remove-${host}`}
+                      onClick={() => handleRemoveCustomHost(host)}
+                      className="hover-bg shrink-0 rounded px-2 py-1 text-[11px]"
+                      style={{
+                        color: "var(--red)",
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.preferredHost")} desc={t("remote.preferredHostDesc")}>
+          <FocusSelect
+            data-testid="remote-settings-preferred-host-select"
+            className={inputCls}
+            value={remote.preferredHost}
+            onChange={(event) => update({ preferredHost: event.target.value })}
+          >
+            <option value="">{t("remote.hostAuto")}</option>
+            {!preferredAvailable && (
+              <option value={remote.preferredHost}>{remote.preferredHost}</option>
+            )}
+            {hostOptions.map((option) => (
+              <option key={`${option.kind}:${option.host}`} value={option.host}>
+                {option.label}
+              </option>
+            ))}
           </FocusSelect>
         </SettingRow>
       </SubGroup>
@@ -3248,14 +3556,20 @@ export function SettingsView() {
   }).current;
 
   const handleSave = () => {
+    const shouldReconcileRemote = dirtySetRef.current.has("remote");
+    const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
+    const nextRemoteEnabled = useSettingsStore.getState().remote.enabled;
     draftValuesRef.current.clear();
     dirtySetRef.current.clear();
     setDirty(false);
     clearTimeout(saveTimerRef.current);
     persistSession()
-      .then(() => {
+      .then(async () => {
+        if (shouldReconcileRemote) {
+          await reconcileRemoteAccessAfterRemoteSave(previousRemoteEnabled, nextRemoteEnabled);
+        }
         setSaveLabel("Saved!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 1500);
       })
@@ -3400,6 +3714,16 @@ export function SettingsView() {
 
           {/* Integrations */}
           <NavGroupHeader label={t("nav.groupIntegrations")} />
+          <button
+            data-testid="nav-remote"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("remote")}
+            onClick={() => setActiveNav("remote")}
+            onMouseEnter={() => setNavHover("remote")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.remote")}
+          </button>
           <button
             data-testid="nav-claude"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -3555,6 +3879,7 @@ export function SettingsView() {
             {activeNav === "paste" && <PasteSection />}
             {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
+            {activeNav === "remote" && <RemoteSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "memo" && <MemoSection />}

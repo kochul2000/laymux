@@ -1,4 +1,5 @@
 use laymux_lib::cli::{LxMessage, LxResponse};
+use laymux_lib::commands::get_remote_host_candidates;
 use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
@@ -189,6 +190,8 @@ fn settings_round_trip_with_full_config() {
             allowed_origins: vec!["http://100.64.0.2:19281".into()],
             allowed_ips: vec!["100.64.0.0/10".into(), "fd7a:115c:a1e0::/48".into()],
             auth_token: "test-remote-token".into(),
+            preferred_host: "100.64.0.2".into(),
+            custom_hosts: vec!["devbox.tailnet.ts.net".into(), "192.168.0.44".into()],
             ..RemoteSettings::default()
         },
         sync_cwd_defaults: None,
@@ -202,6 +205,17 @@ fn settings_round_trip_with_full_config() {
     let loaded: Settings = serde_json::from_str(&content).unwrap();
 
     assert_eq!(settings, loaded);
+}
+
+#[tokio::test]
+async fn remote_host_candidates_command_returns_loopback_candidate() {
+    let candidates = get_remote_host_candidates().await.unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.kind == "loopback" && candidate.host == "127.0.0.1"),
+        "remote host candidates should include loopback, got {candidates:?}"
+    );
 }
 
 #[test]

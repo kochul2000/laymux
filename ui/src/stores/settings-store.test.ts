@@ -871,11 +871,19 @@ describe("settings-store", () => {
 
   it("has default automatic mobile mode width threshold", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
+    expect(useSettingsStore.getState().remote.preferredHost).toBe("");
+    expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
 
   it("setRemote updates automatic mobile mode width threshold", () => {
-    useSettingsStore.getState().setRemote({ autoMobileModeMinWidth: 0 });
+    useSettingsStore.getState().setRemote({
+      autoMobileModeMinWidth: 0,
+      preferredHost: "100.64.0.2",
+      customHosts: ["devbox.tailnet.ts.net"],
+    });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+    expect(useSettingsStore.getState().remote.preferredHost).toBe("100.64.0.2");
+    expect(useSettingsStore.getState().remote.customHosts).toEqual(["devbox.tailnet.ts.net"]);
   });
 
   it("loadFromSettings fills missing remote automatic mobile mode width with default", () => {
@@ -883,12 +891,20 @@ describe("settings-store", () => {
       remote: { enabled: true, authToken: "secret" } as any,
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
+    expect(useSettingsStore.getState().remote.preferredHost).toBe("");
+    expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
 
   it("loadFromSettings preserves explicit remote automatic mobile mode width", () => {
     useSettingsStore.getState().loadFromSettings({
-      remote: { autoMobileModeMinWidth: 0 } as any,
+      remote: {
+        autoMobileModeMinWidth: 0,
+        preferredHost: "100.64.0.2",
+        customHosts: ["devbox.tailnet.ts.net"],
+      } as any,
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+    expect(useSettingsStore.getState().remote.preferredHost).toBe("100.64.0.2");
+    expect(useSettingsStore.getState().remote.customHosts).toEqual(["devbox.tailnet.ts.net"]);
   });
 });

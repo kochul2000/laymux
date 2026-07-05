@@ -989,6 +989,12 @@ pub struct RemoteSettings {
     /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
     #[serde(default = "default_remote_auto_mobile_mode_min_width")]
     pub auto_mobile_mode_min_width: u32,
+    /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
+    #[serde(default)]
+    pub preferred_host: String,
+    /// User-managed host names or IPs that are offered alongside detected candidates.
+    #[serde(default)]
+    pub custom_hosts: Vec<String>,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1017,6 +1023,8 @@ impl Default for RemoteSettings {
             auth_token: String::new(),
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
+            preferred_host: String::new(),
+            custom_hosts: Vec::new(),
         }
     }
 }
