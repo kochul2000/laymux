@@ -33,9 +33,9 @@ describe("RemoteAccessModal", () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
 
   const hostCandidates = [
-    { kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" },
     { kind: "tailscale", host: "100.64.0.2", label: "Tailscale 100.64.0.2" },
     { kind: "lan", host: "192.168.0.44", label: "LAN 192.168.0.44" },
+    { kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" },
   ];
 
   const accessStatus = (runtimeEnabled = false) => {
@@ -99,7 +99,7 @@ describe("RemoteAccessModal", () => {
     render(<RemoteAccessModal />);
 
     const select = (await screen.findByTestId("remote-host-select")) as HTMLSelectElement;
-    expect(select.value).toBe("127.0.0.1");
+    expect(select.value).toBe("100.64.0.2");
     await user.selectOptions(select, "192.168.0.44");
 
     expect(screen.getByText("http://192.168.0.44:19281/remote/#token=secret")).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("RemoteAccessModal", () => {
     const { unmount } = render(<RemoteAccessModal />);
 
     const select = (await screen.findByTestId("remote-host-select")) as HTMLSelectElement;
-    expect(select.value).toBe("127.0.0.1");
+    expect(select.value).toBe("100.64.0.2");
     await user.selectOptions(select, "192.168.0.44");
 
     expect(localStorage.getItem(REMOTE_LAST_HOST_KEY)).toBe("192.168.0.44");
@@ -188,7 +188,7 @@ describe("RemoteAccessModal", () => {
 
     render(<RemoteAccessModal />);
 
-    await screen.findByText("http://127.0.0.1:19281/remote/#token=secret");
+    await screen.findByText("http://100.64.0.2:19281/remote/#token=secret");
     await user.click(screen.getByTestId("remote-mobile-mode-open"));
 
     expect(useLocalMobileModeStore.getState().active).toBe(true);
@@ -202,7 +202,7 @@ describe("RemoteAccessModal", () => {
 
     render(<RemoteAccessModal />);
 
-    await screen.findByText("http://127.0.0.1:19281/remote/#token=secret");
+    await screen.findByText("http://100.64.0.2:19281/remote/#token=secret");
     await user.click(screen.getByTestId("remote-mobile-mode-open"));
 
     expect(mockInvoke).toHaveBeenCalledWith("set_remote_runtime_access", {

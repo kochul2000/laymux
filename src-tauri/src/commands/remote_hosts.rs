@@ -21,15 +21,25 @@ pub async fn get_remote_host_candidates() -> Result<Vec<HostCandidate>, String> 
 }
 
 pub fn get_remote_host_candidates_inner() -> Vec<HostCandidate> {
+    remote_host_candidates_from_detected(
+        detect_tailscale_host_candidates(),
+        detect_lan_host_candidates(),
+    )
+}
+
+fn remote_host_candidates_from_detected(
+    tailscale_candidates: Vec<HostCandidate>,
+    lan_candidates: Vec<HostCandidate>,
+) -> Vec<HostCandidate> {
     let mut candidates = Vec::new();
-    candidates.push(host_candidate(
-        HOST_KIND_LOOPBACK,
-        "127.0.0.1",
-        "Localhost 127.0.0.1",
-    ));
-    candidates.extend(detect_tailscale_host_candidates());
-    candidates.extend(detect_lan_host_candidates());
+    candidates.extend(tailscale_candidates);
+    candidates.extend(lan_candidates);
+    candidates.push(loopback_host_candidate());
     dedupe_host_candidates(candidates)
+}
+
+fn loopback_host_candidate() -> HostCandidate {
+    host_candidate(HOST_KIND_LOOPBACK, "127.0.0.1", "Localhost 127.0.0.1")
 }
 
 fn host_candidate(kind: &str, host: &str, label: &str) -> HostCandidate {
@@ -171,10 +181,71 @@ mod tests {
     }
 
     #[test]
-    fn get_remote_host_candidates_always_starts_with_loopback() {
-        let candidates = get_remote_host_candidates_inner();
-        assert!(!candidates.is_empty());
+    fn remote_host_candidates_order_tailscale_lan_loopback() {
+        let candidates = remote_host_candidates_from_detected(
+            vec![host_candidate(
+                HOST_KIND_TAILSCALE,
+                "100.64.0.2",
+                "Tailscale 100.64.0.2",
+            )],
+            vec![host_candidate(
+                HOST_KIND_LAN,
+                "192.168.0.44",
+                "LAN 192.168.0.44",
+            )],
+        );
+
+        let hosts: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.host.as_str())
+            .collect();
+        let kinds: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.kind.as_str())
+            .collect();
+        assert_eq!(hosts, vec!["100.64.0.2", "192.168.0.44", "127.0.0.1"]);
+        assert_eq!(
+            kinds,
+            vec![HOST_KIND_TAILSCALE, HOST_KIND_LAN, HOST_KIND_LOOPBACK]
+        );
+    }
+
+    #[test]
+    fn remote_host_candidates_order_lan_loopback_when_tailscale_absent() {
+        let candidates = remote_host_candidates_from_detected(
+            Vec::new(),
+            vec![host_candidate(
+                HOST_KIND_LAN,
+                "192.168.0.44",
+                "LAN 192.168.0.44",
+            )],
+        );
+
+        let hosts: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.host.as_str())
+            .collect();
+        assert_eq!(hosts, vec!["192.168.0.44", "127.0.0.1"]);
+    }
+
+    #[test]
+    fn remote_host_candidates_include_loopback_when_detected_empty() {
+        let candidates = remote_host_candidates_from_detected(Vec::new(), Vec::new());
+
+        assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].kind, HOST_KIND_LOOPBACK);
         assert_eq!(candidates[0].host, "127.0.0.1");
+    }
+
+    #[test]
+    fn get_remote_host_candidates_always_includes_loopback() {
+        let candidates = get_remote_host_candidates_inner();
+        assert!(!candidates.is_empty());
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.kind == HOST_KIND_LOOPBACK
+                    && candidate.host == "127.0.0.1")
+        );
     }
 }
