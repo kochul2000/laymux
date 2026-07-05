@@ -1,20 +1,17 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getRemoteAccessStatus,
   getRemoteControlStatus,
-  getRemoteHostCandidates,
   reclaimRemoteControl,
   setRemoteRuntimeAccess,
-  type HostCandidate,
   type RemoteAccessStatus,
   type RemoteControlStatus,
 } from "@/lib/tauri-api";
 import {
   buildLocalMobileModeUrl,
-  buildRemoteHostOptions,
   buildRemoteUrlWithToken,
   chooseRemoteHost,
   generateRemoteToken,
@@ -27,6 +24,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { FocusSelect } from "@/components/ui/FormControls";
+import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -56,32 +54,28 @@ export function RemoteAccessModal() {
   const [port, setPort] = useState<number | null>(null);
   const [accessStatus, setAccessStatus] = useState<RemoteAccessStatus | null>(null);
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
-  const [hostCandidates, setHostCandidates] = useState<HostCandidate[]>([]);
-  const [lastHost, setLastHost] = useState(() => readLastRemoteHost());
+  const lastHostRef = useRef(readLastRemoteHost());
   const [selectedHost, setSelectedHost] = useState("");
   const [reclaiming, setReclaiming] = useState(false);
   const [actionPending, setActionPending] = useState<"runtime" | "mobile" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const hostOptions = useMemo(
-    () => buildRemoteHostOptions(hostCandidates, remote.customHosts),
-    [hostCandidates, remote.customHosts],
-  );
+  const hostOptions = useRemoteHostOptions(remote.customHosts);
+  const resolvedHost = chooseRemoteHost(hostOptions, remote.preferredHost, lastHostRef.current);
 
   useEffect(() => {
     setSelectedHost((current) => {
       if (current && hostOptions.some((option) => option.host === current)) return current;
-      return chooseRemoteHost(hostOptions, remote.preferredHost, lastHost);
+      return resolvedHost;
     });
-  }, [hostOptions, lastHost, remote.preferredHost]);
+  }, [hostOptions, resolvedHost]);
 
   const token = (accessStatus?.effectiveAuthToken ?? remote.authToken).trim();
   const tokenConfigured = token.length > 0;
   const effectiveEnabled = accessStatus?.effectiveEnabled ?? remote.enabled;
   const runtimeEnabled = accessStatus?.runtimeEnabled ?? false;
-  const effectiveSelectedHost =
-    selectedHost || chooseRemoteHost(hostOptions, remote.preferredHost, lastHost);
+  const effectiveSelectedHost = selectedHost || resolvedHost;
   const urlHost = effectiveSelectedHost || "<laymux-host>";
   const urlWithToken = tokenConfigured
     ? buildRemoteUrlWithToken(urlHost, port ?? "...", token)
@@ -95,20 +89,6 @@ export function RemoteAccessModal() {
       })
       .catch(() => {
         // Keep copy disabled rather than exposing a stale or bogus port.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    getRemoteHostCandidates()
-      .then((candidates) => {
-        if (!cancelled) setHostCandidates(candidates);
-      })
-      .catch(() => {
-        if (!cancelled) setHostCandidates([]);
       });
     return () => {
       cancelled = true;
@@ -247,7 +227,6 @@ export function RemoteAccessModal() {
               onChange={(event) => {
                 const host = event.target.value;
                 setSelectedHost(host);
-                setLastHost(host);
                 writeLastRemoteHost(host);
               }}
               className="w-full rounded px-2 py-1 text-[12px]"
