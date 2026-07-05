@@ -491,6 +491,10 @@ const DEFAULT_REMOTE: RemoteSettings = {
   autoMobileModeMinWidth: 720,
   preferredHost: "",
   customHosts: [],
+  cloudEnabled: false,
+  relayBaseUrl: "",
+  cloudInstanceId: null,
+  cloudAutoReconnect: true,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
