@@ -22,6 +22,7 @@ import {
   loadSettings,
   saveSettings,
   getRemoteAccessStatus,
+  getRemoteHostCandidates,
   setRemoteRuntimeAccess,
   onTerminalOutput,
   onOpenFile,
@@ -194,6 +195,14 @@ describe("tauri-api", () => {
         enabled: true,
         authToken: "secret",
       });
+    });
+
+    it("invokes get_remote_host_candidates", async () => {
+      const candidates = [{ kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" }];
+      mockInvoke.mockResolvedValue(candidates);
+
+      await expect(getRemoteHostCandidates()).resolves.toEqual(candidates);
+      expect(mockInvoke).toHaveBeenCalledWith("get_remote_host_candidates");
     });
   });
 

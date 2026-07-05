@@ -1,6 +1,11 @@
-import { render, screen, within, fireEvent, act } from "@testing-library/react";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const mockInvoke = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
 
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
@@ -8,6 +13,7 @@ vi.mock("@/lib/persist-session", () => ({
 
 import { SettingsView } from "./SettingsView";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import { persistSession } from "@/lib/persist-session";
 
 /** Helper: click a profile in the sidebar by name */
@@ -20,9 +26,44 @@ async function navigateToProfile(user: ReturnType<typeof userEvent.setup>, name:
   await user.click(psNav);
 }
 
+function remoteAccessStatus(runtimeEnabled = false, runtimeToken = "") {
+  const remote = useSettingsStore.getState().remote;
+  const token = remote.authToken || runtimeToken;
+  return {
+    effectiveEnabled: remote.enabled || runtimeEnabled,
+    persistentEnabled: remote.enabled,
+    runtimeEnabled,
+    authTokenConfigured: token.length > 0,
+    effectiveAuthToken: token,
+  };
+}
+
 describe("SettingsView", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_system_monospace_fonts") {
+        return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
+      }
+      if (cmd === "get_remote_host_candidates") {
+        return Promise.resolve([
+          { kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" },
+          { kind: "tailscale", host: "100.64.0.2", label: "Tailscale 100.64.0.2" },
+          { kind: "lan", host: "192.168.0.44", label: "LAN 192.168.0.44" },
+        ]);
+      }
+      if (cmd === "get_remote_access_status") {
+        return Promise.resolve(remoteAccessStatus());
+      }
+      if (cmd === "set_remote_runtime_access") {
+        const runtimeEnabled = Boolean(args?.enabled);
+        const runtimeToken = typeof args?.authToken === "string" ? args.authToken : "";
+        return Promise.resolve(remoteAccessStatus(runtimeEnabled, runtimeToken));
+      }
+      return Promise.resolve(undefined);
+    });
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useRemoteAccessStore.setState(useRemoteAccessStore.getInitialState());
   });
 
   it("renders settings panel", () => {
@@ -1637,6 +1678,143 @@ describe("SettingsView", () => {
       });
 
       expect(select.value).toBe("TestProfile");
+    });
+  });
+
+  describe("RemoteSection", () => {
+    it("renders the Remote nav section", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+
+      expect(await screen.findByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
+      expect(screen.getAllByText("Remote").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId("remote-settings-allowed-ips-input")).toBeInTheDocument();
+    });
+
+    it("enables startup remote access with a generated token only after Save", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-enabled-toggle"));
+
+      expect(useSettingsStore.getState().remote.enabled).toBe(false);
+      expect(useSettingsStore.getState().remote.authToken).toBe("");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.enabled).toBe(true);
+      expect(useSettingsStore.getState().remote.authToken).toHaveLength(48);
+    });
+
+    it("saves allowed IPs from the Remote settings section", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const input = (await screen.findByTestId(
+        "remote-settings-allowed-ips-input",
+      )) as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "127.0.0.1/32\n100.64.0.0/10" } });
+
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual(["127.0.0.1/32", "::1/128"]);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual([
+        "127.0.0.1/32",
+        "100.64.0.0/10",
+      ]);
+    });
+
+    it("adds the Tailscale allowlist preset and saves automatic mobile width", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-add-tailscale"));
+      const width = screen.getByTestId(
+        "remote-settings-auto-mobile-width-input",
+      ) as HTMLInputElement;
+      fireEvent.change(width, { target: { value: "0" } });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual([
+        "127.0.0.1/32",
+        "::1/128",
+        "100.64.0.0/10",
+        "fd7a:115c:a1e0::/48",
+      ]);
+      expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+    });
+
+    it("adds custom hosts and saves the preferred host", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const input = (await screen.findByTestId(
+        "remote-settings-custom-host-input",
+      )) as HTMLInputElement;
+      await user.type(input, "devbox.tailnet.ts.net");
+      await user.click(screen.getByTestId("remote-settings-custom-host-add"));
+
+      const select = screen.getByTestId(
+        "remote-settings-preferred-host-select",
+      ) as HTMLSelectElement;
+      await user.selectOptions(select, "devbox.tailnet.ts.net");
+
+      expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
+      expect(useSettingsStore.getState().remote.preferredHost).toBe("");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.customHosts).toEqual(["devbox.tailnet.ts.net"]);
+      expect(useSettingsStore.getState().remote.preferredHost).toBe("devbox.tailnet.ts.net");
+    });
+
+    it("removes a custom host and clears it as preferred host", async () => {
+      useSettingsStore.getState().setRemote({
+        customHosts: ["devbox.tailnet.ts.net"],
+        preferredHost: "devbox.tailnet.ts.net",
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(
+        await screen.findByTestId("remote-settings-custom-host-remove-devbox.tailnet.ts.net"),
+      );
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
+      expect(useSettingsStore.getState().remote.preferredHost).toBe("");
+    });
+
+    it("reconciles backend access status after disabling startup remote access", async () => {
+      useSettingsStore.getState().setRemote({ enabled: true, authToken: "secret" });
+      useRemoteAccessStore.getState().setStatus(remoteAccessStatus(false));
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-enabled-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("set_remote_runtime_access", {
+          enabled: false,
+          authToken: null,
+        });
+      });
+      expect(useRemoteAccessStore.getState().status).toMatchObject({
+        effectiveEnabled: false,
+        persistentEnabled: false,
+        runtimeEnabled: false,
+        effectiveAuthToken: "secret",
+      });
     });
   });
 

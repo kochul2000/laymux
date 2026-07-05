@@ -171,6 +171,7 @@ pub fn run() {
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,
+            commands::get_remote_host_candidates,
             commands::reclaim_remote_control,
         ])
         .run(tauri::generate_context!())

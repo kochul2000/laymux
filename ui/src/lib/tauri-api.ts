@@ -92,6 +92,16 @@ export async function getRemoteControlStatus(): Promise<RemoteControlStatus> {
   return invoke("get_remote_control_status");
 }
 
+export interface HostCandidate {
+  kind: "loopback" | "tailscale" | "lan";
+  host: string;
+  label: string;
+}
+
+export async function getRemoteHostCandidates(): Promise<HostCandidate[]> {
+  return invoke("get_remote_host_candidates");
+}
+
 export async function reclaimRemoteControl(): Promise<RemoteControlStatus> {
   return invoke("reclaim_remote_control");
 }
@@ -313,6 +323,8 @@ export interface RemoteSettings {
   authToken: string;
   heartbeatTimeoutSeconds: number;
   autoMobileModeMinWidth: number;
+  preferredHost: string;
+  customHosts: string[];
 }
 
 export interface Settings {
