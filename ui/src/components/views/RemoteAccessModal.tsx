@@ -285,7 +285,7 @@ export function RemoteAccessModal() {
           )}
         </Row>
       </div>
-      <div className="mt-3 flex flex-col items-start gap-2">
+      <div className="mt-3 flex flex-col items-start">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs" style={{ color: "var(--text-primary)" }}>
             {t("remoteAccess.runtimeThisRun")}
@@ -303,24 +303,26 @@ export function RemoteAccessModal() {
               : t("remoteAccess.runtimeThisRunOff")}
           </span>
         </div>
-        <button
-          type="button"
-          data-testid="remote-mobile-mode-open"
-          onClick={() => void handleOpenMobileMode()}
-          disabled={actionPending !== null || port === null}
-          className="hover-bg rounded px-3 py-1.5 text-xs"
-          style={{
-            color: "var(--accent)",
-            background: "transparent",
-            border: "1px solid var(--border)",
-            cursor: actionPending !== null || port === null ? "default" : "pointer",
-            opacity: actionPending !== null || port === null ? 0.65 : 1,
-          }}
-        >
-          {actionPending === "mobile"
-            ? t("remoteAccess.openingMobileMode")
-            : t("remoteAccess.openMobileMode")}
-        </button>
+        <div className="mt-4 w-full pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <button
+            type="button"
+            data-testid="remote-mobile-mode-open"
+            onClick={() => void handleOpenMobileMode()}
+            disabled={actionPending !== null || port === null}
+            className="hover-bg rounded px-3 py-1.5 text-xs"
+            style={{
+              color: "var(--accent)",
+              background: "transparent",
+              border: "1px solid var(--border)",
+              cursor: actionPending !== null || port === null ? "default" : "pointer",
+              opacity: actionPending !== null || port === null ? 0.65 : 1,
+            }}
+          >
+            {actionPending === "mobile"
+              ? t("remoteAccess.openingMobileMode")
+              : t("remoteAccess.openMobileMode")}
+          </button>
+        </div>
       </div>
       {status?.active && (
         <div className="mt-3">
