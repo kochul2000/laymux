@@ -207,9 +207,9 @@ fn settings_round_trip_with_full_config() {
     assert_eq!(settings, loaded);
 }
 
-#[test]
-fn remote_host_candidates_command_returns_loopback_candidate() {
-    let candidates = get_remote_host_candidates().unwrap();
+#[tokio::test]
+async fn remote_host_candidates_command_returns_loopback_candidate() {
+    let candidates = get_remote_host_candidates().await.unwrap();
     assert!(
         candidates
             .iter()

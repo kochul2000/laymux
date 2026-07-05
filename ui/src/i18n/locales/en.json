@@ -22,7 +22,6 @@
       "disabled": "Off",
       "urlWithToken": "URL + token",
       "host": "Host",
-      "hostAuto": "Automatic",
       "token": "Token",
       "missing": "Missing",
       "copy": "Copy",

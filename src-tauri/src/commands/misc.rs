@@ -37,8 +37,10 @@ pub fn get_automation_info(state: State<Arc<AppState>>) -> Result<serde_json::Va
 }
 
 #[tauri::command]
-pub fn get_remote_host_candidates() -> Result<Vec<HostCandidate>, String> {
-    Ok(get_remote_host_candidates_inner())
+pub async fn get_remote_host_candidates() -> Result<Vec<HostCandidate>, String> {
+    tokio::task::spawn_blocking(get_remote_host_candidates_inner)
+        .await
+        .map_err(|e| format!("Failed to collect remote host candidates: {e}"))
 }
 
 pub fn get_remote_host_candidates_inner() -> Vec<HostCandidate> {

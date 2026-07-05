@@ -26,6 +26,7 @@ import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { FocusSelect } from "@/components/ui/FormControls";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -240,7 +241,7 @@ export function RemoteAccessModal() {
         </Row>
         <Row label={t("remoteAccess.host")}>
           {hostOptions.length > 0 ? (
-            <select
+            <FocusSelect
               data-testid="remote-host-select"
               value={effectiveSelectedHost}
               onChange={(event) => {
@@ -249,21 +250,14 @@ export function RemoteAccessModal() {
                 setLastHost(host);
                 writeLastRemoteHost(host);
               }}
-              className="ui-focus-ring w-full rounded px-2 py-1 text-[12px]"
-              style={{
-                color: "var(--text-primary)",
-                background: "var(--bg-base)",
-                border: "1px solid var(--border)",
-                outline: "none",
-                colorScheme: "dark",
-              }}
+              className="w-full rounded px-2 py-1 text-[12px]"
             >
               {hostOptions.map((option) => (
                 <option key={`${option.kind}:${option.host}`} value={option.host}>
                   {option.label}
                 </option>
               ))}
-            </select>
+            </FocusSelect>
           ) : (
             <Value>{"<laymux-host>"}</Value>
           )}
