@@ -29,11 +29,9 @@ import {
 } from "@/stores/settings-store";
 import {
   getRemoteAccessStatus,
-  getRemoteHostCandidates,
   setRemoteRuntimeAccess,
   type ExtensionViewer,
   type FileExplorerSettings,
-  type HostCandidate,
   type RemoteSettings,
 } from "@/lib/tauri-api";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
@@ -51,7 +49,6 @@ import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import {
   appendAllowedIps,
-  buildRemoteHostOptions,
   formatAllowedIps,
   generateRemoteToken,
   LOOPBACK_ALLOWED_IPS,
@@ -60,6 +57,7 @@ import {
   parseAllowedIps,
   TAILSCALE_ALLOWED_IPS,
 } from "@/lib/remote-hosts";
+import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
 const cardStyle: React.CSSProperties = {
   background: "var(--bg-overlay)",
@@ -1708,26 +1706,7 @@ function RemoteSection() {
   const [remote, setDraftRemote] = useDraft<RemoteSectionDraft>("remote", storeDraft, (draft) =>
     setRemote(toRemoteSettings(draft)),
   );
-  const [hostCandidates, setHostCandidates] = useState<HostCandidate[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getRemoteHostCandidates()
-      .then((candidates) => {
-        if (!cancelled) setHostCandidates(candidates);
-      })
-      .catch(() => {
-        if (!cancelled) setHostCandidates([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const hostOptions = useMemo(
-    () => buildRemoteHostOptions(hostCandidates, remote.customHosts),
-    [hostCandidates, remote.customHosts],
-  );
+  const hostOptions = useRemoteHostOptions(remote.customHosts);
   const preferredAvailable =
     remote.preferredHost === "" ||
     hostOptions.some((option) => option.host === remote.preferredHost);
