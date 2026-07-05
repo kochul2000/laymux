@@ -163,4 +163,18 @@ mod tests {
         assert!(!render_workspace_list.contains("dockListEl"));
         assert!(!render_workspace_list.contains("renderDockTerminalRow"));
     }
+
+    #[test]
+    fn remote_page_prefers_only_visible_dock_terminal_fallbacks() {
+        let html = remote_page_html();
+        let start = html.find("function preferredTerminal").unwrap();
+        let end = start + html[start..].find("async function loadNavigation").unwrap();
+        let preferred_terminal = &html[start..end];
+
+        assert!(preferred_terminal.contains(
+            "const visibleDocks = (data.docks || []).filter((dock) => dock.visible !== false);"
+        ));
+        assert!(preferred_terminal.contains("for (const dock of visibleDocks)"));
+        assert!(!preferred_terminal.contains("for (const dock of data.docks || [])"));
+    }
 }

@@ -1829,7 +1829,8 @@
           const focusedPane = activePanes.find((pane) => pane.paneNumber === focusedNumber && pane.terminalId && pane.terminalLive);
           const activePane = focusedPane || activePanes.find((pane) => pane.terminalId && pane.terminalLive);
           if (activePane) return terminals.find((terminalInfo) => terminalInfo.id === activePane.terminalId) || null;
-          for (const dock of data.docks || []) {
+          const visibleDocks = (data.docks || []).filter((dock) => dock.visible !== false);
+          for (const dock of visibleDocks) {
             const dockPane = (dock.panes || []).find((pane) => pane.terminalId && pane.terminalLive);
             if (dockPane) return terminals.find((terminalInfo) => terminalInfo.id === dockPane.terminalId) || null;
           }

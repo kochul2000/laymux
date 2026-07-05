@@ -232,6 +232,7 @@ const handlers: HandlerMap = {
     },
     switchActive: (p) => {
       useWorkspaceStore.getState().setActiveWorkspace(p.id as string);
+      useDockStore.getState().setFocusedDock(null);
       return ok({ switched: p.id });
     },
     add: (p) => {
@@ -599,8 +600,11 @@ const handlers: HandlerMap = {
       if (dockCtx) {
         useDockStore.getState().setFocusedDock(dockCtx.dock.position, dockCtx.pane.id);
         useGridStore.getState().setFocusedPane(null);
-      } else if (paneIndex >= 0) {
-        useGridStore.getState().setFocusedPane(paneIndex);
+      } else {
+        useDockStore.getState().setFocusedDock(null);
+        if (paneIndex >= 0) {
+          useGridStore.getState().setFocusedPane(paneIndex);
+        }
       }
 
       useTerminalStore.getState().setTerminalFocus(terminalId);
@@ -767,11 +771,14 @@ const handlers: HandlerMap = {
     state: () => {
       const { hideMode, hiddenPaneIds, hiddenWorkspaceIds, notificationPanelOpen } =
         useUiStore.getState();
+      const { focusedDock, focusedDockPaneId } = useDockStore.getState();
       const { workspaceSelector } = useSettingsStore.getState();
       return ok({
         hideMode,
         hiddenPaneIds: [...hiddenPaneIds],
         hiddenWorkspaceIds: [...hiddenWorkspaceIds],
+        focusedDock,
+        focusedDockPaneId,
         notificationPanelOpen,
         workspaceSelector,
       });
