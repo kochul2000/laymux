@@ -3,6 +3,7 @@ import type { HostCandidate } from "@/lib/tauri-api";
 export const LOOPBACK_ALLOWED_IPS = ["127.0.0.1/32", "::1/128"];
 export const TAILSCALE_ALLOWED_IPS = ["100.64.0.0/10", "fd7a:115c:a1e0::/48"];
 export const LOCAL_MOBILE_CLIENT_NAME = "laymux-mobile";
+export const REMOTE_LAST_HOST_KEY = "laymux-remote-last-host";
 
 export interface RemoteHostOption {
   kind: HostCandidate["kind"] | "custom";
@@ -77,10 +78,37 @@ export function buildRemoteHostOptions(
   return options;
 }
 
-export function chooseRemoteHost(options: RemoteHostOption[], preferredHost: string): string {
+export function chooseRemoteHost(
+  options: RemoteHostOption[],
+  preferredHost: string,
+  lastHost = "",
+): string {
   const preferred = preferredHost.trim();
   if (preferred && options.some((option) => option.host === preferred)) return preferred;
+  const last = lastHost.trim();
+  if (last && options.some((option) => option.host === last)) return last;
   return options[0]?.host ?? "";
+}
+
+export function readLastRemoteHost(): string {
+  try {
+    return localStorage.getItem(REMOTE_LAST_HOST_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeLastRemoteHost(host: string): void {
+  const trimmed = host.trim();
+  try {
+    if (trimmed) {
+      localStorage.setItem(REMOTE_LAST_HOST_KEY, trimmed);
+    } else {
+      localStorage.removeItem(REMOTE_LAST_HOST_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function formatHostForUrl(host: string): string {

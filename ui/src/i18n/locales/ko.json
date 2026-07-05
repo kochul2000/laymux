@@ -27,8 +27,9 @@
       "missing": "없음",
       "copy": "복사",
       "copied": "복사됨",
-      "runtimeOn": "이번 실행 동안 허용",
-      "runtimeOff": "이번 실행 허용 끄기",
+      "runtimeThisRun": "이번 실행 동안 허용",
+      "runtimeThisRunOn": "켜짐",
+      "runtimeThisRunOff": "꺼짐",
       "openMobileMode": "모바일 모드로 전환",
       "openingMobileMode": "전환 중...",
       "missingTokenForMobileMode": "모바일 모드에는 원격 토큰이 필요합니다."
@@ -306,7 +307,7 @@
       "customHostPlaceholder": "devbox.tailnet.ts.net",
       "addCustomHost": "호스트 추가",
       "preferredHost": "기본 호스트",
-      "preferredHostDesc": "Remote Access URL에 미리 선택할 호스트입니다. 자동은 첫 후보를 사용합니다.",
+      "preferredHostDesc": "Remote Access URL에 미리 선택할 호스트입니다. 자동은 마지막 선택 호스트를 쓰고, 없으면 첫 후보를 사용합니다.",
       "hostAuto": "자동"
     },
     "workspaces": {

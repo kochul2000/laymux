@@ -47,6 +47,7 @@ import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import {
   appendAllowedIps,
@@ -1347,17 +1348,17 @@ function ToggleRow({
   const { t } = useTranslation("settings");
   return (
     <SettingRow label={label} desc={desc}>
-      <label className="flex cursor-pointer items-center gap-2">
-        <input
+      <div className="flex items-center gap-2">
+        <ToggleSwitch
           data-testid={testid}
-          type="checkbox"
+          aria-label={label}
           checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
+          onChange={onChange}
         />
         <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
           {checked ? t("common.enabled") : t("common.disabled")}
         </span>
-      </label>
+      </div>
     </SettingRow>
   );
 }

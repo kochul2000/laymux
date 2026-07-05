@@ -18,11 +18,14 @@ import {
   buildRemoteUrlWithToken,
   chooseRemoteHost,
   generateRemoteToken,
+  readLastRemoteHost,
+  writeLastRemoteHost,
 } from "@/lib/remote-hosts";
 import { useLocalMobileModeStore } from "@/stores/local-mobile-mode-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -53,6 +56,7 @@ export function RemoteAccessModal() {
   const [accessStatus, setAccessStatus] = useState<RemoteAccessStatus | null>(null);
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
   const [hostCandidates, setHostCandidates] = useState<HostCandidate[]>([]);
+  const [lastHost, setLastHost] = useState(() => readLastRemoteHost());
   const [selectedHost, setSelectedHost] = useState("");
   const [reclaiming, setReclaiming] = useState(false);
   const [actionPending, setActionPending] = useState<"runtime" | "mobile" | null>(null);
@@ -67,15 +71,16 @@ export function RemoteAccessModal() {
   useEffect(() => {
     setSelectedHost((current) => {
       if (current && hostOptions.some((option) => option.host === current)) return current;
-      return chooseRemoteHost(hostOptions, remote.preferredHost);
+      return chooseRemoteHost(hostOptions, remote.preferredHost, lastHost);
     });
-  }, [hostOptions, remote.preferredHost]);
+  }, [hostOptions, lastHost, remote.preferredHost]);
 
   const token = (accessStatus?.effectiveAuthToken ?? remote.authToken).trim();
   const tokenConfigured = token.length > 0;
   const effectiveEnabled = accessStatus?.effectiveEnabled ?? remote.enabled;
   const runtimeEnabled = accessStatus?.runtimeEnabled ?? false;
-  const effectiveSelectedHost = selectedHost || chooseRemoteHost(hostOptions, remote.preferredHost);
+  const effectiveSelectedHost =
+    selectedHost || chooseRemoteHost(hostOptions, remote.preferredHost, lastHost);
   const urlHost = effectiveSelectedHost || "<laymux-host>";
   const urlWithToken = tokenConfigured
     ? buildRemoteUrlWithToken(urlHost, port ?? "...", token)
@@ -238,7 +243,12 @@ export function RemoteAccessModal() {
             <select
               data-testid="remote-host-select"
               value={effectiveSelectedHost}
-              onChange={(event) => setSelectedHost(event.target.value)}
+              onChange={(event) => {
+                const host = event.target.value;
+                setSelectedHost(host);
+                setLastHost(host);
+                writeLastRemoteHost(host);
+              }}
               className="ui-focus-ring w-full rounded px-2 py-1 text-[12px]"
               style={{
                 color: "var(--text-primary)",
@@ -275,17 +285,34 @@ export function RemoteAccessModal() {
           )}
         </Row>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-col items-start gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: "var(--text-primary)" }}>
+            {t("remoteAccess.runtimeThisRun")}
+          </span>
+          <ToggleSwitch
+            data-testid="remote-runtime-toggle"
+            aria-label={t("remoteAccess.runtimeThisRun")}
+            checked={runtimeEnabled}
+            onChange={() => void handleToggleRuntimeAccess()}
+            disabled={actionPending !== null}
+          />
+          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            {runtimeEnabled
+              ? t("remoteAccess.runtimeThisRunOn")
+              : t("remoteAccess.runtimeThisRunOff")}
+          </span>
+        </div>
         <button
           type="button"
           data-testid="remote-mobile-mode-open"
           onClick={() => void handleOpenMobileMode()}
           disabled={actionPending !== null || port === null}
-          className="rounded px-3 py-1.5 text-xs"
+          className="hover-bg rounded px-3 py-1.5 text-xs"
           style={{
-            color: "var(--bg-base)",
-            background: "var(--accent)",
-            border: "1px solid var(--accent)",
+            color: "var(--accent)",
+            background: "transparent",
+            border: "1px solid var(--border)",
             cursor: actionPending !== null || port === null ? "default" : "pointer",
             opacity: actionPending !== null || port === null ? 0.65 : 1,
           }}
@@ -293,22 +320,6 @@ export function RemoteAccessModal() {
           {actionPending === "mobile"
             ? t("remoteAccess.openingMobileMode")
             : t("remoteAccess.openMobileMode")}
-        </button>
-        <button
-          type="button"
-          data-testid="remote-runtime-toggle"
-          onClick={() => void handleToggleRuntimeAccess()}
-          disabled={actionPending !== null}
-          className="hover-bg rounded px-3 py-1.5 text-xs"
-          style={{
-            color: runtimeEnabled ? "var(--bg-base)" : "var(--accent)",
-            background: runtimeEnabled ? "var(--accent)" : "transparent",
-            border: "1px solid var(--accent)",
-            cursor: actionPending !== null ? "default" : "pointer",
-            opacity: actionPending !== null ? 0.7 : 1,
-          }}
-        >
-          {runtimeEnabled ? t("remoteAccess.runtimeOff") : t("remoteAccess.runtimeOn")}
         </button>
       </div>
       {status?.active && (

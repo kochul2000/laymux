@@ -27,8 +27,9 @@
       "missing": "Missing",
       "copy": "Copy",
       "copied": "Copied",
-      "runtimeOn": "Allow This Run",
-      "runtimeOff": "Stop This Run",
+      "runtimeThisRun": "Allow for this run",
+      "runtimeThisRunOn": "On",
+      "runtimeThisRunOff": "Off",
       "openMobileMode": "Open Mobile Mode",
       "openingMobileMode": "Opening...",
       "missingTokenForMobileMode": "Remote token is required for mobile mode."
@@ -306,7 +307,7 @@
       "customHostPlaceholder": "devbox.tailnet.ts.net",
       "addCustomHost": "Add Host",
       "preferredHost": "Default Host",
-      "preferredHostDesc": "Host preselected in Remote Access URLs. Automatic uses the first available candidate.",
+      "preferredHostDesc": "Host preselected in Remote Access URLs. Automatic uses the last selected host, then the first available candidate.",
       "hostAuto": "Automatic"
     },
     "workspaces": {

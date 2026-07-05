@@ -41,6 +41,24 @@ describe("remote-hosts", () => {
     expect(chooseRemoteHost(options, "missing")).toBe("127.0.0.1");
   });
 
+  it("chooses remote hosts by preferred, last-used, then first-candidate priority", () => {
+    const options = buildRemoteHostOptions(
+      [
+        { kind: "loopback", host: "127.0.0.1", label: "Localhost" },
+        { kind: "tailscale", host: "100.64.0.2", label: "Tailscale" },
+        { kind: "lan", host: "192.168.0.44", label: "LAN" },
+      ],
+      [],
+    );
+
+    expect(chooseRemoteHost(options, "100.64.0.2", "192.168.0.44")).toBe("100.64.0.2");
+    expect(chooseRemoteHost(options, "", "192.168.0.44")).toBe("192.168.0.44");
+    expect(chooseRemoteHost(options, "missing", "192.168.0.44")).toBe("192.168.0.44");
+    expect(chooseRemoteHost(options, "", "missing")).toBe("127.0.0.1");
+    expect(chooseRemoteHost(options, "missing", "also-missing")).toBe("127.0.0.1");
+    expect(chooseRemoteHost([], "", "192.168.0.44")).toBe("");
+  });
+
   it("brackets IPv6 hosts for URL building", () => {
     expect(formatHostForUrl("fd7a:115c:a1e0::7")).toBe("[fd7a:115c:a1e0::7]");
     expect(formatHostForUrl("[::1]")).toBe("[::1]");
