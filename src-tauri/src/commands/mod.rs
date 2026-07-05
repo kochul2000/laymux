@@ -5,6 +5,7 @@ mod misc;
 mod remote_hosts;
 mod terminal;
 
+pub use crate::cloud::commands::*;
 pub use claude_session::*;
 pub use file_ops::*;
 pub use ipc_dispatch::*;

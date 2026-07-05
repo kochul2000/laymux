@@ -192,6 +192,10 @@ fn settings_round_trip_with_full_config() {
             auth_token: "test-remote-token".into(),
             preferred_host: "100.64.0.2".into(),
             custom_hosts: vec!["devbox.tailnet.ts.net".into(), "192.168.0.44".into()],
+            cloud_enabled: true,
+            relay_base_url: "https://relay.example.test".into(),
+            cloud_instance_id: Some("instance-test".into()),
+            cloud_auto_reconnect: false,
             ..RemoteSettings::default()
         },
         sync_cwd_defaults: None,

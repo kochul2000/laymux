@@ -38,9 +38,16 @@ function remoteAccessStatus(runtimeEnabled = false, runtimeToken = "") {
   };
 }
 
+let mockCloudStatus = {
+  connected: false,
+  instanceId: null as string | null,
+  lastError: null as string | null,
+};
+
 describe("SettingsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCloudStatus = { connected: false, instanceId: null, lastError: null };
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "list_system_monospace_fonts") {
         return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
@@ -59,6 +66,13 @@ describe("SettingsView", () => {
         const runtimeEnabled = Boolean(args?.enabled);
         const runtimeToken = typeof args?.authToken === "string" ? args.authToken : "";
         return Promise.resolve(remoteAccessStatus(runtimeEnabled, runtimeToken));
+      }
+      if (cmd === "get_cloud_status") {
+        return Promise.resolve(mockCloudStatus);
+      }
+      if (cmd === "cloud_disconnect") {
+        mockCloudStatus = { connected: false, instanceId: null, lastError: null };
+        return Promise.resolve(mockCloudStatus);
       }
       return Promise.resolve(undefined);
     });
@@ -1815,6 +1829,101 @@ describe("SettingsView", () => {
         runtimeEnabled: false,
         effectiveAuthToken: "secret",
       });
+    });
+
+    it("renders cloud connection status and saves the relay override", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+
+      expect(await screen.findByText("Cloud Connection")).toBeInTheDocument();
+      expect(await screen.findByTestId("remote-settings-cloud-status")).toHaveTextContent(
+        "Disconnected",
+      );
+      const input = screen.getByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      ) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: " https://relay.example.test " } });
+
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://relay.example.test");
+    });
+
+    it("disconnects cloud status and mirrors persisted cloud fields in the store", async () => {
+      mockCloudStatus = { connected: true, instanceId: "instance-1", lastError: null };
+      useSettingsStore.getState().setRemote({
+        cloudEnabled: true,
+        cloudInstanceId: "instance-1",
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      expect(await screen.findByTestId("remote-settings-cloud-status")).toHaveTextContent(
+        "Connected (instance-1)",
+      );
+      await user.click(await screen.findByTestId("remote-settings-cloud-disconnect"));
+
+      await waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
+      });
+      expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent("Disconnected");
+      expect(useSettingsStore.getState().remote.cloudEnabled).toBe(false);
+      expect(useSettingsStore.getState().remote.cloudInstanceId).toBeNull();
+    });
+
+    it("shows cloud disconnect when persisted cloud settings remain but runtime is disconnected", async () => {
+      mockCloudStatus = { connected: false, instanceId: null, lastError: null };
+      useSettingsStore.getState().setRemote({
+        cloudEnabled: true,
+        cloudInstanceId: "instance-1",
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+
+      expect(await screen.findByTestId("remote-settings-cloud-status")).toHaveTextContent(
+        "Disconnected",
+      );
+      expect(screen.getByTestId("remote-settings-cloud-disconnect")).toBeInTheDocument();
+    });
+
+    it("preserves unsaved remote draft edits when cloud disconnect updates cloud fields", async () => {
+      mockCloudStatus = { connected: false, instanceId: null, lastError: null };
+      useSettingsStore.getState().setRemote({
+        cloudEnabled: true,
+        cloudInstanceId: "instance-1",
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const relayInput = (await screen.findByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      )) as HTMLInputElement;
+      fireEvent.change(relayInput, { target: { value: " https://draft-relay.example.test " } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-disconnect"));
+
+      await waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
+      });
+      expect(relayInput.value).toBe(" https://draft-relay.example.test ");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("");
+      expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      expect(useSettingsStore.getState().remote.cloudEnabled).toBe(false);
+      expect(useSettingsStore.getState().remote.cloudInstanceId).toBeNull();
     });
   });
 

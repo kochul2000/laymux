@@ -292,6 +292,7 @@
       "title": "Remote",
       "groupAccess": "Access",
       "groupHosts": "Hosts",
+      "groupCloud": "Cloud Connection",
       "enabled": "Enable on Startup",
       "enabledDesc": "Open Direct Remote Mode automatically on the next app start. A token is generated when this is enabled without one.",
       "allowedIps": "Allowed IPs",
@@ -307,7 +308,16 @@
       "addCustomHost": "Add Host",
       "preferredHost": "Default Host",
       "preferredHostDesc": "Host preselected in Remote Access URLs. Automatic uses the last selected host, then the first available candidate.",
-      "hostAuto": "Automatic"
+      "hostAuto": "Automatic",
+      "cloudStatus": "Status",
+      "cloudStatusConnected": "Connected",
+      "cloudStatusConnectedWithInstance": "Connected ({{instanceId}})",
+      "cloudStatusDisconnected": "Disconnected",
+      "cloudStatusError": "Error: {{error}}",
+      "cloudRelayBaseUrl": "Relay Base URL",
+      "cloudRelayBaseUrlDesc": "Optional relay override for cloud pairing. Empty uses the product default in a later pairing release.",
+      "cloudDisconnect": "Disconnect",
+      "cloudDisconnecting": "Disconnecting..."
     },
     "workspaces": {
       "title": "Workspaces",

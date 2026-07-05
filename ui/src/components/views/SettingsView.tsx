@@ -28,8 +28,11 @@ import {
   type LanguageSetting,
 } from "@/stores/settings-store";
 import {
+  cloudDisconnect,
+  getCloudStatus,
   getRemoteAccessStatus,
   setRemoteRuntimeAccess,
+  type CloudStatus,
   type ExtensionViewer,
   type FileExplorerSettings,
   type RemoteSettings,
@@ -1673,6 +1676,7 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
     ...remote,
     authToken: remote.authToken.trim(),
     preferredHost: remote.preferredHost.trim(),
+    relayBaseUrl: remote.relayBaseUrl.trim(),
     customHosts,
     allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
     autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
@@ -1710,9 +1714,36 @@ function RemoteSection() {
   const preferredAvailable =
     remote.preferredHost === "" ||
     hostOptions.some((option) => option.host === remote.preferredHost);
+  const remoteDraftChanged = useMemo(
+    () => JSON.stringify(remote) !== JSON.stringify(storeDraft),
+    [remote, storeDraft],
+  );
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
+  const [cloudStatusError, setCloudStatusError] = useState<string | null>(null);
+  const [cloudDisconnectPending, setCloudDisconnectPending] = useState(false);
 
   const update = (partial: Partial<RemoteSectionDraft>) =>
     setDraftRemote((prev) => ({ ...prev, ...partial }));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getCloudStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setCloudStatus(status);
+        setCloudStatusError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCloudStatus(null);
+        setCloudStatusError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleToggleEnabled = (enabled: boolean) => {
     update({
@@ -1739,6 +1770,40 @@ function RemoteSection() {
       ...(remote.preferredHost === host ? { preferredHost: "" } : {}),
     });
   };
+
+  const handleCloudDisconnect = async () => {
+    setCloudDisconnectPending(true);
+    setCloudStatusError(null);
+    try {
+      const status = await cloudDisconnect();
+      setCloudStatus(status);
+      if (remoteDraftChanged) {
+        setDraftRemote((prev) => ({ ...prev, cloudEnabled: false, cloudInstanceId: null }));
+      } else if (storeRemote.cloudEnabled || storeRemote.cloudInstanceId) {
+        setRemote({ cloudEnabled: false, cloudInstanceId: null });
+      }
+    } catch (error) {
+      setCloudStatusError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCloudDisconnectPending(false);
+    }
+  };
+
+  const cloudStatusText = cloudStatusError
+    ? t("remote.cloudStatusError", { error: cloudStatusError })
+    : cloudStatus?.lastError
+      ? t("remote.cloudStatusError", { error: cloudStatus.lastError })
+      : cloudStatus?.connected
+        ? cloudStatus.instanceId
+          ? t("remote.cloudStatusConnectedWithInstance", { instanceId: cloudStatus.instanceId })
+          : t("remote.cloudStatusConnected")
+        : t("remote.cloudStatusDisconnected");
+  const showCloudDisconnect =
+    remote.cloudEnabled ||
+    Boolean(remote.cloudInstanceId) ||
+    Boolean(cloudStatus?.connected) ||
+    Boolean(cloudStatus?.instanceId) ||
+    Boolean(cloudStatus?.lastError);
 
   return (
     <div>
@@ -1904,6 +1969,52 @@ function RemoteSection() {
               </option>
             ))}
           </FocusSelect>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("remote.groupCloud")}>
+        <SettingRow label={t("remote.cloudStatus")}>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span
+              data-testid="remote-settings-cloud-status"
+              className="min-w-0 text-[12px]"
+              style={{
+                color:
+                  cloudStatusError || cloudStatus?.lastError ? "var(--red)" : "var(--text-primary)",
+              }}
+            >
+              {cloudStatusText}
+            </span>
+            {showCloudDisconnect && (
+              <button
+                type="button"
+                data-testid="remote-settings-cloud-disconnect"
+                onClick={handleCloudDisconnect}
+                disabled={cloudDisconnectPending}
+                className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  color: "var(--red)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: cloudDisconnectPending ? "not-allowed" : "pointer",
+                }}
+              >
+                {cloudDisconnectPending
+                  ? t("remote.cloudDisconnecting")
+                  : t("remote.cloudDisconnect")}
+              </button>
+            )}
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.cloudRelayBaseUrl")} desc={t("remote.cloudRelayBaseUrlDesc")}>
+          <FocusInput
+            data-testid="remote-settings-cloud-relay-base-url-input"
+            className={inputCls}
+            placeholder="https://relay.example.com"
+            value={remote.relayBaseUrl}
+            onChange={(event) => update({ relayBaseUrl: event.target.value })}
+          />
         </SettingRow>
       </SubGroup>
     </div>

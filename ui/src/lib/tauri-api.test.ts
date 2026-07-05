@@ -23,6 +23,8 @@ import {
   saveSettings,
   getRemoteAccessStatus,
   getRemoteHostCandidates,
+  getCloudStatus,
+  cloudDisconnect,
   setRemoteRuntimeAccess,
   onTerminalOutput,
   onOpenFile,
@@ -203,6 +205,22 @@ describe("tauri-api", () => {
 
       await expect(getRemoteHostCandidates()).resolves.toEqual(candidates);
       expect(mockInvoke).toHaveBeenCalledWith("get_remote_host_candidates");
+    });
+
+    it("invokes get_cloud_status", async () => {
+      const status = { connected: true, instanceId: "instance-1", lastError: null };
+      mockInvoke.mockResolvedValue(status);
+
+      await expect(getCloudStatus()).resolves.toEqual(status);
+      expect(mockInvoke).toHaveBeenCalledWith("get_cloud_status");
+    });
+
+    it("invokes cloud_disconnect", async () => {
+      const status = { connected: false, instanceId: null, lastError: null };
+      mockInvoke.mockResolvedValue(status);
+
+      await expect(cloudDisconnect()).resolves.toEqual(status);
+      expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
     });
   });
 

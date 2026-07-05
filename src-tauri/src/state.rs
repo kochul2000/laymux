@@ -25,6 +25,7 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
 /// 11. `remote_access`
 /// 12. `remote_control`
+/// 13. `cloud`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -77,6 +78,8 @@ pub struct AppState {
     pub remote_access: Mutex<crate::remote_server::RemoteAccessRuntimeState>,
     /// Current Direct Remote Mode controller lease plus local reclaim lockout state.
     pub remote_control: Mutex<crate::remote_server::RemoteControlState>,
+    /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
+    pub cloud: Mutex<crate::cloud::CloudStatus>,
 }
 
 impl AppState {
@@ -98,6 +101,7 @@ impl AppState {
             notification_counter: AtomicU64::new(1),
             remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::default()),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
+            cloud: Mutex::new(crate::cloud::CloudStatus::default()),
         }
     }
 }
@@ -180,5 +184,14 @@ mod tests {
         let remote = state.remote_control.lock().unwrap();
         assert!(remote.lease.is_none());
         assert!(remote.reclaim_lockout_until.is_none());
+    }
+
+    #[test]
+    fn cloud_status_starts_disconnected() {
+        let state = AppState::new();
+        let cloud = state.cloud.lock().unwrap();
+        assert!(!cloud.connected);
+        assert!(cloud.instance_id.is_none());
+        assert!(cloud.last_error.is_none());
     }
 }

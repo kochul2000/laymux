@@ -5,6 +5,7 @@ pub mod claude_activity;
 pub mod claude_bullet;
 pub mod cli;
 pub mod clipboard;
+pub mod cloud;
 pub mod codex_activity;
 pub mod commands;
 pub mod constants;
@@ -173,6 +174,8 @@ pub fn run() {
             commands::get_remote_control_status,
             commands::get_remote_host_candidates,
             commands::reclaim_remote_control,
+            commands::get_cloud_status,
+            commands::cloud_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

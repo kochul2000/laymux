@@ -995,6 +995,18 @@ pub struct RemoteSettings {
     /// User-managed host names or IPs that are offered alongside detected candidates.
     #[serde(default)]
     pub custom_hosts: Vec<String>,
+    /// Cloud relay connection is enabled for the current desktop instance.
+    #[serde(default)]
+    pub cloud_enabled: bool,
+    /// Optional cloud relay base URL override. Empty = product default in a later pairing PR.
+    #[serde(default)]
+    pub relay_base_url: String,
+    /// Instance ID assigned by the cloud relay after pairing.
+    #[serde(default)]
+    pub cloud_instance_id: Option<String>,
+    /// Reconnect to the cloud relay automatically on startup when credentials exist.
+    #[serde(default = "default_cloud_auto_reconnect")]
+    pub cloud_auto_reconnect: bool,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1013,6 +1025,10 @@ fn default_remote_auto_mobile_mode_min_width() -> u32 {
     720
 }
 
+fn default_cloud_auto_reconnect() -> bool {
+    true
+}
+
 impl Default for RemoteSettings {
     fn default() -> Self {
         Self {
@@ -1025,6 +1041,10 @@ impl Default for RemoteSettings {
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
+            cloud_enabled: false,
+            relay_base_url: String::new(),
+            cloud_instance_id: None,
+            cloud_auto_reconnect: default_cloud_auto_reconnect(),
         }
     }
 }

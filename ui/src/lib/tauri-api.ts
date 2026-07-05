@@ -74,6 +74,12 @@ export interface RemoteAccessStatus {
   effectiveAuthToken: string;
 }
 
+export interface CloudStatus {
+  connected: boolean;
+  instanceId?: string | null;
+  lastError?: string | null;
+}
+
 export async function getRemoteAccessStatus(): Promise<RemoteAccessStatus> {
   return invoke("get_remote_access_status");
 }
@@ -100,6 +106,14 @@ export interface HostCandidate {
 
 export async function getRemoteHostCandidates(): Promise<HostCandidate[]> {
   return invoke("get_remote_host_candidates");
+}
+
+export async function getCloudStatus(): Promise<CloudStatus> {
+  return invoke("get_cloud_status");
+}
+
+export async function cloudDisconnect(): Promise<CloudStatus> {
+  return invoke("cloud_disconnect");
 }
 
 export async function reclaimRemoteControl(): Promise<RemoteControlStatus> {
@@ -325,6 +339,10 @@ export interface RemoteSettings {
   autoMobileModeMinWidth: number;
   preferredHost: string;
   customHosts: string[];
+  cloudEnabled: boolean;
+  relayBaseUrl: string;
+  cloudInstanceId?: string | null;
+  cloudAutoReconnect: boolean;
 }
 
 export interface Settings {

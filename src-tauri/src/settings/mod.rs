@@ -253,6 +253,10 @@ mod tests {
         assert_eq!(legacy.remote.allowed_ips, vec!["127.0.0.1/32", "::1/128"]);
         assert_eq!(legacy.remote.heartbeat_timeout_seconds, 15);
         assert_eq!(legacy.remote.auto_mobile_mode_min_width, 720);
+        assert!(!legacy.remote.cloud_enabled);
+        assert_eq!(legacy.remote.relay_base_url, "");
+        assert_eq!(legacy.remote.cloud_instance_id, None);
+        assert!(legacy.remote.cloud_auto_reconnect);
 
         let json = r#"{
           "remote": {
@@ -260,7 +264,11 @@ mod tests {
             "allowedIps": ["100.64.0.0/10"],
             "authToken": "secret",
             "heartbeatTimeoutSeconds": 30,
-            "autoMobileModeMinWidth": 640
+            "autoMobileModeMinWidth": 640,
+            "cloudEnabled": true,
+            "relayBaseUrl": "https://relay.example.test",
+            "cloudInstanceId": "instance-123",
+            "cloudAutoReconnect": false
           }
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
@@ -269,12 +277,23 @@ mod tests {
         assert_eq!(settings.remote.auth_token, "secret");
         assert_eq!(settings.remote.heartbeat_timeout_seconds, 30);
         assert_eq!(settings.remote.auto_mobile_mode_min_width, 640);
+        assert!(settings.remote.cloud_enabled);
+        assert_eq!(settings.remote.relay_base_url, "https://relay.example.test");
+        assert_eq!(
+            settings.remote.cloud_instance_id.as_deref(),
+            Some("instance-123")
+        );
+        assert!(!settings.remote.cloud_auto_reconnect);
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"remote\""));
         assert!(serialized.contains("\"allowedIps\":[\"100.64.0.0/10\"]"));
         assert!(serialized.contains("\"authToken\":\"secret\""));
         assert!(serialized.contains("\"autoMobileModeMinWidth\":640"));
+        assert!(serialized.contains("\"cloudEnabled\":true"));
+        assert!(serialized.contains("\"relayBaseUrl\":\"https://relay.example.test\""));
+        assert!(serialized.contains("\"cloudInstanceId\":\"instance-123\""));
+        assert!(serialized.contains("\"cloudAutoReconnect\":false"));
     }
 
     #[test]

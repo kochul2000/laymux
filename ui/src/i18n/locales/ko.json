@@ -292,6 +292,7 @@
       "title": "원격",
       "groupAccess": "접속",
       "groupHosts": "호스트",
+      "groupCloud": "클라우드 연결",
       "enabled": "시작 시 자동 허용",
       "enabledDesc": "다음 앱 시작부터 Direct Remote Mode를 자동으로 엽니다. 토큰이 없으면 켤 때 생성합니다.",
       "allowedIps": "허용 IP",
@@ -307,7 +308,16 @@
       "addCustomHost": "호스트 추가",
       "preferredHost": "기본 호스트",
       "preferredHostDesc": "Remote Access URL에 미리 선택할 호스트입니다. 자동은 마지막 선택 호스트를 쓰고, 없으면 첫 후보를 사용합니다.",
-      "hostAuto": "자동"
+      "hostAuto": "자동",
+      "cloudStatus": "상태",
+      "cloudStatusConnected": "연결됨",
+      "cloudStatusConnectedWithInstance": "연결됨 ({{instanceId}})",
+      "cloudStatusDisconnected": "미연결",
+      "cloudStatusError": "오류: {{error}}",
+      "cloudRelayBaseUrl": "릴레이 기본 URL",
+      "cloudRelayBaseUrlDesc": "클라우드 pairing용 릴레이 주소를 재정의합니다. 비워두면 다음 pairing 릴리스에서 제품 기본값을 사용합니다.",
+      "cloudDisconnect": "연결 해제",
+      "cloudDisconnecting": "해제 중..."
     },
     "workspaces": {
       "title": "워크스페이스",
