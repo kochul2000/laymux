@@ -257,4 +257,14 @@ mod tests {
             !preferred_terminal.contains("if (preferredTerminalId) {\n            const existing")
         );
     }
+
+    #[test]
+    fn remote_page_auto_claims_on_autoconnect_without_local_app_gate() {
+        // The cloud dashboard flow serves the page in an external browser (not
+        // localApp), so auto-claim must fire on autoConnect=1 alone — otherwise
+        // the user has to click Connect a second time to take control.
+        let html = remote_page_html();
+        assert!(html.contains("if (autoConnectMode && token()) {"));
+        assert!(!html.contains("if (localAppMode && autoConnectMode && token())"));
+    }
 }
