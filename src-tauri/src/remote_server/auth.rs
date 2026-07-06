@@ -24,14 +24,16 @@ pub(crate) async fn remote_guard(
     req: Request,
     next: Next,
 ) -> Response {
-    if request_is_tunnel_authorized(&req) {
-        return next.run(req).await;
-    }
-
     let settings = match effective_remote_settings(&server.app_state) {
         Ok(settings) => settings,
         Err(err) => return internal_error(err),
     };
+
+    match tunnel_authorized_decision(&req, &settings) {
+        TunnelAuthorizedDecision::Allowed => return next.run(req).await,
+        TunnelAuthorizedDecision::Denied(response) => return response,
+        TunnelAuthorizedDecision::NotTunnel => {}
+    }
 
     if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
@@ -50,15 +52,48 @@ pub(crate) fn request_is_tunnel_authorized(req: &Request) -> bool {
     req.extensions().get::<TunnelAuthorized>().is_some()
 }
 
-pub(crate) fn check_remote_base_access(
+enum TunnelAuthorizedDecision {
+    NotTunnel,
+    Allowed,
+    Denied(Response),
+}
+
+fn tunnel_authorized_decision(
+    req: &Request,
     settings: &RemoteSettings,
-    addr: SocketAddr,
-) -> Option<Response> {
+) -> TunnelAuthorizedDecision {
+    // Cloud tunnel requests are authorized at the WSS device-token layer, so
+    // they skip the local token/IP/Origin gate — BUT they still require the user
+    // to have allowed remote control (the same enable toggle that governs
+    // Tailscale). Pairing/being online must not hand over control on its own.
+    if !request_is_tunnel_authorized(req) {
+        return TunnelAuthorizedDecision::NotTunnel;
+    }
+    if let Some(response) = check_remote_enabled(settings) {
+        return TunnelAuthorizedDecision::Denied(response);
+    }
+    TunnelAuthorizedDecision::Allowed
+}
+
+/// The user-facing remote-control gate shared by every transport (Tailscale and
+/// cloud tunnel). Returns a 403 when remote control is not enabled. Cloud tunnel
+/// requests check only this — not the token/IP/Origin gate below.
+pub(crate) fn check_remote_enabled(settings: &RemoteSettings) -> Option<Response> {
     if !settings.enabled {
         return Some(json_error(
             StatusCode::FORBIDDEN,
             "direct remote mode is disabled",
         ));
+    }
+    None
+}
+
+pub(crate) fn check_remote_base_access(
+    settings: &RemoteSettings,
+    addr: SocketAddr,
+) -> Option<Response> {
+    if let Some(response) = check_remote_enabled(settings) {
+        return Some(response);
     }
     if settings.auth_token.is_empty() {
         return Some(json_error(
@@ -322,6 +357,17 @@ mod tests {
     use axum::body::Body;
     use axum::http::HeaderValue;
 
+    fn guard_request(tunnel_authorized: bool) -> Request {
+        let mut request = Request::builder()
+            .uri("/remote/v1/health")
+            .body(Body::empty())
+            .unwrap();
+        if tunnel_authorized {
+            request.extensions_mut().insert(TunnelAuthorized);
+        }
+        request
+    }
+
     #[test]
     fn remote_allowlist_matches_tailscale_cidrs() {
         let allowed = vec![
@@ -377,7 +423,23 @@ mod tests {
     }
 
     #[test]
-    fn tunnel_authorized_request_bypasses_direct_remote_gate_marker_only() {
+    fn check_remote_enabled_requires_enabled_settings() {
+        let disabled = RemoteSettings {
+            enabled: false,
+            ..RemoteSettings::default()
+        };
+        let response = check_remote_enabled(&disabled).unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let enabled = RemoteSettings {
+            enabled: true,
+            ..RemoteSettings::default()
+        };
+        assert!(check_remote_enabled(&enabled).is_none());
+    }
+
+    #[test]
+    fn tunnel_authorized_request_marker_is_not_remote_enable_gate() {
         let settings = RemoteSettings {
             enabled: false,
             auth_token: "persistent-token".into(),
@@ -395,6 +457,50 @@ mod tests {
         assert!(!request_is_tunnel_authorized(&request));
         request.extensions_mut().insert(TunnelAuthorized);
         assert!(request_is_tunnel_authorized(&request));
+    }
+
+    #[test]
+    fn remote_guard_rejects_tunnel_authorized_when_remote_disabled() {
+        let settings = RemoteSettings {
+            enabled: false,
+            auth_token: "persistent-token".into(),
+            ..RemoteSettings::default()
+        };
+        let request = guard_request(true);
+
+        match tunnel_authorized_decision(&request, &settings) {
+            TunnelAuthorizedDecision::Denied(response) => {
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            }
+            _ => panic!("expected disabled tunnel request to be denied"),
+        }
+    }
+
+    #[test]
+    fn remote_guard_allows_tunnel_authorized_when_enabled_without_token_ip_origin() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: String::new(),
+            allowed_ips: vec!["198.51.100.1/32".into()],
+            allowed_origins: vec!["https://remote.example".into()],
+            ..RemoteSettings::default()
+        };
+        let tunnel_request = guard_request(true);
+        let direct_request = guard_request(false);
+
+        assert!(matches!(
+            tunnel_authorized_decision(&tunnel_request, &settings),
+            TunnelAuthorizedDecision::Allowed
+        ));
+        assert!(matches!(
+            tunnel_authorized_decision(&direct_request, &settings),
+            TunnelAuthorizedDecision::NotTunnel
+        ));
+
+        let direct_response =
+            check_remote_base_access(&settings, "203.0.113.10:1".parse::<SocketAddr>().unwrap())
+                .unwrap();
+        assert_eq!(direct_response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

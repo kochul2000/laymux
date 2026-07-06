@@ -49,6 +49,7 @@ const FRAME_STREAM_ERROR: &str = "stream.error";
 const KIND_HTTP_REQUEST: &str = "http.request";
 const KIND_HTTP_RESPONSE: &str = "http.response";
 const KIND_WEBSOCKET: &str = "websocket";
+const KIND_WEBSOCKET_ACCEPT: &str = "websocket.accept";
 const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
@@ -1194,6 +1195,37 @@ async fn stream_terminal_output_over_tunnel(
     lease_id: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let timeout_seconds = remote_output_timeout_seconds(&app_state);
+    match remote_server::active_lease_matches_with_timeout(
+        &app_state,
+        &lease_id,
+        Duration::from_secs(timeout_seconds),
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            let _ = send_stream_error(
+                &outbound_tx,
+                &stream_id,
+                StreamErrorPayload::new(
+                    "lease_not_active",
+                    "remote controller lease is not active",
+                    false,
+                ),
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            let _ = send_stream_error(
+                &outbound_tx,
+                &stream_id,
+                StreamErrorPayload::new("lease_check_failed", error, false),
+            )
+            .await;
+            return;
+        }
+    }
+
     let (initial, mut seq) = match terminal_output_snapshot(&app_state, &terminal_id) {
         Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
@@ -1216,6 +1248,26 @@ async fn stream_terminal_output_over_tunnel(
         }
     };
 
+    // Handshake: the server holds the output stream pending a
+    // `stream.open{kind:"websocket.accept"}` on the same stream_id. Without it
+    // the server drops srv-XXX and rejects our subsequent output frames as
+    // "Unknown stream_id". Send it once, after the local terminal (dial) is
+    // confirmed present, before any output data. (HTTP sends stream.open
+    // {http.response}; the websocket path needs its accept analog.)
+    if send_frame(
+        &outbound_tx,
+        TunnelFrame::new(
+            &stream_id,
+            FRAME_STREAM_OPEN,
+            json!({ "kind": KIND_WEBSOCKET_ACCEPT }),
+        ),
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+
     if !initial.is_empty()
         && send_stream_data(&outbound_tx, &stream_id, &initial)
             .await
@@ -1224,7 +1276,6 @@ async fn stream_terminal_output_over_tunnel(
         return;
     }
 
-    let timeout_seconds = remote_output_timeout_seconds(&app_state);
     let mut output_interval = interval(Duration::from_millis(OUTPUT_POLL_MS));
     let mut lease_check = interval(Duration::from_millis(LEASE_CHECK_MS));
     let mut sent_error = false;
@@ -1494,12 +1545,14 @@ pub(crate) fn reconnect_backoff(attempt: u32) -> Duration {
 mod tests {
     use std::env;
     use std::path::Path;
+    use std::time::Instant;
 
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use serial_test::serial;
 
     use super::*;
+    use crate::output_buffer::TerminalOutputBuffer;
     use crate::settings::{save_settings, Settings};
 
     struct EnvVarGuard {
@@ -1549,6 +1602,77 @@ mod tests {
 
     fn error_code(frame: &TunnelFrame) -> Option<&str> {
         frame.payload.as_ref()?.get("code")?.as_str()
+    }
+
+    fn save_remote_enabled(enabled: bool) {
+        save_remote_enabled_with_token(enabled, "remote-token");
+    }
+
+    fn save_remote_enabled_with_token(enabled: bool, auth_token: &str) {
+        let mut settings = Settings::default();
+        settings.remote.enabled = enabled;
+        settings.remote.auth_token = auth_token.into();
+        save_settings(&settings).unwrap();
+    }
+
+    fn state_with_terminal_output_and_lease(lease_id: &str) -> Arc<AppState> {
+        let state = Arc::new(AppState::new());
+        let mut buffer = TerminalOutputBuffer::default();
+        buffer.push(b"initial output");
+        {
+            let mut buffers = state.output_buffers.lock_or_err().unwrap();
+            buffers.insert("term-1".into(), buffer);
+        }
+        {
+            let mut control = state.remote_control.lock_or_err().unwrap();
+            control.lease = Some(remote_server::RemoteControlLease {
+                lease_id: lease_id.into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: Instant::now(),
+            });
+        }
+        state
+    }
+
+    async fn spawn_output_stream(
+        state: Arc<AppState>,
+        lease_id: &str,
+    ) -> (
+        mpsc::Receiver<TunnelFrame>,
+        watch::Sender<bool>,
+        TokioJoinHandle<()>,
+    ) {
+        let (tx, rx) = mpsc::channel(8);
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let join = tokio::spawn(stream_terminal_output_over_tunnel(
+            tx,
+            state,
+            "srv-output".into(),
+            "term-1".into(),
+            lease_id.into(),
+            shutdown_rx,
+        ));
+        (rx, shutdown_tx, join)
+    }
+
+    async fn assert_output_stream_rejects_before_accept(
+        mut rx: mpsc::Receiver<TunnelFrame>,
+        join: TokioJoinHandle<()>,
+    ) {
+        let first = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.stream_id, "srv-output");
+        assert_eq!(first.frame_type, FRAME_STREAM_ERROR);
+        assert_eq!(error_code(&first), Some("lease_not_active"));
+
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(rx.recv().await.is_none());
     }
 
     fn pending_response_task() -> TokioJoinHandle<()> {
@@ -1731,6 +1855,112 @@ mod tests {
         assert!(!status.runtime_enabled);
         assert!(!status.effective_enabled);
         assert!(status.auth_token_configured);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_sends_websocket_accept_before_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let (mut rx, shutdown_tx, join) = spawn_output_stream(state, "lease-1").await;
+
+        let first = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.stream_id, "srv-output");
+        assert_eq!(first.frame_type, FRAME_STREAM_OPEN);
+        assert_eq!(
+            first
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.get("kind"))
+                .and_then(Value::as_str),
+            Some(KIND_WEBSOCKET_ACCEPT)
+        );
+
+        let second = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.stream_id, "srv-output");
+        assert_eq!(second.frame_type, FRAME_STREAM_DATA);
+        assert_eq!(decode_stream_data(&second).unwrap(), b"initial output");
+
+        shutdown_tx.send(true).unwrap();
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_accepts_enabled_cloud_lease_without_remote_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled_with_token(true, "");
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let (mut rx, shutdown_tx, join) = spawn_output_stream(state, "lease-1").await;
+
+        let first = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.stream_id, "srv-output");
+        assert_eq!(first.frame_type, FRAME_STREAM_OPEN);
+        assert_eq!(
+            first
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.get("kind"))
+                .and_then(Value::as_str),
+            Some(KIND_WEBSOCKET_ACCEPT)
+        );
+
+        let second = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.stream_id, "srv-output");
+        assert_eq!(second.frame_type, FRAME_STREAM_DATA);
+        assert_eq!(decode_stream_data(&second).unwrap(), b"initial output");
+
+        shutdown_tx.send(true).unwrap();
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_rejects_disabled_remote_before_accept_or_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(false);
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let (rx, _shutdown_tx, join) = spawn_output_stream(state, "lease-1").await;
+
+        assert_output_stream_rejects_before_accept(rx, join).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_rejects_invalid_lease_before_accept_or_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let (rx, _shutdown_tx, join) = spawn_output_stream(state, "stale-lease").await;
+
+        assert_output_stream_rejects_before_accept(rx, join).await;
     }
 
     #[tokio::test]
