@@ -25,7 +25,8 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
 /// 11. `remote_access`
 /// 12. `remote_control`
-/// 13. `cloud`
+/// 13. `cloud_tunnel`
+/// 14. `cloud`
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
 pub struct AppState {
@@ -78,6 +79,9 @@ pub struct AppState {
     pub remote_access: Mutex<crate::remote_server::RemoteAccessRuntimeState>,
     /// Current Direct Remote Mode controller lease plus local reclaim lockout state.
     pub remote_control: Mutex<crate::remote_server::RemoteControlState>,
+    /// Runtime cloud tunnel worker control. Stored separately from status so
+    /// disconnect can cancel the long-running WSS task without holding cloud.
+    pub cloud_tunnel: Mutex<Option<crate::cloud::tunnel::TunnelControl>>,
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
 }
@@ -101,6 +105,7 @@ impl AppState {
             notification_counter: AtomicU64::new(1),
             remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::default()),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
+            cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
         }
     }
@@ -193,5 +198,12 @@ mod tests {
         assert!(!cloud.connected);
         assert!(cloud.instance_id.is_none());
         assert!(cloud.last_error.is_none());
+    }
+
+    #[test]
+    fn cloud_tunnel_control_starts_empty() {
+        let state = AppState::new();
+        let tunnel = state.cloud_tunnel.lock().unwrap();
+        assert!(tunnel.is_none());
     }
 }

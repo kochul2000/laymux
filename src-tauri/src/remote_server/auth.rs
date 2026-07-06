@@ -15,12 +15,19 @@ use super::{internal_error, json_error};
 
 const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TunnelAuthorized;
+
 pub(crate) async fn remote_guard(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
     next: Next,
 ) -> Response {
+    if request_is_tunnel_authorized(&req) {
+        return next.run(req).await;
+    }
+
     let settings = match effective_remote_settings(&server.app_state) {
         Ok(settings) => settings,
         Err(err) => return internal_error(err),
@@ -37,6 +44,10 @@ pub(crate) async fn remote_guard(
     }
 
     next.run(req).await
+}
+
+pub(crate) fn request_is_tunnel_authorized(req: &Request) -> bool {
+    req.extensions().get::<TunnelAuthorized>().is_some()
 }
 
 pub(crate) fn check_remote_base_access(
@@ -308,6 +319,7 @@ fn ipv6_in_cidr(addr: Ipv6Addr, network: Ipv6Addr, prefix: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
     use axum::http::HeaderValue;
 
     #[test]
@@ -362,6 +374,27 @@ mod tests {
                 .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn tunnel_authorized_request_bypasses_direct_remote_gate_marker_only() {
+        let settings = RemoteSettings {
+            enabled: false,
+            auth_token: "persistent-token".into(),
+            ..RemoteSettings::default()
+        };
+        assert!(
+            check_remote_base_access(&settings, "127.0.0.1:1".parse::<SocketAddr>().unwrap())
+                .is_some()
+        );
+
+        let mut request = Request::builder()
+            .uri("/remote/v1/health")
+            .body(Body::empty())
+            .unwrap();
+        assert!(!request_is_tunnel_authorized(&request));
+        request.extensions_mut().insert(TunnelAuthorized);
+        assert!(request_is_tunnel_authorized(&request));
     }
 
     #[tokio::test]

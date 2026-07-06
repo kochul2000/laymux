@@ -111,6 +111,16 @@ pub fn run() {
                 }
             });
 
+            let cloud_state = app_state.clone();
+            let cloud_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match cloud::tunnel::start_auto_reconnect(cloud_state, cloud_app).await {
+                    Ok(Some(_)) => tracing::info!("Cloud tunnel auto-reconnect started"),
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!(error = %e, "Cloud tunnel auto-reconnect failed"),
+                }
+            });
+
             // Set window icon (for taskbar in dev mode)
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {

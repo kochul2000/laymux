@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
-use super::{keyring_store, CloudStatus};
+use super::{keyring_store, tunnel, CloudStatus};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::settings::{default_cloud_relay_base_url, load_settings, save_settings};
@@ -52,9 +52,22 @@ pub(crate) struct CallbackHttpResponse {
     pub outcome: CallbackOutcome,
 }
 
-pub async fn cloud_connect_start_inner(state: Arc<AppState>) -> Result<CloudStatus, AppError> {
+pub async fn cloud_connect_start_inner(
+    state: Arc<AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<CloudStatus, AppError> {
     match run_pairing_flow(&state).await {
-        Ok(status) => Ok(status),
+        Ok(status) => match tunnel::start_tunnel_from_settings(state.clone(), app_handle).await {
+            Ok(tunnel_status) => Ok(tunnel_status),
+            Err(error) => {
+                set_cloud_pairing_error(&state, format!("Cloud tunnel start failed: {error}")).map(
+                    |mut next| {
+                        next.instance_id = next.instance_id.or(status.instance_id);
+                        next
+                    },
+                )
+            }
+        },
         Err(error) => set_cloud_pairing_error(&state, error.to_string()),
     }
 }

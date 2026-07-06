@@ -17,6 +17,8 @@ pub use access::{
     get_remote_access_status, set_remote_runtime_access, RemoteAccessRuntimeState,
     RemoteAccessStatus,
 };
+pub(crate) use auth::TunnelAuthorized;
+pub(crate) use lease::active_lease_matches_with_timeout;
 pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,
     RemoteControlStatus,
