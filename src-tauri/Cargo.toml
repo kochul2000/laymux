@@ -16,11 +16,13 @@ serde_json = "1"
 portable-pty = "0.8"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors"] }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3"
 png = "0.17"
 font-kit = "0.14"
 rmcp = { version = "1.4", features = ["server", "transport-streamable-http-server"] }
@@ -29,6 +31,7 @@ base64 = "0.22"
 if-addrs = "0.13"
 keyring = { version = "3", features = ["windows-native", "linux-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
@@ -37,7 +40,6 @@ windows-sys = { version = "0.59", features = ["Win32_System_Diagnostics_ToolHelp
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
-tower = { version = "0.5", features = ["util"] }
 
 [lib]
 name = "laymux_lib"

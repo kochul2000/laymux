@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod keyring_store;
 pub mod pairing;
+pub mod tunnel;
 
 use serde::Serialize;
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use super::{keyring_store, pairing, CloudStatus};
+use super::{keyring_store, pairing, tunnel, CloudStatus};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
@@ -17,8 +17,11 @@ pub fn get_cloud_status_inner(state: &AppState) -> Result<CloudStatus, AppError>
 }
 
 #[tauri::command]
-pub async fn cloud_connect_start(state: State<'_, Arc<AppState>>) -> Result<CloudStatus, String> {
-    pairing::cloud_connect_start_inner(state.inner().clone())
+pub async fn cloud_connect_start(
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<CloudStatus, String> {
+    pairing::cloud_connect_start_inner(state.inner().clone(), app)
         .await
         .map_err(Into::into)
 }
@@ -38,6 +41,10 @@ pub fn cloud_disconnect_inner(state: &AppState) -> Result<CloudStatus, AppError>
 
 fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
     let mut errors = Vec::new();
+
+    if let Err(error) = tunnel::stop_tunnel(state) {
+        errors.push(format!("tunnel stop failed: {error}"));
+    }
 
     if let Err(error) = keyring_store::delete_device_token() {
         errors.push(format!("keyring delete failed: {error}"));

@@ -41,6 +41,7 @@ ADR 이 필요한 대표 기준:
 | [0021](0021-remote-host-candidate-discovery.md) | Remote Host Candidate Discovery | Accepted |
 | [0022](0022-cloud-connection-foundation.md) | Cloud Connection Foundation | Accepted |
 | [0023](0023-cloud-pairing-loopback-oauth.md) | Cloud Pairing Loopback OAuth | Accepted |
+| [0024](0024-cloud-native-wss-tunnel.md) | Cloud Native WSS Tunnel | Accepted |
 
 ## 새 ADR 추가
 
