@@ -28,8 +28,10 @@ import {
   type LanguageSetting,
 } from "@/stores/settings-store";
 import {
+  cloudConnectStart,
   cloudDisconnect,
   getCloudStatus,
+  loadSettings,
   getRemoteAccessStatus,
   setRemoteRuntimeAccess,
   type CloudStatus,
@@ -1718,8 +1720,14 @@ function RemoteSection() {
     () => JSON.stringify(remote) !== JSON.stringify(storeDraft),
     [remote, storeDraft],
   );
+  // Mirror the latest dirty state into a ref so async cloud callbacks (which
+  // capture the value at click time) branch on the current draft state after a
+  // long-running OAuth await instead of a stale closure snapshot.
+  const remoteDraftChangedRef = useRef(remoteDraftChanged);
+  remoteDraftChangedRef.current = remoteDraftChanged;
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
   const [cloudStatusError, setCloudStatusError] = useState<string | null>(null);
+  const [cloudConnectPending, setCloudConnectPending] = useState(false);
   const [cloudDisconnectPending, setCloudDisconnectPending] = useState(false);
 
   const update = (partial: Partial<RemoteSectionDraft>) =>
@@ -1771,17 +1779,61 @@ function RemoteSection() {
     });
   };
 
+  const applyCloudFieldUpdate = (partial: Partial<RemoteSectionDraft>) => {
+    // Always merge cloud fields into the draft functionally so a concurrent
+    // edit made during the async flow is preserved. Only sync the store when
+    // the draft has no unsaved changes (read from the ref, not a stale closure)
+    // to avoid clobbering an in-progress edit.
+    setDraftRemote((prev) => ({ ...prev, ...partial }));
+    if (!remoteDraftChangedRef.current) {
+      setRemote(partial);
+    }
+  };
+
+  const handleCloudConnect = async () => {
+    setCloudConnectPending(true);
+    setCloudStatusError(null);
+    try {
+      const status = await cloudConnectStart();
+      setCloudStatus(status);
+      if (status.instanceId && !status.lastError) {
+        let refreshedRemote: RemoteSettings | null = null;
+        try {
+          refreshedRemote = (await loadSettings()).remote ?? null;
+        } catch (refreshError) {
+          setCloudStatusError(
+            refreshError instanceof Error ? refreshError.message : String(refreshError),
+          );
+        }
+        applyCloudFieldUpdate({
+          cloudEnabled: true,
+          cloudInstanceId: refreshedRemote?.cloudInstanceId ?? status.instanceId,
+          cloudTunnelUrl: refreshedRemote?.cloudTunnelUrl ?? null,
+          cloudServerBaseUrl: refreshedRemote?.cloudServerBaseUrl ?? null,
+          ...(remoteDraftChangedRef.current || !refreshedRemote
+            ? {}
+            : { relayBaseUrl: refreshedRemote.relayBaseUrl }),
+        });
+      }
+    } catch (error) {
+      setCloudStatusError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCloudConnectPending(false);
+    }
+  };
+
   const handleCloudDisconnect = async () => {
     setCloudDisconnectPending(true);
     setCloudStatusError(null);
     try {
       const status = await cloudDisconnect();
       setCloudStatus(status);
-      if (remoteDraftChanged) {
-        setDraftRemote((prev) => ({ ...prev, cloudEnabled: false, cloudInstanceId: null }));
-      } else if (storeRemote.cloudEnabled || storeRemote.cloudInstanceId) {
-        setRemote({ cloudEnabled: false, cloudInstanceId: null });
-      }
+      applyCloudFieldUpdate({
+        cloudEnabled: false,
+        cloudInstanceId: null,
+        cloudTunnelUrl: null,
+        cloudServerBaseUrl: null,
+      });
     } catch (error) {
       setCloudStatusError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1794,10 +1846,10 @@ function RemoteSection() {
     : cloudStatus?.lastError
       ? t("remote.cloudStatusError", { error: cloudStatus.lastError })
       : cloudStatus?.connected
-        ? cloudStatus.instanceId
-          ? t("remote.cloudStatusConnectedWithInstance", { instanceId: cloudStatus.instanceId })
-          : t("remote.cloudStatusConnected")
-        : t("remote.cloudStatusDisconnected");
+        ? t("remote.cloudStatusConnected")
+        : cloudStatus?.instanceId || remote.cloudInstanceId
+          ? t("remote.cloudStatusPaired")
+          : t("remote.cloudStatusDisconnected");
   const showCloudDisconnect =
     remote.cloudEnabled ||
     Boolean(remote.cloudInstanceId) ||
@@ -1985,18 +2037,33 @@ function RemoteSection() {
             >
               {cloudStatusText}
             </span>
+            <button
+              type="button"
+              data-testid="remote-settings-cloud-connect"
+              onClick={handleCloudConnect}
+              disabled={cloudConnectPending || cloudDisconnectPending}
+              className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                color: "var(--accent)",
+                background: "transparent",
+                border: "1px solid var(--border)",
+                cursor: cloudConnectPending || cloudDisconnectPending ? "not-allowed" : "pointer",
+              }}
+            >
+              {cloudConnectPending ? t("remote.cloudConnecting") : t("remote.cloudConnect")}
+            </button>
             {showCloudDisconnect && (
               <button
                 type="button"
                 data-testid="remote-settings-cloud-disconnect"
                 onClick={handleCloudDisconnect}
-                disabled={cloudDisconnectPending}
+                disabled={cloudDisconnectPending || cloudConnectPending}
                 className="hover-bg rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   color: "var(--red)",
                   background: "transparent",
                   border: "1px solid var(--border)",
-                  cursor: cloudDisconnectPending ? "not-allowed" : "pointer",
+                  cursor: cloudDisconnectPending || cloudConnectPending ? "not-allowed" : "pointer",
                 }}
               >
                 {cloudDisconnectPending

@@ -195,6 +195,8 @@ fn settings_round_trip_with_full_config() {
             cloud_enabled: true,
             relay_base_url: "https://relay.example.test".into(),
             cloud_instance_id: Some("instance-test".into()),
+            cloud_tunnel_url: Some("wss://relay.example.test/tunnel/instance-test".into()),
+            cloud_server_base_url: Some("https://relay.example.test".into()),
             cloud_auto_reconnect: false,
             ..RemoteSettings::default()
         },

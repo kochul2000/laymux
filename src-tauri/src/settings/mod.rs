@@ -254,8 +254,13 @@ mod tests {
         assert_eq!(legacy.remote.heartbeat_timeout_seconds, 15);
         assert_eq!(legacy.remote.auto_mobile_mode_min_width, 720);
         assert!(!legacy.remote.cloud_enabled);
-        assert_eq!(legacy.remote.relay_base_url, "");
+        assert_eq!(
+            legacy.remote.relay_base_url,
+            models::default_cloud_relay_base_url()
+        );
         assert_eq!(legacy.remote.cloud_instance_id, None);
+        assert_eq!(legacy.remote.cloud_tunnel_url, None);
+        assert_eq!(legacy.remote.cloud_server_base_url, None);
         assert!(legacy.remote.cloud_auto_reconnect);
 
         let json = r#"{
@@ -268,6 +273,8 @@ mod tests {
             "cloudEnabled": true,
             "relayBaseUrl": "https://relay.example.test",
             "cloudInstanceId": "instance-123",
+            "cloudTunnelUrl": "wss://relay.example.test/tunnel/instance-123",
+            "cloudServerBaseUrl": "https://relay.example.test",
             "cloudAutoReconnect": false
           }
         }"#;
@@ -283,6 +290,14 @@ mod tests {
             settings.remote.cloud_instance_id.as_deref(),
             Some("instance-123")
         );
+        assert_eq!(
+            settings.remote.cloud_tunnel_url.as_deref(),
+            Some("wss://relay.example.test/tunnel/instance-123")
+        );
+        assert_eq!(
+            settings.remote.cloud_server_base_url.as_deref(),
+            Some("https://relay.example.test")
+        );
         assert!(!settings.remote.cloud_auto_reconnect);
 
         let serialized = serde_json::to_string(&settings).unwrap();
@@ -293,6 +308,9 @@ mod tests {
         assert!(serialized.contains("\"cloudEnabled\":true"));
         assert!(serialized.contains("\"relayBaseUrl\":\"https://relay.example.test\""));
         assert!(serialized.contains("\"cloudInstanceId\":\"instance-123\""));
+        assert!(serialized
+            .contains("\"cloudTunnelUrl\":\"wss://relay.example.test/tunnel/instance-123\""));
+        assert!(serialized.contains("\"cloudServerBaseUrl\":\"https://relay.example.test\""));
         assert!(serialized.contains("\"cloudAutoReconnect\":false"));
     }
 

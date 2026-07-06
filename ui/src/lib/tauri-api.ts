@@ -112,6 +112,10 @@ export async function getCloudStatus(): Promise<CloudStatus> {
   return invoke("get_cloud_status");
 }
 
+export async function cloudConnectStart(): Promise<CloudStatus> {
+  return invoke("cloud_connect_start");
+}
+
 export async function cloudDisconnect(): Promise<CloudStatus> {
   return invoke("cloud_disconnect");
 }
@@ -342,6 +346,8 @@ export interface RemoteSettings {
   cloudEnabled: boolean;
   relayBaseUrl: string;
   cloudInstanceId?: string | null;
+  cloudTunnelUrl?: string | null;
+  cloudServerBaseUrl?: string | null;
   cloudAutoReconnect: boolean;
 }
 

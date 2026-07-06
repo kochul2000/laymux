@@ -24,6 +24,7 @@ import {
   getRemoteAccessStatus,
   getRemoteHostCandidates,
   getCloudStatus,
+  cloudConnectStart,
   cloudDisconnect,
   setRemoteRuntimeAccess,
   onTerminalOutput,
@@ -213,6 +214,14 @@ describe("tauri-api", () => {
 
       await expect(getCloudStatus()).resolves.toEqual(status);
       expect(mockInvoke).toHaveBeenCalledWith("get_cloud_status");
+    });
+
+    it("invokes cloud_connect_start", async () => {
+      const status = { connected: false, instanceId: "instance-1", lastError: null };
+      mockInvoke.mockResolvedValue(status);
+
+      await expect(cloudConnectStart()).resolves.toEqual(status);
+      expect(mockInvoke).toHaveBeenCalledWith("cloud_connect_start");
     });
 
     it("invokes cloud_disconnect", async () => {

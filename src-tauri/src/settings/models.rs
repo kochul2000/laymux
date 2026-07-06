@@ -998,12 +998,18 @@ pub struct RemoteSettings {
     /// Cloud relay connection is enabled for the current desktop instance.
     #[serde(default)]
     pub cloud_enabled: bool,
-    /// Optional cloud relay base URL override. Empty = product default in a later pairing PR.
-    #[serde(default)]
+    /// Cloud relay base URL used for desktop pairing.
+    #[serde(default = "default_cloud_relay_base_url")]
     pub relay_base_url: String,
     /// Instance ID assigned by the cloud relay after pairing.
     #[serde(default)]
     pub cloud_instance_id: Option<String>,
+    /// WSS tunnel URL assigned by the cloud relay after pairing.
+    #[serde(default)]
+    pub cloud_tunnel_url: Option<String>,
+    /// Canonical server base URL returned by the relay after pairing.
+    #[serde(default)]
+    pub cloud_server_base_url: Option<String>,
     /// Reconnect to the cloud relay automatically on startup when credentials exist.
     #[serde(default = "default_cloud_auto_reconnect")]
     pub cloud_auto_reconnect: bool,
@@ -1029,6 +1035,10 @@ fn default_cloud_auto_reconnect() -> bool {
     true
 }
 
+pub fn default_cloud_relay_base_url() -> String {
+    "https://cloud.laymux.example".into()
+}
+
 impl Default for RemoteSettings {
     fn default() -> Self {
         Self {
@@ -1042,8 +1052,10 @@ impl Default for RemoteSettings {
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,
-            relay_base_url: String::new(),
+            relay_base_url: default_cloud_relay_base_url(),
             cloud_instance_id: None,
+            cloud_tunnel_url: None,
+            cloud_server_base_url: None,
             cloud_auto_reconnect: default_cloud_auto_reconnect(),
         }
     }

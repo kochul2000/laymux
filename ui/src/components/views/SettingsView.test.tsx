@@ -70,6 +70,23 @@ describe("SettingsView", () => {
       if (cmd === "get_cloud_status") {
         return Promise.resolve(mockCloudStatus);
       }
+      if (cmd === "cloud_connect_start") {
+        mockCloudStatus = { connected: false, instanceId: "instance-2", lastError: null };
+        return Promise.resolve(mockCloudStatus);
+      }
+      if (cmd === "load_settings") {
+        return Promise.resolve({
+          remote: {
+            ...useSettingsStore.getState().remote,
+            cloudEnabled: Boolean(mockCloudStatus.instanceId),
+            cloudInstanceId: mockCloudStatus.instanceId,
+            cloudTunnelUrl: mockCloudStatus.instanceId
+              ? `wss://relay.example.test/tunnel/${mockCloudStatus.instanceId}`
+              : null,
+            cloudServerBaseUrl: mockCloudStatus.instanceId ? "https://relay.example.test" : null,
+          },
+        });
+      }
       if (cmd === "cloud_disconnect") {
         mockCloudStatus = { connected: false, instanceId: null, lastError: null };
         return Promise.resolve(mockCloudStatus);
@@ -1846,7 +1863,7 @@ describe("SettingsView", () => {
       ) as HTMLInputElement;
       fireEvent.change(input, { target: { value: " https://relay.example.test " } });
 
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
 
       await user.click(screen.getByTestId("save-settings-btn"));
 
@@ -1864,7 +1881,7 @@ describe("SettingsView", () => {
 
       await user.click(screen.getByTestId("nav-remote"));
       expect(await screen.findByTestId("remote-settings-cloud-status")).toHaveTextContent(
-        "Connected (instance-1)",
+        "Connected",
       );
       await user.click(await screen.findByTestId("remote-settings-cloud-disconnect"));
 
@@ -1888,9 +1905,184 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("nav-remote"));
 
       expect(await screen.findByTestId("remote-settings-cloud-status")).toHaveTextContent(
-        "Disconnected",
+        "Paired (waiting to connect)",
       );
       expect(screen.getByTestId("remote-settings-cloud-disconnect")).toBeInTheDocument();
+    });
+
+    it("starts cloud pairing, shows pending text, and mirrors the paired status", async () => {
+      let resolveConnect: (value: typeof mockCloudStatus) => void = () => {};
+      mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "list_system_monospace_fonts") {
+          return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
+        }
+        if (cmd === "get_remote_host_candidates") {
+          return Promise.resolve([
+            { kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" },
+          ]);
+        }
+        if (cmd === "get_remote_access_status") {
+          return Promise.resolve(remoteAccessStatus());
+        }
+        if (cmd === "set_remote_runtime_access") {
+          return Promise.resolve(remoteAccessStatus(Boolean(args?.enabled)));
+        }
+        if (cmd === "get_cloud_status") {
+          return Promise.resolve({ connected: false, instanceId: null, lastError: null });
+        }
+        if (cmd === "cloud_connect_start") {
+          return new Promise((resolve) => {
+            resolveConnect = resolve;
+          });
+        }
+        if (cmd === "load_settings") {
+          return Promise.resolve({
+            remote: {
+              ...useSettingsStore.getState().remote,
+              cloudEnabled: true,
+              cloudInstanceId: "instance-2",
+              cloudTunnelUrl: "wss://relay.example.test/tunnel/instance-2",
+              cloudServerBaseUrl: "https://relay.example.test",
+            },
+          });
+        }
+        return Promise.resolve(undefined);
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const connect = await screen.findByTestId("remote-settings-cloud-connect");
+      await user.click(connect);
+
+      expect(connect).toHaveTextContent("Connecting...");
+      expect(connect).toBeDisabled();
+
+      await act(async () => {
+        resolveConnect({ connected: false, instanceId: "instance-2", lastError: null });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+      expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
+      expect(useSettingsStore.getState().remote.cloudInstanceId).toBe("instance-2");
+      expect(useSettingsStore.getState().remote.cloudTunnelUrl).toBe(
+        "wss://relay.example.test/tunnel/instance-2",
+      );
+      expect(useSettingsStore.getState().remote.cloudServerBaseUrl).toBe(
+        "https://relay.example.test",
+      );
+    });
+
+    it("preserves unsaved relay draft while merging pairing metadata after cloud connect", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const relayInput = (await screen.findByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      )) as HTMLInputElement;
+      fireEvent.change(relayInput, { target: { value: " https://draft-relay.example.test " } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+      expect(relayInput.value).toBe(" https://draft-relay.example.test ");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
+      expect(useSettingsStore.getState().remote.cloudInstanceId).toBe("instance-2");
+      expect(useSettingsStore.getState().remote.cloudTunnelUrl).toBe(
+        "wss://relay.example.test/tunnel/instance-2",
+      );
+      expect(useSettingsStore.getState().remote.cloudServerBaseUrl).toBe(
+        "https://relay.example.test",
+      );
+    });
+
+    it("preserves a relay draft edited DURING the pending cloud connect await", async () => {
+      // Regression: handleCloudConnect must branch on the draft-dirty state at
+      // completion time, not the value captured when the button was clicked. If
+      // the draft was clean at click but the user edits it during the long OAuth
+      // await, resolving must not clobber that edit via a stale-closure setRemote.
+      let resolveConnect: (value: typeof mockCloudStatus) => void = () => {};
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "list_system_monospace_fonts") {
+          return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
+        }
+        if (cmd === "get_remote_host_candidates") {
+          return Promise.resolve([
+            { kind: "loopback", host: "127.0.0.1", label: "Localhost 127.0.0.1" },
+          ]);
+        }
+        if (cmd === "get_remote_access_status") {
+          return Promise.resolve(remoteAccessStatus());
+        }
+        if (cmd === "get_cloud_status") {
+          return Promise.resolve({ connected: false, instanceId: null, lastError: null });
+        }
+        if (cmd === "cloud_connect_start") {
+          return new Promise((resolve) => {
+            resolveConnect = resolve;
+          });
+        }
+        if (cmd === "load_settings") {
+          return Promise.resolve({
+            remote: {
+              ...useSettingsStore.getState().remote,
+              cloudEnabled: true,
+              cloudInstanceId: "instance-2",
+              cloudTunnelUrl: "wss://relay.example.test/tunnel/instance-2",
+              cloudServerBaseUrl: "https://relay.example.test",
+            },
+          });
+        }
+        return Promise.resolve(undefined);
+      });
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      // Draft is clean at click time.
+      await user.click(await screen.findByTestId("remote-settings-cloud-connect"));
+
+      // Edit the relay draft WHILE the connect promise is still pending.
+      const relayInput = (await screen.findByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      )) as HTMLInputElement;
+      fireEvent.change(relayInput, { target: { value: " https://mid-flight.example.test " } });
+
+      await act(async () => {
+        resolveConnect({ connected: false, instanceId: "instance-2", lastError: null });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+      // Mid-flight edit survives; store was not clobbered by a stale-closure sync.
+      expect(relayInput.value).toBe(" https://mid-flight.example.test ");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://mid-flight.example.test",
+      );
+      expect(useSettingsStore.getState().remote.cloudInstanceId).toBe("instance-2");
     });
 
     it("preserves unsaved remote draft edits when cloud disconnect updates cloud fields", async () => {
@@ -1914,7 +2106,7 @@ describe("SettingsView", () => {
         expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
       });
       expect(relayInput.value).toBe(" https://draft-relay.example.test ");
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
       expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
 
       await user.click(screen.getByTestId("save-settings-btn"));
