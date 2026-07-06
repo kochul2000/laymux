@@ -44,7 +44,7 @@ pub fn get_remote_control_status(app_state: &AppState) -> Result<RemoteControlSt
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
     let mut current = app_state.remote_control.lock_or_err()?;
-    if !settings.enabled || settings.auth_token.trim().is_empty() {
+    if !settings.enabled {
         current.lease = None;
         current.reclaim_lockout_until = None;
         return Ok(status_from_state(&current, timeout_seconds));
@@ -194,7 +194,67 @@ pub(crate) fn active_lease_matches_with_timeout(
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::path::Path;
+
     use super::*;
+    use serial_test::serial;
+
+    use crate::settings::{save_settings, Settings};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
+        EnvVarGuard::set_path("APPDATA", dir)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
+        EnvVarGuard::set_path("HOME", dir)
+    }
+
+    fn save_remote_settings(enabled: bool, auth_token: &str) {
+        let mut settings = Settings::default();
+        settings.remote.enabled = enabled;
+        settings.remote.auth_token = auth_token.into();
+        save_settings(&settings).unwrap();
+    }
+
+    fn state_with_active_lease(lease_id: &str) -> AppState {
+        let state = AppState::new();
+        {
+            let mut control = state.remote_control.lock_or_err().unwrap();
+            control.lease = Some(RemoteControlLease {
+                lease_id: lease_id.into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: Instant::now(),
+            });
+        }
+        state
+    }
 
     #[test]
     fn expired_lease_is_pruned() {
@@ -223,5 +283,35 @@ mod tests {
             now + Duration::from_secs(5)
         ));
         assert!(state.reclaim_lockout_until.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn remote_status_keeps_active_lease_when_enabled_with_empty_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        save_remote_settings(true, "");
+        let state = state_with_active_lease("lease-1");
+
+        let status = get_remote_control_status(&state).unwrap();
+
+        assert!(status.active);
+        assert_eq!(status.lease_id.as_deref(), Some("lease-1"));
+        assert!(state.remote_control.lock_or_err().unwrap().lease.is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn remote_status_clears_active_lease_when_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        save_remote_settings(false, "");
+        let state = state_with_active_lease("lease-1");
+
+        let status = get_remote_control_status(&state).unwrap();
+
+        assert!(!status.active);
+        assert!(status.lease_id.is_none());
+        assert!(state.remote_control.lock_or_err().unwrap().lease.is_none());
     }
 }

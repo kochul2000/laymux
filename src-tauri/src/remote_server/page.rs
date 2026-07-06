@@ -1,23 +1,43 @@
 use std::net::SocketAddr;
 
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::automation_server::ServerState;
 
 use super::access::effective_remote_settings;
-use super::auth::check_remote_base_access;
+use super::auth::{check_remote_base_access, check_remote_enabled, request_is_tunnel_authorized};
 use super::internal_error;
+
+/// Gate the page/asset routes, which sit outside the `remote_guard` middleware.
+/// Cloud tunnel requests (WSS-authorized) only need the enable gate; direct
+/// requests go through the full token/IP/Origin base-access check.
+fn remote_page_gate(server: &ServerState, addr: SocketAddr, req: &Request) -> Option<Response> {
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return Some(internal_error(err)),
+    };
+    remote_page_gate_for_settings(&settings, addr, request_is_tunnel_authorized(req))
+}
+
+fn remote_page_gate_for_settings(
+    settings: &crate::settings::models::RemoteSettings,
+    addr: SocketAddr,
+    tunnel_authorized: bool,
+) -> Option<Response> {
+    if tunnel_authorized {
+        check_remote_enabled(settings)
+    } else {
+        check_remote_base_access(settings, addr)
+    }
+}
 
 pub(crate) async fn remote_page_redirect(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
 ) -> Response {
-    let settings = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => settings,
-        Err(err) => return internal_error(err),
-    };
-    if let Some(response) = check_remote_base_access(&settings, addr) {
+    if let Some(response) = remote_page_gate(&server, addr, &req) {
         return response;
     }
 
@@ -27,12 +47,9 @@ pub(crate) async fn remote_page_redirect(
 pub(crate) async fn remote_page(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
 ) -> Response {
-    let settings = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => settings,
-        Err(err) => return internal_error(err),
-    };
-    if let Some(response) = check_remote_base_access(&settings, addr) {
+    if let Some(response) = remote_page_gate(&server, addr, &req) {
         return response;
     }
 
@@ -48,6 +65,15 @@ const REMOTE_PAGE_HTML: &str = include_str!("page.html");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::settings::Settings;
+
+    fn remote_settings(enabled: bool, token: &str) -> crate::settings::models::RemoteSettings {
+        let mut settings = Settings::default();
+        settings.remote.enabled = enabled;
+        settings.remote.auth_token = token.into();
+        settings.remote
+    }
 
     #[test]
     fn remote_page_html_contains_remote_bootstrap() {
@@ -125,6 +151,28 @@ mod tests {
         assert!(html.contains("function isDockTerminalId(terminalId)"));
         assert!(html.contains("options.focusDockHost === true || !isDockTerminalId(terminalId)"));
         assert!(html.contains("function isMainOutputTerminal(data, terminalId)"));
+    }
+
+    #[test]
+    fn remote_page_gate_requires_enabled_for_tunnel_requests() {
+        let addr = "203.0.113.10:1".parse::<SocketAddr>().unwrap();
+
+        let disabled_settings = remote_settings(false, "");
+        let disabled = remote_page_gate_for_settings(&disabled_settings, addr, true).unwrap();
+        assert_eq!(disabled.status(), axum::http::StatusCode::FORBIDDEN);
+
+        let enabled_settings = remote_settings(true, "");
+        assert!(remote_page_gate_for_settings(&enabled_settings, addr, true).is_none());
+    }
+
+    #[test]
+    fn remote_page_gate_uses_full_base_access_for_direct_requests() {
+        let addr = "203.0.113.10:1".parse::<SocketAddr>().unwrap();
+
+        let settings = remote_settings(true, "");
+        let response = remote_page_gate_for_settings(&settings, addr, false).unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 
     #[test]
