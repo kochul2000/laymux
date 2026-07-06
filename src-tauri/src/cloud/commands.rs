@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use super::{keyring_store, CloudStatus};
+use super::{keyring_store, pairing, CloudStatus};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
@@ -14,6 +14,13 @@ pub fn get_cloud_status(state: State<Arc<AppState>>) -> Result<CloudStatus, Stri
 
 pub fn get_cloud_status_inner(state: &AppState) -> Result<CloudStatus, AppError> {
     Ok(state.cloud.lock_or_err()?.clone())
+}
+
+#[tauri::command]
+pub async fn cloud_connect_start(state: State<'_, Arc<AppState>>) -> Result<CloudStatus, String> {
+    pairing::cloud_connect_start_inner(state.inner().clone())
+        .await
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -39,6 +46,8 @@ fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
     let mut settings = crate::settings::load_settings();
     settings.remote.cloud_enabled = false;
     settings.remote.cloud_instance_id = None;
+    settings.remote.cloud_tunnel_url = None;
+    settings.remote.cloud_server_base_url = None;
     if let Err(error) = crate::settings::save_settings(&settings).map_err(AppError::Other) {
         errors.push(format!("settings save failed: {error}"));
     }
@@ -138,6 +147,9 @@ mod tests {
         let mut settings = Settings::default();
         settings.remote.cloud_enabled = true;
         settings.remote.cloud_instance_id = Some("instance-1".into());
+        settings.remote.cloud_tunnel_url =
+            Some("wss://relay.example.test/tunnel/instance-1".into());
+        settings.remote.cloud_server_base_url = Some("https://relay.example.test".into());
         settings.remote.relay_base_url = "https://relay.example.test".into();
         save_settings(&settings).unwrap();
         keyring_store::set_device_token("device-token").unwrap();
@@ -156,6 +168,8 @@ mod tests {
         let loaded = load_settings();
         assert!(!loaded.remote.cloud_enabled);
         assert_eq!(loaded.remote.cloud_instance_id, None);
+        assert_eq!(loaded.remote.cloud_tunnel_url, None);
+        assert_eq!(loaded.remote.cloud_server_base_url, None);
         assert_eq!(loaded.remote.relay_base_url, "https://relay.example.test");
         assert_eq!(*state.cloud.lock_or_err().unwrap(), CloudStatus::default());
     }
@@ -170,6 +184,9 @@ mod tests {
         let mut settings = Settings::default();
         settings.remote.cloud_enabled = true;
         settings.remote.cloud_instance_id = Some("instance-1".into());
+        settings.remote.cloud_tunnel_url =
+            Some("wss://relay.example.test/tunnel/instance-1".into());
+        settings.remote.cloud_server_base_url = Some("https://relay.example.test".into());
         save_settings(&settings).unwrap();
         keyring_store::set_device_token("device-token").unwrap();
         keyring_store::set_mock_error(keyring::Error::Invalid(
@@ -197,6 +214,8 @@ mod tests {
         let loaded = load_settings();
         assert!(!loaded.remote.cloud_enabled);
         assert_eq!(loaded.remote.cloud_instance_id, None);
+        assert_eq!(loaded.remote.cloud_tunnel_url, None);
+        assert_eq!(loaded.remote.cloud_server_base_url, None);
         let state_status = state.cloud.lock_or_err().unwrap().clone();
         assert!(!state_status.connected);
         assert_eq!(state_status.instance_id, None);

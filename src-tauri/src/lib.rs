@@ -175,6 +175,7 @@ pub fn run() {
             commands::get_remote_host_candidates,
             commands::reclaim_remote_control,
             commands::get_cloud_status,
+            commands::cloud_connect_start,
             commands::cloud_disconnect,
         ])
         .run(tauri::generate_context!())

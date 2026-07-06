@@ -492,8 +492,10 @@ const DEFAULT_REMOTE: RemoteSettings = {
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,
-  relayBaseUrl: "",
+  relayBaseUrl: "https://cloud.laymux.example",
   cloudInstanceId: null,
+  cloudTunnelUrl: null,
+  cloudServerBaseUrl: null,
   cloudAutoReconnect: true,
 };
 

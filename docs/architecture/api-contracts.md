@@ -57,14 +57,16 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "preferredHost": "",               // 복사 URL 기본 호스트. 빈 값 = 자동
     "customHosts": [],                  // 감지 후보 외에 URL host select 에 표시할 수동 호스트
     "cloudEnabled": false,              // 클라우드 연결 영속 설정. pairing 전 기본값 false
-    "relayBaseUrl": "",                // 클라우드 relay override. 빈 값 = 제품 기본값(후속 PR)
+    "relayBaseUrl": "https://cloud.laymux.example",
     "cloudInstanceId": null,            // relay가 발급한 instance id. 미연결이면 null
+    "cloudTunnelUrl": null,             // pairing complete 응답의 WSS tunnel URL. PR3 터널에서 사용
+    "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
     "cloudAutoReconnect": true          // 토큰이 있으면 시작 시 자동 재연결(후속 PR에서 사용)
   }
 }
 ```
 
-클라우드 연결 foundation은 Direct Remote Mode와 additive 관계다([ADR-0022](../adr/0022-cloud-connection-foundation.md)). 이번 단계의 Tauri IPC 계약은 `get_cloud_status() -> { connected, instanceId, lastError }` 와 `cloud_disconnect()` 뿐이다. device token은 `settings.json` 에 저장하지 않고 OS keyring service `laymux`(`debug_assertions` 빌드는 `laymux-dev`), account `device-token` 에 저장한다. `cloud_disconnect` 는 keyring token 삭제, `settings.remote.cloudEnabled=false`, `settings.remote.cloudInstanceId=null` 저장, `AppState.cloud` 리셋만 수행하며 pairing HTTP/터널 시작은 아직 제공하지 않는다.
+클라우드 연결은 Direct Remote Mode와 additive 관계다([ADR-0022](../adr/0022-cloud-connection-foundation.md), [ADR-0023](../adr/0023-cloud-pairing-loopback-oauth.md)). Tauri IPC 계약은 `get_cloud_status() -> { connected, instanceId, lastError }`, `cloud_connect_start() -> CloudStatus`, `cloud_disconnect() -> CloudStatus` 다. `cloud_connect_start` 는 `relayBaseUrl` 의 `/pair/desktop` 으로 시스템 브라우저를 열고, `http://127.0.0.1:<ephemeral>/pair/callback` loopback callback 에서 code/state 를 수신한 뒤 `/api/desktop/pair/complete` 로 device token을 교환한다. redirect URI는 `http`, host `127.0.0.1`, path `/pair/callback`, fragment/userinfo 없음으로 고정한다. pairing 성공 후 device token은 `settings.json` 에 저장하지 않고 OS keyring service `laymux`(`debug_assertions` 빌드는 `laymux-dev`), account `device-token` 에 저장한다. `settings.remote` 에는 `cloudEnabled=true`, `cloudInstanceId`, `cloudTunnelUrl`, `cloudServerBaseUrl`, `relayBaseUrl` 만 저장하며 `AppState.cloud.connected` 는 터널 PR 전까지 `false` 로 유지한다. `cloud_disconnect` 는 keyring token 삭제, cloud 저장 필드 정리, `AppState.cloud` 리셋을 best-effort 로 수행한다.
 
 Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`) 또는 구체적인 peer IP/CIDR를 추가하고 `authToken`을 설정한다. Tailscale은 transport 격리일 뿐 인증을 대체하지 않는다.
 
