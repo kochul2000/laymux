@@ -2220,7 +2220,12 @@
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => terminal && terminal.focus());
-        if (localAppMode && autoConnectMode && token()) {
+        // Auto-claim on load when autoConnect=1 is present. This is NOT gated on
+        // localAppMode so the cloud dashboard flow (external browser) also grabs
+        // control on connect — one fewer click. The remote-control enable toggle
+        // still governs: if control is not allowed the claim fails and we stay an
+        // observer with a status hint (no hard error).
+        if (autoConnectMode && token()) {
           setTimeout(() => connect().catch((err) => setStatus(err.message, true)), 0);
         }
         window.addEventListener("beforeunload", () => {
