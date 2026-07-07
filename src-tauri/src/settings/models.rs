@@ -1035,6 +1035,12 @@ fn default_cloud_auto_reconnect() -> bool {
     true
 }
 
+/// Prod cloud relay base URL (release-build default). LIVE, TLS via Let's Encrypt.
+pub const PROD_CLOUD_RELAY_BASE_URL: &str = "https://app.laymux.com";
+
+/// Local cloud relay base URL (dev/debug-build default) for the local relay server.
+pub const DEV_CLOUD_RELAY_BASE_URL: &str = "http://127.0.0.1:8000";
+
 pub fn default_cloud_relay_base_url() -> String {
     // dev builds default to the local relay server for testing; release builds
     // default to prod. Mirrors the dev/prod split used for the automation port
@@ -1042,9 +1048,9 @@ pub fn default_cloud_relay_base_url() -> String {
     // value already persisted in settings.json is kept (serde default only
     // fills an absent field).
     if cfg!(debug_assertions) {
-        "http://127.0.0.1:8000".into()
+        DEV_CLOUD_RELAY_BASE_URL.into()
     } else {
-        "https://app.laymux.com".into()
+        PROD_CLOUD_RELAY_BASE_URL.into()
     }
 }
 

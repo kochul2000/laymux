@@ -580,9 +580,9 @@ mod tests {
     #[test]
     fn build_pair_url_targets_prod_pair_desktop() {
         // With the prod relay base, the desktop must open exactly
-        // https://app.laymux.com/pair/desktop with the pairing query params.
+        // <PROD_CLOUD_RELAY_BASE_URL>/pair/desktop with the pairing query params.
         let url = build_pair_url(
-            "https://app.laymux.com",
+            crate::settings::PROD_CLOUD_RELAY_BASE_URL,
             "http://127.0.0.1:54321/pair/callback",
             "state-123",
             "my-pc",
@@ -609,7 +609,10 @@ mod tests {
             default_cloud_relay_base_url()
         );
         #[cfg(debug_assertions)]
-        assert_eq!(normalized_relay_base_url(""), "http://127.0.0.1:8000");
+        assert_eq!(
+            normalized_relay_base_url(""),
+            crate::settings::DEV_CLOUD_RELAY_BASE_URL
+        );
     }
 
     #[test]
