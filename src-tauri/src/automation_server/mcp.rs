@@ -93,6 +93,13 @@ struct WriteTerminalParam {
     /// to you via `write_to_terminal`. Only use when the target pane runs an
     /// LLM agent — the footer would garble input to shells or editors.
     reply_to: Option<String>,
+    /// When set, wait this many milliseconds after writing, then include the
+    /// target's new output (produced since the write) as `response` in the
+    /// return — ANSI-stripped and tail-truncated. Useful to immediately catch a
+    /// pane you assumed was an agent but was a bare shell: the shell echoes your
+    /// text and errors (e.g. `command not found`), and that shows up in
+    /// `response`. Clamped to 10000ms. Omit (default) for a non-blocking write.
+    capture_ms: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -115,10 +122,23 @@ struct WriteToNeighborParam {
     /// `data` so the receiving LLM agent knows where to send its result.
     /// See `write_to_terminal` for details.
     reply_to: Option<String>,
+    /// Wait this many ms after writing, then include the neighbor's new output
+    /// as `response` (ANSI-stripped, tail-truncated). See `write_to_terminal`.
+    /// Clamped to 10000ms. Omit for a non-blocking write.
+    capture_ms: Option<u64>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// Result of [`McpHandler::write_input`]: bytes sent plus the pre-write state
+/// sampled atomically under the per-terminal exec lock (`activity` always;
+/// `before_seq` only when capture was requested).
+struct WriteOutcome {
+    bytes: usize,
+    activity: serde_json::Value,
+    before_seq: Option<u64>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -578,6 +598,14 @@ impl McpHandler {
     /// PowerShell/Claude Code 에는 무해하다(추가 지연만 발생).
     const ENTER_CR_DELAY_MS: u64 = 300;
 
+    /// Upper bound for `capture_ms` — the caller blocks for at most this long
+    /// waiting to snapshot the target's post-write output.
+    const CAPTURE_MS_MAX: u64 = 10_000;
+
+    /// Max characters returned in a `capture_ms` `response`; the tail is kept so
+    /// shell errors near the prompt survive truncation.
+    const CAPTURE_RESPONSE_MAX_CHARS: usize = 2000;
+
     /// 입력 본문(타이핑될 텍스트)을 준비한다 — 제출용 CR은 포함하지 않는다.
     /// CR은 `write_input`이 별도 write로 보낸다([`Self::ENTER_CR_DELAY_MS`] 참조).
     ///
@@ -672,7 +700,13 @@ impl McpHandler {
     /// 청크 사이에 [`Self::ENTER_CR_DELAY_MS`] 지연을 둔다(#314 — Codex paste 오인
     /// 방지). 같은 터미널에 대한 write/execute 는 per-terminal 락으로 직렬화하여,
     /// 분리된 body+CR 시퀀스 사이에 다른 호출이 끼어들어 `bodyA bodyB \r \r` 처럼
-    /// 인터리브되는 것을 막는다. 총 전송 바이트 수를 반환한다.
+    /// 인터리브되는 것을 막는다.
+    ///
+    /// 쓰기 직전 pane activity 와 (capture 시) 출력 버퍼 seq 를 **락 안에서** 샘플링해
+    /// [`WriteOutcome`]에 담아 돌려준다. 락 밖에서 샘플링하면 이 세션의 다른 write 가
+    /// 락을 먼저 잡아 그 사이에 끼어들 수 있어, activity/seq 가 실제 "이 write 직전"이
+    /// 아니게 된다. 락 안 샘플링으로 그 경합을 막는다. (교차 MCP 세션 직렬화는
+    /// `exec_locks` 가 세션별이라 여전히 보장되지 않는다 — 별도 이슈.)
     async fn write_input(
         &self,
         terminal_id: &str,
@@ -680,12 +714,15 @@ impl McpHandler {
         escape: bool,
         enter: bool,
         reply_to: Option<&str>,
-    ) -> Result<usize, CallToolResult> {
+        capture: bool,
+    ) -> Result<WriteOutcome, CallToolResult> {
         let chunks = Self::plan_input_writes(data, escape, enter, reply_to);
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
         let lock = self.terminal_exec_lock(terminal_id).await;
         let _guard = lock.lock().await;
+        // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
+        let (activity, before_seq) = self.sample_activity_and_seq(terminal_id, capture);
         let mut total = 0usize;
         for (i, chunk) in chunks.iter().enumerate() {
             // 청크(=본문 다음의 CR) 앞에만 지연을 둔다. lone CR/본문만일 때는
@@ -695,7 +732,11 @@ impl McpHandler {
             }
             total += self.write_pty(terminal_id, chunk)?;
         }
-        Ok(total)
+        Ok(WriteOutcome {
+            bytes: total,
+            activity,
+            before_seq,
+        })
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -925,6 +966,88 @@ impl McpHandler {
                 terminal_id
             ))])),
         }
+    }
+
+    /// Sample a terminal's pre-write state in a single `output_buffers` lock:
+    /// its activity (shell / running / interactiveApp) as JSON, and — when
+    /// `want_seq` — the current output-buffer write sequence to bracket a
+    /// `capture_ms` window. Call this while holding the per-terminal exec lock so
+    /// the sample is atomic w.r.t. this terminal's write ordering. Best-effort: a
+    /// poisoned lock yields `(null, None)`.
+    fn sample_activity_and_seq(
+        &self,
+        terminal_id: &str,
+        want_seq: bool,
+    ) -> (serde_json::Value, Option<u64>) {
+        let app_state = &self.state.app_state;
+        let Ok(buffers) = app_state.output_buffers.lock_or_err() else {
+            return (json!(null), None);
+        };
+        let buf = buffers.get(terminal_id);
+        let info = crate::activity::detect_terminal_state(app_state, terminal_id, buf);
+        let activity = serde_json::to_value(&info.activity).unwrap_or(json!(null));
+        let seq = if want_seq {
+            buf.map(|b| b.write_seq())
+        } else {
+            None
+        };
+        (activity, seq)
+    }
+
+    /// Copy the raw bytes produced since `before_seq` under the buffer lock, then
+    /// release it before the (potentially large) ANSI strip + tail truncation so
+    /// a noisy TUI's snapshot doesn't stall PTY callbacks pushing into the buffer.
+    /// Returns `(response, truncated)`; empty string when nothing new / unknown.
+    fn capture_response_since(&self, terminal_id: &str, before_seq: u64) -> (String, bool) {
+        let raw = {
+            let Ok(buffers) = self.state.app_state.output_buffers.lock_or_err() else {
+                return (String::new(), false);
+            };
+            match buffers.get(terminal_id) {
+                Some(buf) => buf.bytes_since(before_seq),
+                None => return (String::new(), false),
+            }
+        }; // buffer lock released here
+        let text = super::helpers::strip_ansi(&String::from_utf8_lossy(&raw));
+        Self::truncate_tail(text.trim(), Self::CAPTURE_RESPONSE_MAX_CHARS)
+    }
+
+    /// Keep at most `max` trailing chars of `s`. Returns `(text, truncated)`.
+    /// The tail is kept so shell errors near the prompt survive truncation.
+    fn truncate_tail(s: &str, max: usize) -> (String, bool) {
+        let total = s.chars().count();
+        if total > max {
+            (s.chars().skip(total - max).collect(), true)
+        } else {
+            (s.to_string(), false)
+        }
+    }
+
+    /// If `capture_ms` was requested, block up to `CAPTURE_MS_MAX`, then inject
+    /// `captureMs` plus `response` / `responseTruncated` into a write tool's
+    /// result. `response` is always present when `capture_ms` is set (empty
+    /// string if the pre-write sequence was unavailable) so the return contract
+    /// is stable. No-op when `capture_ms` is unset.
+    async fn apply_capture(
+        &self,
+        result: &mut serde_json::Value,
+        terminal_id: &str,
+        capture_ms: Option<u64>,
+        before_seq: Option<u64>,
+    ) {
+        let Some(ms) = capture_ms else { return };
+        let ms = ms.min(Self::CAPTURE_MS_MAX);
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        let Some(obj) = result.as_object_mut() else {
+            return;
+        };
+        obj.insert("captureMs".to_string(), json!(ms));
+        let (response, truncated) = match before_seq {
+            Some(seq) => self.capture_response_since(terminal_id, seq),
+            None => (String::new(), false),
+        };
+        obj.insert("response".to_string(), json!(response));
+        obj.insert("responseTruncated".to_string(), json!(truncated));
     }
 
     /// Resolve the workspace containing the given terminal from the bridge terminal list.
@@ -1206,6 +1329,14 @@ impl McpHandler {
     /// When messaging another LLM agent pane, pass `reply_to` with your own
     /// terminal ID ($LX_TERMINAL_ID) — a standardized footer is appended
     /// telling the agent where to send its result back.
+    /// The return includes `activity` — the target pane's state sampled just
+    /// BEFORE the write: `{"type":"shell"}` (bare prompt), `{"type":"running"}`
+    /// (non-interactive command), or `{"type":"interactiveApp","name":"Codex"}`
+    /// (a TUI). Check it right after sending to catch the case where a pane you
+    /// assumed was an agent (Codex/Claude) had actually dropped to a shell.
+    /// Pass `capture_ms` to additionally block that long and return the target's
+    /// new output as `response` — e.g. the shell's `command not found` when your
+    /// prompt landed on a bare shell instead of an agent.
     #[tool]
     async fn write_to_terminal(
         &self,
@@ -1223,6 +1354,8 @@ impl McpHandler {
             Ok(id) => id,
             Err(e) => return Ok(e),
         };
+        // Activity + capture start-seq are sampled inside write_input under the
+        // per-terminal exec lock, atomic with the write itself.
         match self
             .write_input(
                 &terminal_id,
@@ -1230,16 +1363,23 @@ impl McpHandler {
                 p.escape,
                 p.enter,
                 p.reply_to.as_deref(),
+                p.capture_ms.is_some(),
             )
             .await
         {
-            Ok(bytes) => Ok(json_result(&json!({
-                "written": true,
-                "bytes": bytes,
-                "bytesWritten": bytes,
-                "enter": p.enter,
-                "terminalId": terminal_id,
-            }))),
+            Ok(outcome) => {
+                let mut result = json!({
+                    "written": true,
+                    "bytes": outcome.bytes,
+                    "bytesWritten": outcome.bytes,
+                    "enter": p.enter,
+                    "terminalId": terminal_id,
+                    "activity": outcome.activity,
+                });
+                self.apply_capture(&mut result, &terminal_id, p.capture_ms, outcome.before_seq)
+                    .await;
+                Ok(json_result(&result))
+            }
             Err(e) => Ok(e),
         }
     }
@@ -1248,6 +1388,9 @@ impl McpHandler {
     /// in a single call. Pass your own terminal_id (from $LX_TERMINAL_ID) and the direction
     /// of the neighbor you want to send to. Like `write_to_terminal`, input is
     /// submitted by default; pass `enter: false` to type without submitting.
+    /// The return includes the neighbor's pre-write `activity` (shell / running /
+    /// interactiveApp) and, when `capture_ms` is set, its post-write `response` —
+    /// see `write_to_terminal` for how to use them.
     #[tool]
     async fn write_to_neighbor(
         &self,
@@ -1281,7 +1424,8 @@ impl McpHandler {
             ))]));
         };
 
-        // 2. Write to the neighbor
+        // 2. Write to the neighbor. Activity + capture start-seq are sampled
+        // inside write_input under the per-terminal exec lock (see write_to_terminal).
         match self
             .write_input(
                 &target_id,
@@ -1289,16 +1433,23 @@ impl McpHandler {
                 p.escape,
                 p.enter,
                 p.reply_to.as_deref(),
+                p.capture_ms.is_some(),
             )
             .await
         {
-            Ok(bytes) => Ok(json_result(&json!({
-                "written": true,
-                "bytes": bytes,
-                "enter": p.enter,
-                "targetTerminalId": target_id,
-                "direction": p.direction.to_string(),
-            }))),
+            Ok(outcome) => {
+                let mut result = json!({
+                    "written": true,
+                    "bytes": outcome.bytes,
+                    "enter": p.enter,
+                    "targetTerminalId": target_id,
+                    "direction": p.direction.to_string(),
+                    "activity": outcome.activity,
+                });
+                self.apply_capture(&mut result, &target_id, p.capture_ms, outcome.before_seq)
+                    .await;
+                Ok(json_result(&result))
+            }
             Err(e) => Ok(e),
         }
     }
@@ -2093,7 +2244,10 @@ impl McpHandler {
         let mut failed = Vec::new();
 
         for id in &p.terminal_ids {
-            match self.write_input(id, &p.data, p.escape, p.enter, None).await {
+            match self
+                .write_input(id, &p.data, p.escape, p.enter, None, false)
+                .await
+            {
                 Ok(_) => written.push(id.clone()),
                 Err(_) => failed.push(json!({ "id": id, "error": "not found or write failed" })),
             }
@@ -3319,6 +3473,65 @@ mod tests {
         let json = r#"{"terminal_id":"t1","direction":"right","data":"hello","enter":false}"#;
         let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
         assert!(!p.enter);
+    }
+
+    #[test]
+    fn write_terminal_capture_ms_defaults_to_none() {
+        // capture_ms 생략 시 응답 캡처 없이 논블로킹 write (기존 동작 유지).
+        let json = r#"{"terminal_id":"t1","data":"hello"}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.capture_ms, None);
+    }
+
+    #[test]
+    fn write_terminal_capture_ms_parsed() {
+        let json = r#"{"terminal_id":"t1","data":"hello","capture_ms":1500}"#;
+        let p: WriteTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.capture_ms, Some(1500));
+    }
+
+    #[test]
+    fn write_to_neighbor_capture_ms_parsed() {
+        let json = r#"{"terminal_id":"t1","direction":"below","data":"hello","capture_ms":800}"#;
+        let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.capture_ms, Some(800));
+    }
+
+    #[test]
+    fn truncate_tail_keeps_short_text_verbatim() {
+        let (out, trunc) = McpHandler::truncate_tail("short output", 2000);
+        assert_eq!(out, "short output");
+        assert!(!trunc);
+    }
+
+    #[test]
+    fn truncate_tail_keeps_the_tail_when_over_max() {
+        let s: String = (0..50).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+        let (out, trunc) = McpHandler::truncate_tail(&s, 10);
+        assert!(trunc);
+        assert_eq!(out.chars().count(), 10);
+        // Tail kept, not head: the last 10 chars of the source.
+        let expected: String = s.chars().skip(50 - 10).collect();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn truncate_tail_is_char_boundary_safe_for_multibyte() {
+        // 5 multi-byte chars, cap at 2 → must not panic and must yield 2 chars.
+        let (out, trunc) = McpHandler::truncate_tail("가나다라마", 2);
+        assert!(trunc);
+        assert_eq!(out, "라마");
+    }
+
+    #[test]
+    fn capture_response_pipeline_strips_ansi_then_truncates() {
+        // strip_ansi + truncate_tail is the response pipeline; verify ANSI removal
+        // composes with tail truncation without splitting escape sequences.
+        let raw = "\x1b[31mERROR\x1b[0m: command not found";
+        let stripped = super::super::helpers::strip_ansi(raw);
+        let (out, trunc) = McpHandler::truncate_tail(stripped.trim(), 2000);
+        assert_eq!(out, "ERROR: command not found");
+        assert!(!trunc);
     }
 
     #[test]

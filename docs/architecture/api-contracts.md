@@ -477,8 +477,12 @@ impl McpHandler {
     // 지연 뒤 제출용 CR(\r)을 별도 write. Codex TUI는 텍스트+CR을 한 번에 받으면
     // paste로 간주해 CR을 줄바꿈 처리하므로, CR을 분리해 보내야 Enter로 제출된다
     // (#314). WSL PTY는 ~40ms로도 됐으나 Windows ConPTY는 더 큰 간격이 필요.
-    async fn write_input(&self, terminal_id: &str, data: &str, escape: bool, enter: bool)
-        -> Result<usize, CallToolResult> { ... }
+    // 쓰기 직전 pane activity 와 (capture 시) 출력 버퍼 seq 를 per-terminal exec
+    // 락 안에서 원자적으로 샘플링해 WriteOutcome{ bytes, activity, before_seq }로
+    // 반환한다. 락 밖 샘플링이면 같은 세션의 다른 write 가 끼어들어 판정이 오염된다.
+    async fn write_input(&self, terminal_id: &str, data: &str, escape: bool, enter: bool,
+                         reply_to: Option<&str>, capture: bool)
+        -> Result<WriteOutcome, CallToolResult> { ... }
     // 공용 헬퍼: PTY 쓰기
     fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> { ... }
 
@@ -491,10 +495,22 @@ impl McpHandler {
     // AppState 직접 접근 패턴: PTY 입력
     #[tool]
     async fn write_to_terminal(&self, p: WriteTerminalParam) -> Result<CallToolResult, ErrorData> {
-        self.write_input(&p.terminal_id, &p.data, p.escape, p.enter).await...
+        // 리턴: { written, bytes, terminalId, activity, (capture_ms 시) captureMs/response/responseTruncated }
+        let out = self.write_input(&p.terminal_id, &p.data, p.escape, p.enter,
+                                   p.reply_to.as_deref(), p.capture_ms.is_some()).await...
     }
 }
 ```
+
+**`write_to_terminal` / `write_to_neighbor` 리턴 계약** (#426):
+- `activity`: 쓰기 **직전** 대상 pane 상태. `{"type":"shell"}` | `{"type":"running"}` |
+  `{"type":"interactiveApp","name":"Codex"}`. codex/claude 인 줄 알고 보냈는데 shell 로
+  빠진 경우를 호출 즉시 감지하기 위한 필드. 락 안에서 샘플링해 write 와 원자적.
+- `capture_ms`(opt-in): 주면 write 후 그만큼(상한 10000ms) 대기했다가 대상이 새로 낸
+  출력을 ANSI 제거 + tail 절단(상한 2000자)해 반환. `capture_ms` 를 준 호출은 **항상**
+  `captureMs` + `response`(문자열, 캡처 불가 시 `""`) + `responseTruncated`(bool)를 포함
+  — 계약 안정성. 대기는 exec 락 밖에서 하므로 같은 pane 의 다른 write 를 블록하지 않는다.
+- 교차 MCP 세션 write 직렬화는 `exec_locks` 가 세션별 handler 소유라 보장되지 않음(선존 한계).
 
 #### Tool 추가 시
 
