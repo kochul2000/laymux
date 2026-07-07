@@ -143,13 +143,14 @@ struct WriteOutcome {
 
 /// Get or create the per-terminal serialization lock from a shared table.
 /// Same `terminal_id` → the same `Arc` (so all callers serialize); distinct
-/// ids → distinct locks. Free fn so it can be unit-tested without an
-/// `McpHandler` (which needs a Tauri `AppHandle`).
-async fn get_or_create_terminal_lock(
+/// ids → distinct locks. The outer table mutex is `std` and held only for this
+/// get/insert (never across `.await`). Free fn so it can be unit-tested without
+/// an `McpHandler` (which needs a Tauri `AppHandle`).
+fn get_or_create_terminal_lock(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
 ) -> Arc<TokioMutex<()>> {
-    let mut map = locks.lock().await;
+    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
     map.entry(terminal_id.to_string())
         .or_insert_with(|| Arc::new(TokioMutex::new(())))
         .clone()
@@ -592,7 +593,7 @@ impl McpHandler {
     /// the shared `Arc<AppState>` (see [`crate::state::SharedExecLocks`]) so this
     /// holds across MCP sessions, not just within one handler (#427).
     async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
-        get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id).await
+        get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id)
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -713,10 +714,10 @@ impl McpHandler {
     /// 인터리브되는 것을 막는다.
     ///
     /// 쓰기 직전 pane activity 와 (capture 시) 출력 버퍼 seq 를 **락 안에서** 샘플링해
-    /// [`WriteOutcome`]에 담아 돌려준다. 락 밖에서 샘플링하면 이 세션의 다른 write 가
-    /// 락을 먼저 잡아 그 사이에 끼어들 수 있어, activity/seq 가 실제 "이 write 직전"이
-    /// 아니게 된다. 락 안 샘플링으로 그 경합을 막는다. (교차 MCP 세션 직렬화는
-    /// `exec_locks` 가 세션별이라 여전히 보장되지 않는다 — 별도 이슈.)
+    /// [`WriteOutcome`]에 담아 돌려준다. 락 밖에서 샘플링하면 다른 write 가 락을
+    /// 먼저 잡아 그 사이에 끼어들 수 있어, activity/seq 가 실제 "이 write 직전"이
+    /// 아니게 된다. 락 안 샘플링으로 그 경합을 막는다. 락 테이블이 프로세스 전역
+    /// (`AppState::exec_locks`)이라 직렬화는 MCP 세션과 무관하게 성립한다(#427).
     async fn write_input(
         &self,
         terminal_id: &str,
@@ -727,6 +728,15 @@ impl McpHandler {
         capture: bool,
     ) -> Result<WriteOutcome, CallToolResult> {
         let chunks = Self::plan_input_writes(data, escape, enter, reply_to);
+        // 존재하지 않는 터미널이면 락 엔트리를 만들기 전에 거른다 — 전역 exec_locks
+        // 테이블이 무효/닫힌 id 호출만으로 커지지 않도록(#427). write_pty 도 동일한
+        // not-found 를 내지만, 그 전에 이미 락이 삽입된 뒤다.
+        if !self.terminal_exists(terminal_id) {
+            return Err(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{}' not found",
+                terminal_id
+            ))]));
+        }
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
         let lock = self.terminal_exec_lock(terminal_id).await;
@@ -747,6 +757,18 @@ impl McpHandler {
             activity,
             before_seq,
         })
+    }
+
+    /// True if the terminal has a live PTY handle. Used to reject writes to
+    /// unknown/closed ids before an `exec_locks` entry is created (#427). A
+    /// poisoned lock is treated as "not present" (writes are fatal anyway).
+    fn terminal_exists(&self, terminal_id: &str) -> bool {
+        self.state
+            .app_state
+            .pty_handles
+            .lock_or_err()
+            .map(|ptys| ptys.contains_key(terminal_id))
+            .unwrap_or(false)
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -1554,6 +1576,15 @@ impl McpHandler {
 
         let timeout_ms = p.timeout_ms.unwrap_or(10_000).min(60_000);
         let strip = matches!(p.format.as_deref(), Some("text"));
+
+        // Reject unknown/closed terminals before creating a lock entry so the
+        // process-global exec_locks table can't grow from invalid ids (#427).
+        if !self.terminal_exists(&p.terminal_id) {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{}' not found",
+                p.terminal_id
+            ))]));
+        }
 
         // Acquire per-terminal lock to serialize concurrent execute_command calls
         let lock = self.terminal_exec_lock(&p.terminal_id).await;
@@ -3507,24 +3538,44 @@ mod tests {
         assert_eq!(p.capture_ms, Some(800));
     }
 
-    #[tokio::test]
-    async fn exec_locks_are_shared_across_appstate_clones() {
+    #[test]
+    fn exec_locks_are_shared_across_appstate_clones() {
         // Two MCP handlers in different sessions hold clones of the same
         // Arc<AppState>; the exec-lock table lives there, so the same terminal
         // must resolve to the SAME lock Arc across them (cross-session
         // serialization — #427). Different terminals get different locks.
         let a = Arc::new(crate::state::AppState::new());
         let b = a.clone(); // second session's ServerState.app_state
-        let la = get_or_create_terminal_lock(&a.exec_locks, "t1").await;
-        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1").await;
+        let la = get_or_create_terminal_lock(&a.exec_locks, "t1");
+        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1");
         assert!(
             Arc::ptr_eq(&la, &lb),
             "same terminal across shared AppState must yield one lock"
         );
-        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2").await;
+        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2");
         assert!(
             !Arc::ptr_eq(&la, &lc),
             "different terminals must get distinct locks"
+        );
+    }
+
+    #[test]
+    fn exec_locks_entry_is_dropped_after_removal() {
+        // Mirrors close_terminal_session cleanup (#427): once an entry is
+        // removed from the table, the next get_or_create makes a fresh lock, so
+        // the table does not retain entries for closed terminals forever.
+        let state = Arc::new(crate::state::AppState::new());
+        let first = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        state.exec_locks.lock().unwrap().remove("t1");
+        assert_eq!(
+            state.exec_locks.lock().unwrap().len(),
+            0,
+            "removal must empty the table"
+        );
+        let second = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "a re-created lock after removal must be a distinct Arc"
         );
     }
 
