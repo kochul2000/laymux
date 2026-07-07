@@ -851,6 +851,13 @@ pub fn close_terminal_session(
         known.remove(&id);
     }
 
+    // Clean up the per-terminal write/exec lock (#427). The table is now
+    // process-global on AppState, so without this it would grow unbounded as
+    // terminals open and close over a long session.
+    if let Ok(mut locks) = state.exec_locks.lock() {
+        locks.remove(&id);
+    }
+
     // Clean up interactive-app grace window (#237) so a new terminal that
     // happens to reuse this ID does not inherit stale detection.
     activity::clear_interactive_app_grace_window(&state, &id);

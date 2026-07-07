@@ -27,8 +27,15 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// 12. `remote_control`
 /// 13. `cloud_tunnel`
 /// 14. `cloud`
+/// 15. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
+///     never across `.await` and never while holding another `AppState` lock)
 ///
 /// Never acquire a higher-numbered lock while holding a lower-numbered one.
+///
+/// The per-terminal locks *inside* `exec_locks` are `tokio::sync::Mutex` because
+/// a writer holds one across `.await` (the body→CR delay); they are acquired
+/// only after the `exec_locks` table mutex has been released, so they sit
+/// outside this ordering.
 pub struct AppState {
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
@@ -84,7 +91,22 @@ pub struct AppState {
     pub cloud_tunnel: Mutex<Option<crate::cloud::tunnel::TunnelControl>>,
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
+    /// Process-global per-terminal lock table serializing `write_input` /
+    /// `execute_command` on the same terminal (#314). Living on the shared
+    /// `Arc<AppState>` — not on the per-MCP-session handler — is what makes the
+    /// serialization hold **across MCP sessions** (#427). Entries are removed on
+    /// terminal close so the table does not grow unbounded.
+    ///
+    /// The outer table is a `std::sync::Mutex` (held only briefly to get/insert,
+    /// never across `.await`, so sync close paths can clean it too); each value
+    /// is a `tokio::sync::Mutex` because a writer holds it across the body→CR
+    /// `.await` delay.
+    pub exec_locks: SharedExecLocks,
 }
+
+/// Process-global per-terminal write/exec serialization table. See
+/// [`AppState::exec_locks`].
+pub type SharedExecLocks = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
 
 impl AppState {
     pub fn new() -> Self {
@@ -107,6 +129,7 @@ impl AppState {
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
+            exec_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
