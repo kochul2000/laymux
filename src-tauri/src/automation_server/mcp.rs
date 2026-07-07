@@ -927,6 +927,24 @@ impl McpHandler {
         }
     }
 
+    /// Detect a terminal's current activity (shell / running / interactiveApp)
+    /// as a JSON value. Used to surface the pre-write pane state in the
+    /// `write_to_terminal`/`write_to_neighbor` return so callers immediately
+    /// notice when a pane they assumed was a TUI (Codex/Claude) has dropped to
+    /// a shell prompt. Best-effort: a poisoned buffer lock yields `null`.
+    fn detect_activity_json(&self, terminal_id: &str) -> serde_json::Value {
+        let app_state = &self.state.app_state;
+        let Ok(buffers) = app_state.output_buffers.lock_or_err() else {
+            return json!(null);
+        };
+        let info = crate::activity::detect_terminal_state(
+            app_state,
+            terminal_id,
+            buffers.get(terminal_id),
+        );
+        serde_json::to_value(&info.activity).unwrap_or(json!(null))
+    }
+
     /// Resolve the workspace containing the given terminal from the bridge terminal list.
     async fn terminal_workspace_id(&self, terminal_id: &str) -> Result<String, CallToolResult> {
         let data = self
@@ -1206,6 +1224,11 @@ impl McpHandler {
     /// When messaging another LLM agent pane, pass `reply_to` with your own
     /// terminal ID ($LX_TERMINAL_ID) — a standardized footer is appended
     /// telling the agent where to send its result back.
+    /// The return includes `activity` — the target pane's state sampled just
+    /// BEFORE the write: `{"type":"shell"}` (bare prompt), `{"type":"running"}`
+    /// (non-interactive command), or `{"type":"interactiveApp","name":"Codex"}`
+    /// (a TUI). Check it right after sending to catch the case where a pane you
+    /// assumed was an agent (Codex/Claude) had actually dropped to a shell.
     #[tool]
     async fn write_to_terminal(
         &self,
@@ -1223,6 +1246,9 @@ impl McpHandler {
             Ok(id) => id,
             Err(e) => return Ok(e),
         };
+        // Detect the pane's activity BEFORE writing — after the write the
+        // buffer is dirtied by our own input, poisoning the shell/TUI verdict.
+        let activity = self.detect_activity_json(&terminal_id);
         match self
             .write_input(
                 &terminal_id,
@@ -1239,6 +1265,7 @@ impl McpHandler {
                 "bytesWritten": bytes,
                 "enter": p.enter,
                 "terminalId": terminal_id,
+                "activity": activity,
             }))),
             Err(e) => Ok(e),
         }
@@ -1248,6 +1275,8 @@ impl McpHandler {
     /// in a single call. Pass your own terminal_id (from $LX_TERMINAL_ID) and the direction
     /// of the neighbor you want to send to. Like `write_to_terminal`, input is
     /// submitted by default; pass `enter: false` to type without submitting.
+    /// The return includes the neighbor's pre-write `activity` (shell / running /
+    /// interactiveApp) — see `write_to_terminal` for how to use it.
     #[tool]
     async fn write_to_neighbor(
         &self,
@@ -1281,7 +1310,9 @@ impl McpHandler {
             ))]));
         };
 
-        // 2. Write to the neighbor
+        // 2. Detect neighbor activity BEFORE writing (see write_to_terminal),
+        // then write.
+        let activity = self.detect_activity_json(&target_id);
         match self
             .write_input(
                 &target_id,
@@ -1298,6 +1329,7 @@ impl McpHandler {
                 "enter": p.enter,
                 "targetTerminalId": target_id,
                 "direction": p.direction.to_string(),
+                "activity": activity,
             }))),
             Err(e) => Ok(e),
         }
