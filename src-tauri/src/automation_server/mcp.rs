@@ -156,6 +156,25 @@ fn get_or_create_terminal_lock(
         .clone()
 }
 
+/// Remove `terminal_id`'s entry, but only if it is still the exact `expected`
+/// lock. A stale write that saw the terminal vanish must not delete a *different*
+/// lock that a same-id terminal recreated in the meantime (id reuse + close
+/// race), which would split serialization for the new terminal (#427).
+fn remove_terminal_lock_if(
+    locks: &crate::state::SharedExecLocks,
+    terminal_id: &str,
+    expected: &Arc<TokioMutex<()>>,
+) {
+    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+    let is_ours = map
+        .get(terminal_id)
+        .map(|cur| Arc::ptr_eq(cur, expected))
+        .unwrap_or(false);
+    if is_ours {
+        map.remove(terminal_id);
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct PaneLocator {
     workspace_name: String,
@@ -754,9 +773,9 @@ impl McpHandler {
                 Ok(n) => total += n,
                 Err(e) => {
                     // 쓰기 도중 터미널이 사라졌다면(close 와 경합) 방금 재생성됐을
-                    // 수 있는 락 엔트리를 정리한다(#427).
+                    // 수 있는 락 엔트리를 정리한다(#427). 단 우리가 든 락일 때만.
                     if !self.terminal_exists(terminal_id) {
-                        self.remove_terminal_lock(terminal_id);
+                        self.remove_terminal_lock(terminal_id, &lock);
                     }
                     return Err(e);
                 }
@@ -781,20 +800,14 @@ impl McpHandler {
             .unwrap_or(false)
     }
 
-    /// Drop a terminal's entry from the shared `exec_locks` table. Called when a
-    /// write discovers the terminal vanished mid-flight — the pre-write
-    /// `terminal_exists` check can race a concurrent `close_terminal_session`
-    /// (close removes the entry, then this call recreated it), so self-heal here
-    /// rather than leak the recreated entry (#427). Safe while holding the
-    /// per-terminal guard: the guard keeps its own `Arc`; the map only drops a ref.
-    fn remove_terminal_lock(&self, terminal_id: &str) {
-        let mut map = self
-            .state
-            .app_state
-            .exec_locks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        map.remove(terminal_id);
+    /// Drop the per-terminal lock `held` for `terminal_id` when a write finds the
+    /// terminal vanished mid-flight — the pre-write `terminal_exists` check can
+    /// race a concurrent `close_terminal_session`, leaving an entry we recreated.
+    /// Only removes when the table still holds *our* lock (`Arc::ptr_eq`), so a
+    /// same-id terminal recreated after us keeps its own lock (#427). Safe under
+    /// the per-terminal guard: the guard keeps its `Arc`; the map drops a ref.
+    fn remove_terminal_lock(&self, terminal_id: &str, held: &Arc<TokioMutex<()>>) {
+        remove_terminal_lock_if(&self.state.app_state.exec_locks, terminal_id, held);
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -1633,8 +1646,9 @@ impl McpHandler {
                 }
                 None => {
                     // Vanished after the pre-lock existence check (raced close):
-                    // purge the possibly-recreated lock entry (#427).
-                    self.remove_terminal_lock(&p.terminal_id);
+                    // purge the possibly-recreated lock entry, but only if it is
+                    // still ours (#427).
+                    self.remove_terminal_lock(&p.terminal_id, &lock);
                     return Ok(CallToolResult::error(vec![Content::text(format!(
                         "Terminal '{}' not found",
                         p.terminal_id
@@ -3606,6 +3620,30 @@ mod tests {
             !Arc::ptr_eq(&first, &second),
             "a re-created lock after removal must be a distinct Arc"
         );
+    }
+
+    #[test]
+    fn remove_terminal_lock_if_only_drops_the_matching_arc() {
+        // id reuse + close race (#427): a stale write must not delete a lock
+        // that a same-id terminal recreated after it.
+        let state = Arc::new(crate::state::AppState::new());
+        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        // Simulate close + same-id recreation: table now holds a DIFFERENT Arc.
+        state.exec_locks.lock().unwrap().remove("t1");
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        assert!(!Arc::ptr_eq(&stale, &current));
+
+        // Stale write tries to purge with its old Arc → must be a no-op.
+        remove_terminal_lock_if(&state.exec_locks, "t1", &stale);
+        let after = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        assert!(
+            Arc::ptr_eq(&current, &after),
+            "purge with a stale Arc must not evict the current lock"
+        );
+
+        // Purge with the matching Arc → removes it.
+        remove_terminal_lock_if(&state.exec_locks, "t1", &current);
+        assert_eq!(state.exec_locks.lock().unwrap().len(), 0);
     }
 
     #[test]
