@@ -141,6 +141,20 @@ struct WriteOutcome {
     before_seq: Option<u64>,
 }
 
+/// Get or create the per-terminal serialization lock from a shared table.
+/// Same `terminal_id` → the same `Arc` (so all callers serialize); distinct
+/// ids → distinct locks. Free fn so it can be unit-tested without an
+/// `McpHandler` (which needs a Tauri `AppHandle`).
+async fn get_or_create_terminal_lock(
+    locks: &crate::state::SharedExecLocks,
+    terminal_id: &str,
+) -> Arc<TokioMutex<()>> {
+    let mut map = locks.lock().await;
+    map.entry(terminal_id.to_string())
+        .or_insert_with(|| Arc::new(TokioMutex::new(())))
+        .clone()
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct PaneLocator {
     workspace_name: String,
@@ -548,8 +562,6 @@ pub struct McpHandler {
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
     is_dev: bool,
-    /// Per-terminal mutex to serialize execute_command calls on the same terminal.
-    exec_locks: Arc<TokioMutex<HashMap<String, Arc<TokioMutex<()>>>>>,
     /// Shared subscription registry: tracks `resources/subscribe` requests so
     /// the Tauri→MCP event bridge can push `notifications/resources/updated`
     /// to the correct peers.
@@ -569,7 +581,6 @@ impl McpHandler {
             state,
             tool_router: Self::tool_router(),
             is_dev,
-            exec_locks: Arc::new(TokioMutex::new(HashMap::new())),
             subscriptions,
             peer_id: new_peer_id(),
         }
@@ -577,12 +588,11 @@ impl McpHandler {
 
     /// Get or create a per-terminal lock serializing execute_command and
     /// write_input (so a split body+CR sequence is not interleaved by another
-    /// concurrent write/exec to the same terminal — #314).
+    /// concurrent write/exec to the same terminal — #314). The table lives on
+    /// the shared `Arc<AppState>` (see [`crate::state::SharedExecLocks`]) so this
+    /// holds across MCP sessions, not just within one handler (#427).
     async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
-        let mut map = self.exec_locks.lock().await;
-        map.entry(terminal_id.to_string())
-            .or_insert_with(|| Arc::new(TokioMutex::new(())))
-            .clone()
+        get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id).await
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -3495,6 +3505,27 @@ mod tests {
         let json = r#"{"terminal_id":"t1","direction":"below","data":"hello","capture_ms":800}"#;
         let p: WriteToNeighborParam = serde_json::from_str(json).unwrap();
         assert_eq!(p.capture_ms, Some(800));
+    }
+
+    #[tokio::test]
+    async fn exec_locks_are_shared_across_appstate_clones() {
+        // Two MCP handlers in different sessions hold clones of the same
+        // Arc<AppState>; the exec-lock table lives there, so the same terminal
+        // must resolve to the SAME lock Arc across them (cross-session
+        // serialization — #427). Different terminals get different locks.
+        let a = Arc::new(crate::state::AppState::new());
+        let b = a.clone(); // second session's ServerState.app_state
+        let la = get_or_create_terminal_lock(&a.exec_locks, "t1").await;
+        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1").await;
+        assert!(
+            Arc::ptr_eq(&la, &lb),
+            "same terminal across shared AppState must yield one lock"
+        );
+        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2").await;
+        assert!(
+            !Arc::ptr_eq(&la, &lc),
+            "different terminals must get distinct locks"
+        );
     }
 
     #[test]

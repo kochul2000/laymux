@@ -84,7 +84,17 @@ pub struct AppState {
     pub cloud_tunnel: Mutex<Option<crate::cloud::tunnel::TunnelControl>>,
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
+    /// Process-global per-terminal lock table serializing `write_input` /
+    /// `execute_command` on the same terminal (#314). Living on the shared
+    /// `Arc<AppState>` — not on the per-MCP-session handler — is what makes the
+    /// serialization hold **across MCP sessions** (#427). A `tokio::sync::Mutex`
+    /// because it is held across the write's `.await` points.
+    pub exec_locks: SharedExecLocks,
 }
+
+/// Process-global per-terminal write/exec serialization table. See
+/// [`AppState::exec_locks`].
+pub type SharedExecLocks = Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
 
 impl AppState {
     pub fn new() -> Self {
@@ -107,6 +117,7 @@ impl AppState {
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
+            exec_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 }
