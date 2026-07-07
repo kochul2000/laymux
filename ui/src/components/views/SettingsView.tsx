@@ -1796,13 +1796,19 @@ function RemoteSection() {
     try {
       // The backend `cloud_connect_start` reads `relay_base_url` from
       // `load_settings()` (disk), NOT from this unsaved draft. If the relay was
-      // edited, commit the whole remote draft to store + disk before pairing so
-      // it pairs against the URL the user typed. Commit the FULL draft (not just
-      // relay): a partial `setRemote({ relayBaseUrl })` would trip useDraft's
-      // store-change sync (#51) and discard any other unsaved remote edits.
+      // edited, run the same commit the Save button does for the remote section
+      // before pairing so it pairs against the URL the user typed:
+      //  - commit the FULL draft (not just relay) — a partial `setRemote` would
+      //    trip useDraft's store-change sync (#51) and discard other unsaved edits,
+      //  - persist to disk, and
+      //  - reconcile Direct Remote runtime access if `enabled` changed
+      //    (mirrors handleSave; no-ops when it did not change).
       if (remote.relayBaseUrl.trim() !== storeRemote.relayBaseUrl) {
-        setRemote(toRemoteSettings(remote));
+        const previousEnabled = storeRemote.enabled;
+        const committed = toRemoteSettings(remote);
+        setRemote(committed);
         await persistSession();
+        await reconcileRemoteAccessAfterRemoteSave(previousEnabled, committed.enabled);
       }
       const status = await cloudConnectStart();
       setCloudStatus(status);

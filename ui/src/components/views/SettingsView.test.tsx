@@ -2050,6 +2050,36 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().remote.allowedIps).toEqual(["10.0.0.0/8"]);
     });
 
+    it("reconciles Direct Remote runtime access when enabled is co-edited on connect", async () => {
+      // Committing the remote draft on Connect must run the same runtime-access
+      // reconciliation as Save, so a co-edited `enabled` toggle is not persisted
+      // without updating the runtime daemon state.
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-enabled-toggle"));
+      const relayInput = screen.getByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      ) as HTMLInputElement;
+      fireEvent.change(relayInput, { target: { value: "https://draft-relay.example.test" } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+
+      expect(useSettingsStore.getState().remote.enabled).toBe(true);
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      // Reconcile ran (enabled false→true triggers a runtime-access sync).
+      expect(mockInvoke).toHaveBeenCalledWith("set_remote_runtime_access", expect.anything());
+    });
+
     it("does not persist relay on connect when the draft is unchanged", async () => {
       // No-op guard: an unedited relay must not trigger a settings write on Connect.
       const user = userEvent.setup();
