@@ -2018,6 +2018,38 @@ describe("SettingsView", () => {
       );
     });
 
+    it("preserves other unsaved remote edits when committing relay on connect", async () => {
+      // Regression guard: committing the relay must flush the WHOLE remote draft,
+      // not just relayBaseUrl. A partial store update would trip useDraft's
+      // store-change sync and discard a co-edited field (here: allowed IPs).
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const relayInput = (await screen.findByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      )) as HTMLInputElement;
+      const allowedIpsInput = screen.getByTestId(
+        "remote-settings-allowed-ips-input",
+      ) as HTMLTextAreaElement;
+      fireEvent.change(relayInput, { target: { value: "https://draft-relay.example.test" } });
+      fireEvent.change(allowedIpsInput, { target: { value: "10.0.0.0/8" } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+
+      // Both edits committed — the co-edited allowed IPs is not lost.
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual(["10.0.0.0/8"]);
+    });
+
     it("does not persist relay on connect when the draft is unchanged", async () => {
       // No-op guard: an unedited relay must not trigger a settings write on Connect.
       const user = userEvent.setup();
