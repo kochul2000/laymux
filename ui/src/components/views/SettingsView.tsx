@@ -1794,6 +1794,15 @@ function RemoteSection() {
     setCloudConnectPending(true);
     setCloudStatusError(null);
     try {
+      // The backend `cloud_connect_start` reads `relay_base_url` from
+      // `load_settings()` (disk), NOT from this unsaved draft. Commit the relay
+      // draft to disk first so an edited-but-unsaved URL pairs against the value
+      // the user actually sees, instead of the previously-saved relay.
+      const relayBaseUrl = remote.relayBaseUrl.trim();
+      if (relayBaseUrl !== storeRemote.relayBaseUrl) {
+        setRemote({ relayBaseUrl });
+        await persistSession();
+      }
       const status = await cloudConnectStart();
       setCloudStatus(status);
       if (status.instanceId && !status.lastError) {
