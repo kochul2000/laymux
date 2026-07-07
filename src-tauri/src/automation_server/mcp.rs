@@ -750,7 +750,17 @@ impl McpHandler {
             if i > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(Self::ENTER_CR_DELAY_MS)).await;
             }
-            total += self.write_pty(terminal_id, chunk)?;
+            match self.write_pty(terminal_id, chunk) {
+                Ok(n) => total += n,
+                Err(e) => {
+                    // 쓰기 도중 터미널이 사라졌다면(close 와 경합) 방금 재생성됐을
+                    // 수 있는 락 엔트리를 정리한다(#427).
+                    if !self.terminal_exists(terminal_id) {
+                        self.remove_terminal_lock(terminal_id);
+                    }
+                    return Err(e);
+                }
+            }
         }
         Ok(WriteOutcome {
             bytes: total,
@@ -769,6 +779,22 @@ impl McpHandler {
             .lock_or_err()
             .map(|ptys| ptys.contains_key(terminal_id))
             .unwrap_or(false)
+    }
+
+    /// Drop a terminal's entry from the shared `exec_locks` table. Called when a
+    /// write discovers the terminal vanished mid-flight — the pre-write
+    /// `terminal_exists` check can race a concurrent `close_terminal_session`
+    /// (close removes the entry, then this call recreated it), so self-heal here
+    /// rather than leak the recreated entry (#427). Safe while holding the
+    /// per-terminal guard: the guard keeps its own `Arc`; the map only drops a ref.
+    fn remove_terminal_lock(&self, terminal_id: &str) {
+        let mut map = self
+            .state
+            .app_state
+            .exec_locks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.remove(terminal_id);
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -1606,6 +1632,9 @@ impl McpHandler {
                     buf.write_seq()
                 }
                 None => {
+                    // Vanished after the pre-lock existence check (raced close):
+                    // purge the possibly-recreated lock entry (#427).
+                    self.remove_terminal_lock(&p.terminal_id);
                     return Ok(CallToolResult::error(vec![Content::text(format!(
                         "Terminal '{}' not found",
                         p.terminal_id
