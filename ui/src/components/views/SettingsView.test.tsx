@@ -1863,7 +1863,7 @@ describe("SettingsView", () => {
       ) as HTMLInputElement;
       fireEvent.change(input, { target: { value: " https://relay.example.test " } });
 
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://app.laymux.com");
 
       await user.click(screen.getByTestId("save-settings-btn"));
 
@@ -1995,7 +1995,7 @@ describe("SettingsView", () => {
         );
       });
       expect(relayInput.value).toBe(" https://draft-relay.example.test ");
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://app.laymux.com");
 
       await user.click(screen.getByTestId("save-settings-btn"));
 
@@ -2075,7 +2075,7 @@ describe("SettingsView", () => {
       });
       // Mid-flight edit survives; store was not clobbered by a stale-closure sync.
       expect(relayInput.value).toBe(" https://mid-flight.example.test ");
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://app.laymux.com");
 
       await user.click(screen.getByTestId("save-settings-btn"));
 
@@ -2106,7 +2106,7 @@ describe("SettingsView", () => {
         expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
       });
       expect(relayInput.value).toBe(" https://draft-relay.example.test ");
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://cloud.laymux.example");
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://app.laymux.com");
       expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
 
       await user.click(screen.getByTestId("save-settings-btn"));

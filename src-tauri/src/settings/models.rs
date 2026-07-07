@@ -1036,7 +1036,16 @@ fn default_cloud_auto_reconnect() -> bool {
 }
 
 pub fn default_cloud_relay_base_url() -> String {
-    "https://cloud.laymux.example".into()
+    // dev builds default to the local relay server for testing; release builds
+    // default to prod. Mirrors the dev/prod split used for the automation port
+    // (19281/19280 via `debug_assertions`). Overridable in settings, and any
+    // value already persisted in settings.json is kept (serde default only
+    // fills an absent field).
+    if cfg!(debug_assertions) {
+        "http://127.0.0.1:8000".into()
+    } else {
+        "https://app.laymux.com".into()
+    }
 }
 
 impl Default for RemoteSettings {

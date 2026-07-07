@@ -57,7 +57,7 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "preferredHost": "",               // 복사 URL 기본 호스트. 빈 값 = 자동
     "customHosts": [],                  // 감지 후보 외에 URL host select 에 표시할 수동 호스트
     "cloudEnabled": false,              // 클라우드 연결 영속 설정. pairing 전 기본값 false
-    "relayBaseUrl": "https://cloud.laymux.example",
+    "relayBaseUrl": "https://app.laymux.com",  // 기본값: release=https://app.laymux.com, dev(debug)=http://127.0.0.1:8000. 설정에서 변경 가능
     "cloudInstanceId": null,            // relay가 발급한 instance id. 미연결이면 null
     "cloudTunnelUrl": null,             // pairing complete 응답의 WSS tunnel URL. PR3 터널에서 사용
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL

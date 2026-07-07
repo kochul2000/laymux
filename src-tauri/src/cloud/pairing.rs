@@ -578,6 +578,41 @@ mod tests {
     const TEST_PORT: u16 = 8080;
 
     #[test]
+    fn build_pair_url_targets_prod_pair_desktop() {
+        // With the prod relay base, the desktop must open exactly
+        // https://app.laymux.com/pair/desktop with the pairing query params.
+        let url = build_pair_url(
+            "https://app.laymux.com",
+            "http://127.0.0.1:54321/pair/callback",
+            "state-123",
+            "my-pc",
+        )
+        .unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("app.laymux.com"));
+        assert_eq!(url.path(), "/pair/desktop");
+        let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            q.get("redirect_uri").map(String::as_str),
+            Some("http://127.0.0.1:54321/pair/callback")
+        );
+        assert_eq!(q.get("state").map(String::as_str), Some("state-123"));
+        assert_eq!(q.get("name").map(String::as_str), Some("my-pc"));
+    }
+
+    #[test]
+    fn empty_relay_base_url_falls_back_to_build_default() {
+        // An absent/blank relay URL normalizes to the compiled default:
+        // dev(debug) → local relay, release → prod. Tests run in debug.
+        assert_eq!(
+            normalized_relay_base_url("   "),
+            default_cloud_relay_base_url()
+        );
+        #[cfg(debug_assertions)]
+        assert_eq!(normalized_relay_base_url(""), "http://127.0.0.1:8000");
+    }
+
+    #[test]
     fn callback_rejects_state_mismatch() {
         let response = handle_callback_request(
             "GET /pair/callback?code=abc&state=wrong HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
