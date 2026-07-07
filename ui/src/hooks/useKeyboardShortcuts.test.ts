@@ -15,9 +15,10 @@ vi.mock("@/lib/tauri-api", () => ({
   saveMemo: vi.fn().mockResolvedValue(undefined),
   saveSettings: vi.fn().mockResolvedValue(undefined),
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { propagateCwdOnce } from "@/lib/tauri-api";
+import { clipboardWriteText, propagateCwdOnce } from "@/lib/tauri-api";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 import type { ViewInstanceConfig } from "@/stores/types";
 
@@ -1628,6 +1629,77 @@ describe("useKeyboardShortcuts", () => {
       // New combo matches
       fireKey("P", { ctrlKey: true, shiftKey: true });
       expect(propagateCwdOnce).toHaveBeenCalledWith("terminal-pane-a");
+    });
+  });
+
+  describe("Ctrl+Alt+C: copy the focused pane identifier", () => {
+    function setActivePanes() {
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            id: "ws-default",
+            name: "Default",
+            panes: [
+              {
+                id: "pane-right",
+                x: 0.5,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                view: { type: "TerminalView" },
+              },
+              {
+                id: "pane-left",
+                x: 0,
+                y: 0,
+                w: 0.5,
+                h: 1,
+                view: { type: "TerminalView" },
+              },
+            ],
+          },
+        ],
+        activeWorkspaceId: "ws-default",
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(clipboardWriteText).mockClear();
+    });
+
+    it("copies the focused pane's spatial identifier", () => {
+      setActivePanes();
+      useGridStore.getState().setFocusedPane(0);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("c", { ctrlKey: true, altKey: true });
+
+      expect(clipboardWriteText).toHaveBeenCalledWith("lx:pane:Default:2");
+    });
+
+    it("does nothing when no pane is focused", () => {
+      setActivePanes();
+      useGridStore.getState().setFocusedPane(null);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("c", { ctrlKey: true, altKey: true });
+
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("respects a user override from settings", () => {
+      setActivePanes();
+      useGridStore.getState().setFocusedPane(1);
+      useSettingsStore.setState({
+        keybindings: [{ command: "pane.copyIdentifier", keys: "Ctrl+Shift+C" }],
+      } as Partial<ReturnType<typeof useSettingsStore.getState>>);
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("c", { ctrlKey: true, altKey: true });
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+
+      fireKey("C", { ctrlKey: true, shiftKey: true });
+      expect(clipboardWriteText).toHaveBeenCalledWith("lx:pane:Default:1");
     });
   });
 

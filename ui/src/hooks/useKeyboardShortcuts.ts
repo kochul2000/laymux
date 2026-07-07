@@ -9,11 +9,13 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
+import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
 import { findNotificationNavTarget } from "@/lib/notification-navigation";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
+import { clipboardWriteText } from "@/lib/tauri-api";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -133,6 +135,26 @@ function navigateByNotification(direction: "recent" | "oldest") {
   // In workspace/paneFocus dismiss modes, auto-dismiss also fires (harmless overlap).
   // In manual mode, this is the only dismissal path.
   markNotificationsAsRead(target.notificationIds);
+}
+
+function copyFocusedPaneIdentifier(): boolean {
+  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  const { focusedPaneIndex } = useGridStore.getState();
+  if (!ws || focusedPaneIndex === null) return false;
+
+  const pane = ws.panes[focusedPaneIndex];
+  if (!pane) return false;
+
+  const paneNumber = paneNumberFor(ws.panes, pane.id);
+  if (paneNumber === null) return false;
+
+  try {
+    const text = formatPaneIdentifier({ workspaceName: ws.name, paneNumber });
+    void clipboardWriteText(text).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Check if the currently focused element is a text-editable field (input, textarea, contentEditable). */
@@ -270,6 +292,12 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     // 헬퍼가 실제로 전파를 디스패치했을 때만 preventDefault — CWD 없는
     // view(Memo 등)에서는 no-op 이므로 기본 동작을 막지 않는다 (PR #331 리뷰).
     if (pane && propagateCwdOnceForPane(pane)) {
+      e.preventDefault();
+    }
+  },
+
+  "pane.copyIdentifier": (e) => {
+    if (copyFocusedPaneIdentifier()) {
       e.preventDefault();
     }
   },
