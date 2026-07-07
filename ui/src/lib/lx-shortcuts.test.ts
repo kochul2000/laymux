@@ -142,6 +142,11 @@ describe("isLxShortcut", () => {
     expect(isLxShortcut(makeKeyEvent("p", { ctrlKey: true, altKey: true }))).toBe(true);
   });
 
+  it("returns true for Ctrl+Alt+C / Ctrl+Alt+c (copy pane identifier)", () => {
+    expect(isLxShortcut(makeKeyEvent("C", { ctrlKey: true, altKey: true }))).toBe(true);
+    expect(isLxShortcut(makeKeyEvent("c", { ctrlKey: true, altKey: true }))).toBe(true);
+  });
+
   // --- Case-insensitive Ctrl+Shift letter keys ---
   it("returns true for Ctrl+Shift+u (lowercase, jump to unread)", () => {
     expect(isLxShortcut(makeKeyEvent("u", { ctrlKey: true, shiftKey: true }))).toBe(true);
@@ -248,6 +253,14 @@ describe("isLxShortcut", () => {
       expect(isLxShortcut(makeKeyEvent("G", { ctrlKey: true, shiftKey: true }))).toBe(true);
       // Old default Ctrl+Alt+P no longer bound → must reach the shell
       expect(isLxShortcut(makeKeyEvent("P", { ctrlKey: true, altKey: true }))).toBe(false);
+    });
+
+    it("respects pane.copyIdentifier override (document-level Pane action)", () => {
+      mockGetState.mockReturnValue({
+        keybindings: [{ command: "pane.copyIdentifier", keys: "Ctrl+Shift+J" }],
+      });
+      expect(isLxShortcut(makeKeyEvent("J", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(isLxShortcut(makeKeyEvent("C", { ctrlKey: true, altKey: true }))).toBe(false);
     });
   });
 });

@@ -26,7 +26,7 @@ export interface KeybindingDef {
    * through (PR #338 review).
    *
    * Declared per-definition — not derived from `group` — because the group
-   * alone doesn't decide it: `pane.focus`/`pane.propagateCwdOnce` are
+   * alone doesn't decide it: `pane.focus`/`pane.propagateCwdOnce`/`pane.copyIdentifier` are
    * document-level, but `pane.delete` (plain Delete) must stay with the
    * terminal. Terminal/Memo/Issue Reporter actions are handled inside the
    * focused view itself and never pass through.
@@ -166,6 +166,13 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     id: "pane.propagateCwdOnce",
     label: "포커스 Pane CWD 1회 전파",
     defaultKeys: "Ctrl+Alt+P",
+    group: "Pane",
+    passThroughTerminal: true,
+  },
+  {
+    id: "pane.copyIdentifier",
+    label: "포커스 Pane 식별자 복사",
+    defaultKeys: "Ctrl+Alt+C",
     group: "Pane",
     passThroughTerminal: true,
   },

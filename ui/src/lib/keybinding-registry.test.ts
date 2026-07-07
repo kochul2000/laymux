@@ -54,6 +54,14 @@ describe("keybinding-registry", () => {
       expect(def?.group).toBe("Pane");
     });
 
+    it("should include pane.copyIdentifier with Ctrl+Alt+C default", () => {
+      const def = DEFAULT_KEYBINDINGS.find((d) => d.id === "pane.copyIdentifier");
+      expect(def).toBeDefined();
+      expect(def?.defaultKeys).toBe("Ctrl+Alt+C");
+      expect(def?.group).toBe("Pane");
+      expect(def?.passThroughTerminal).toBe(true);
+    });
+
     it("should include terminal.copy / terminal.paste with OS-default combos", () => {
       const copy = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.copy");
       const paste = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste");
