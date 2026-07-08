@@ -1041,6 +1041,10 @@ pub const PROD_CLOUD_RELAY_BASE_URL: &str = "https://app.laymux.com";
 /// Local cloud relay base URL (dev/debug-build default) for the local relay server.
 pub const DEV_CLOUD_RELAY_BASE_URL: &str = "http://127.0.0.1:8000";
 
+/// Legacy placeholder relay URL persisted by older builds (ADR-0023). Dead host;
+/// migrated to the current build default on load so cloud connect stops opening it.
+pub const LEGACY_CLOUD_RELAY_PLACEHOLDER: &str = "https://cloud.laymux.example";
+
 pub fn default_cloud_relay_base_url() -> String {
     // dev builds default to the local relay server for testing; release builds
     // default to prod. Mirrors the dev/prod split used for the automation port
