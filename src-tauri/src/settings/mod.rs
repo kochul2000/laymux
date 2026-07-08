@@ -137,6 +137,16 @@ fn migrate_settings(settings: &mut Settings) {
         }
     }
 
+    // Heal stale cloud relay placeholder → build default.
+    // Older builds persisted `https://cloud.laymux.example` (a dead placeholder)
+    // as the relay base URL default. serde's `default` only fills an absent
+    // field, so upgraded installs keep the placeholder and cloud connect opens
+    // the dead host. Rewrite it to the current build default.
+    if settings.remote.relay_base_url.trim().trim_end_matches('/') == LEGACY_CLOUD_RELAY_PLACEHOLDER
+    {
+        settings.remote.relay_base_url = default_cloud_relay_base_url();
+    }
+
     // Deduplicate workspace names
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for ws in &mut settings.workspaces {
@@ -514,6 +524,33 @@ mod tests {
             .map(|w| w.name.as_str())
             .collect();
         assert_eq!(names, vec!["Dev", "Dev (2)", "Dev (3)"]);
+    }
+
+    #[test]
+    fn migrate_heals_stale_cloud_relay_placeholder() {
+        let mut settings = Settings::default();
+        settings.remote.relay_base_url = LEGACY_CLOUD_RELAY_PLACEHOLDER.into();
+        migrate_settings(&mut settings);
+        assert_eq!(
+            settings.remote.relay_base_url,
+            default_cloud_relay_base_url()
+        );
+
+        // Trailing slash variant is also healed.
+        settings.remote.relay_base_url = format!("{LEGACY_CLOUD_RELAY_PLACEHOLDER}/");
+        migrate_settings(&mut settings);
+        assert_eq!(
+            settings.remote.relay_base_url,
+            default_cloud_relay_base_url()
+        );
+    }
+
+    #[test]
+    fn migrate_keeps_custom_relay_url() {
+        let mut settings = Settings::default();
+        settings.remote.relay_base_url = "http://127.0.0.1:8000".into();
+        migrate_settings(&mut settings);
+        assert_eq!(settings.remote.relay_base_url, "http://127.0.0.1:8000");
     }
 
     #[test]
