@@ -1977,7 +1977,12 @@ describe("SettingsView", () => {
       );
     });
 
-    it("preserves unsaved relay draft while merging pairing metadata after cloud connect", async () => {
+    it("commits the edited relay draft to disk before pairing on cloud connect", async () => {
+      // Regression: the backend cloud_connect_start reads relay_base_url from
+      // load_settings() (disk). Editing the relay field and clicking Connect
+      // WITHOUT a separate Save used to pair against the previously-saved relay.
+      // Fix: Connect commits the trimmed relay draft (store + disk via
+      // save_settings) before pairing, so it uses the URL the user typed.
       const user = userEvent.setup();
       render(<SettingsView />);
 
@@ -1985,7 +1990,7 @@ describe("SettingsView", () => {
       const relayInput = (await screen.findByTestId(
         "remote-settings-cloud-relay-base-url-input",
       )) as HTMLInputElement;
-      fireEvent.change(relayInput, { target: { value: " https://draft-relay.example.test " } });
+      fireEvent.change(relayInput, { target: { value: "https://draft-relay.example.test" } });
 
       await user.click(screen.getByTestId("remote-settings-cloud-connect"));
 
@@ -1994,14 +1999,15 @@ describe("SettingsView", () => {
           "Paired (waiting to connect)",
         );
       });
-      expect(relayInput.value).toBe(" https://draft-relay.example.test ");
-      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://app.laymux.com");
 
-      await user.click(screen.getByTestId("save-settings-btn"));
-
+      // Relay committed to the store + persisted to disk during Connect — no
+      // manual Save required.
       expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
         "https://draft-relay.example.test",
       );
+      expect(persistSession).toHaveBeenCalled();
+
+      // Pairing metadata merged as before.
       expect(useSettingsStore.getState().remote.cloudEnabled).toBe(true);
       expect(useSettingsStore.getState().remote.cloudInstanceId).toBe("instance-2");
       expect(useSettingsStore.getState().remote.cloudTunnelUrl).toBe(
@@ -2010,6 +2016,85 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().remote.cloudServerBaseUrl).toBe(
         "https://relay.example.test",
       );
+    });
+
+    it("preserves other unsaved remote edits when committing relay on connect", async () => {
+      // Regression guard: committing the relay must flush the WHOLE remote draft,
+      // not just relayBaseUrl. A partial store update would trip useDraft's
+      // store-change sync and discard a co-edited field (here: allowed IPs).
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const relayInput = (await screen.findByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      )) as HTMLInputElement;
+      const allowedIpsInput = screen.getByTestId(
+        "remote-settings-allowed-ips-input",
+      ) as HTMLTextAreaElement;
+      fireEvent.change(relayInput, { target: { value: "https://draft-relay.example.test" } });
+      fireEvent.change(allowedIpsInput, { target: { value: "10.0.0.0/8" } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+
+      // Both edits committed — the co-edited allowed IPs is not lost.
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual(["10.0.0.0/8"]);
+    });
+
+    it("reconciles Direct Remote runtime access when enabled is co-edited on connect", async () => {
+      // Committing the remote draft on Connect must run the same runtime-access
+      // reconciliation as Save, so a co-edited `enabled` toggle is not persisted
+      // without updating the runtime daemon state.
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-enabled-toggle"));
+      const relayInput = screen.getByTestId(
+        "remote-settings-cloud-relay-base-url-input",
+      ) as HTMLInputElement;
+      fireEvent.change(relayInput, { target: { value: "https://draft-relay.example.test" } });
+
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+
+      expect(useSettingsStore.getState().remote.enabled).toBe(true);
+      expect(useSettingsStore.getState().remote.relayBaseUrl).toBe(
+        "https://draft-relay.example.test",
+      );
+      // Reconcile ran (enabled false→true triggers a runtime-access sync).
+      expect(mockInvoke).toHaveBeenCalledWith("set_remote_runtime_access", expect.anything());
+    });
+
+    it("does not persist relay on connect when the draft is unchanged", async () => {
+      // No-op guard: an unedited relay must not trigger a settings write on Connect.
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("remote-settings-cloud-status")).toHaveTextContent(
+          "Paired (waiting to connect)",
+        );
+      });
+
+      expect(persistSession).not.toHaveBeenCalled();
     });
 
     it("preserves a relay draft edited DURING the pending cloud connect await", async () => {
