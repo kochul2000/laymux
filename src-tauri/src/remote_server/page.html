@@ -1535,7 +1535,7 @@
           const pointerOptions = { passive: false };
 
           element.addEventListener("pointerdown", (event) => {
-            if (!isTouchPointer(event) || event.isPrimary === false) return;
+            if (!isTouchPointer(event)) return;
             const point = rememberTouchPointer(event);
             event.preventDefault();
             event.stopPropagation();

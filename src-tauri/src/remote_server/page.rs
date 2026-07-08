@@ -104,6 +104,8 @@ mod tests {
         assert!(html.contains("function sendTerminalAppScroll(term, deltaY, point)"));
         assert!(html.contains("function handleTouchTap(term, element, point)"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        assert!(html.contains("if (!isTouchPointer(event)) return;"));
+        assert!(!html.contains("event.isPrimary === false"));
         assert!(html.contains("touchGesture.mode = \"scrolling\""));
         assert!(html.contains("touchGesture.mode = \"selecting\""));
         assert!(html.contains("mode: \"twoFingerScrolling\""));
