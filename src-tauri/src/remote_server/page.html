@@ -739,7 +739,12 @@
         width: 100%;
         height: 100%;
         min-height: 0;
+        position: relative;
+        /* Touch gestures are mediated below: drag scrolls, long-press drag selects. */
         touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        overscroll-behavior: contain;
       }
       .xterm {
         height: 100%;
@@ -824,6 +829,19 @@
       }
       .xterm .xterm-scroll-area {
         width: 100%;
+      }
+      .touch-selection-handle {
+        position: absolute;
+        z-index: 12;
+        display: none;
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--terminal-bg);
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        touch-action: none;
+        transform: translate(-50%, -50%);
       }
     </style>
   </head>
@@ -959,6 +977,17 @@
         let inputWriteChain = Promise.resolve();
         let notificationPanelOpen = false;
         let dockPanelOpen = false;
+        let touchGesture = null;
+        let touchPointers = new Map();
+        let lastTouchTap = { time: 0, x: 0, y: 0, count: 0 };
+        let selectionHandles = null;
+        let selectionHandleDrag = null;
+
+        // UX contract: long press. This delay is only the local gesture threshold.
+        const INTERNAL_TOUCH_LONG_PRESS_DELAY_MS = 500;
+        const INTERNAL_TOUCH_SCROLL_SLOP_PX = 8;
+        const INTERNAL_TOUCH_TAP_SLOP_PX = 18;
+        const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
@@ -1167,8 +1196,48 @@
           }
         }
 
-        function isTouchSelectionPointer(event) {
+        function isTouchPointer(event) {
           return event.pointerType === "touch" || event.pointerType === "pen";
+        }
+
+        function touchPointFromEvent(event) {
+          return {
+            screenX: event.screenX,
+            screenY: event.screenY,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          };
+        }
+
+        function touchDistance(a, b) {
+          return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        }
+
+        function touchCenterPoint() {
+          if (touchPointers.size === 0) return null;
+          let screenX = 0;
+          let screenY = 0;
+          let clientX = 0;
+          let clientY = 0;
+          for (const point of touchPointers.values()) {
+            screenX += point.screenX;
+            screenY += point.screenY;
+            clientX += point.clientX;
+            clientY += point.clientY;
+          }
+          const count = touchPointers.size;
+          return {
+            screenX: screenX / count,
+            screenY: screenY / count,
+            clientX: clientX / count,
+            clientY: clientY / count,
+          };
+        }
+
+        function rememberTouchPointer(event) {
+          const point = touchPointFromEvent(event);
+          touchPointers.set(event.pointerId, point);
+          return point;
         }
 
         function shouldForceTouchSelection(term) {
@@ -1176,16 +1245,22 @@
           return Boolean(mouseTrackingMode && mouseTrackingMode !== "none");
         }
 
-        function touchSelectionMouseEvent(type, pointerEvent, forceSelection) {
+        function isNormalScrollbackMode(term) {
+          const bufferType = term && term.buffer && term.buffer.active && term.buffer.active.type;
+          const mouseTrackingMode = term && term.modes && term.modes.mouseTrackingMode;
+          return bufferType === "normal" && (!mouseTrackingMode || mouseTrackingMode === "none");
+        }
+
+        function touchSelectionMouseEvent(type, point, forceSelection, detail = type === "mousedown" ? 1 : 0) {
           return new MouseEvent(type, {
             bubbles: true,
             cancelable: true,
             view: window,
-            detail: type === "mousedown" ? 1 : 0,
-            screenX: pointerEvent.screenX,
-            screenY: pointerEvent.screenY,
-            clientX: pointerEvent.clientX,
-            clientY: pointerEvent.clientY,
+            detail,
+            screenX: point.screenX,
+            screenY: point.screenY,
+            clientX: point.clientX,
+            clientY: point.clientY,
             button: 0,
             buttons: type === "mouseup" ? 0 : 1,
             shiftKey: forceSelection,
@@ -1193,8 +1268,263 @@
           });
         }
 
-        function dispatchTouchSelectionMouse(target, type, pointerEvent, forceSelection) {
-          target.dispatchEvent(touchSelectionMouseEvent(type, pointerEvent, forceSelection));
+        function dispatchTouchSelectionMouse(target, type, point, forceSelection, detail) {
+          target.dispatchEvent(touchSelectionMouseEvent(type, point, forceSelection, detail));
+        }
+
+        function clearTouchLongPressTimer() {
+          if (!touchGesture || touchGesture.longPressTimer === null) return;
+          window.clearTimeout(touchGesture.longPressTimer);
+          touchGesture.longPressTimer = null;
+        }
+
+        function releaseTouchPointer(element, pointerId) {
+          if (element.hasPointerCapture?.(pointerId)) {
+            element.releasePointerCapture?.(pointerId);
+          }
+        }
+
+        function resetTouchGesture(element) {
+          if (!touchGesture) return;
+          clearTouchLongPressTimer();
+          for (const pointerId of touchPointers.keys()) {
+            releaseTouchPointer(element, pointerId);
+          }
+          touchPointers.clear();
+          touchGesture = null;
+        }
+
+        function terminalMetrics(term) {
+          const element = term && term.element;
+          if (!element || !term.rows || !term.cols) return null;
+          const screen = element.querySelector(".xterm-screen");
+          const rect = (screen || element).getBoundingClientRect();
+          const fallbackRect = element.getBoundingClientRect();
+          const width = rect.width || fallbackRect.width;
+          const height = rect.height || fallbackRect.height;
+          if (width <= 0 || height <= 0) return null;
+          return {
+            rect,
+            cellWidth: width / term.cols,
+            cellHeight: height / term.rows,
+            viewportY: (term.buffer && term.buffer.active && term.buffer.active.viewportY) || 0,
+          };
+        }
+
+        function touchCellCoords(term, point) {
+          const metrics = terminalMetrics(term);
+          if (!metrics) return null;
+          const x = Math.max(0, Math.min(term.cols, Math.floor((point.clientX - metrics.rect.left) / metrics.cellWidth)));
+          const viewportRow = Math.max(0, Math.min(term.rows - 1, Math.floor((point.clientY - metrics.rect.top) / metrics.cellHeight)));
+          const bufferLength = (term.buffer && term.buffer.active && term.buffer.active.length) || term.rows;
+          const y = Math.max(0, Math.min(bufferLength - 1, metrics.viewportY + viewportRow));
+          return { x, y };
+        }
+
+        function scrollTouchTerminal(term, deltaY, gesture = touchGesture) {
+          if (!gesture || typeof term.scrollLines !== "function") return;
+          const metrics = terminalMetrics(term);
+          if (!metrics) return;
+          gesture.scrollRemainderPx += -deltaY;
+          const exactLines = gesture.scrollRemainderPx / metrics.cellHeight;
+          const wholeLines = exactLines < 0 ? Math.ceil(exactLines) : Math.floor(exactLines);
+          if (wholeLines === 0) return;
+          term.scrollLines(wholeLines);
+          gesture.scrollRemainderPx -= wholeLines * metrics.cellHeight;
+          updateSelectionHandles(term);
+        }
+
+        function sendTerminalAppScroll(term, deltaY, point) {
+          const element = term && term.element;
+          if (!element) return;
+          const wheel = new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: point ? point.clientX : 0,
+            clientY: point ? point.clientY : 0,
+            deltaY: -deltaY,
+            deltaMode: 0,
+          });
+          element.dispatchEvent(wheel);
+        }
+
+        function routeOneFingerScroll(term, deltaY, point) {
+          if (isNormalScrollbackMode(term)) {
+            scrollTouchTerminal(term, deltaY);
+          } else {
+            sendTerminalAppScroll(term, deltaY, point);
+          }
+        }
+
+        function routeTwoFingerScroll(term, deltaY, point) {
+          if (isNormalScrollbackMode(term)) {
+            scrollTouchTerminal(term, deltaY);
+          } else {
+            sendTerminalAppScroll(term, deltaY, point);
+          }
+        }
+
+        function startTouchSelection(term, element, pointerId) {
+          if (!touchGesture || touchGesture.pointerId !== pointerId || touchGesture.mode !== "pending") return;
+          touchGesture.mode = "selecting";
+          touchGesture.forceSelection = shouldForceTouchSelection(term);
+          touchGesture.scrollRemainderPx = 0;
+          dispatchTouchSelectionMouse(element, "mousedown", touchGesture.startPoint, touchGesture.forceSelection);
+        }
+
+        function triggerTouchTapSelection(term, element, point, detail) {
+          const forceSelection = shouldForceTouchSelection(term);
+          dispatchTouchSelectionMouse(element, "mousedown", point, forceSelection, detail);
+          dispatchTouchSelectionMouse(document, "mouseup", point, forceSelection, detail);
+          updateTerminalControls();
+          updateSelectionHandles(term);
+        }
+
+        function handleTouchTap(term, element, point) {
+          term.focus?.();
+          const now = Date.now();
+          const isSameTapCluster =
+            now - lastTouchTap.time <= INTERNAL_TOUCH_MULTI_TAP_DELAY_MS &&
+            touchDistance(point, lastTouchTap) <= INTERNAL_TOUCH_TAP_SLOP_PX;
+          const count = isSameTapCluster ? lastTouchTap.count + 1 : 1;
+          lastTouchTap = { time: now, x: point.clientX, y: point.clientY, clientX: point.clientX, clientY: point.clientY, count };
+
+          if (count === 2) {
+            triggerTouchTapSelection(term, element, point, 2);
+            return;
+          }
+          if (count >= 3) {
+            triggerTouchTapSelection(term, element, point, 3);
+            lastTouchTap.count = 0;
+            return;
+          }
+
+          if (term.hasSelection && term.hasSelection()) {
+            term.clearSelection();
+            updateTerminalControls();
+            updateSelectionHandles(term);
+          }
+        }
+
+        function selectionRange(start, end, cols) {
+          const forward = start.y < end.y || (start.y === end.y && start.x <= end.x);
+          const first = forward ? start : end;
+          const last = forward ? end : start;
+          return {
+            start: first,
+            length: Math.max(0, (last.y - first.y) * cols + (last.x - first.x)),
+          };
+        }
+
+        function applySelectionRange(term, anchor, focus) {
+          const range = selectionRange(anchor, focus, term.cols);
+          if (range.length <= 0) {
+            term.clearSelection();
+          } else {
+            term.select(range.start.x, range.start.y, range.length);
+          }
+          updateTerminalControls();
+          updateSelectionHandles(term);
+        }
+
+        function updateSelectionHandles(term) {
+          if (!selectionHandles || !term || !term.getSelectionPosition || !term.hasSelection()) {
+            if (selectionHandles) {
+              selectionHandles.start.style.display = "none";
+              selectionHandles.end.style.display = "none";
+            }
+            return;
+          }
+          const selection = term.getSelectionPosition();
+          const metrics = terminalMetrics(term);
+          if (!selection || !metrics) return;
+          const hostRect = terminalHost.getBoundingClientRect();
+
+          const place = (handle, pos) => {
+            const viewportRow = pos.y - metrics.viewportY;
+            if (viewportRow < 0 || viewportRow >= term.rows) {
+              handle.style.display = "none";
+              return;
+            }
+            handle.style.left = `${metrics.rect.left - hostRect.left + pos.x * metrics.cellWidth}px`;
+            handle.style.top = `${metrics.rect.top - hostRect.top + (viewportRow + 1) * metrics.cellHeight}px`;
+            handle.style.display = "block";
+          };
+
+          place(selectionHandles.start, selection.start);
+          place(selectionHandles.end, selection.end);
+        }
+
+        function installSelectionHandles(term) {
+          if (selectionHandles) return;
+          const start = document.createElement("div");
+          const end = document.createElement("div");
+          start.className = "touch-selection-handle";
+          end.className = "touch-selection-handle";
+          start.dataset.handle = "start";
+          end.dataset.handle = "end";
+          terminalHost.append(start, end);
+          selectionHandles = { start, end };
+
+          const onHandlePointerDown = (event) => {
+            if (!isTouchPointer(event)) return;
+            const selection = term.getSelectionPosition && term.getSelectionPosition();
+            if (!selection) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            const role = event.currentTarget.dataset.handle;
+            selectionHandleDrag = {
+              pointerId: event.pointerId,
+              role,
+              anchor: role === "start" ? selection.end : selection.start,
+            };
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          };
+
+          const onHandlePointerMove = (event) => {
+            if (!selectionHandleDrag || event.pointerId !== selectionHandleDrag.pointerId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const coords = touchCellCoords(term, touchPointFromEvent(event));
+            if (!coords) return;
+            applySelectionRange(term, selectionHandleDrag.anchor, coords);
+          };
+
+          const onHandlePointerUp = (event) => {
+            if (!selectionHandleDrag || event.pointerId !== selectionHandleDrag.pointerId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const target = event.currentTarget;
+            if (target.hasPointerCapture?.(event.pointerId)) {
+              target.releasePointerCapture?.(event.pointerId);
+            }
+            selectionHandleDrag = null;
+            updateSelectionHandles(term);
+          };
+
+          for (const handle of [start, end]) {
+            handle.addEventListener("pointerdown", onHandlePointerDown, { passive: false });
+            handle.addEventListener("pointermove", onHandlePointerMove, { passive: false });
+            handle.addEventListener("pointerup", onHandlePointerUp, { passive: false });
+            handle.addEventListener("pointercancel", onHandlePointerUp, { passive: false });
+          }
+        }
+
+        function enterTwoFingerScroll(term) {
+          const center = touchCenterPoint();
+          if (!center) return;
+          clearTouchLongPressTimer();
+          touchGesture = {
+            pointerId: null,
+            mode: "twoFingerScrolling",
+            startPoint: center,
+            lastY: center.clientY,
+            forceSelection: false,
+            longPressTimer: null,
+            scrollRemainderPx: 0,
+          };
         }
 
         function installTouchSelectionBridge(term) {
@@ -1202,38 +1532,97 @@
           if (!element || element.dataset.touchSelectionBridge === "true") return;
           element.dataset.touchSelectionBridge = "true";
 
-          let activePointerId = null;
-          let forceSelection = false;
           const pointerOptions = { passive: false };
 
           element.addEventListener("pointerdown", (event) => {
-            if (!isTouchSelectionPointer(event) || activePointerId !== null || event.isPrimary === false) return;
-            activePointerId = event.pointerId;
-            forceSelection = shouldForceTouchSelection(term);
+            if (!isTouchPointer(event)) return;
+            const point = rememberTouchPointer(event);
             event.preventDefault();
             event.stopPropagation();
             element.setPointerCapture?.(event.pointerId);
-            dispatchTouchSelectionMouse(element, "mousedown", event, forceSelection);
+            if (touchPointers.size >= 2) {
+              enterTwoFingerScroll(term);
+              return;
+            }
+            if (touchGesture !== null) return;
+            touchGesture = {
+              pointerId: event.pointerId,
+              mode: "pending",
+              startPoint: point,
+              lastY: point.clientY,
+              forceSelection: false,
+              longPressTimer: null,
+              scrollRemainderPx: 0,
+            };
+            touchGesture.longPressTimer = window.setTimeout(
+              () => startTouchSelection(term, element, event.pointerId),
+              INTERNAL_TOUCH_LONG_PRESS_DELAY_MS
+            );
           }, pointerOptions);
 
           element.addEventListener("pointermove", (event) => {
-            if (event.pointerId !== activePointerId) return;
+            if (!isTouchPointer(event) || !touchPointers.has(event.pointerId)) return;
+            const point = rememberTouchPointer(event);
             event.preventDefault();
             event.stopPropagation();
-            dispatchTouchSelectionMouse(document, "mousemove", event, forceSelection);
+
+            if (touchGesture && touchGesture.mode === "twoFingerScrolling") {
+              const center = touchCenterPoint();
+              if (!center) return;
+              const deltaY = center.clientY - touchGesture.lastY;
+              touchGesture.lastY = center.clientY;
+              routeTwoFingerScroll(term, deltaY, center);
+              return;
+            }
+
+            if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
+
+            if (touchGesture.mode === "pending") {
+              const movedX = point.clientX - touchGesture.startPoint.clientX;
+              const movedY = point.clientY - touchGesture.startPoint.clientY;
+              if (Math.hypot(movedX, movedY) <= INTERNAL_TOUCH_SCROLL_SLOP_PX) return;
+              clearTouchLongPressTimer();
+              touchGesture.mode = "scrolling";
+            }
+
+            if (touchGesture.mode === "scrolling") {
+              const deltaY = point.clientY - touchGesture.lastY;
+              touchGesture.lastY = point.clientY;
+              routeOneFingerScroll(term, deltaY, point);
+              return;
+            }
+
+            dispatchTouchSelectionMouse(document, "mousemove", point, touchGesture.forceSelection);
           }, pointerOptions);
 
           const finishTouchSelection = (event) => {
-            if (event.pointerId !== activePointerId) return;
+            if (!isTouchPointer(event) || !touchPointers.has(event.pointerId)) return;
+            const point = touchPointFromEvent(event);
             event.preventDefault();
             event.stopPropagation();
-            dispatchTouchSelectionMouse(document, "mouseup", event, forceSelection);
-            if (element.hasPointerCapture?.(event.pointerId)) {
-              element.releasePointerCapture?.(event.pointerId);
+            touchPointers.delete(event.pointerId);
+            releaseTouchPointer(element, event.pointerId);
+            if (touchGesture && touchGesture.mode === "twoFingerScrolling") {
+              if (touchPointers.size >= 2) {
+                const center = touchCenterPoint();
+                if (center) touchGesture.lastY = center.clientY;
+                return;
+              }
+              resetTouchGesture(element);
+              updateTerminalControls();
+              return;
             }
-            activePointerId = null;
-            forceSelection = false;
+            if (!touchGesture || event.pointerId !== touchGesture.pointerId) return;
+            clearTouchLongPressTimer();
+            if (touchGesture.mode === "pending") {
+              handleTouchTap(term, element, point);
+            }
+            if (touchGesture.mode === "selecting") {
+              dispatchTouchSelectionMouse(document, "mouseup", point, touchGesture.forceSelection);
+            }
+            resetTouchGesture(element);
             updateTerminalControls();
+            updateSelectionHandles(term);
           };
 
           element.addEventListener("pointerup", finishTouchSelection, pointerOptions);
@@ -1251,10 +1640,15 @@
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           terminal.open(terminalHost);
+          installSelectionHandles(terminal);
           installTouchSelectionBridge(terminal);
           terminal.onData((data) => enqueueInput(data));
           terminal.onResize(({ cols, rows }) => queueResize(cols, rows));
-          terminal.onSelectionChange(() => updateTerminalControls());
+          terminal.onSelectionChange(() => {
+            updateTerminalControls();
+            updateSelectionHandles(terminal);
+          });
+          terminal.onScroll?.(() => updateSelectionHandles(terminal));
           if ("ResizeObserver" in window) {
             resizeObserver = new ResizeObserver(() => fitTerminal());
             resizeObserver.observe(terminalHost);
@@ -2092,6 +2486,7 @@
           if (sendResize && terminal.cols > 0 && terminal.rows > 0) {
             queueResize(terminal.cols, terminal.rows);
           }
+          updateSelectionHandles(terminal);
           scheduleTerminalRefresh();
         }
 
@@ -2109,6 +2504,7 @@
             terminalRefreshFrame = null;
             if (terminal && terminal.rows > 0) {
               terminal.refresh(0, terminal.rows - 1);
+              updateSelectionHandles(terminal);
             }
           });
         }
