@@ -122,6 +122,11 @@ mod tests {
         assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
         assert!(html.contains("function scheduleTerminalRefresh()"));
         assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("const OUTPUT_RECONNECT_INITIAL_DELAY_MS"));
+        assert!(html.contains("const OUTPUT_RECONNECT_MAX_DELAY_MS"));
+        assert!(html.contains("function scheduleOutputReconnect(terminalId, outputLeaseId)"));
+        assert!(html.contains("function handleHeartbeatError(err)"));
+        assert!(html.contains("let heartbeatAbortController = null;"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("const localAppMode ="));
@@ -213,6 +218,56 @@ mod tests {
         assert!(terminal_branch < workspace_branch);
         assert!(open_notification.contains("await focusTerminalOnHost(notification.terminalId);"));
         assert!(open_notification.contains("await activateWorkspace(notification.workspaceId);"));
+    }
+
+    #[test]
+    fn remote_page_reconnects_output_socket_without_releasing_lease() {
+        let html = remote_page_html();
+        let start = html.find("function scheduleOutputReconnect").unwrap();
+        let end = start + html[start..].find("async function connect").unwrap();
+        let output_stream = &html[start..end];
+
+        assert!(output_stream.contains("const outputLeaseId = leaseId;"));
+        assert!(output_stream.contains("stopSocket(!reconnecting);"));
+        assert!(output_stream.contains("scheduleOutputReconnect(terminalId, outputLeaseId);"));
+        assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
+        assert!(output_stream.contains("let outputTerminalMissing = false;"));
+        assert!(output_stream.contains("payload === \"terminal session not found\""));
+        assert!(output_stream.contains("loadNavigation(null).catch"));
+        assert!(
+            !output_stream.contains("loseRemoteControl("),
+            "output WebSocket close is recoverable while heartbeat keeps the lease alive"
+        );
+    }
+
+    #[test]
+    fn remote_page_heartbeat_tolerates_transient_failures_until_timeout() {
+        let html = remote_page_html();
+        let start = html.find("function handleHeartbeatError").unwrap();
+        let end = start + html[start..].find("function startHeartbeat").unwrap();
+        let heartbeat_error = &html[start..end];
+        let heartbeat_start = html.find("async function heartbeat").unwrap();
+        let heartbeat_end = heartbeat_start
+            + html[heartbeat_start..]
+                .find("function isFatalRemoteControlError")
+                .unwrap();
+        let heartbeat_request = &html[heartbeat_start..heartbeat_end];
+        let start_heartbeat = &html[html.find("function startHeartbeat").unwrap()..];
+
+        assert!(html.contains("error.status = response.status;"));
+        assert!(heartbeat_error.contains("isFatalRemoteControlError(err) || heartbeatTimedOut()"));
+        assert!(heartbeat_error.contains("loseRemoteControl(`Control returned to the host."));
+        assert!(heartbeat_error.contains("Retrying before lease timeout"));
+        assert!(heartbeat_request.contains("signal: controller.signal"));
+        assert!(
+            heartbeat_request.contains("setTimeout(() => controller.abort(), heartbeatTimeoutMs)")
+        );
+        assert!(start_heartbeat.contains("if (heartbeatTimedOut())"));
+        assert!(start_heartbeat.contains(
+            "loseRemoteControl(\"Control returned to the host. Heartbeat timed out.\");"
+        ));
+        assert!(start_heartbeat.contains("lastHeartbeatOkAt = Date.now();"));
+        assert!(start_heartbeat.contains("handleHeartbeatError(err);"));
     }
 
     #[test]

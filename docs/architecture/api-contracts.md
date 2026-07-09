@@ -668,6 +668,8 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 
 `write`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다. 이는 인증된 다른 remote peer가 active controller를 우회해 입력을 주입하지 못하게 하는 서버 측 게이트다. Cloud tunnel에서 이 출력 WebSocket을 M5 stream으로 변환할 때 desktop은 같은 `srv-*` stream id로 `stream.open{kind:"websocket.accept"}` 를 먼저 보내고, 그 다음 ring buffer snapshot과 delta를 `stream.data` frame으로 보낸다.
 
+Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취급한다. Heartbeat가 `401`/`403`/`409`처럼 권한·lease 상실을 명시하면 즉시 local control로 돌려주지만, 일시적 fetch 실패나 pending 상태로 멈춘 heartbeat request는 `heartbeatTimeoutSeconds`가 지날 때까지 재시도하고 timeout 시 abort/lease 상실 처리한다. Output WebSocket close/error는 곧바로 lease를 반납하지 않고, heartbeat가 active lease를 유지하는 동안 같은 terminal output stream을 지수 backoff로 다시 연다. 재연결 시 서버가 보내는 ring buffer tail을 중복 append하지 않도록 remote xterm surface를 reset한 뒤 다시 붙는다.
+
 ---
 
 ## 14. Rust 코드 설계 원칙
