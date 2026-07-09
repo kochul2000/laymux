@@ -961,7 +961,11 @@
         const tokenKey = "laymux.remote.token";
         let leaseId = null;
         let heartbeatTimer = null;
+        let heartbeatTimeoutMs = 15000;
+        let lastHeartbeatOkAt = 0;
         let socket = null;
+        let outputReconnectTimer = null;
+        let outputReconnectAttempt = 0;
         let activeTerminalId = null;
         let terminalInfoById = new Map();
         let navigationState = null;
@@ -988,6 +992,8 @@
         const INTERNAL_TOUCH_SCROLL_SLOP_PX = 8;
         const INTERNAL_TOUCH_TAP_SLOP_PX = 18;
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
+        const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
+        const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
@@ -1057,7 +1063,9 @@
           });
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            throw new Error(body.error || `${response.status} ${response.statusText}`);
+            const error = new Error(body.error || `${response.status} ${response.statusText}`);
+            error.status = response.status;
+            throw error;
           }
           return response.json();
         }
@@ -1661,7 +1669,16 @@
           return terminal;
         }
 
-        function stopSocket() {
+        function stopOutputReconnect(resetAttempt = true) {
+          if (outputReconnectTimer) {
+            clearTimeout(outputReconnectTimer);
+            outputReconnectTimer = null;
+          }
+          if (resetAttempt) outputReconnectAttempt = 0;
+        }
+
+        function stopSocket(resetReconnect = true) {
+          stopOutputReconnect(resetReconnect);
           if (socket) {
             const closingSocket = socket;
             socket = null;
@@ -1699,14 +1716,33 @@
             method: "POST",
             body: JSON.stringify({ leaseId }),
           });
+          lastHeartbeatOkAt = Date.now();
+        }
+
+        function isFatalRemoteControlError(err) {
+          return err && (err.status === 401 || err.status === 403 || err.status === 409);
+        }
+
+        function heartbeatTimedOut() {
+          return Date.now() - lastHeartbeatOkAt >= heartbeatTimeoutMs;
+        }
+
+        function handleHeartbeatError(err) {
+          if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
+            loseRemoteControl(`Control returned to the host. ${err.message}`);
+            return;
+          }
+          setStatus(`Connection interrupted. Retrying before lease timeout. ${err.message}`, true);
         }
 
         function startHeartbeat(timeoutSeconds) {
           stopHeartbeat();
+          heartbeatTimeoutMs = Math.max(5000, Math.floor(timeoutSeconds * 1000));
+          lastHeartbeatOkAt = Date.now();
           const intervalMs = Math.max(1000, Math.floor(timeoutSeconds * 333));
           heartbeatTimer = setInterval(() => {
             heartbeat().catch((err) => {
-              loseRemoteControl(`Control returned to the host. ${err.message}`);
+              handleHeartbeatError(err);
             });
           }, intervalMs);
         }
@@ -2372,22 +2408,54 @@
           return `${protocol}//${location.host}`;
         }
 
-        function openOutput(terminalId) {
+        function outputReconnectDelayMs(attempt) {
+          return Math.min(
+            OUTPUT_RECONNECT_MAX_DELAY_MS,
+            OUTPUT_RECONNECT_INITIAL_DELAY_MS * Math.pow(2, attempt)
+          );
+        }
+
+        function scheduleOutputReconnect(terminalId, outputLeaseId) {
+          if (!outputLeaseId || leaseId !== outputLeaseId || activeTerminalId !== terminalId) return;
+          if (outputReconnectTimer) return;
+          const delayMs = outputReconnectDelayMs(outputReconnectAttempt);
+          outputReconnectAttempt += 1;
+          const delayLabel = delayMs < 1000 ? "shortly" : `in ${Math.ceil(delayMs / 1000)}s`;
+          setStatus(`Output stream disconnected. Reconnecting ${delayLabel}...`, true);
+          outputReconnectTimer = setTimeout(() => {
+            outputReconnectTimer = null;
+            if (leaseId !== outputLeaseId || activeTerminalId !== terminalId) return;
+            setStatus("Reconnecting output stream...");
+            openOutput(terminalId, { reconnect: true });
+          }, delayMs);
+        }
+
+        function openOutput(terminalId, options = {}) {
           const terminalInfo = terminalInfoById.get(terminalId);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
-          stopSocket();
-          stopInputFlush();
-          stopResizeFlush();
+          const reconnecting = options.reconnect === true;
+          const outputLeaseId = leaseId;
+          if (!outputLeaseId) {
+            setStatus("Remote control is not active.", true);
+            return;
+          }
+          stopSocket(!reconnecting);
+          if (!reconnecting) {
+            stopInputFlush();
+            stopResizeFlush();
+          }
           applyTerminalAppearance(terminalInfo && terminalInfo.appearance);
           term.reset();
           updateTerminalControls();
           lastResizeKey = "";
-          const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(leaseId)}&token=${encodeURIComponent(token())}`;
+          const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}`;
           const outputSocket = new WebSocket(url);
+          let outputTerminalMissing = false;
           socket = outputSocket;
           outputSocket.binaryType = "arraybuffer";
           outputSocket.onopen = () => {
-            if (socket === outputSocket) {
+            if (socket === outputSocket && leaseId === outputLeaseId && activeTerminalId === terminalId) {
+              outputReconnectAttempt = 0;
               setStatus(`Connected to ${terminalId}`);
               scheduleTerminalFit(true);
               term.focus();
@@ -2400,17 +2468,27 @@
               payload = new Uint8Array(event.data);
             } else {
               payload = String(event.data);
+              if (payload === "terminal session not found") {
+                outputTerminalMissing = true;
+                setStatus("Terminal session ended. Refreshing navigation...", true);
+                outputSocket.close();
+                return;
+              }
             }
             term.write(payload, scheduleTerminalRefresh);
           };
           outputSocket.onclose = () => {
             if (socket === outputSocket) {
               socket = null;
-              if (leaseId) loseRemoteControl("Control returned to the host. Connect again to resume.");
+              if (outputTerminalMissing) {
+                loadNavigation(null).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
+                return;
+              }
+              scheduleOutputReconnect(terminalId, outputLeaseId);
             }
           };
           outputSocket.onerror = () => {
-            if (socket === outputSocket) setStatus("Output stream error.", true);
+            if (socket === outputSocket) setStatus("Output stream error. Waiting to reconnect.", true);
           };
         }
 
