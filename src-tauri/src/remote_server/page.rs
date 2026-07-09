@@ -126,6 +126,7 @@ mod tests {
         assert!(html.contains("const OUTPUT_RECONNECT_MAX_DELAY_MS"));
         assert!(html.contains("function scheduleOutputReconnect(terminalId, outputLeaseId)"));
         assert!(html.contains("function handleHeartbeatError(err)"));
+        assert!(html.contains("let heartbeatAbortController = null;"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("const localAppMode ="));
@@ -245,12 +246,26 @@ mod tests {
         let start = html.find("function handleHeartbeatError").unwrap();
         let end = start + html[start..].find("function startHeartbeat").unwrap();
         let heartbeat_error = &html[start..end];
+        let heartbeat_start = html.find("async function heartbeat").unwrap();
+        let heartbeat_end = heartbeat_start
+            + html[heartbeat_start..]
+                .find("function isFatalRemoteControlError")
+                .unwrap();
+        let heartbeat_request = &html[heartbeat_start..heartbeat_end];
         let start_heartbeat = &html[html.find("function startHeartbeat").unwrap()..];
 
         assert!(html.contains("error.status = response.status;"));
         assert!(heartbeat_error.contains("isFatalRemoteControlError(err) || heartbeatTimedOut()"));
         assert!(heartbeat_error.contains("loseRemoteControl(`Control returned to the host."));
         assert!(heartbeat_error.contains("Retrying before lease timeout"));
+        assert!(heartbeat_request.contains("signal: controller.signal"));
+        assert!(
+            heartbeat_request.contains("setTimeout(() => controller.abort(), heartbeatTimeoutMs)")
+        );
+        assert!(start_heartbeat.contains("if (heartbeatTimedOut())"));
+        assert!(start_heartbeat.contains(
+            "loseRemoteControl(\"Control returned to the host. Heartbeat timed out.\");"
+        ));
         assert!(start_heartbeat.contains("lastHeartbeatOkAt = Date.now();"));
         assert!(start_heartbeat.contains("handleHeartbeatError(err);"));
     }

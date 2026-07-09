@@ -961,6 +961,8 @@
         const tokenKey = "laymux.remote.token";
         let leaseId = null;
         let heartbeatTimer = null;
+        let heartbeatAbortController = null;
+        let heartbeatInFlight = false;
         let heartbeatTimeoutMs = 15000;
         let lastHeartbeatOkAt = 0;
         let socket = null;
@@ -1693,6 +1695,11 @@
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
           }
+          if (heartbeatAbortController) {
+            heartbeatAbortController.abort();
+            heartbeatAbortController = null;
+          }
+          heartbeatInFlight = false;
         }
 
         function stopInputFlush() {
@@ -1711,12 +1718,25 @@
         }
 
         async function heartbeat() {
-          if (!leaseId) return;
-          await remoteFetch("/remote/v1/session/heartbeat", {
-            method: "POST",
-            body: JSON.stringify({ leaseId }),
-          });
-          lastHeartbeatOkAt = Date.now();
+          if (!leaseId || heartbeatInFlight) return;
+          heartbeatInFlight = true;
+          const controller = typeof AbortController === "function" ? new AbortController() : null;
+          heartbeatAbortController = controller;
+          const abortTimer = controller
+            ? setTimeout(() => controller.abort(), heartbeatTimeoutMs)
+            : null;
+          try {
+            await remoteFetch("/remote/v1/session/heartbeat", {
+              method: "POST",
+              body: JSON.stringify({ leaseId }),
+              ...(controller ? { signal: controller.signal } : {}),
+            });
+            lastHeartbeatOkAt = Date.now();
+          } finally {
+            if (abortTimer) clearTimeout(abortTimer);
+            if (heartbeatAbortController === controller) heartbeatAbortController = null;
+            heartbeatInFlight = false;
+          }
         }
 
         function isFatalRemoteControlError(err) {
@@ -1728,6 +1748,7 @@
         }
 
         function handleHeartbeatError(err) {
+          if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
             loseRemoteControl(`Control returned to the host. ${err.message}`);
             return;
@@ -1741,6 +1762,10 @@
           lastHeartbeatOkAt = Date.now();
           const intervalMs = Math.max(1000, Math.floor(timeoutSeconds * 333));
           heartbeatTimer = setInterval(() => {
+            if (heartbeatTimedOut()) {
+              loseRemoteControl("Control returned to the host. Heartbeat timed out.");
+              return;
+            }
             heartbeat().catch((err) => {
               handleHeartbeatError(err);
             });
