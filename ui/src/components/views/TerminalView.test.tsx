@@ -16,7 +16,11 @@ import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/a
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
-const mockOnResize = vi.fn();
+let capturedResizeHandler: ((size: { cols: number; rows: number }) => void) | null = null;
+const mockOnResize = vi.fn((handler: (size: { cols: number; rows: number }) => void) => {
+  capturedResizeHandler = handler;
+  return { dispose: vi.fn() };
+});
 const mockOnTitleChange = vi.fn();
 const mockOnSelectionChange = vi.fn();
 const mockOnKey = vi.fn();
@@ -39,6 +43,12 @@ let capturedScrollHandler: (() => void) | null = null;
 // scrolled-up one.
 const mockScrollToBottom = vi.fn(() => {
   mockBufferActive.viewportY = mockBufferActive.baseY;
+});
+const mockScrollLines = vi.fn((lines: number) => {
+  mockBufferActive.viewportY = Math.max(
+    0,
+    Math.min(mockBufferActive.baseY, mockBufferActive.viewportY + lines),
+  );
 });
 const mockBufferActive: { cursorX: number; cursorY: number; baseY: number; viewportY: number } = {
   cursorX: 0,
@@ -102,6 +112,7 @@ vi.mock("@xterm/xterm", () => ({
     onRender = mockOnRender;
     onScroll = mockOnScroll;
     scrollToBottom = mockScrollToBottom;
+    scrollLines = mockScrollLines;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     focus = mockFocus;
     blur = mockBlur;
@@ -115,7 +126,7 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
     element = document.createElement("div");
-    buffer = { active: mockBufferActive };
+    buffer = { active: mockBufferActive, normal: mockBufferActive };
     modes = mockModes;
     parser = {
       registerOscHandler: mockRegisterOscHandler.mockImplementation(
@@ -192,11 +203,15 @@ const mockRegisterTerminalSerializer = vi.fn();
 const mockUnregisterTerminalSerializer = vi.fn();
 const mockRegisterTerminalInspector = vi.fn();
 const mockUnregisterTerminalInspector = vi.fn();
+const mockRegisterTerminalScroller = vi.fn();
+const mockUnregisterTerminalScroller = vi.fn();
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
   registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
   unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
+  registerTerminalScroller: (...args: unknown[]) => mockRegisterTerminalScroller(...args),
+  unregisterTerminalScroller: (...args: unknown[]) => mockUnregisterTerminalScroller(...args),
 }));
 
 // Mock tauri API
@@ -267,6 +282,7 @@ describe("TerminalView", () => {
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
     capturedRemoteControlChanged = null;
+    capturedResizeHandler = null;
     capturedScrollHandler = null;
     mockBufferActive.cursorX = 0;
     mockBufferActive.cursorY = 0;
@@ -3405,6 +3421,140 @@ describe("TerminalView", () => {
       });
     } finally {
       globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("waits for queued PTY writes and an output quiet window before resize reflow", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-write-queue" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+      });
+
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const finishWrites: Array<() => void> = [];
+      const holdWrite = function (_: string | Uint8Array, callback?: () => void) {
+        if (callback) finishWrites.push(callback);
+      };
+      mockWrite.mockImplementationOnce(holdWrite).mockImplementationOnce(holdWrite);
+
+      mockFit.mockClear();
+      act(() => {
+        onOutput?.(new TextEncoder().encode("streaming output one"));
+        onOutput?.(new TextEncoder().encode("streaming output two"));
+      });
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 760, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => {
+        // A new ConPTY chunk can arrive after the queue briefly drained. Its
+        // cursor-addressing sequences still target the old width, so the fit
+        // must also wait for a short output-quiet window.
+        onOutput?.(new TextEncoder().encode("latest streaming output"));
+        finishWrites[0]?.();
+      });
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => {
+        finishWrites[1]?.();
+      });
+      expect(mockFit).not.toHaveBeenCalled();
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("filters the ConPTY screen repaint after widening normal-buffer scrollback", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+
+    try {
+      render(<TerminalView instanceId="t-conpty-widen" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(capturedResizeHandler).not.toBeNull();
+      });
+
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      mockBufferActive.baseY = 40;
+      mockWrite.mockClear();
+      mockResizeTerminal.mockClear();
+
+      act(() => {
+        capturedResizeHandler?.({ cols: 100, rows: 24 });
+      });
+      await vi.waitFor(() => {
+        expect(mockResizeTerminal).toHaveBeenCalledWith("t-conpty-widen", 100, 24);
+      });
+
+      act(() => {
+        onOutput?.(
+          new TextEncoder().encode("\x1b[?25l\x1b[Hduplicated historical rows\x1b[19;19H\x1b[?25h"),
+        );
+      });
+      expect(mockWrite).not.toHaveBeenCalled();
+
+      act(() => {
+        onOutput?.(new TextEncoder().encode("real output after repaint"));
+      });
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(
+        "real output after repaint",
+      );
+    } finally {
+      userAgent.mockRestore();
     }
   });
 

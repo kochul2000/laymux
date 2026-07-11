@@ -95,10 +95,13 @@ import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
   registerTerminalInspector,
+  registerTerminalScroller,
   unregisterTerminalInspector,
+  unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
+import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -112,6 +115,12 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
  * interleaving. Kept short so a settled resize still feels immediate.
  */
 const RESIZE_FIT_DEBOUNCE_MS = 80;
+
+/** Silence after the last PTY chunk before xterm may reflow its active buffer. */
+const RESIZE_OUTPUT_QUIET_MS = 120;
+
+/** ConPTY emits its resize repaint within this window after SIGWINCH. */
+const CONPTY_RESIZE_REPAINT_WINDOW_MS = 500;
 
 const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
 
@@ -623,10 +632,9 @@ export function TerminalView({
       overviewRuler: { width: overviewRulerWidth },
       scrollback: 10000,
       // ConPTY backend with buildNumber >= 21376 enables xterm's own buffer
-      // reflow so scrollback re-wraps correctly on a width change. The #285
-      // scrollback corruption is NOT caused by this value (verified: 21375
-      // disables reflow and truncates instead) — its real cause is resize
-      // events racing ConPTY repaints, fixed by the debounced fit below.
+      // reflow so scrollback re-wraps correctly on a width change. ConPTY also
+      // repaints its old screen after a resize; the guarded output path below
+      // removes that one frame before it can overwrite reflowed scrollback.
       windowsPty: { backend: "conpty", buildNumber: 21376 },
       // OSC 8 hyperlinks (e.g. Codex wraps URLs in escape sequences) are
       // activated by xterm's built-in handler. Without a custom linkHandler
@@ -1696,10 +1704,28 @@ export function TerminalView({
       }
     });
 
+    const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
+      CONPTY_RESIZE_REPAINT_WINDOW_MS,
+    );
+    let previousResizeCols = terminal.cols;
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
+      const widened = cols > previousResizeCols;
+      previousResizeCols = cols;
       if (!localTerminalControlAllowed()) return;
-      resizeTerminal(instanceId, cols, rows).catch(() => {});
+
+      const normalBuffer = terminal.buffer.normal;
+      if (
+        widened &&
+        navigator.userAgent.includes("Windows") &&
+        terminal.buffer.active === normalBuffer &&
+        normalBuffer.baseY > 0
+      ) {
+        conptyResizeRepaintFilter.arm();
+      }
+      resizeTerminal(instanceId, cols, rows).catch(() => {
+        conptyResizeRepaintFilter.disarm();
+      });
     });
 
     // Track terminal title changes (OSC 0/2) for interactive app detection.
@@ -1754,6 +1780,40 @@ export function TerminalView({
 
     // Listen for terminal output from backend PTY
     let cancelled = false;
+    let pendingTerminalWrites = 0;
+    let lastTerminalOutputAt = 0;
+    let deferredResizeFit: (() => void) | undefined;
+    let deferredResizeQuietTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearDeferredResizeQuietTimer = () => {
+      if (deferredResizeQuietTimer !== undefined) {
+        clearTimeout(deferredResizeQuietTimer);
+        deferredResizeQuietTimer = undefined;
+      }
+    };
+    const flushDeferredResizeFit = () => {
+      if (cancelled || pendingTerminalWrites > 0 || !deferredResizeFit) return;
+      const quietFor = Date.now() - lastTerminalOutputAt;
+      if (lastTerminalOutputAt > 0 && quietFor < RESIZE_OUTPUT_QUIET_MS) {
+        clearDeferredResizeQuietTimer();
+        deferredResizeQuietTimer = setTimeout(() => {
+          deferredResizeQuietTimer = undefined;
+          flushDeferredResizeFit();
+        }, RESIZE_OUTPUT_QUIET_MS - quietFor);
+        return;
+      }
+      clearDeferredResizeQuietTimer();
+      const fit = deferredResizeFit;
+      deferredResizeFit = undefined;
+      fit();
+    };
+    const applyFitAfterPendingWrites = (fit: () => void) => {
+      // xterm's write parser and buffer reflow both mutate the active buffer.
+      // ConPTY also emits cursor-addressed repaint chunks for the old width.
+      // Keep only the latest fit and run it after the queue drains and output
+      // has stayed quiet long enough for those old-width chunks to finish.
+      deferredResizeFit = fit;
+      flushDeferredResizeFit();
+    };
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
     let recentOutputTail = "";
@@ -1790,10 +1850,17 @@ export function TerminalView({
     // CR is sent as a standalone write after the text has landed in the input
     // box so long custom messages still submit reliably.
     const SESSION_LIMIT_SUBMIT_CR_DELAY_MS = 150;
-    onTerminalOutput(instanceId, (data) => {
+    onTerminalOutput(instanceId, (rawData) => {
       if (cancelled) return;
+      const data = conptyResizeRepaintFilter.filter(rawData);
+      if (data.length === 0) return;
+      lastTerminalOutputAt = Date.now();
+      clearDeferredResizeQuietTimer();
+      pendingTerminalWrites += 1;
       terminal.write(data, () => {
+        pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
         startSyncOutputMonitor();
+        flushDeferredResizeFit();
       });
       const text = streamDecoder.decode(data, { stream: true });
       const previousOutputTail = recentOutputTail;
@@ -2164,6 +2231,10 @@ export function TerminalView({
         clearTimeout(resizeFitTimer);
         resizeFitTimer = undefined;
       }
+      if (isNowHidden) {
+        deferredResizeFit = undefined;
+        clearDeferredResizeQuietTimer();
+      }
       if (width > 0 && height > 0 && !sessionCreated) {
         sessionCreated = true;
         prevW = Math.round(width);
@@ -2229,6 +2300,24 @@ export function TerminalView({
           registerTerminalInspector(paneId, dumpBuffer);
         }
         registerTerminalInspector(instanceId, dumpBuffer);
+
+        const scrollViewport = (lines: number) => {
+          terminal.scrollLines(lines);
+          const buffer = terminal.buffer.active as { baseY?: number; viewportY?: number };
+          const baseY = buffer.baseY ?? 0;
+          const viewportY = buffer.viewportY ?? baseY;
+          return {
+            cols: terminal.cols,
+            rows: terminal.rows,
+            baseY,
+            viewportY,
+            isAtBottom: viewportY === baseY,
+          };
+        };
+        if (paneId) {
+          registerTerminalScroller(paneId, scrollViewport);
+        }
+        registerTerminalScroller(instanceId, scrollViewport);
 
         fitAddon.fit();
         openedRef.current = true;
@@ -2352,7 +2441,7 @@ export function TerminalView({
             clearTimeout(resizeFitTimer);
             resizeFitTimer = undefined;
           }
-          applyFit();
+          applyFitAfterPendingWrites(applyFit);
         } else {
           // Plain container-size change (e.g. dragging a pane divider): debounce
           // so xterm reflow + the PTY resize happen ONCE after the drag settles,
@@ -2364,7 +2453,7 @@ export function TerminalView({
             // this was scheduled (race with the 0×0 cancel above). Skip — the
             // hide→show recovery path re-fits on return (issue #285 P2).
             if (cancelled || isContainerHiddenRef.current) return;
-            applyFit();
+            applyFitAfterPendingWrites(applyFit);
           }, RESIZE_FIT_DEBOUNCE_MS);
         }
       }
@@ -2377,6 +2466,9 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      conptyResizeRepaintFilter.disarm();
+      deferredResizeFit = undefined;
+      clearDeferredResizeQuietTimer();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
@@ -2418,9 +2510,11 @@ export function TerminalView({
       if (paneId) {
         unregisterTerminalSerializer(paneId);
         unregisterTerminalInspector(paneId);
+        unregisterTerminalScroller(paneId);
       }
       unregisterTerminalSerializer(instanceId);
       unregisterTerminalInspector(instanceId);
+      unregisterTerminalScroller(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

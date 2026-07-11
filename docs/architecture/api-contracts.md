@@ -356,7 +356,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 33개 + dev 전용 17개)
+#### Tool 목록 (release 33개 + dev 전용 19개)
 
 **터미널 (8)**:
 
@@ -418,7 +418,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
-**Dev 전용 (17)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
+**Dev 전용 (19)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
 
 | Tool | bridge method | 설명 |
 |------|---------------|------|
@@ -439,6 +439,8 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `simulate_hover` | `grid.simulateHover` | hover UI 검증용 pane hover 상태 시뮬레이션 |
 | `set_edit_mode` | `grid.setEditMode` | grid edit mode 설정 |
 | `set_pane_view` | `panes.setView` | pane view config 직접 변경 |
+| `scroll_terminal` | `terminals.scroll` | live xterm viewport 상대 스크롤. PTY 입력 없이 `cols`/`rows`/`baseY`/`viewportY`/`isAtBottom` 반환 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
+| `dump_terminal_buffer` | `terminals.dumpBuffer` | live xterm의 reflow 완료 line model(`text`, `isWrapped`) 조회. WebGL 화면과 실제 버퍼 손상을 분리 진단 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
 
 #### MCP Resources — 구독형 read-only 상태 (issue #202)
 
