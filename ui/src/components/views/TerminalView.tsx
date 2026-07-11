@@ -1718,20 +1718,12 @@ export function TerminalView({
     const isWindowsHost = navigator.userAgent.includes("Windows");
     let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
-    let conptyRepaintArmSequence = 0;
-    let latestConptyRepaintArm = 0;
     let normalScrollbackBeforeFit: boolean | undefined;
     const clearConptyRepaintExpiryTimer = () => {
       if (conptyRepaintExpiryTimer !== undefined) {
         clearTimeout(conptyRepaintExpiryTimer);
         conptyRepaintExpiryTimer = undefined;
       }
-    };
-    const flushConptyRepaintProbe = () => {
-      clearConptyRepaintExpiryTimer();
-      const pending = conptyResizeRepaintFilter.flush();
-      if (pending.length === 0) return;
-      writeTerminalDisplayData?.(pending);
     };
     const scheduleConptyRepaintExpiry = () => {
       clearConptyRepaintExpiryTimer();
@@ -1747,7 +1739,6 @@ export function TerminalView({
       );
     };
     const armConptyRepaintFilter = () => {
-      if (!conptyResizeRepaintFilter.isDropping) flushConptyRepaintProbe();
       conptyResizeRepaintFilter.arm();
       scheduleConptyRepaintExpiry();
     };
@@ -1760,25 +1751,21 @@ export function TerminalView({
 
       const normalBuffer = terminal.buffer.normal;
       const hadNormalScrollback = normalScrollbackBeforeFit ?? normalBuffer.baseY > 0;
-      let repaintArmRequest: number | undefined;
+      let repaintArmed = false;
       if (
         widened &&
         isWindowsHost &&
         terminal.buffer.active === normalBuffer &&
         hadNormalScrollback
       ) {
-        repaintArmRequest = ++conptyRepaintArmSequence;
-        latestConptyRepaintArm = repaintArmRequest;
+        repaintArmed = true;
         armConptyRepaintFilter();
       }
       resizeTerminal(instanceId, cols, rows).catch(() => {
-        if (repaintArmRequest === undefined || repaintArmRequest !== latestConptyRepaintArm) return;
-        if (conptyResizeRepaintFilter.isDropping) {
-          conptyResizeRepaintFilter.cancelPendingRearm();
-          scheduleConptyRepaintExpiry();
-        } else {
-          flushConptyRepaintProbe();
-        }
+        if (!repaintArmed) return;
+        const pending = conptyResizeRepaintFilter.cancelArm();
+        if (pending.length > 0) writeTerminalDisplayData?.(pending);
+        scheduleConptyRepaintExpiry();
       });
     });
 
@@ -1920,11 +1907,17 @@ export function TerminalView({
     guardedTerminalFitRef.current = requestGuardedTerminalFit;
     const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
       pendingTerminalWrites += 1;
-      terminal.write(data, () => {
+      try {
+        terminal.write(data, () => {
+          pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
+          onParsed?.();
+          flushDeferredTerminalFit();
+        });
+      } catch (error) {
         pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-        onParsed?.();
+        console.warn("[TerminalView] xterm write failed:", error);
         flushDeferredTerminalFit();
-      });
+      }
     };
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
@@ -2346,6 +2339,10 @@ export function TerminalView({
         resizeFitTimer = undefined;
       }
       if (isNowHidden) {
+        if (deferredTerminalFit?.rebuildAtlas) reflowDirtyRef.current = true;
+        if (deferredTerminalFit?.syncBackendResize) {
+          remoteReturnResizeDirtyRef.current = true;
+        }
         deferredTerminalFit = undefined;
         deferredResizeRequestedAt = 0;
         clearDeferredResizeQuietTimer();

@@ -3049,6 +3049,92 @@ describe("TerminalView", () => {
     });
   });
 
+  it("preserves remote-return backend sync when a deferred fit becomes hidden", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const finishWrites: Array<() => void> = [];
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-remote-hidden-sync" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(capturedRemoteControlChanged).toBeTruthy();
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
+        if (callback) finishWrites.push(callback);
+      });
+      act(() => {
+        onOutput?.(new TextEncoder().encode("pending parser write"));
+      });
+      expect(finishWrites).toHaveLength(1);
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+      mockFit.mockClear();
+      mockResizeTerminal.mockClear();
+      act(() => {
+        capturedRemoteControlChanged?.({ active: true });
+        capturedRemoteControlChanged?.({ active: false });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+        obs.callback(
+          [{ target, contentRect: { width: 800, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+        finishWrites[0]();
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+        expect(mockResizeTerminal).toHaveBeenCalledTimes(1);
+        expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-hidden-sync", 80, 24);
+      });
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   it("polls active remote control status and reflows after lease expiration", async () => {
     vi.useFakeTimers();
     mockGetRemoteControlStatus
@@ -3989,6 +4075,120 @@ describe("TerminalView", () => {
       );
     } finally {
       userAgent.mockRestore();
+    }
+  });
+
+  it("keeps a split repaint start private when a second widen rearms scanning", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+
+    try {
+      render(<TerminalView instanceId="t-conpty-probe-rearm" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(capturedResizeHandler).not.toBeNull();
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      mockBufferActive.baseY = 40;
+      mockWrite.mockClear();
+
+      act(() => {
+        capturedResizeHandler?.({ cols: 100, rows: 24 });
+        onOutput?.(new TextEncoder().encode("\x1b[?25"));
+        capturedResizeHandler?.({ cols: 120, rows: 24 });
+        onOutput?.(
+          new TextEncoder().encode(
+            "l\x1b[Hfirst frame\x1b[?25hbetween" + "\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter",
+          ),
+        );
+      });
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(
+        "betweenafter",
+      );
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+
+  it("releases the write-drain gate when xterm write throws synchronously", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-write-throw" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      mockWrite.mockImplementationOnce(() => {
+        throw new Error("write data discarded");
+      });
+      let writeError: unknown;
+      try {
+        act(() => {
+          onOutput?.(new TextEncoder().encode("overloaded output"));
+        });
+      } catch (error) {
+        writeError = error;
+      }
+
+      const obs = observers[0];
+      const target = obs.target as Element;
+      mockFit.mockClear();
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 760, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+      });
+      expect(writeError).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith("[TerminalView] xterm write failed:", expect.any(Error));
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      warn.mockRestore();
+      globalThis.ResizeObserver = originalResizeObserver;
     }
   });
 

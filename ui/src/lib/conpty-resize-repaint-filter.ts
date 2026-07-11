@@ -51,14 +51,14 @@ function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
 export class ConptyResizeRepaintFilter {
   private armedUntil = 0;
   private dropping = false;
-  private rearmPending = false;
+  private expectedRepaints = 0;
   private startProbe = new Uint8Array();
   private endProbe = new Uint8Array();
 
   constructor(private readonly windowMs: number) {}
 
   get isArmed(): boolean {
-    return this.armedUntil !== 0;
+    return this.expectedRepaints > 0;
   }
 
   get isDropping(): boolean {
@@ -70,21 +70,36 @@ export class ConptyResizeRepaintFilter {
   }
 
   arm(now = Date.now()): void {
-    if (this.dropping) {
-      this.rearmPending = true;
+    if (!this.isArmed) {
+      this.expectedRepaints = 1;
+      this.startScanning(now);
       return;
     }
-    this.startScanning(now);
+
+    this.expectedRepaints += 1;
+    if (!this.dropping) {
+      // Keep a split start marker private while extending the scan for the
+      // newly requested resize. Resetting here lets xterm reconstruct the
+      // marker across writes and bypass the filter.
+      this.armedUntil = now + this.windowMs;
+    }
   }
 
-  cancelPendingRearm(): void {
-    this.rearmPending = false;
+  /** Cancel one resize expectation without disturbing another outstanding frame. */
+  cancelArm(): Uint8Array {
+    if (!this.isArmed) return new Uint8Array();
+    if (this.expectedRepaints > 1) {
+      this.expectedRepaints -= 1;
+      return new Uint8Array();
+    }
+    // Once a frame has started, finish dropping it even if the resize call
+    // reports an error; releasing its suffix would corrupt the buffer.
+    return this.dropping ? new Uint8Array() : this.flush();
   }
 
   private startScanning(now: number): void {
     this.armedUntil = now + this.windowMs;
     this.dropping = false;
-    this.rearmPending = false;
     this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
@@ -93,19 +108,31 @@ export class ConptyResizeRepaintFilter {
     this.reset();
   }
 
-  /** Release non-repaint bytes held while probing a split start marker. */
+  /** Expire one outstanding repaint and release a probe after the final one. */
   flush(now = Date.now()): Uint8Array {
+    if (!this.isArmed) return new Uint8Array();
+    if (this.expectedRepaints > 1) {
+      this.expectedRepaints -= 1;
+      if (this.dropping) {
+        this.startScanning(now);
+      } else {
+        // A partial marker may belong to the next outstanding repaint. Keep
+        // it buffered instead of exposing it to xterm between scan windows.
+        this.armedUntil = now + this.windowMs;
+        this.endProbe = new Uint8Array();
+      }
+      return new Uint8Array();
+    }
+
     const pending = this.dropping ? new Uint8Array() : this.startProbe;
-    const shouldRearm = this.rearmPending;
     this.reset();
-    if (shouldRearm) this.startScanning(now);
     return pending;
   }
 
   private reset(): void {
     this.armedUntil = 0;
     this.dropping = false;
-    this.rearmPending = false;
+    this.expectedRepaints = 0;
     this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
@@ -146,12 +173,12 @@ export class ConptyResizeRepaintFilter {
     const end = indexOfBytes(candidate, REPAINT_END);
     if (end >= 0) {
       const suffix = candidate.slice(end + REPAINT_END.length);
-      const shouldRearm = this.rearmPending;
-      this.reset();
-      if (shouldRearm) {
+      this.expectedRepaints = Math.max(0, this.expectedRepaints - 1);
+      if (this.expectedRepaints > 0) {
         this.startScanning(now);
         return this.filter(suffix, now);
       }
+      this.reset();
       return suffix;
     }
 

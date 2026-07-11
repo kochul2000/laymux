@@ -16,10 +16,10 @@ xterm.js 6.0.0에는 별개로 폭 확장 reflow 뒤 제거된 soft-wrap 행의 
 
 Windows normal buffer의 scrollback이 있는 상태에서 열 수가 증가할 때만 ConPTY resize repaint filter를 짧게 활성화한다.
 
-- pane resize, 폰트, DPR, scrollbar, remote control 복귀처럼 terminal geometry를 바꾸는 모든 `fit()`은 공통 스케줄러를 통과한다. pane resize는 기존 80ms trailing debounce를 유지하며, PTY 출력과 세션 복원을 포함한 모든 xterm write를 공통 추적 함수로 전달해 queue drain 뒤에만 fit한다. 대기 중 들어온 atlas 재생성 및 backend resize 요구는 OR로 누적해 뒤의 일반 fit 요청이 덮어쓰지 못하게 한다.
+- pane resize, 폰트, DPR, scrollbar, remote control 복귀처럼 terminal geometry를 바꾸는 모든 `fit()`은 공통 스케줄러를 통과한다. pane resize는 기존 80ms trailing debounce를 유지하며, PTY 출력과 세션 복원을 포함한 모든 xterm write를 공통 추적 함수로 전달해 queue drain 뒤에만 fit한다. xterm write가 동기 예외를 던지면 drain 카운터를 즉시 되돌린다. 대기 중 들어온 atlas 재생성 및 backend resize 요구는 OR로 누적해 뒤의 일반 fit 요청이 덮어쓰지 못하게 하며, 대기 중 컨테이너가 숨겨지면 각 dirty ref로 이관한다.
 - Windows에서만 queue drain 뒤 마지막 PTY 출력 기준 최대 120ms의 quiet window를 기다린다. 최초 보류부터 500ms가 지나면 quiet 조건을 해제하고, parser queue가 비는 즉시 최신 resize를 실행한다. Linux는 queue가 비면 즉시 실행한다.
 - 각 fit 직전에 active normal buffer의 `baseY > 0` 여부를 스냅샷으로 저장한다. xterm `onResize`에서 이전 열 수보다 증가했고 이 스냅샷에 scrollback이 있었을 때 500ms repaint 탐색 창을 연다. 따라서 얕은 scrollback이 wider reflow 과정에서 `baseY = 0`으로 줄어도 필터가 누락되지 않는다.
-- 필터는 PTY 청크 경계와 무관하게 그 창 안에서 `ESC[?25l ESC[H`로 시작해 `ESC[?25h`로 끝나는 한 프레임만 xterm 입력에서 제거한다. start marker가 탐색 창 끝에서 검출돼도 end marker를 받을 수 있도록 검출 시점부터 별도의 500ms 완료 창을 시작한다. 프레임 앞뒤 데이터와 일치하지 않는 출력은 그대로 전달하고, 불완전한 start marker 후보는 불일치하거나 탐색 창이 만료되면 방출한다. end marker 없이 완료 창이 만료되면 불완전 프레임을 폐기한다. 프레임 제거 중 추가 폭 증가가 발생하면 현재 프레임을 끝내거나 만료시킨 뒤 새 탐색 창을 이어서 적용하며, 현재 프레임의 나머지를 중간에 통과시키지 않는다.
+- 필터는 PTY 청크 경계와 무관하게 그 창 안에서 `ESC[?25l ESC[H`로 시작해 `ESC[?25h`로 끝나는 프레임을 xterm 입력에서 제거한다. start marker가 탐색 창 끝에서 검출돼도 end marker를 받을 수 있도록 검출 시점부터 별도의 500ms 완료 창을 시작한다. 프레임 앞뒤 데이터와 일치하지 않는 출력은 그대로 전달하고, 불완전한 start marker 후보는 불일치하거나 최종 탐색 창이 만료되면 방출한다. end marker 없이 완료 창이 만료되면 불완전 프레임을 폐기한다. 추가 폭 증가는 outstanding repaint 수로 누적한다. 아직 start marker를 찾는 중이면 split 후보를 비공개로 유지하고, 프레임 제거 중이면 현재 프레임을 끝내거나 만료시킨 뒤 남은 수만큼 탐색 창을 이어서 적용한다.
 - alternate buffer와 Linux에서는 필터를 활성화하지 않는다.
 - Rust PTY 콜백의 OSC 단일 패스와 raw output ring은 변경하지 않는다. 필터는 구조화 이벤트 처리 이후 WebView의 xterm write 경계에만 적용한다.
 - `@xterm/xterm`은 6.0.0으로 고정하고, upstream commit `e9c648f`의 `isWrapped` 정리 패치를 `postinstall`에서 적용한다. stable xterm 릴리스가 해당 수정 내용을 포함하면 로컬 패치와 버전 고정을 재검토한다.
