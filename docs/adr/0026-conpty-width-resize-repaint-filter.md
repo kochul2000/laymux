@@ -16,9 +16,10 @@ xterm.js 6.0.0에는 별개로 폭 확장 reflow 뒤 제거된 soft-wrap 행의 
 
 Windows normal buffer의 scrollback이 있는 상태에서 열 수가 증가할 때만 ConPTY resize repaint filter를 짧게 활성화한다.
 
-- pane resize는 기존 80ms trailing debounce와 xterm write queue drain 뒤 120ms output quiet 조건을 유지한다.
-- xterm `onResize`에서 이전 열 수보다 증가했고 active buffer가 normal buffer이며 `baseY > 0`일 때 500ms 필터 창을 연다.
-- 필터는 그 창 안에서 `ESC[?25l ESC[H`로 시작해 `ESC[?25h`로 끝나는 한 프레임만 xterm 입력에서 제거한다. 프레임 앞뒤 데이터와 일치하지 않는 출력은 그대로 전달한다.
+- pane resize는 기존 80ms trailing debounce와 xterm write queue drain 조건을 유지한다. PTY 출력과 세션 복원을 포함한 모든 xterm write를 공통 추적 함수로 전달한다.
+- Windows에서만 queue drain 뒤 마지막 PTY 출력 기준 최대 120ms의 quiet window를 기다린다. 최초 보류부터 500ms가 지나면 quiet 조건을 해제하고, parser queue가 비는 즉시 최신 resize를 실행한다. Linux는 queue가 비면 즉시 실행한다.
+- xterm `onResize`에서 이전 열 수보다 증가했고 active buffer가 normal buffer이며 `baseY > 0`일 때 500ms repaint 탐색 창을 연다.
+- 필터는 PTY 청크 경계와 무관하게 그 창 안에서 `ESC[?25l ESC[H`로 시작해 `ESC[?25h`로 끝나는 한 프레임만 xterm 입력에서 제거한다. start marker가 탐색 창 끝에서 검출돼도 end marker를 받을 수 있도록 검출 시점부터 별도의 500ms 완료 창을 시작한다. 프레임 앞뒤 데이터와 일치하지 않는 출력은 그대로 전달하고, 불완전한 start marker 후보는 불일치하거나 탐색 창이 만료되면 방출한다. end marker 없이 완료 창이 만료되면 불완전 프레임을 폐기하고 필터를 해제한다.
 - alternate buffer와 Linux에서는 필터를 활성화하지 않는다.
 - Rust PTY 콜백의 OSC 단일 패스와 raw output ring은 변경하지 않는다. 필터는 구조화 이벤트 처리 이후 WebView의 xterm write 경계에만 적용한다.
 - `@xterm/xterm`은 6.0.0으로 고정하고, upstream commit `e9c648f`의 `isWrapped` 정리 패치를 `postinstall`에서 적용한다. stable xterm 릴리스가 해당 수정 내용을 포함하면 로컬 패치와 버전 고정을 재검토한다.
@@ -28,5 +29,6 @@ Windows normal buffer의 scrollback이 있는 상태에서 열 수가 증가할 
 - ConPTY가 보내는 resize 화면 복제본이 reflow된 scrollback을 덮지 않아 폭 변경 뒤 과거 행의 순서와 개수가 유지된다.
 - xterm 자체의 stale `isWrapped`도 제거되어 행 시작 위치와 wrapped range 계산이 일치한다.
 - 필터는 exact frame marker, normal buffer, Windows, 폭 증가, scrollback 존재, 짧은 시간 창을 모두 만족해야 동작하므로 일반 PTY 출력에 대한 영향 범위가 제한된다.
-- resize 직후 normal buffer 애플리케이션이 같은 marker를 의도적으로 출력하면 그 한 프레임이 제거될 수 있다. output quiet 조건과 500ms 상한으로 가능성을 줄이며, TUI가 주로 쓰는 alternate buffer는 제외한다.
+- resize 직후 normal buffer 애플리케이션이 같은 marker를 의도적으로 출력하면 그 한 프레임이 제거될 수 있다. Windows 전용 output quiet 조건과 repaint start의 500ms 탐색 창으로 가능성을 줄이며, TUI가 주로 쓰는 alternate buffer는 제외한다.
+- 지속 출력에 대한 quiet 대기는 최초 보류 뒤 500ms를 넘지 않는다. 새 PTY write가 parser queue에 남아 있으면 queue drain은 계속 우선하며, queue가 비는 다음 시점에 resize를 실행해 xterm parser와 reflow가 겹치지 않게 한다.
 - 설치 결과가 upstream bundle 형태에 의존하므로 patch script는 대상 문자열을 찾지 못하면 즉시 실패하고, 테스트는 패치 적용 여부를 확인한다.

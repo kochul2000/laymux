@@ -38,6 +38,49 @@ describe("ConptyResizeRepaintFilter", () => {
     expect(filter.isArmed).toBe(false);
   });
 
+  it("finishes a repaint that starts near the scan window boundary", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+
+    expect(decoder.decode(filter.filter(bytes("\x1b[?25l\x1b[Hframe"), 1490))).toBe("");
+    expect(decoder.decode(filter.filter(bytes(" tail\x1b[?25hafter"), 1510))).toBe("after");
+    expect(filter.isArmed).toBe(false);
+  });
+
+  it("stops dropping an incomplete repaint after its frame window", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+
+    expect(decoder.decode(filter.filter(bytes("\x1b[?25l\x1b[Hincomplete"), 1490))).toBe("");
+    expect(decoder.decode(filter.filter(bytes("later output"), 1991))).toBe("later output");
+    expect(filter.isArmed).toBe(false);
+  });
+
+  it("removes a repaint at every split inside the start marker", () => {
+    const start = "\x1b[?25l\x1b[H";
+    const frame = `${start}frame\x1b[8;3H\x1b[?25hafter`;
+
+    for (let split = 1; split < start.length; split++) {
+      const filter = new ConptyResizeRepaintFilter(500);
+      filter.arm(1000);
+
+      const first = filter.filter(bytes(frame.slice(0, split)), 1050);
+      const second = filter.filter(bytes(frame.slice(split)), 1060);
+
+      expect(decoder.decode(first), `split ${split} first chunk`).toBe("");
+      expect(decoder.decode(second), `split ${split} second chunk`).toBe("after");
+      expect(filter.isArmed, `split ${split} armed state`).toBe(false);
+    }
+  });
+
+  it("releases a partial start prefix when the following chunk does not match", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+
+    expect(decoder.decode(filter.filter(bytes("before\x1b[?25"), 1050))).toBe("before");
+    expect(decoder.decode(filter.filter(bytes("Xafter"), 1060))).toBe("\x1b[?25Xafter");
+  });
+
   it("keeps unrelated output while waiting for the resize repaint", () => {
     const filter = new ConptyResizeRepaintFilter(500);
     filter.arm(1000);

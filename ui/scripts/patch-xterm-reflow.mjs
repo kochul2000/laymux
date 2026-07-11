@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import process from "node:process";
+import { fileURLToPath, URL } from "node:url";
 
 // xterm.js #5997 / e9c648f: widening can leave stale isWrapped flags on
 // retained rows. Remove this once a stable @xterm/xterm release contains it.

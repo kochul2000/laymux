@@ -328,9 +328,11 @@ describe("TerminalView", () => {
 
     const background = screen.getByTestId("terminal-background-t-background-layer");
     const host = screen.getByTestId("terminal-xterm-host-t-background-layer");
+    const wrapper = screen.getByTestId("terminal-view-t-background-layer");
     expect(background).toBeInTheDocument();
     expect(background).toHaveClass("terminal-background-layer");
     expect(host).toHaveClass("terminal-xterm-host");
+    expect(wrapper).toHaveClass("min-w-0", "overflow-hidden");
     expect(
       background.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -3431,6 +3433,9 @@ describe("TerminalView", () => {
     };
     const observers: Observer[] = [];
     const originalResizeObserver = globalThis.ResizeObserver;
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     globalThis.ResizeObserver = class {
       private obs: Observer;
       constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
@@ -3508,6 +3513,151 @@ describe("TerminalView", () => {
         expect(mockFit).toHaveBeenCalledTimes(1);
       });
     } finally {
+      userAgent.mockRestore();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("bounds resize deferral while ConPTY output remains continuous", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(<TerminalView instanceId="t-resize-continuous" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const obs = observers[0];
+      const target = obs.target as Element;
+      mockFit.mockClear();
+
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 760, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      for (let i = 0; i < 14; i++) {
+        act(() => {
+          onOutput?.(new TextEncoder().encode(`continuous output ${i}`));
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      expect(mockFit).toHaveBeenCalledTimes(1);
+    } finally {
+      userAgent.mockRestore();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("waits for session restore writes to drain before resize reflow", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const finishWrites: Array<() => void> = [];
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => {
+          this.obs.callback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    mockLoadTerminalOutputCache.mockResolvedValueOnce("large cached terminal output");
+    mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+      if (callback) finishWrites.push(callback);
+    });
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-resize-restore-queue"
+          paneId="pane-resize-restore"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-resize-restore");
+        expect(finishWrites).toHaveLength(3);
+      });
+      const obs = observers[0];
+      const target = obs.target as Element;
+      mockFit.mockClear();
+
+      act(() => {
+        obs.callback(
+          [{ target, contentRect: { width: 760, height: 600 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => {
+        for (const finish of finishWrites.splice(0)) finish();
+      });
+      await vi.waitFor(() => {
+        expect(mockFit).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
       globalThis.ResizeObserver = originalResizeObserver;
     }
   });

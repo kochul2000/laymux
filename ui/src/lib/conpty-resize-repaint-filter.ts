@@ -18,6 +18,22 @@ function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): numbe
   return -1;
 }
 
+function matchingPrefixSuffixLength(haystack: Uint8Array, needle: Uint8Array): number {
+  const maxLength = Math.min(haystack.length, needle.length - 1);
+  for (let length = maxLength; length > 0; length--) {
+    const offset = haystack.length - length;
+    let matches = true;
+    for (let i = 0; i < length; i++) {
+      if (haystack[offset + i] !== needle[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return length;
+  }
+  return 0;
+}
+
 function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
   if (left.length === 0) return right;
   if (right.length === 0) return left;
@@ -35,6 +51,7 @@ function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
 export class ConptyResizeRepaintFilter {
   private armedUntil = 0;
   private dropping = false;
+  private startProbe = new Uint8Array();
   private endProbe = new Uint8Array();
 
   constructor(private readonly windowMs: number) {}
@@ -43,35 +60,60 @@ export class ConptyResizeRepaintFilter {
     return this.armedUntil !== 0;
   }
 
+  get isDropping(): boolean {
+    return this.dropping;
+  }
+
   arm(now = Date.now()): void {
     this.armedUntil = now + this.windowMs;
     this.dropping = false;
+    this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
 
   disarm(): void {
+    this.reset();
+  }
+
+  /** Release non-repaint bytes held while probing a split start marker. */
+  flush(): Uint8Array {
+    const pending = this.dropping ? new Uint8Array() : this.startProbe;
+    this.reset();
+    return pending;
+  }
+
+  private reset(): void {
     this.armedUntil = 0;
     this.dropping = false;
+    this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
 
   filter(data: Uint8Array, now = Date.now()): Uint8Array {
     if (!this.isArmed) return data;
     if (now > this.armedUntil) {
-      this.disarm();
-      return data;
+      return concatBytes(this.flush(), data);
     }
 
     if (this.dropping) {
       return this.dropUntilRepaintEnd(data);
     }
 
-    const start = indexOfBytes(data, REPAINT_START);
-    if (start < 0) return data;
+    const candidate = concatBytes(this.startProbe, data);
+    this.startProbe = new Uint8Array();
+    const start = indexOfBytes(candidate, REPAINT_START);
+    if (start < 0) {
+      const probeLength = matchingPrefixSuffixLength(candidate, REPAINT_START);
+      this.startProbe = candidate.slice(candidate.length - probeLength);
+      return candidate.slice(0, candidate.length - probeLength);
+    }
 
     this.dropping = true;
-    const prefix = data.slice(0, start);
-    const suffix = this.dropUntilRepaintEnd(data.slice(start + REPAINT_START.length));
+    // The scan window limits when a repaint may start. Once recognized, give
+    // the split frame its own bounded window in which to reach the end marker.
+    this.armedUntil = now + this.windowMs;
+    const prefix = candidate.slice(0, start);
+    const suffix = this.dropUntilRepaintEnd(candidate.slice(start + REPAINT_START.length));
     return concatBytes(prefix, suffix);
   }
 

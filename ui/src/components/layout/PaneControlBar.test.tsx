@@ -612,6 +612,20 @@ describe("PaneControlBar", () => {
     expect(screen.getByTestId("child")).toBeInTheDocument();
   });
 
+  it("allows the content slot to shrink below a child's intrinsic width", () => {
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div data-testid="wide-child">content</div>
+      </PaneControlBar>,
+    );
+
+    expect(screen.getByTestId("pane-control-hover")).toHaveClass("min-w-0", "overflow-hidden");
+    expect(screen.getByTestId("wide-child").parentElement).toHaveClass(
+      "min-w-0",
+      "overflow-hidden",
+    );
+  });
+
   // -- Persistence via paneId --
 
   it("persists mode per paneId in overrides-store", async () => {

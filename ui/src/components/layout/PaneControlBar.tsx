@@ -889,7 +889,11 @@ export function PaneControlBar({
 
   return (
     <PaneControlContext.Provider value={ctxValue}>
-      <div ref={rootRef} className="flex h-full w-full flex-col" data-testid={modeTestId}>
+      <div
+        ref={rootRef}
+        className="flex h-full w-full min-w-0 flex-col overflow-hidden"
+        data-testid={modeTestId}
+      >
         {/* Pinned bar: ViewHeader가 없는 View만 자체 바 렌더 */}
         {isPinned && !hasViewHeader && (
           <div
@@ -934,7 +938,7 @@ export function PaneControlBar({
         )}
 
         {/* children은 항상 이 위치에 렌더링 — 모드 전환으로 리마운트되지 않음 */}
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           {children}
 
           {/* Hover bar: ViewHeader가 없는 View만 overlay */}

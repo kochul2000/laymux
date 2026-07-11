@@ -116,8 +116,11 @@ const OUTPUT_IDLE_TIMEOUT_MS = 5000;
  */
 const RESIZE_FIT_DEBOUNCE_MS = 80;
 
-/** Silence after the last PTY chunk before xterm may reflow its active buffer. */
+/** Windows-only silence after the last PTY chunk before xterm may reflow. */
 const RESIZE_OUTPUT_QUIET_MS = 120;
+
+/** Upper bound for waiting on a continuous ConPTY output stream before resize. */
+const RESIZE_OUTPUT_MAX_WAIT_MS = 500;
 
 /** ConPTY emits its resize repaint within this window after SIGWINCH. */
 const CONPTY_RESIZE_REPAINT_WINDOW_MS = 500;
@@ -1707,6 +1710,34 @@ export function TerminalView({
     const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
       CONPTY_RESIZE_REPAINT_WINDOW_MS,
     );
+    const isWindowsHost = navigator.userAgent.includes("Windows");
+    let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
+    const clearConptyRepaintExpiryTimer = () => {
+      if (conptyRepaintExpiryTimer !== undefined) {
+        clearTimeout(conptyRepaintExpiryTimer);
+        conptyRepaintExpiryTimer = undefined;
+      }
+    };
+    const flushConptyRepaintProbe = () => {
+      clearConptyRepaintExpiryTimer();
+      const pending = conptyResizeRepaintFilter.flush();
+      if (pending.length === 0) return;
+      writeTerminalDisplayData?.(pending);
+    };
+    const scheduleConptyRepaintExpiry = () => {
+      clearConptyRepaintExpiryTimer();
+      conptyRepaintExpiryTimer = setTimeout(() => {
+        conptyRepaintExpiryTimer = undefined;
+        const pending = conptyResizeRepaintFilter.flush();
+        if (pending.length > 0) writeTerminalDisplayData?.(pending);
+      }, CONPTY_RESIZE_REPAINT_WINDOW_MS);
+    };
+    const armConptyRepaintFilter = () => {
+      flushConptyRepaintProbe();
+      conptyResizeRepaintFilter.arm();
+      scheduleConptyRepaintExpiry();
+    };
     let previousResizeCols = terminal.cols;
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
@@ -1717,14 +1748,14 @@ export function TerminalView({
       const normalBuffer = terminal.buffer.normal;
       if (
         widened &&
-        navigator.userAgent.includes("Windows") &&
+        isWindowsHost &&
         terminal.buffer.active === normalBuffer &&
         normalBuffer.baseY > 0
       ) {
-        conptyResizeRepaintFilter.arm();
+        armConptyRepaintFilter();
       }
       resizeTerminal(instanceId, cols, rows).catch(() => {
-        conptyResizeRepaintFilter.disarm();
+        flushConptyRepaintProbe();
       });
     });
 
@@ -1783,6 +1814,7 @@ export function TerminalView({
     let pendingTerminalWrites = 0;
     let lastTerminalOutputAt = 0;
     let deferredResizeFit: (() => void) | undefined;
+    let deferredResizeRequestedAt = 0;
     let deferredResizeQuietTimer: ReturnType<typeof setTimeout> | undefined;
     const clearDeferredResizeQuietTimer = () => {
       if (deferredResizeQuietTimer !== undefined) {
@@ -1792,27 +1824,47 @@ export function TerminalView({
     };
     const flushDeferredResizeFit = () => {
       if (cancelled || pendingTerminalWrites > 0 || !deferredResizeFit) return;
-      const quietFor = Date.now() - lastTerminalOutputAt;
-      if (lastTerminalOutputAt > 0 && quietFor < RESIZE_OUTPUT_QUIET_MS) {
+      const now = Date.now();
+      const quietFor = now - lastTerminalOutputAt;
+      const deferredFor = now - deferredResizeRequestedAt;
+      if (
+        isWindowsHost &&
+        lastTerminalOutputAt > 0 &&
+        quietFor < RESIZE_OUTPUT_QUIET_MS &&
+        deferredFor < RESIZE_OUTPUT_MAX_WAIT_MS
+      ) {
         clearDeferredResizeQuietTimer();
-        deferredResizeQuietTimer = setTimeout(() => {
-          deferredResizeQuietTimer = undefined;
-          flushDeferredResizeFit();
-        }, RESIZE_OUTPUT_QUIET_MS - quietFor);
+        deferredResizeQuietTimer = setTimeout(
+          () => {
+            deferredResizeQuietTimer = undefined;
+            flushDeferredResizeFit();
+          },
+          Math.min(RESIZE_OUTPUT_QUIET_MS - quietFor, RESIZE_OUTPUT_MAX_WAIT_MS - deferredFor),
+        );
         return;
       }
       clearDeferredResizeQuietTimer();
       const fit = deferredResizeFit;
       deferredResizeFit = undefined;
+      deferredResizeRequestedAt = 0;
       fit();
     };
     const applyFitAfterPendingWrites = (fit: () => void) => {
       // xterm's write parser and buffer reflow both mutate the active buffer.
       // ConPTY also emits cursor-addressed repaint chunks for the old width.
-      // Keep only the latest fit and run it after the queue drains and output
-      // has stayed quiet long enough for those old-width chunks to finish.
+      // Keep only the latest fit and run it after the queue drains. On Windows,
+      // also wait briefly for old-width ConPTY output, with a bounded delay.
+      if (!deferredResizeFit) deferredResizeRequestedAt = Date.now();
       deferredResizeFit = fit;
       flushDeferredResizeFit();
+    };
+    const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
+      pendingTerminalWrites += 1;
+      terminal.write(data, () => {
+        pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
+        onParsed?.();
+        flushDeferredResizeFit();
+      });
     };
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
@@ -1850,18 +1902,12 @@ export function TerminalView({
     // CR is sent as a standalone write after the text has landed in the input
     // box so long custom messages still submit reliably.
     const SESSION_LIMIT_SUBMIT_CR_DELAY_MS = 150;
-    onTerminalOutput(instanceId, (rawData) => {
+    const processTerminalOutput = (data: Uint8Array) => {
       if (cancelled) return;
-      const data = conptyResizeRepaintFilter.filter(rawData);
       if (data.length === 0) return;
       lastTerminalOutputAt = Date.now();
       clearDeferredResizeQuietTimer();
-      pendingTerminalWrites += 1;
-      terminal.write(data, () => {
-        pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-        startSyncOutputMonitor();
-        flushDeferredResizeFit();
-      });
+      trackedTerminalWrite(data, startSyncOutputMonitor);
       const text = streamDecoder.decode(data, { stream: true });
       const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
@@ -2175,6 +2221,18 @@ export function TerminalView({
           activity: { type: "shell" },
         });
       }
+    };
+    writeTerminalDisplayData = processTerminalOutput;
+    onTerminalOutput(instanceId, (rawData) => {
+      if (cancelled) return;
+      const wasDroppingRepaint = conptyResizeRepaintFilter.isDropping;
+      const data = conptyResizeRepaintFilter.filter(rawData);
+      if (!wasDroppingRepaint && conptyResizeRepaintFilter.isDropping) {
+        scheduleConptyRepaintExpiry();
+      } else if (!conptyResizeRepaintFilter.isArmed) {
+        clearConptyRepaintExpiryTimer();
+      }
+      processTerminalOutput(data);
     }).then((unlisten) => {
       if (cancelled) {
         unlisten();
@@ -2233,6 +2291,7 @@ export function TerminalView({
       }
       if (isNowHidden) {
         deferredResizeFit = undefined;
+        deferredResizeRequestedAt = 0;
         clearDeferredResizeQuietTimer();
       }
       if (width > 0 && height > 0 && !sessionCreated) {
@@ -2367,7 +2426,9 @@ export function TerminalView({
             startupOverride,
           ).catch((err) => {
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
-            terminal.write(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
+            trackedTerminalWrite(
+              `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
+            );
           });
         }
 
@@ -2376,11 +2437,11 @@ export function TerminalView({
           loadTerminalOutputCache(paneId)
             .then((cached) => {
               if (cancelled || !cached || cached.length === 0) return;
-              terminal.write(cached);
-              terminal.write("\r\n\x1b[90m--- session restored ---\x1b[0m");
+              trackedTerminalWrite(cached);
+              trackedTerminalWrite("\r\n\x1b[90m--- session restored ---\x1b[0m");
               // Push restored content into scrollback so shell init
               // clear-screen sequences don't destroy it
-              terminal.write("\r\n".repeat(terminal.rows));
+              trackedTerminalWrite("\r\n".repeat(terminal.rows));
             })
             .catch((err) => {
               const msg = err instanceof Error ? err.message : String(err);
@@ -2466,8 +2527,11 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      clearConptyRepaintExpiryTimer();
       conptyResizeRepaintFilter.disarm();
+      writeTerminalDisplayData = undefined;
       deferredResizeFit = undefined;
+      deferredResizeRequestedAt = 0;
       clearDeferredResizeQuietTimer();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
@@ -2907,7 +2971,7 @@ export function TerminalView({
     <div
       ref={wrapperRef}
       data-testid={`terminal-view-${instanceId}`}
-      className={`relative h-full w-full ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
+      className={`relative h-full w-full min-w-0 overflow-hidden ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
       style={wrapperStyle}
     >
       <div
