@@ -38,6 +38,35 @@ describe("ConptyResizeRepaintFilter", () => {
     expect(filter.isArmed).toBe(false);
   });
 
+  it("finishes the current repaint before honoring a second arm", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+
+    expect(decoder.decode(filter.filter(bytes("\x1b[?25l\x1b[Hfirst frame"), 1050))).toBe("");
+    filter.arm(1060);
+    expect(
+      decoder.decode(
+        filter.filter(
+          bytes(" tail\x1b[?25hbetween\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter"),
+          1070,
+        ),
+      ),
+    ).toBe("betweenafter");
+    expect(filter.isArmed).toBe(false);
+  });
+
+  it("honors a second arm after an incomplete current repaint expires", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+
+    expect(decoder.decode(filter.filter(bytes("\x1b[?25l\x1b[Hincomplete"), 1050))).toBe("");
+    filter.arm(1060);
+    expect(
+      decoder.decode(filter.filter(bytes("\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter"), 1551)),
+    ).toBe("after");
+    expect(filter.isArmed).toBe(false);
+  });
+
   it("finishes a repaint that starts near the scan window boundary", () => {
     const filter = new ConptyResizeRepaintFilter(500);
     filter.arm(1000);

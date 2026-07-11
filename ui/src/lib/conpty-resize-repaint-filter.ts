@@ -51,6 +51,7 @@ function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
 export class ConptyResizeRepaintFilter {
   private armedUntil = 0;
   private dropping = false;
+  private rearmPending = false;
   private startProbe = new Uint8Array();
   private endProbe = new Uint8Array();
 
@@ -64,9 +65,26 @@ export class ConptyResizeRepaintFilter {
     return this.dropping;
   }
 
+  get expiresAt(): number {
+    return this.armedUntil;
+  }
+
   arm(now = Date.now()): void {
+    if (this.dropping) {
+      this.rearmPending = true;
+      return;
+    }
+    this.startScanning(now);
+  }
+
+  cancelPendingRearm(): void {
+    this.rearmPending = false;
+  }
+
+  private startScanning(now: number): void {
     this.armedUntil = now + this.windowMs;
     this.dropping = false;
+    this.rearmPending = false;
     this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
@@ -76,15 +94,18 @@ export class ConptyResizeRepaintFilter {
   }
 
   /** Release non-repaint bytes held while probing a split start marker. */
-  flush(): Uint8Array {
+  flush(now = Date.now()): Uint8Array {
     const pending = this.dropping ? new Uint8Array() : this.startProbe;
+    const shouldRearm = this.rearmPending;
     this.reset();
+    if (shouldRearm) this.startScanning(now);
     return pending;
   }
 
   private reset(): void {
     this.armedUntil = 0;
     this.dropping = false;
+    this.rearmPending = false;
     this.startProbe = new Uint8Array();
     this.endProbe = new Uint8Array();
   }
@@ -92,11 +113,14 @@ export class ConptyResizeRepaintFilter {
   filter(data: Uint8Array, now = Date.now()): Uint8Array {
     if (!this.isArmed) return data;
     if (now > this.armedUntil) {
-      return concatBytes(this.flush(), data);
+      const pending = this.flush(now);
+      return this.isArmed
+        ? concatBytes(pending, this.filter(data, now))
+        : concatBytes(pending, data);
     }
 
     if (this.dropping) {
-      return this.dropUntilRepaintEnd(data);
+      return this.dropUntilRepaintEnd(data, now);
     }
 
     const candidate = concatBytes(this.startProbe, data);
@@ -113,16 +137,21 @@ export class ConptyResizeRepaintFilter {
     // the split frame its own bounded window in which to reach the end marker.
     this.armedUntil = now + this.windowMs;
     const prefix = candidate.slice(0, start);
-    const suffix = this.dropUntilRepaintEnd(candidate.slice(start + REPAINT_START.length));
+    const suffix = this.dropUntilRepaintEnd(candidate.slice(start + REPAINT_START.length), now);
     return concatBytes(prefix, suffix);
   }
 
-  private dropUntilRepaintEnd(data: Uint8Array): Uint8Array {
+  private dropUntilRepaintEnd(data: Uint8Array, now: number): Uint8Array {
     const candidate = concatBytes(this.endProbe, data);
     const end = indexOfBytes(candidate, REPAINT_END);
     if (end >= 0) {
       const suffix = candidate.slice(end + REPAINT_END.length);
-      this.disarm();
+      const shouldRearm = this.rearmPending;
+      this.reset();
+      if (shouldRearm) {
+        this.startScanning(now);
+        return this.filter(suffix, now);
+      }
       return suffix;
     }
 

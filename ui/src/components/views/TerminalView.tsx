@@ -431,6 +431,11 @@ interface TerminalViewProps {
   startupCommandOverride?: string;
 }
 
+interface TerminalFitRequest {
+  rebuildAtlas?: boolean;
+  syncBackendResize?: boolean;
+}
+
 export function TerminalView({
   instanceId,
   paneId,
@@ -451,8 +456,9 @@ export function TerminalView({
   const overlayCaretRef = useRef<HTMLDivElement>(null);
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalReflowFrameRef = useRef<number | null>(null);
+  const pendingRendererFitRequestRef = useRef<TerminalFitRequest | null>(null);
+  const guardedTerminalFitRef = useRef<((request: TerminalFitRequest) => void) | null>(null);
   // Tracks whether the TerminalView's container is currently hidden
   // (display:none → 0×0). WorkspaceArea hides inactive workspaces this way
   // and the font/DPR/scrollbar reflow effects (defined below) consult this
@@ -653,7 +659,6 @@ export function TerminalView({
     });
 
     const fitAddon = new FitAddon();
-    fitAddonRef.current = fitAddon;
     const webLinksAddon = new WebLinksAddon((_event, uri) => {
       openExternal(uri).catch(() => {});
     });
@@ -1713,6 +1718,9 @@ export function TerminalView({
     const isWindowsHost = navigator.userAgent.includes("Windows");
     let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
+    let conptyRepaintArmSequence = 0;
+    let latestConptyRepaintArm = 0;
+    let normalScrollbackBeforeFit: boolean | undefined;
     const clearConptyRepaintExpiryTimer = () => {
       if (conptyRepaintExpiryTimer !== undefined) {
         clearTimeout(conptyRepaintExpiryTimer);
@@ -1727,14 +1735,19 @@ export function TerminalView({
     };
     const scheduleConptyRepaintExpiry = () => {
       clearConptyRepaintExpiryTimer();
-      conptyRepaintExpiryTimer = setTimeout(() => {
-        conptyRepaintExpiryTimer = undefined;
-        const pending = conptyResizeRepaintFilter.flush();
-        if (pending.length > 0) writeTerminalDisplayData?.(pending);
-      }, CONPTY_RESIZE_REPAINT_WINDOW_MS);
+      if (!conptyResizeRepaintFilter.isArmed) return;
+      conptyRepaintExpiryTimer = setTimeout(
+        () => {
+          conptyRepaintExpiryTimer = undefined;
+          const pending = conptyResizeRepaintFilter.flush();
+          if (pending.length > 0) writeTerminalDisplayData?.(pending);
+          scheduleConptyRepaintExpiry();
+        },
+        Math.max(0, conptyResizeRepaintFilter.expiresAt - Date.now()),
+      );
     };
     const armConptyRepaintFilter = () => {
-      flushConptyRepaintProbe();
+      if (!conptyResizeRepaintFilter.isDropping) flushConptyRepaintProbe();
       conptyResizeRepaintFilter.arm();
       scheduleConptyRepaintExpiry();
     };
@@ -1746,16 +1759,26 @@ export function TerminalView({
       if (!localTerminalControlAllowed()) return;
 
       const normalBuffer = terminal.buffer.normal;
+      const hadNormalScrollback = normalScrollbackBeforeFit ?? normalBuffer.baseY > 0;
+      let repaintArmRequest: number | undefined;
       if (
         widened &&
         isWindowsHost &&
         terminal.buffer.active === normalBuffer &&
-        normalBuffer.baseY > 0
+        hadNormalScrollback
       ) {
+        repaintArmRequest = ++conptyRepaintArmSequence;
+        latestConptyRepaintArm = repaintArmRequest;
         armConptyRepaintFilter();
       }
       resizeTerminal(instanceId, cols, rows).catch(() => {
-        flushConptyRepaintProbe();
+        if (repaintArmRequest === undefined || repaintArmRequest !== latestConptyRepaintArm) return;
+        if (conptyResizeRepaintFilter.isDropping) {
+          conptyResizeRepaintFilter.cancelPendingRearm();
+          scheduleConptyRepaintExpiry();
+        } else {
+          flushConptyRepaintProbe();
+        }
       });
     });
 
@@ -1813,7 +1836,7 @@ export function TerminalView({
     let cancelled = false;
     let pendingTerminalWrites = 0;
     let lastTerminalOutputAt = 0;
-    let deferredResizeFit: (() => void) | undefined;
+    let deferredTerminalFit: TerminalFitRequest | undefined;
     let deferredResizeRequestedAt = 0;
     let deferredResizeQuietTimer: ReturnType<typeof setTimeout> | undefined;
     const clearDeferredResizeQuietTimer = () => {
@@ -1822,8 +1845,36 @@ export function TerminalView({
         deferredResizeQuietTimer = undefined;
       }
     };
-    const flushDeferredResizeFit = () => {
-      if (cancelled || pendingTerminalWrites > 0 || !deferredResizeFit) return;
+    const performTerminalFit = (request: TerminalFitRequest) => {
+      const normalBuffer = terminal.buffer.normal;
+      normalScrollbackBeforeFit = terminal.buffer.active === normalBuffer && normalBuffer.baseY > 0;
+      try {
+        fitAddon.fit();
+      } finally {
+        normalScrollbackBeforeFit = undefined;
+      }
+
+      if (request.syncBackendResize || remoteReturnResizeDirtyRef.current) {
+        remoteReturnResizeDirtyRef.current = false;
+        if (localTerminalControlAllowed() && terminal.cols > 0 && terminal.rows > 0) {
+          resizeTerminal(instanceId, terminal.cols, terminal.rows).catch(() => {});
+        }
+      }
+
+      if (request.rebuildAtlas || reflowDirtyRef.current) {
+        try {
+          (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+        } catch {
+          /* older xterm builds / mocks may lack this method */
+        }
+        terminal.refresh(0, terminal.rows - 1);
+        reflowDirtyRef.current = false;
+      }
+      bindHelperTextareaEvents();
+      scheduleOverlayCaretUpdate();
+    };
+    const flushDeferredTerminalFit = () => {
+      if (cancelled || pendingTerminalWrites > 0 || !deferredTerminalFit) return;
       const now = Date.now();
       const quietFor = now - lastTerminalOutputAt;
       const deferredFor = now - deferredResizeRequestedAt;
@@ -1837,33 +1888,42 @@ export function TerminalView({
         deferredResizeQuietTimer = setTimeout(
           () => {
             deferredResizeQuietTimer = undefined;
-            flushDeferredResizeFit();
+            flushDeferredTerminalFit();
           },
           Math.min(RESIZE_OUTPUT_QUIET_MS - quietFor, RESIZE_OUTPUT_MAX_WAIT_MS - deferredFor),
         );
         return;
       }
       clearDeferredResizeQuietTimer();
-      const fit = deferredResizeFit;
-      deferredResizeFit = undefined;
+      const request = deferredTerminalFit;
+      deferredTerminalFit = undefined;
       deferredResizeRequestedAt = 0;
-      fit();
+      performTerminalFit(request);
     };
-    const applyFitAfterPendingWrites = (fit: () => void) => {
+    const requestGuardedTerminalFit = (request: TerminalFitRequest) => {
+      if (isContainerHiddenRef.current) {
+        if (request.rebuildAtlas) reflowDirtyRef.current = true;
+        if (request.syncBackendResize) remoteReturnResizeDirtyRef.current = true;
+        return;
+      }
       // xterm's write parser and buffer reflow both mutate the active buffer.
       // ConPTY also emits cursor-addressed repaint chunks for the old width.
-      // Keep only the latest fit and run it after the queue drains. On Windows,
-      // also wait briefly for old-width ConPTY output, with a bounded delay.
-      if (!deferredResizeFit) deferredResizeRequestedAt = Date.now();
-      deferredResizeFit = fit;
-      flushDeferredResizeFit();
+      // Merge sticky recovery work while waiting for the queue to drain. On
+      // Windows, also wait briefly for old-width ConPTY output, with a bound.
+      if (!deferredTerminalFit) deferredResizeRequestedAt = Date.now();
+      deferredTerminalFit = {
+        rebuildAtlas: deferredTerminalFit?.rebuildAtlas || request.rebuildAtlas,
+        syncBackendResize: deferredTerminalFit?.syncBackendResize || request.syncBackendResize,
+      };
+      flushDeferredTerminalFit();
     };
+    guardedTerminalFitRef.current = requestGuardedTerminalFit;
     const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
       pendingTerminalWrites += 1;
       terminal.write(data, () => {
         pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
         onParsed?.();
-        flushDeferredResizeFit();
+        flushDeferredTerminalFit();
       });
     };
     let unlistenOutput: (() => void) | undefined;
@@ -2225,13 +2285,8 @@ export function TerminalView({
     writeTerminalDisplayData = processTerminalOutput;
     onTerminalOutput(instanceId, (rawData) => {
       if (cancelled) return;
-      const wasDroppingRepaint = conptyResizeRepaintFilter.isDropping;
       const data = conptyResizeRepaintFilter.filter(rawData);
-      if (!wasDroppingRepaint && conptyResizeRepaintFilter.isDropping) {
-        scheduleConptyRepaintExpiry();
-      } else if (!conptyResizeRepaintFilter.isArmed) {
-        clearConptyRepaintExpiryTimer();
-      }
+      scheduleConptyRepaintExpiry();
       processTerminalOutput(data);
     }).then((unlisten) => {
       if (cancelled) {
@@ -2280,6 +2335,7 @@ export function TerminalView({
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       const isNowHidden = width === 0 || height === 0;
+      isContainerHiddenRef.current = isNowHidden;
       // A pending debounced fit must never run against a hidden container.
       // WorkspaceArea/PaneGrid hide inactive panes via display:none, firing a
       // 0×0 entry; if a drag just scheduled a fit, fitting on the 0×0 box would
@@ -2290,7 +2346,7 @@ export function TerminalView({
         resizeFitTimer = undefined;
       }
       if (isNowHidden) {
-        deferredResizeFit = undefined;
+        deferredTerminalFit = undefined;
         deferredResizeRequestedAt = 0;
         clearDeferredResizeQuietTimer();
       }
@@ -2378,7 +2434,7 @@ export function TerminalView({
         }
         registerTerminalScroller(instanceId, scrollViewport);
 
-        fitAddon.fit();
+        performTerminalFit({});
         openedRef.current = true;
         // Issue #349: sync the jump-to-bottom button once on mount. onScroll
         // only fires on subsequent viewport moves, so a terminal restored
@@ -2467,33 +2523,6 @@ export function TerminalView({
         prevW = w;
         prevH = h;
 
-        // The actual reflow, factored out so the common drag path can debounce
-        // it while one-shot recovery events run promptly.
-        const applyFit = () => {
-          if (cancelled) return;
-          fitAddon.fit();
-          if (remoteReturnResizeDirtyRef.current) {
-            remoteReturnResizeDirtyRef.current = false;
-            syncBackendSizeFromTerminal(terminal);
-          }
-          if (recoveringFromHidden || consumeDirty) {
-            // See `prevWasHidden` / `reflowDirtyRef` definitions: the WebGL
-            // atlas can go stale while the container is display:none (a DPR
-            // or font change that fires on a 0-size terminal cannot rebuild
-            // anything), so re-rasterise on the hide → show transition.
-            // Safe no-op without WebGL renderer.
-            try {
-              (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-            } catch {
-              /* older xterm builds / mocks may lack this method */
-            }
-            terminal.refresh(0, terminal.rows - 1);
-            reflowDirtyRef.current = false;
-          }
-          bindHelperTextareaEvents();
-          scheduleOverlayCaretUpdate();
-        };
-
         if (recoveringFromHidden || consumeDirty) {
           // Hide→show recovery / pending dirty reflow are single, important
           // events — apply now and cancel any in-flight drag debounce so the
@@ -2502,7 +2531,7 @@ export function TerminalView({
             clearTimeout(resizeFitTimer);
             resizeFitTimer = undefined;
           }
-          applyFitAfterPendingWrites(applyFit);
+          requestGuardedTerminalFit({ rebuildAtlas: true });
         } else {
           // Plain container-size change (e.g. dragging a pane divider): debounce
           // so xterm reflow + the PTY resize happen ONCE after the drag settles,
@@ -2514,7 +2543,7 @@ export function TerminalView({
             // this was scheduled (race with the 0×0 cancel above). Skip — the
             // hide→show recovery path re-fits on return (issue #285 P2).
             if (cancelled || isContainerHiddenRef.current) return;
-            applyFitAfterPendingWrites(applyFit);
+            requestGuardedTerminalFit({});
           }, RESIZE_FIT_DEBOUNCE_MS);
         }
       }
@@ -2530,7 +2559,10 @@ export function TerminalView({
       clearConptyRepaintExpiryTimer();
       conptyResizeRepaintFilter.disarm();
       writeTerminalDisplayData = undefined;
-      deferredResizeFit = undefined;
+      if (guardedTerminalFitRef.current === requestGuardedTerminalFit) {
+        guardedTerminalFitRef.current = null;
+      }
+      deferredTerminalFit = undefined;
       deferredResizeRequestedAt = 0;
       clearDeferredResizeQuietTimer();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
@@ -2541,6 +2573,7 @@ export function TerminalView({
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
       }
+      pendingRendererFitRequestRef.current = null;
       clearTimeout(notifyGateTimer);
       clearParkSettleTimer();
       idleDetector.dispose();
@@ -2682,26 +2715,25 @@ export function TerminalView({
   // back-to-back) compounds with TUI exit bursts (e.g. Codex's `ESC[?1049l`,
   // scrollback re-emit) and is what makes the WebGL atlas race manifest as
   // glyph corruption in adjacent panes.
-  const syncBackendSizeFromTerminal = (term: Terminal) => {
-    if (localTerminalControlAllowed() && term.cols > 0 && term.rows > 0) {
-      resizeTerminal(instanceId, term.cols, term.rows).catch(() => {});
-    }
-  };
-  const runTerminalRendererReflow = (term: Terminal, syncBackendResize = false) => {
-    if (terminalReflowFrameRef.current !== null) {
-      cancelAnimationFrame(terminalReflowFrameRef.current);
-    }
+  const runTerminalRendererReflow = (_term: Terminal, syncBackendResize = false) => {
+    const pending = pendingRendererFitRequestRef.current;
+    pendingRendererFitRequestRef.current = {
+      rebuildAtlas: true,
+      syncBackendResize: pending?.syncBackendResize || syncBackendResize,
+    };
+    if (terminalReflowFrameRef.current !== null) return;
     terminalReflowFrameRef.current = requestAnimationFrame(() => {
       terminalReflowFrameRef.current = null;
-      fitAddonRef.current?.fit();
-      if (syncBackendResize) syncBackendSizeFromTerminal(term);
-      try {
-        (term as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-      } catch {
-        /* older xterm builds / mocks may lack this method */
+      const request = pendingRendererFitRequestRef.current;
+      pendingRendererFitRequestRef.current = null;
+      if (!request) return;
+      const guardedFit = guardedTerminalFitRef.current;
+      if (guardedFit) {
+        guardedFit(request);
+      } else {
+        if (request.rebuildAtlas) reflowDirtyRef.current = true;
+        if (request.syncBackendResize) remoteReturnResizeDirtyRef.current = true;
       }
-      term.refresh(0, term.rows - 1);
-      overlayCaretUpdaterRef.current?.();
     });
   };
   useEffect(() => {
@@ -2916,7 +2948,7 @@ export function TerminalView({
       if (isContainerHiddenRef.current) {
         reflowDirtyRef.current = true;
       } else {
-        fitAddonRef.current?.fit();
+        guardedTerminalFitRef.current?.({});
       }
     } catch {
       /* xterm mock may not support options setter */
