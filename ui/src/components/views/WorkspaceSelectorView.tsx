@@ -29,6 +29,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 import { markNotificationsRead } from "@/lib/tauri-api";
+import { computePaneNumbers } from "@/lib/pane-numbers";
 
 /** Abbreviate profile/view labels to max 3 characters. */
 const LABEL_ABBREV: Record<string, string> = {
@@ -477,10 +478,16 @@ function WorkspaceItem({
             {(() => {
               const showMinimap = panes.length >= 1;
               const minimapPanes = panes.map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h }));
+              const paneIndexById = new Map(panes.map((pane, index) => [pane.id, index]));
+              const paneNumbers = computePaneNumbers(panes);
+              const panesByNumber = [...panes].sort(
+                (a, b) => (paneNumbers.get(a.id) ?? 0) - (paneNumbers.get(b.id) ?? 0),
+              );
               const gridFocused = isActive ? useGridStore.getState().focusedPaneIndex : null;
-              return panes.map((pane, paneIdx) => {
-                const paneIndex = showMinimap ? paneIdx : -1;
-                const isFocusedPane = isActive && gridFocused === paneIdx;
+              return panesByNumber.map((pane) => {
+                // 표시 순서와 달리 focus/minimap은 WorkspacePane[] 원본 인덱스를 사용한다.
+                const paneIndex = paneIndexById.get(pane.id) ?? -1;
+                const isFocusedPane = isActive && gridFocused === paneIndex;
                 const isPaneHidden = hiddenPaneIds.has(pane.id);
                 const isPaneCollapsed = !hideMode && isPaneHidden;
                 if (pane.view.type === "TerminalView") {
