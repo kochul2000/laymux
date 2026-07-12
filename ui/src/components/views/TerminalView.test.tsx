@@ -263,6 +263,7 @@ vi.mock("@/lib/tauri-api", () => ({
   setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
+  resolveGitRemote: vi.fn().mockResolvedValue(null),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   markCodexTerminal: (...args: unknown[]) => mockMarkCodexTerminal(...args),

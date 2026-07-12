@@ -441,9 +441,30 @@ pub fn get_listening_ports() -> Vec<crate::port_detect::ListeningPort> {
 
 #[tauri::command]
 pub fn get_git_branch(working_dir: String) -> Option<String> {
-    let path = std::path::Path::new(&working_dir);
+    // A pane's stored cwd is in Linux form on Windows (PowerShell → `/mnt/d/…`,
+    // WSL → `/home/…`). Convert to a Windows access path before touching the FS,
+    // like stat_path/list_directory do (#441).
+    let resolved = crate::path_utils::resolve_address_path_following_symlinks(&working_dir, None);
+    let path = std::path::Path::new(&resolved);
     let git_dir = crate::git_watcher::find_git_dir(path)?;
     crate::git_watcher::read_git_branch(&git_dir)
+}
+
+/// Resolve a pane's git `origin` remote to its GitHub base URL
+/// (`https://github.com/{owner}/{repo}`), or None when the path is not a
+/// GitHub-backed repo. Used by the frontend to make plain-text `#123`
+/// issue/PR references clickable (issue #439).
+#[tauri::command]
+pub fn resolve_git_remote(path: String) -> Option<String> {
+    // The pane cwd arrives in Linux form on Windows; convert to a Windows
+    // access path first (see get_git_branch) or find_git_dir never matches (#441).
+    let resolved = crate::path_utils::resolve_address_path_following_symlinks(&path, None);
+    let p = std::path::Path::new(&resolved);
+    let git_dir = crate::git_watcher::find_git_dir(p)?;
+    let config_path = crate::git_watcher::find_git_config(&git_dir)?;
+    let config = std::fs::read_to_string(config_path).ok()?;
+    let url = crate::git_watcher::parse_remote_origin_url(&config)?;
+    crate::git_watcher::github_base_from_remote_url(&url)
 }
 
 #[tauri::command]

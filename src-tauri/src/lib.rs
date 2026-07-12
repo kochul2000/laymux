@@ -154,6 +154,7 @@ pub fn run() {
             commands::submit_github_issue,
             commands::get_listening_ports,
             commands::get_git_branch,
+            commands::resolve_git_remote,
             commands::send_os_notification,
             commands::automation_response,
             commands::get_terminal_states,

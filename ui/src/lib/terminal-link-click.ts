@@ -22,6 +22,7 @@
  */
 
 import { findIndentedUrls, type IndentedLineInfo } from "./indented-link-provider";
+import { findPrTokens } from "./pr-link-provider";
 
 /**
  * WebLinksAddon 이 쓰는 기본 URL 정규식과 동일하게 유지한다.
@@ -71,11 +72,17 @@ export interface LinkAtCellInput {
   col: number;
   /** 들여쓰기 하드랩 URL 결합을 시도할지(설정: paste.linkJoin). */
   enableIndentedJoin: boolean;
+  /**
+   * pane 의 GitHub 베이스 URL(`https://github.com/{owner}/{repo}`). 있으면
+   * 평문 `#123` 토큰을 `{repoBase}/issues/{n}` 로 변환한다. 없으면(=GitHub
+   * repo 아님) `#123` 은 링크가 아니다. (issue #439)
+   */
+  repoBase?: string | null;
 }
 
 /**
  * 클릭한 셀에 대응하는 링크 URL 을 우선순위에 따라 도출한다.
- * OSC 8 → 들여쓰기 하드랩 URL → 평문 URL 순. 없으면 null.
+ * OSC 8 → 들여쓰기 하드랩 URL → 평문 URL → `#번호` 이슈/PR 순. 없으면 null.
  */
 export function resolveLinkAtCell(input: LinkAtCellInput): string | null {
   // 1) OSC 8 hyperlink 우선
@@ -108,6 +115,20 @@ export function resolveLinkAtCell(input: LinkAtCellInput): string | null {
   if (clicked) {
     const plain = findPlainUrlAtCol(clicked.text, input.col);
     if (plain) return plain;
+
+    // 4) 평문 `#123` 이슈/PR 토큰 — GitHub repo 일 때만(#439). 클릭한 셀이
+    //    토큰 컬럼 범위(1-based, endCol 포함) 안에 있어야 한다.
+    //    주의(#441): findPrTokens 의 col 은 UTF-16 문자열 오프셋이라 폭2
+    //    문자(CJK/이모지)가 앞서면 셀 컬럼과 어긋난다(pr-link-provider 는
+    //    reconstructLine 으로 보정). 이 경로는 마우스트래킹 앱(codex) 전용인데
+    //    codex 는 `#123` 을 OSC8 로 이미 링크하므로 실질 트리거가 거의 없어
+    //    보정하지 않는다. 필요해지면 provider 와 동일한 셀 매핑을 적용할 것.
+    if (input.repoBase) {
+      const token = findPrTokens(clicked.text).find(
+        (t) => input.col >= t.startCol && input.col <= t.endCol,
+      );
+      if (token) return `${input.repoBase}/issues/${token.number}`;
+    }
   }
 
   return null;
