@@ -2878,10 +2878,11 @@ export function TerminalView({
   // pr-link-provider 가 `#123` 링크를 만들 때 이 값을 동기로 읽는다. cwd 가
   // 없거나 GitHub repo 가 아니면 null → 링크가 생성되지 않는다.
   useEffect(() => {
-    if (!cwd) {
-      repoBaseRef.current = null;
-      return;
-    }
+    // #441: cwd 가 바뀌면 이전 repo 값을 **즉시** 비운다. 조회(UNC/WSL 등)가
+    // 느리거나 실패하는 창에서 이전 repo 의 이슈를 여는 것보다, 잠깐 링크가
+    // 안 뜨는 편이 안전하다.
+    repoBaseRef.current = null;
+    if (!cwd) return;
     let cancelled = false;
     resolveGitRemote(cwd)
       .then((base) => {

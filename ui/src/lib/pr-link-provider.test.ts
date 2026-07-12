@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { findPrTokens, createPrLinkProvider } from "./pr-link-provider";
+import {
+  findPrTokens,
+  reconstructLine,
+  createPrLinkProvider,
+  type CellInfo,
+} from "./pr-link-provider";
 
 describe("findPrTokens", () => {
   it("detects a bare #number token", () => {
@@ -59,19 +64,76 @@ describe("findPrTokens", () => {
   });
 });
 
+// ASCII helper: one cell per code unit, all width 1 (offset == column).
+function asciiCells(text: string): CellInfo[] {
+  return [...text].map((ch) => ({ chars: ch, width: 1 }));
+}
+
+describe("reconstructLine", () => {
+  it("maps ASCII 1:1 (offset == column)", () => {
+    const { text, columns } = reconstructLine(asciiCells("#12"));
+    expect(text).toBe("#12");
+    expect(columns).toEqual([1, 2, 3]);
+  });
+
+  it("skips the trailing half of a wide char and shifts columns", () => {
+    // 가 (width 2) occupies cells 0+1; `#` lands on cell column 3.
+    const cells: CellInfo[] = [
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      { chars: "#", width: 1 },
+      { chars: "1", width: 1 },
+    ];
+    const { text, columns } = reconstructLine(cells);
+    expect(text).toBe("가#1");
+    // string offsets: 0=가, 1=#, 2=1 → cell columns 1, 3, 4
+    expect(columns).toEqual([1, 3, 4]);
+  });
+
+  it("handles a surrogate-pair emoji (2 UTF-16 units in one wide cell)", () => {
+    const cells: CellInfo[] = [
+      { chars: "😀", width: 2 },
+      { chars: "", width: 0 },
+      { chars: "#", width: 1 },
+    ];
+    const { text, columns } = reconstructLine(cells);
+    expect(text).toBe("😀#");
+    // 😀 is 2 UTF-16 units, both mapped to cell column 1; `#` on column 3.
+    expect(columns).toEqual([1, 1, 3]);
+  });
+
+  it("emits a space for empty/unset cells (matches translateToString padding)", () => {
+    const cells: CellInfo[] = [
+      { chars: "#", width: 1 },
+      { chars: "9", width: 1 },
+      { chars: "", width: 1 },
+    ];
+    const { text, columns } = reconstructLine(cells);
+    expect(text).toBe("#9 ");
+    expect(columns).toEqual([1, 2, 3]);
+  });
+});
+
 describe("createPrLinkProvider", () => {
-  function makeTerminal(lineText: string) {
+  function makeTerminalFromCells(cells: CellInfo[]) {
     return {
       buffer: {
         active: {
           length: 1,
           getLine: (_y: number) => ({
-            translateToString: () => lineText,
-            isWrapped: false,
+            length: cells.length,
+            getCell: (x: number) =>
+              cells[x]
+                ? { getChars: () => cells[x].chars, getWidth: () => cells[x].width }
+                : undefined,
           }),
         },
       },
     };
+  }
+
+  function makeTerminal(lineText: string) {
+    return makeTerminalFromCells(asciiCells(lineText));
   }
 
   it("produces no links when getRepoBase returns null", () => {
@@ -121,5 +183,37 @@ describe("createPrLinkProvider", () => {
     const callback = vi.fn();
     provider.provideLinks(1, callback);
     expect(callback).toHaveBeenCalledWith(undefined);
+  });
+
+  it("shifts link range past a preceding wide char (#441)", () => {
+    // "가 #123": 가(width 2, cells 0+1), space(cell 2), #(cell 3)…
+    const cells: CellInfo[] = [
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      { chars: " ", width: 1 },
+      { chars: "#", width: 1 },
+      { chars: "1", width: 1 },
+      { chars: "2", width: 1 },
+      { chars: "3", width: 1 },
+    ];
+    const terminal = makeTerminalFromCells(cells);
+    const onClick = vi.fn();
+    const provider = createPrLinkProvider(
+      terminal as never,
+      onClick,
+      () => "https://github.com/owner/repo",
+    );
+
+    const callback = vi.fn();
+    provider.provideLinks(1, callback);
+    const links = callback.mock.calls[0][0];
+    expect(links).toHaveLength(1);
+    // `#` is on cell column 4 (not string offset 3), last digit on column 7.
+    expect(links[0].range).toEqual({
+      start: { x: 4, y: 1 },
+      end: { x: 7, y: 1 },
+    });
+    links[0].activate();
+    expect(onClick).toHaveBeenCalledWith(123);
   });
 });

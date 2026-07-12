@@ -118,6 +118,11 @@ export function resolveLinkAtCell(input: LinkAtCellInput): string | null {
 
     // 4) 평문 `#123` 이슈/PR 토큰 — GitHub repo 일 때만(#439). 클릭한 셀이
     //    토큰 컬럼 범위(1-based, endCol 포함) 안에 있어야 한다.
+    //    주의(#441): findPrTokens 의 col 은 UTF-16 문자열 오프셋이라 폭2
+    //    문자(CJK/이모지)가 앞서면 셀 컬럼과 어긋난다(pr-link-provider 는
+    //    reconstructLine 으로 보정). 이 경로는 마우스트래킹 앱(codex) 전용인데
+    //    codex 는 `#123` 을 OSC8 로 이미 링크하므로 실질 트리거가 거의 없어
+    //    보정하지 않는다. 필요해지면 provider 와 동일한 셀 매핑을 적용할 것.
     if (input.repoBase) {
       const token = findPrTokens(clicked.text).find(
         (t) => input.col >= t.startCol && input.col <= t.endCol,
