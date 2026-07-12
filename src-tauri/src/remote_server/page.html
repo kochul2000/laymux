@@ -959,15 +959,26 @@
         const copySelectionButton = $("copySelection");
         const ctrlCButton = $("ctrlC");
         const tokenKey = "laymux.remote.token";
+        const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
+        const HEARTBEAT_INTERVAL_MIN_MS = 1000;
+        const HEARTBEAT_INTERVAL_MAX_MS = 5000;
+        const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;
+        const HEARTBEAT_RETRY_DELAY_MS = 1000;
+        const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
         let leaseId = null;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
         let heartbeatInFlight = false;
-        let heartbeatTimeoutMs = 15000;
+        let heartbeatRetryTimer = null;
+        let heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS * 1000;
         let lastHeartbeatOkAt = 0;
         let socket = null;
         let outputReconnectTimer = null;
         let outputReconnectAttempt = 0;
+        let transientConnectionNoticeTimer = null;
+        let transientConnectionNoticeVisible = false;
+        let heartbeatInterrupted = false;
+        let outputInterrupted = false;
         let activeTerminalId = null;
         let terminalInfoById = new Map();
         let navigationState = null;
@@ -1045,6 +1056,46 @@
         function setStatus(message, error = false) {
           statusEl.textContent = message;
           statusEl.classList.toggle("error", error);
+        }
+
+        function hasTransientConnectionInterruption() {
+          return heartbeatInterrupted || outputInterrupted;
+        }
+
+        function scheduleTransientConnectionNotice(domain) {
+          if (domain === "heartbeat") heartbeatInterrupted = true;
+          if (domain === "output") outputInterrupted = true;
+          if (transientConnectionNoticeTimer || transientConnectionNoticeVisible) return;
+          transientConnectionNoticeTimer = setTimeout(() => {
+            transientConnectionNoticeTimer = null;
+            if (!leaseId || !hasTransientConnectionInterruption()) return;
+            transientConnectionNoticeVisible = true;
+            setStatus("Connection interrupted. Reconnecting...", true);
+          }, TRANSIENT_CONNECTION_NOTICE_DELAY_MS);
+        }
+
+        function clearTransientConnectionNotice(domain, recoveredMessage) {
+          if (domain === "heartbeat") heartbeatInterrupted = false;
+          if (domain === "output") outputInterrupted = false;
+          if (hasTransientConnectionInterruption()) return;
+          if (transientConnectionNoticeTimer) {
+            clearTimeout(transientConnectionNoticeTimer);
+            transientConnectionNoticeTimer = null;
+          }
+          if (transientConnectionNoticeVisible) {
+            transientConnectionNoticeVisible = false;
+            setStatus(recoveredMessage || "Connected.");
+          }
+        }
+
+        function resetTransientConnectionNotice() {
+          heartbeatInterrupted = false;
+          outputInterrupted = false;
+          if (transientConnectionNoticeTimer) {
+            clearTimeout(transientConnectionNoticeTimer);
+            transientConnectionNoticeTimer = null;
+          }
+          transientConnectionNoticeVisible = false;
         }
 
         function token() {
@@ -1681,6 +1732,7 @@
 
         function stopSocket(resetReconnect = true) {
           stopOutputReconnect(resetReconnect);
+          if (resetReconnect) clearTransientConnectionNotice("output");
           if (socket) {
             const closingSocket = socket;
             socket = null;
@@ -1694,6 +1746,10 @@
           if (heartbeatTimer) {
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
+          }
+          if (heartbeatRetryTimer) {
+            clearTimeout(heartbeatRetryTimer);
+            heartbeatRetryTimer = null;
           }
           if (heartbeatAbortController) {
             heartbeatAbortController.abort();
@@ -1717,25 +1773,47 @@
           }
         }
 
+        function heartbeatRequestTimeoutMs() {
+          return Math.min(
+            HEARTBEAT_REQUEST_TIMEOUT_MAX_MS,
+            Math.max(HEARTBEAT_INTERVAL_MIN_MS, Math.floor(heartbeatTimeoutMs / 3))
+          );
+        }
+
         async function heartbeat() {
           if (!leaseId || heartbeatInFlight) return;
+          const heartbeatLeaseId = leaseId;
           heartbeatInFlight = true;
           const controller = typeof AbortController === "function" ? new AbortController() : null;
           heartbeatAbortController = controller;
+          const requestTimeoutMs = heartbeatRequestTimeoutMs();
           const abortTimer = controller
-            ? setTimeout(() => controller.abort(), heartbeatTimeoutMs)
+            ? setTimeout(() => controller.abort(), requestTimeoutMs)
             : null;
           try {
             await remoteFetch("/remote/v1/session/heartbeat", {
               method: "POST",
-              body: JSON.stringify({ leaseId }),
+              body: JSON.stringify({ leaseId: heartbeatLeaseId }),
               ...(controller ? { signal: controller.signal } : {}),
             });
+            if (leaseId !== heartbeatLeaseId || heartbeatAbortController !== controller) return;
             lastHeartbeatOkAt = Date.now();
+            if (heartbeatRetryTimer) {
+              clearTimeout(heartbeatRetryTimer);
+              heartbeatRetryTimer = null;
+            }
+            clearTransientConnectionNotice(
+              "heartbeat",
+              activeTerminalId ? `Connected to ${activeTerminalId}` : "Connected."
+            );
+          } catch (err) {
+            if (leaseId === heartbeatLeaseId && heartbeatAbortController === controller) throw err;
           } finally {
             if (abortTimer) clearTimeout(abortTimer);
-            if (heartbeatAbortController === controller) heartbeatAbortController = null;
-            heartbeatInFlight = false;
+            if (heartbeatAbortController === controller) {
+              heartbeatAbortController = null;
+              heartbeatInFlight = false;
+            }
           }
         }
 
@@ -1747,25 +1825,36 @@
           return Date.now() - lastHeartbeatOkAt >= heartbeatTimeoutMs;
         }
 
+        function scheduleHeartbeatRetry() {
+          if (!leaseId || heartbeatRetryTimer) return;
+          heartbeatRetryTimer = setTimeout(() => {
+            heartbeatRetryTimer = null;
+            heartbeat().catch((err) => handleHeartbeatError(err));
+          }, HEARTBEAT_RETRY_DELAY_MS);
+        }
+
         function handleHeartbeatError(err) {
           if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
             loseRemoteControl(`Control returned to the host. ${err.message}`);
             return;
           }
-          setStatus(`Connection interrupted. Retrying before lease timeout. ${err.message}`, true);
+          scheduleTransientConnectionNotice("heartbeat");
+          scheduleHeartbeatRetry();
         }
 
         function startHeartbeat(timeoutSeconds) {
           stopHeartbeat();
-          heartbeatTimeoutMs = Math.max(5000, Math.floor(timeoutSeconds * 1000));
+          heartbeatTimeoutMs = Math.max(
+            HEARTBEAT_INTERVAL_MAX_MS,
+            Math.floor(timeoutSeconds * 1000)
+          );
           lastHeartbeatOkAt = Date.now();
-          const intervalMs = Math.max(1000, Math.floor(timeoutSeconds * 333));
+          const intervalMs = Math.min(
+            HEARTBEAT_INTERVAL_MAX_MS,
+            Math.max(HEARTBEAT_INTERVAL_MIN_MS, Math.floor(heartbeatTimeoutMs / 3))
+          );
           heartbeatTimer = setInterval(() => {
-            if (heartbeatTimedOut()) {
-              loseRemoteControl("Control returned to the host. Heartbeat timed out.");
-              return;
-            }
             heartbeat().catch((err) => {
               handleHeartbeatError(err);
             });
@@ -2445,12 +2534,10 @@
           if (outputReconnectTimer) return;
           const delayMs = outputReconnectDelayMs(outputReconnectAttempt);
           outputReconnectAttempt += 1;
-          const delayLabel = delayMs < 1000 ? "shortly" : `in ${Math.ceil(delayMs / 1000)}s`;
-          setStatus(`Output stream disconnected. Reconnecting ${delayLabel}...`, true);
+          scheduleTransientConnectionNotice("output");
           outputReconnectTimer = setTimeout(() => {
             outputReconnectTimer = null;
             if (leaseId !== outputLeaseId || activeTerminalId !== terminalId) return;
-            setStatus("Reconnecting output stream...");
             openOutput(terminalId, { reconnect: true });
           }, delayMs);
         }
@@ -2470,20 +2557,23 @@
             stopResizeFlush();
           }
           applyTerminalAppearance(terminalInfo && terminalInfo.appearance);
-          term.reset();
+          if (!reconnecting) term.reset();
           updateTerminalControls();
           lastResizeKey = "";
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}`;
           const outputSocket = new WebSocket(url);
           let outputTerminalMissing = false;
+          let resetOnNextPayload = reconnecting;
           socket = outputSocket;
           outputSocket.binaryType = "arraybuffer";
           outputSocket.onopen = () => {
             if (socket === outputSocket && leaseId === outputLeaseId && activeTerminalId === terminalId) {
               outputReconnectAttempt = 0;
-              setStatus(`Connected to ${terminalId}`);
+              clearTransientConnectionNotice("output", `Connected to ${terminalId}`);
+              if (!reconnecting) setStatus(`Connected to ${terminalId}`);
               scheduleTerminalFit(true);
               term.focus();
+              if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
           };
           outputSocket.onmessage = (event) => {
@@ -2500,6 +2590,10 @@
                 return;
               }
             }
+            if (resetOnNextPayload) {
+              term.reset();
+              resetOnNextPayload = false;
+            }
             term.write(payload, scheduleTerminalRefresh);
           };
           outputSocket.onclose = () => {
@@ -2513,7 +2607,7 @@
             }
           };
           outputSocket.onerror = () => {
-            if (socket === outputSocket) setStatus("Output stream error. Waiting to reconnect.", true);
+            if (socket === outputSocket) scheduleTransientConnectionNotice("output");
           };
         }
 
@@ -2532,7 +2626,7 @@
             leaseId = status.leaseId;
             ensureTerminal();
             setConnected(true);
-            startHeartbeat(status.heartbeatTimeoutSeconds || 15);
+            startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
             await loadNavigation();
             setNavigationOpen(false);
           } catch (err) {
@@ -2666,6 +2760,7 @@
           stopHeartbeat();
           stopInputFlush();
           stopResizeFlush();
+          resetTransientConnectionNotice();
           leaseId = null;
           activeTerminalId = null;
           setConnected(false);

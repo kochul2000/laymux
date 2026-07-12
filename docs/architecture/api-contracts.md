@@ -52,7 +52,7 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "allowedOrigins": [],              // 비어 있으면 Origin 필터 없음, 값이 있으면 Origin 일치 검사
     "allowedIps": ["127.0.0.1/32", "::1/128"],
     "authToken": "",                   // enabled=true일 때 필수
-    "heartbeatTimeoutSeconds": 15,      // 최소 5초로 clamp
+    "heartbeatTimeoutSeconds": 45,      // 기본 45초, 최소 30초로 clamp
     "autoMobileModeMinWidth": 720,      // 앱 창 폭이 이 값 이하이면 Remote Access 모달 자동 표시. 0 = 비활성
     "preferredHost": "",               // 복사 URL 기본 호스트. 빈 값 = 자동
     "customHosts": [],                  // 감지 후보 외에 URL host select 에 표시할 수동 호스트
@@ -617,7 +617,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/v1/session/heartbeat` | POST | lease heartbeat 갱신 |
 | `/remote/v1/session/release` | POST | remote가 lease 반납 |
 
-`claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. PC reclaim은 현재 lease를 해제하고 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다.
+`claim` 응답의 `leaseId`가 이후 제어 요청의 권한이다. PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease를 해제할 수 있다. PC reclaim은 현재 lease를 해제하고 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Heartbeat timeout이 지나면 다음 status/control 검사에서 lease는 만료된다. 짧은 transport 단절을 흡수하기 위해 timeout 기본값은 45초이고 30초 미만의 설정도 런타임에서는 30초로 clamp한다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md)). 이 자동 유예와 무관하게 PC의 명시적 reclaim은 즉시 적용된다.
 
 ### 13.3 Navigation Metadata
 
@@ -670,7 +670,7 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 
 `write`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다. 이는 인증된 다른 remote peer가 active controller를 우회해 입력을 주입하지 못하게 하는 서버 측 게이트다. Cloud tunnel에서 이 출력 WebSocket을 M5 stream으로 변환할 때 desktop은 같은 `srv-*` stream id로 `stream.open{kind:"websocket.accept"}` 를 먼저 보내고, 그 다음 ring buffer snapshot과 delta를 `stream.data` frame으로 보낸다.
 
-Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취급한다. Heartbeat가 `401`/`403`/`409`처럼 권한·lease 상실을 명시하면 즉시 local control로 돌려주지만, 일시적 fetch 실패나 pending 상태로 멈춘 heartbeat request는 `heartbeatTimeoutSeconds`가 지날 때까지 재시도하고 timeout 시 abort/lease 상실 처리한다. Output WebSocket close/error는 곧바로 lease를 반납하지 않고, heartbeat가 active lease를 유지하는 동안 같은 terminal output stream을 지수 backoff로 다시 연다. 재연결 시 서버가 보내는 ring buffer tail을 중복 append하지 않도록 remote xterm surface를 reset한 뒤 다시 붙는다.
+Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취급한다. Heartbeat가 `401`/`403`/`409`처럼 권한·lease 상실을 명시하면 즉시 local control로 돌려주지만, 일시적 fetch 실패는 `heartbeatTimeoutSeconds`가 지날 때까지 재시도한다. Heartbeat는 최대 5초마다 보내고 실패 시 1초 뒤 빠르게 재시도하며, 개별 request는 최대 4초에 abort하므로 pending request 하나가 lease 유예 전체를 소진하지 않는다. Output WebSocket close/error는 곧바로 lease를 반납하지 않고, heartbeat가 active lease를 유지하는 동안 같은 terminal output stream을 지수 backoff로 다시 연다. 두 경로의 일시 오류 표시는 2초간 보류해 그 안에 복구되면 기존 연결 문구와 terminal surface를 그대로 유지한다. Output 재접속 중에도 기존 surface를 보존하고, 서버가 보내는 첫 ring buffer snapshot payload를 적용하기 직전에만 reset하여 tail 중복을 막는다. 서버가 기존 lease 상실을 확정한 뒤에는 새 lease를 자동 claim하지 않는다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md)).
 
 ---
 

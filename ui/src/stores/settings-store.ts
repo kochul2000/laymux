@@ -487,7 +487,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   allowedOrigins: [],
   allowedIps: ["127.0.0.1/32", "::1/128"],
   authToken: "",
-  heartbeatTimeoutSeconds: 15,
+  heartbeatTimeoutSeconds: 45,
   autoMobileModeMinWidth: 720,
   preferredHost: "",
   customHosts: [],

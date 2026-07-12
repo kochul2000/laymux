@@ -886,11 +886,12 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.customHosts).toEqual(["devbox.tailnet.ts.net"]);
   });
 
-  it("loadFromSettings fills missing remote automatic mobile mode width with default", () => {
+  it("loadFromSettings fills missing remote resilience and mobile defaults", () => {
     useSettingsStore.getState().loadFromSettings({
       remote: { enabled: true, authToken: "secret" } as any,
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
+    expect(useSettingsStore.getState().remote.heartbeatTimeoutSeconds).toBe(45);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });

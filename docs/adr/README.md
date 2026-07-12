@@ -44,6 +44,7 @@ ADR 이 필요한 대표 기준:
 | [0024](0024-cloud-native-wss-tunnel.md) | Cloud Native WSS Tunnel | Accepted |
 | [0025](0025-dev-terminal-viewport-automation.md) | Dev terminal viewport diagnostics | Accepted |
 | [0026](0026-conpty-width-resize-repaint-filter.md) | ConPTY width resize repaint filter | Accepted |
+| [0027](0027-remote-connection-graceful-recovery.md) | Remote 연결 유예와 무표시 자동 복구 | Accepted |
 
 ## 새 ADR 추가
 

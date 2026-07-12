@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constants::DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS;
+
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -1024,7 +1026,7 @@ fn default_remote_allowed_ips() -> Vec<String> {
 }
 
 fn default_remote_heartbeat_timeout_seconds() -> u64 {
-    15
+    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS
 }
 
 fn default_remote_auto_mobile_mode_min_width() -> u32 {

@@ -28,6 +28,9 @@ use tower::ServiceExt;
 
 use super::{keyring_store, CloudStatus};
 use crate::automation_server::ServerState;
+use crate::constants::{
+    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
+};
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{self, TunnelAuthorized};
@@ -1372,10 +1375,17 @@ fn terminal_output_delta(
 }
 
 fn remote_output_timeout_seconds(app_state: &AppState) -> u64 {
-    let settings = remote_server::get_remote_control_status(app_state)
-        .map(|status| status.heartbeat_timeout_seconds)
-        .unwrap_or(15);
-    settings.max(5)
+    normalize_remote_output_timeout_seconds(
+        remote_server::get_remote_control_status(app_state)
+            .ok()
+            .map(|status| status.heartbeat_timeout_seconds),
+    )
+}
+
+fn normalize_remote_output_timeout_seconds(timeout_seconds: Option<u64>) -> u64 {
+    timeout_seconds
+        .unwrap_or(DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS)
+        .max(MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS)
 }
 
 async fn send_stream_data(
@@ -1613,6 +1623,13 @@ mod tests {
         settings.remote.enabled = enabled;
         settings.remote.auth_token = auth_token.into();
         save_settings(&settings).unwrap();
+    }
+
+    #[test]
+    fn remote_output_timeout_uses_shared_reconnect_policy() {
+        assert_eq!(normalize_remote_output_timeout_seconds(None), 45);
+        assert_eq!(normalize_remote_output_timeout_seconds(Some(5)), 30);
+        assert_eq!(normalize_remote_output_timeout_seconds(Some(60)), 60);
     }
 
     fn state_with_terminal_output_and_lease(lease_id: &str) -> Arc<AppState> {
