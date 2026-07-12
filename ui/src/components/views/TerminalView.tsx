@@ -1948,6 +1948,16 @@ export function TerminalView({
         },
       );
     };
+    const rebuildTerminalRenderer = () => {
+      try {
+        (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
+      } catch {
+        /* older xterm builds / mocks may lack this method */
+      }
+      terminal.refresh(0, terminal.rows - 1);
+      bindHelperTextareaEvents();
+      scheduleOverlayCaretUpdate();
+    };
     const performTerminalFit = (request: TerminalFitRequest) => {
       const normalBuffer = terminal.buffer.normal;
       const hadNormalScrollback = terminal.buffer.active === normalBuffer && normalBuffer.baseY > 0;
@@ -1968,16 +1978,12 @@ export function TerminalView({
       }
 
       if (request.rebuildAtlas || reflowDirtyRef.current) {
-        try {
-          (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
-        } catch {
-          /* older xterm builds / mocks may lack this method */
-        }
-        terminal.refresh(0, terminal.rows - 1);
+        rebuildTerminalRenderer();
         reflowDirtyRef.current = false;
+      } else {
+        bindHelperTextareaEvents();
+        scheduleOverlayCaretUpdate();
       }
-      bindHelperTextareaEvents();
-      scheduleOverlayCaretUpdate();
     };
     const flushDeferredTerminalFit = () => {
       if (
@@ -2711,7 +2717,24 @@ export function TerminalView({
             clearTimeout(resizeFitTimer);
             resizeFitTimer = undefined;
           }
-          requestGuardedTerminalFit({ rebuildAtlas: true });
+          const proposedDimensions = fitAddon.proposeDimensions();
+          const terminalGridChanged =
+            !proposedDimensions ||
+            proposedDimensions.cols !== terminal.cols ||
+            proposedDimensions.rows !== terminal.rows;
+          if (
+            recoveringFromHidden &&
+            !consumeDirty &&
+            !terminalGridChanged &&
+            !remoteReturnResizeDirtyRef.current
+          ) {
+            rebuildTerminalRenderer();
+          } else {
+            // Remove the stale hidden canvas immediately, but keep the guarded
+            // fit: a late ConPTY repaint can still target the previous grid.
+            if (recoveringFromHidden) rebuildTerminalRenderer();
+            requestGuardedTerminalFit({ rebuildAtlas: true });
+          }
         } else {
           // Plain container-size change (e.g. dragging a pane divider): debounce
           // so xterm reflow + the PTY resize happen ONCE after the drag settles,

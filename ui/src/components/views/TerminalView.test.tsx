@@ -158,9 +158,11 @@ vi.mock("@xterm/xterm", () => ({
 }));
 
 const mockFit = vi.fn();
+const mockProposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class MockFitAddon {
     fit = mockFit;
+    proposeDimensions = mockProposeDimensions;
     dispose = vi.fn();
   },
 }));
@@ -297,6 +299,7 @@ describe("TerminalView", () => {
     });
     _resetWebglStagger();
     vi.clearAllMocks();
+    mockProposeDimensions.mockReturnValue({ cols: 80, rows: 24 });
   });
 
   it("renders terminal container", () => {
@@ -3616,6 +3619,9 @@ describe("TerminalView", () => {
     };
     const observers: Observer[] = [];
     const originalResizeObserver = globalThis.ResizeObserver;
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     globalThis.ResizeObserver = class {
       private obs: Observer;
       constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
@@ -3653,6 +3659,7 @@ describe("TerminalView", () => {
       mockClearTextureAtlas.mockClear();
       mockRefresh.mockClear();
       mockFit.mockClear();
+      mockResizeTerminal.mockClear();
 
       // Find the observer that belongs to the TerminalView container (the
       // first — there is only one resizeObserver in that useEffect).
@@ -3672,8 +3679,9 @@ describe("TerminalView", () => {
       expect(mockClearTextureAtlas).not.toHaveBeenCalled();
 
       // Workspace switched back: container regains real dimensions. On this
-      // transition the fix must re-fit AND rebuild the atlas, otherwise
-      // every glyph renders from stale atlas coordinates (issue #232).
+      // Same-size workspace return must rebuild only the renderer. Re-fitting
+      // mutates the xterm buffer and waits on the ConPTY quiet gate, exposing
+      // the stale canvas for up to the bounded resize delay.
       act(() => {
         obs.callback(
           [
@@ -3687,10 +3695,54 @@ describe("TerminalView", () => {
       });
 
       await vi.waitFor(() => {
-        expect(mockFit).toHaveBeenCalled();
         expect(mockClearTextureAtlas).toHaveBeenCalled();
         expect(mockRefresh).toHaveBeenCalled();
       });
+      expect(mockFit).not.toHaveBeenCalled();
+      expect(mockResizeTerminal).not.toHaveBeenCalled();
+
+      // A hidden terminal can retain a stale xterm grid even when the outer
+      // container returns to the same pixel size. Repaint immediately, but
+      // preserve the ConPTY quiet window before mutating the xterm buffer.
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      mockFit.mockClear();
+      mockClearTextureAtlas.mockClear();
+      mockRefresh.mockClear();
+      mockProposeDimensions.mockReturnValue({ cols: 100, rows: 30 });
+      vi.useFakeTimers();
+      act(() => {
+        onOutput?.(new TextEncoder().encode("recent output"));
+        obs.callback(
+          [{ target, contentRect: { width: 0, height: 0 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+        obs.callback(
+          [
+            {
+              target,
+              contentRect: { width: 800, height: 600 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+      expect(mockFit).not.toHaveBeenCalled();
+      expect(mockClearTextureAtlas).toHaveBeenCalledTimes(1);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(119);
+      });
+      expect(mockFit).not.toHaveBeenCalled();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(mockFit).toHaveBeenCalledTimes(1);
+      expect(mockClearTextureAtlas).toHaveBeenCalledTimes(2);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+      mockProposeDimensions.mockReturnValue({ cols: 80, rows: 24 });
 
       // Subsequent resizes while still visible must NOT keep clearing the
       // atlas — that would be wasteful. Reset counters and fire another
@@ -3716,6 +3768,8 @@ describe("TerminalView", () => {
       });
       expect(mockClearTextureAtlas).not.toHaveBeenCalled();
     } finally {
+      vi.useRealTimers();
+      userAgent.mockRestore();
       globalThis.ResizeObserver = originalResizeObserver;
     }
   });
@@ -4766,6 +4820,9 @@ describe("TerminalView", () => {
     };
     const observers: Observer[] = [];
     const originalResizeObserver = globalThis.ResizeObserver;
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     globalThis.ResizeObserver = class {
       private obs: Observer;
       constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
@@ -4802,6 +4859,9 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
       const obs = observers[0];
       const target = obs.target as Element;
 
@@ -4823,8 +4883,11 @@ describe("TerminalView", () => {
       mockClearTextureAtlas.mockClear();
       mockRefresh.mockClear();
 
-      // Show again — must rebuild atlas (and only once).
+      // Show again: clear the stale canvas immediately, then rebuild once more
+      // after the guarded fit applies the deferred font geometry.
+      vi.useFakeTimers();
       act(() => {
+        onOutput?.(new TextEncoder().encode("recent output"));
         obs.callback(
           [
             {
@@ -4835,14 +4898,19 @@ describe("TerminalView", () => {
           {} as ResizeObserver,
         );
       });
-
-      await vi.waitFor(() => {
-        expect(mockFit).toHaveBeenCalled();
-        expect(mockClearTextureAtlas).toHaveBeenCalled();
-        expect(mockRefresh).toHaveBeenCalled();
+      expect(mockFit).not.toHaveBeenCalled();
+      expect(mockClearTextureAtlas).toHaveBeenCalledTimes(1);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(120);
       });
-      expect(mockClearTextureAtlas.mock.calls.length).toBe(1);
+      expect(mockFit).toHaveBeenCalledTimes(1);
+      expect(mockClearTextureAtlas).toHaveBeenCalledTimes(2);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
     } finally {
+      vi.useRealTimers();
+      userAgent.mockRestore();
       globalThis.ResizeObserver = originalResizeObserver;
     }
   });
