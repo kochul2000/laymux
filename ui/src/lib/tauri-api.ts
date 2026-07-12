@@ -688,6 +688,16 @@ export async function getGitBranch(workingDir: string): Promise<string | null> {
   return invoke("get_git_branch", { workingDir });
 }
 
+/**
+ * Resolve a path's git `origin` remote to its GitHub base URL
+ * (`https://github.com/{owner}/{repo}`), or null when it is not a
+ * GitHub-backed repo. Used to make plain-text `#123` references clickable
+ * (issue #439).
+ */
+export async function resolveGitRemote(path: string): Promise<string | null> {
+  return invoke("resolve_git_remote", { path });
+}
+
 /** Listen for open-file events from the backend. */
 export function onOpenFile(
   callback: (data: { path: string; terminalId: string }) => void,

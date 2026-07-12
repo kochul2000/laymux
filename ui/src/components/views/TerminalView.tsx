@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
+import { createPrLinkProvider } from "@/lib/pr-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
 import {
@@ -34,6 +35,7 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  resolveGitRemote,
   statPath,
   handleLxMessage,
   markClaudeTerminal,
@@ -524,6 +526,11 @@ export function TerminalView({
   const cwd = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.cwd);
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
+  // Issue #439: pane 의 GitHub 베이스 URL(https://github.com/{owner}/{repo}).
+  // cwd 변경 시 백엔드(resolve_git_remote)로 비동기 해석해 ref 에 저장한다.
+  // pr-link-provider 는 provideLinks 안에서 이 ref 를 **동기로만** 읽는다
+  // (invoke 는 async 이므로 provider 안에서 호출 금지).
+  const repoBaseRef = useRef<string | null>(null);
   // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
   // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
   const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkController> | null>(null);
@@ -679,6 +686,23 @@ export function TerminalView({
         terminal,
         (uri) => openExternal(uri).catch(() => {}),
         () => useSettingsStore.getState().paste.linkJoin,
+      ),
+    );
+
+    // Issue #439: bare `#123` issue/PR references. Claude Code prints these as
+    // plain text (Codex wraps them in OSC 8, so xterm makes those clickable
+    // natively). Detect the pattern and open the pane's GitHub repo at
+    // `/issues/{n}` — GitHub redirects issues↔pulls by number, so both work.
+    // Always registered; produces no links when the pane is not a GitHub repo
+    // (repoBaseRef is null). Same UX as Codex, no separate setting toggle.
+    terminal.registerLinkProvider(
+      createPrLinkProvider(
+        terminal,
+        (n) => {
+          const base = repoBaseRef.current;
+          if (base) openExternal(`${base}/issues/${n}`).catch(() => {});
+        },
+        () => repoBaseRef.current,
       ),
     );
 
@@ -1675,6 +1699,7 @@ export function TerminalView({
         clickedLineNumber,
         col,
         enableIndentedJoin: useSettingsStore.getState().paste.linkJoin,
+        repoBase: repoBaseRef.current, // #439: 평문 #123 → issues URL
       });
       if (!uri) return;
 
@@ -2848,6 +2873,27 @@ export function TerminalView({
   useEffect(() => {
     setTerminalCwdReceive(instanceId, cwdReceive).catch(() => {});
   }, [instanceId, cwdReceive]);
+
+  // Issue #439: cwd 가 바뀌면 GitHub 베이스 URL 을 다시 해석해 ref 에 저장한다.
+  // pr-link-provider 가 `#123` 링크를 만들 때 이 값을 동기로 읽는다. cwd 가
+  // 없거나 GitHub repo 가 아니면 null → 링크가 생성되지 않는다.
+  useEffect(() => {
+    if (!cwd) {
+      repoBaseRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    resolveGitRemote(cwd)
+      .then((base) => {
+        if (!cancelled) repoBaseRef.current = base;
+      })
+      .catch(() => {
+        if (!cancelled) repoBaseRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
 
   // Focus/blur terminal when pane focus state changes (only if terminal is opened)
   useEffect(() => {

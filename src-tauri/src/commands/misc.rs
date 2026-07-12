@@ -446,6 +446,20 @@ pub fn get_git_branch(working_dir: String) -> Option<String> {
     crate::git_watcher::read_git_branch(&git_dir)
 }
 
+/// Resolve a pane's git `origin` remote to its GitHub base URL
+/// (`https://github.com/{owner}/{repo}`), or None when the path is not a
+/// GitHub-backed repo. Used by the frontend to make plain-text `#123`
+/// issue/PR references clickable (issue #439).
+#[tauri::command]
+pub fn resolve_git_remote(path: String) -> Option<String> {
+    let p = std::path::Path::new(&path);
+    let git_dir = crate::git_watcher::find_git_dir(p)?;
+    let config_path = crate::git_watcher::find_git_config(&git_dir)?;
+    let config = std::fs::read_to_string(config_path).ok()?;
+    let url = crate::git_watcher::parse_remote_origin_url(&config)?;
+    crate::git_watcher::github_base_from_remote_url(&url)
+}
+
 #[tauri::command]
 pub fn send_os_notification(title: String, body: String) -> Result<(), String> {
     // OS notification via the system's built-in mechanism.

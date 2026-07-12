@@ -107,6 +107,51 @@ describe("resolveLinkAtCell", () => {
     });
     expect(url).toBeNull();
   });
+
+  // Issue #439: 평문 `#123` 을 클릭하면 repoBase 가 있을 때 issues URL 로 연다.
+  it("repoBase 가 있으면 클릭한 #번호를 issues URL 로 변환한다", () => {
+    const url = resolveLinkAtCell({
+      lines: makeLines(["fix done, see #123 thanks"]),
+      clickedLineNumber: 1,
+      col: 16, // '1' 위 (0-based 15)
+      enableIndentedJoin: true,
+      repoBase: "https://github.com/owner/repo",
+    });
+    expect(url).toBe("https://github.com/owner/repo/issues/123");
+  });
+
+  it("repoBase 가 없으면 #번호를 무시한다", () => {
+    const url = resolveLinkAtCell({
+      lines: makeLines(["see #123"]),
+      clickedLineNumber: 1,
+      col: 6,
+      enableIndentedJoin: true,
+    });
+    expect(url).toBeNull();
+  });
+
+  it("#번호 바깥을 클릭하면 null (repoBase 있어도)", () => {
+    const url = resolveLinkAtCell({
+      lines: makeLines(["see #123 now"]),
+      clickedLineNumber: 1,
+      col: 2, // 's' 위 — 토큰 바깥
+      enableIndentedJoin: true,
+      repoBase: "https://github.com/owner/repo",
+    });
+    expect(url).toBeNull();
+  });
+
+  it("OSC 8 은 #번호보다 우선한다", () => {
+    const url = resolveLinkAtCell({
+      oscLinkUri: "https://github.com/owner/repo/pull/123",
+      lines: makeLines(["#123"]),
+      clickedLineNumber: 1,
+      col: 2,
+      enableIndentedJoin: true,
+      repoBase: "https://github.com/owner/repo",
+    });
+    expect(url).toBe("https://github.com/owner/repo/pull/123");
+  });
 });
 
 describe("isModifierLinkClick", () => {
