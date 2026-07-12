@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { formatPaneIdentifier } from "@/lib/pane-numbers";
+import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 
 /**
  * Small badge showing a pane's spatial reading-order number (issue #256).
@@ -30,6 +31,10 @@ export function PaneNumberBadge({
 }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Effective keybinding for the same "copy identifier" action, so the tooltip
+  // advertises the keyboard path too. The hook subscribes to the settings store,
+  // so the tooltip refreshes when the user rebinds the action (PR #331 review).
+  const copyKeys = useResolvedKeybinding("pane.copyIdentifier");
 
   const handleCopy = useCallback(async () => {
     // `formatPaneIdentifier` throws on un-normalized (whitespace) names. There's no
@@ -105,7 +110,11 @@ export function PaneNumberBadge({
       // Explicit name: during the copied feedback the child becomes an aria-hidden ✓, which
       // would otherwise leave the button with no accessible name for COPIED_FEEDBACK_MS.
       aria-label={`Copy pane ${number} identifier`}
-      title={copied ? "Pane identifier copied" : `Click to copy pane ${number} identifier`}
+      title={
+        copied
+          ? "Pane identifier copied"
+          : `Click to copy pane ${number} identifier${copyKeys ? ` (${copyKeys})` : ""}`
+      }
       onClick={(e) => {
         // Badge lives inside focusable/clickable bars; don't bubble into pane focus/select.
         e.stopPropagation();
