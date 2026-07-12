@@ -41,6 +41,14 @@ describe("PaneNumberBadge", () => {
     expect(mockClipboardWriteText).toHaveBeenCalledWith("lx:pane:Backend:3");
   });
 
+  it("advertises the copy-identifier keyboard shortcut in the tooltip", () => {
+    // Discoverability: the badge tooltip surfaces the equivalent keybinding so users
+    // learn the hands-off path (default Ctrl+Alt+C for pane.copyIdentifier).
+    render(<PaneNumberBadge number={3} workspaceId="ws-a1b2c3d4" workspaceName="Backend" />);
+    const badge = screen.getByTestId("pane-number-badge");
+    expect(badge).toHaveAttribute("title", "Click to copy pane 3 identifier (Ctrl+Alt+C)");
+  });
+
   it("shows a copied checkmark after a successful copy", async () => {
     render(<PaneNumberBadge number={1} workspaceId="ws-x" workspaceName="Default" />);
     fireEvent.click(screen.getByTestId("pane-number-badge"));
