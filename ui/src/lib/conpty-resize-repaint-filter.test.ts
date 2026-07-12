@@ -38,6 +38,20 @@ describe("ConptyResizeRepaintFilter", () => {
     expect(filter.isArmed).toBe(false);
   });
 
+  it("removes a split narrow repaint with an intervening ConPTY window-size report", () => {
+    const start = "\x1b[?25l\x1b[8;57;8t\x1b[H";
+    const frame = `${start}narrow screen repaint\x1b[57;7H\x1b[?25hafter`;
+
+    for (let split = 1; split < start.length; split++) {
+      const filter = new ConptyResizeRepaintFilter(500);
+      filter.arm(1000);
+
+      expect(decoder.decode(filter.filter(bytes(frame.slice(0, split)), 1050))).toBe("");
+      expect(decoder.decode(filter.filter(bytes(frame.slice(split)), 1060))).toBe("after");
+      expect(filter.isArmed).toBe(false);
+    }
+  });
+
   it("removes every outstanding repaint when rearmed before the first frame starts", () => {
     const filter = new ConptyResizeRepaintFilter(500);
     filter.arm(1000);
@@ -68,6 +82,17 @@ describe("ConptyResizeRepaintFilter", () => {
         ),
       ),
     ).toBe("betweenafter");
+    expect(filter.isArmed).toBe(false);
+  });
+
+  it("restores the older deadline when a later arm is cancelled", () => {
+    const filter = new ConptyResizeRepaintFilter(500);
+    filter.arm(1000);
+    const laterArm = filter.arm(1400);
+
+    expect(decoder.decode(filter.cancelArm(laterArm))).toBe("");
+    const redraw = "\x1b[?25l\x1b[Happlication redraw\x1b[?25h";
+    expect(decoder.decode(filter.filter(bytes(redraw), 1600))).toBe(redraw);
     expect(filter.isArmed).toBe(false);
   });
 

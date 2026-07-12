@@ -126,6 +126,12 @@ const RESIZE_OUTPUT_MAX_WAIT_MS = 500;
 const CONPTY_RESIZE_REPAINT_WINDOW_MS = 500;
 
 const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
+const REMOTE_RETURN_RESIZE_TIMEOUT_MS = 1000;
+const REMOTE_RETURN_RESIZE_RETRY_MS = 100;
+
+/** Keep retry chunks comfortably below xterm's 50 MB discard watermark. */
+const TERMINAL_WRITE_CHUNK_SIZE = 1024 * 1024;
+const TERMINAL_WRITE_RETRY_MS = 16;
 
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
@@ -1719,6 +1725,7 @@ export function TerminalView({
     let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
     let normalScrollbackBeforeFit: boolean | undefined;
+    let suppressBackendResizeDuringFit = false;
     const clearConptyRepaintExpiryTimer = () => {
       if (conptyRepaintExpiryTimer !== undefined) {
         clearTimeout(conptyRepaintExpiryTimer);
@@ -1739,34 +1746,38 @@ export function TerminalView({
       );
     };
     const armConptyRepaintFilter = () => {
-      conptyResizeRepaintFilter.arm();
+      const token = conptyResizeRepaintFilter.arm();
       scheduleConptyRepaintExpiry();
+      return token;
+    };
+    const cancelConptyRepaintArm = (token: number) => {
+      const pending = conptyResizeRepaintFilter.cancelArm(token);
+      if (pending.length > 0) writeTerminalDisplayData?.(pending);
+      scheduleConptyRepaintExpiry();
+    };
+    const resizeBackendTerminal = (cols: number, rows: number, protectConptyRepaint: boolean) => {
+      const repaintArm = protectConptyRepaint ? armConptyRepaintFilter() : undefined;
+      return resizeTerminal(instanceId, cols, rows).catch((error) => {
+        if (repaintArm !== undefined) cancelConptyRepaintArm(repaintArm);
+        throw error;
+      });
     };
     let previousResizeCols = terminal.cols;
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
-      const widened = cols > previousResizeCols;
+      const widthChanged = cols !== previousResizeCols;
       previousResizeCols = cols;
       if (!localTerminalControlAllowed()) return;
+      if (suppressBackendResizeDuringFit) return;
 
       const normalBuffer = terminal.buffer.normal;
       const hadNormalScrollback = normalScrollbackBeforeFit ?? normalBuffer.baseY > 0;
-      let repaintArmed = false;
-      if (
-        widened &&
+      const protectConptyRepaint =
+        widthChanged &&
         isWindowsHost &&
         terminal.buffer.active === normalBuffer &&
-        hadNormalScrollback
-      ) {
-        repaintArmed = true;
-        armConptyRepaintFilter();
-      }
-      resizeTerminal(instanceId, cols, rows).catch(() => {
-        if (!repaintArmed) return;
-        const pending = conptyResizeRepaintFilter.cancelArm();
-        if (pending.length > 0) writeTerminalDisplayData?.(pending);
-        scheduleConptyRepaintExpiry();
-      });
+        hadNormalScrollback;
+      resizeBackendTerminal(cols, rows, protectConptyRepaint).catch(() => {});
     });
 
     // Track terminal title changes (OSC 0/2) for interactive app detection.
@@ -1822,30 +1833,138 @@ export function TerminalView({
     // Listen for terminal output from backend PTY
     let cancelled = false;
     let pendingTerminalWrites = 0;
+    type DeferredTerminalWrite = {
+      data: string | Uint8Array;
+      onParsed?: () => void;
+      warned: boolean;
+    };
+    const deferredTerminalWrites: DeferredTerminalWrite[] = [];
+    let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
     let deferredResizeRequestedAt = 0;
     let deferredResizeQuietTimer: ReturnType<typeof setTimeout> | undefined;
+    let remoteResizeSyncInFlight = false;
+    let remoteResizeSyncAttempt = 0;
+    let remoteResizeSyncTargetRevision = 0;
+    let remoteResizeSyncTarget:
+      | {
+          revision: number;
+          cols: number;
+          rows: number;
+          protectConptyRepaint: boolean;
+        }
+      | undefined;
+    let remoteResizeSyncTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    let remoteResizeSyncRetryTimer: ReturnType<typeof setTimeout> | undefined;
     const clearDeferredResizeQuietTimer = () => {
       if (deferredResizeQuietTimer !== undefined) {
         clearTimeout(deferredResizeQuietTimer);
         deferredResizeQuietTimer = undefined;
       }
     };
+    const clearRemoteResizeSyncTimeout = () => {
+      if (remoteResizeSyncTimeoutTimer !== undefined) {
+        clearTimeout(remoteResizeSyncTimeoutTimer);
+        remoteResizeSyncTimeoutTimer = undefined;
+      }
+    };
+    const clearRemoteResizeSyncRetry = () => {
+      if (remoteResizeSyncRetryTimer !== undefined) {
+        clearTimeout(remoteResizeSyncRetryTimer);
+        remoteResizeSyncRetryTimer = undefined;
+      }
+    };
+    const scheduleRemoteResizeSyncRetry = () => {
+      if (cancelled || remoteResizeSyncRetryTimer !== undefined) return;
+      remoteResizeSyncRetryTimer = setTimeout(() => {
+        remoteResizeSyncRetryTimer = undefined;
+        if (cancelled || !remoteReturnResizeDirtyRef.current) return;
+        if (!localTerminalControlAllowed()) return;
+        guardedTerminalFitRef.current?.({ syncBackendResize: true });
+      }, REMOTE_RETURN_RESIZE_RETRY_MS);
+    };
+    const startRemoteResizeSync = (protectConptyRepaint: boolean) => {
+      remoteReturnResizeDirtyRef.current = true;
+      const cols = terminal.cols;
+      const rows = terminal.rows;
+      if (
+        !remoteResizeSyncTarget ||
+        remoteResizeSyncTarget.cols !== cols ||
+        remoteResizeSyncTarget.rows !== rows ||
+        remoteResizeSyncTarget.protectConptyRepaint !== protectConptyRepaint
+      ) {
+        remoteResizeSyncTarget = {
+          revision: ++remoteResizeSyncTargetRevision,
+          cols,
+          rows,
+          protectConptyRepaint,
+        };
+      }
+      if (
+        cancelled ||
+        remoteResizeSyncInFlight ||
+        !localTerminalControlAllowed() ||
+        cols <= 0 ||
+        rows <= 0
+      ) {
+        return;
+      }
+
+      const target = remoteResizeSyncTarget;
+      remoteResizeSyncInFlight = true;
+      const attempt = ++remoteResizeSyncAttempt;
+      const resize = resizeBackendTerminal(target.cols, target.rows, target.protectConptyRepaint);
+      clearRemoteResizeSyncTimeout();
+      remoteResizeSyncTimeoutTimer = setTimeout(() => {
+        if (cancelled || attempt !== remoteResizeSyncAttempt) return;
+        remoteResizeSyncTimeoutTimer = undefined;
+        remoteResizeSyncInFlight = false;
+        scheduleRemoteResizeSyncRetry();
+      }, REMOTE_RETURN_RESIZE_TIMEOUT_MS);
+
+      resize.then(
+        () => {
+          if (cancelled || attempt !== remoteResizeSyncAttempt) return;
+          clearRemoteResizeSyncTimeout();
+          remoteResizeSyncInFlight = false;
+          if (
+            localTerminalControlAllowed() &&
+            remoteResizeSyncTarget?.revision === target.revision
+          ) {
+            remoteReturnResizeDirtyRef.current = false;
+            remoteResizeSyncTarget = undefined;
+            clearRemoteResizeSyncRetry();
+          } else {
+            scheduleRemoteResizeSyncRetry();
+          }
+        },
+        () => {
+          if (cancelled || attempt !== remoteResizeSyncAttempt) return;
+          clearRemoteResizeSyncTimeout();
+          remoteResizeSyncInFlight = false;
+          remoteReturnResizeDirtyRef.current = true;
+          scheduleRemoteResizeSyncRetry();
+        },
+      );
+    };
     const performTerminalFit = (request: TerminalFitRequest) => {
       const normalBuffer = terminal.buffer.normal;
-      normalScrollbackBeforeFit = terminal.buffer.active === normalBuffer && normalBuffer.baseY > 0;
+      const hadNormalScrollback = terminal.buffer.active === normalBuffer && normalBuffer.baseY > 0;
+      const syncBackendResize = request.syncBackendResize || remoteReturnResizeDirtyRef.current;
+      normalScrollbackBeforeFit = hadNormalScrollback;
+      suppressBackendResizeDuringFit = syncBackendResize;
       try {
         fitAddon.fit();
       } finally {
+        suppressBackendResizeDuringFit = false;
         normalScrollbackBeforeFit = undefined;
       }
 
-      if (request.syncBackendResize || remoteReturnResizeDirtyRef.current) {
-        remoteReturnResizeDirtyRef.current = false;
-        if (localTerminalControlAllowed() && terminal.cols > 0 && terminal.rows > 0) {
-          resizeTerminal(instanceId, terminal.cols, terminal.rows).catch(() => {});
-        }
+      if (syncBackendResize) {
+        const protectConptyRepaint =
+          isWindowsHost && terminal.buffer.active === normalBuffer && hadNormalScrollback;
+        startRemoteResizeSync(protectConptyRepaint);
       }
 
       if (request.rebuildAtlas || reflowDirtyRef.current) {
@@ -1861,7 +1980,14 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
     const flushDeferredTerminalFit = () => {
-      if (cancelled || pendingTerminalWrites > 0 || !deferredTerminalFit) return;
+      if (
+        cancelled ||
+        pendingTerminalWrites > 0 ||
+        deferredTerminalWrites.length > 0 ||
+        !deferredTerminalFit
+      ) {
+        return;
+      }
       const now = Date.now();
       const quietFor = now - lastTerminalOutputAt;
       const deferredFor = now - deferredResizeRequestedAt;
@@ -1905,19 +2031,76 @@ export function TerminalView({
       flushDeferredTerminalFit();
     };
     guardedTerminalFitRef.current = requestGuardedTerminalFit;
-    const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
+    const isXtermWriteBackpressure = (error: unknown) =>
+      error instanceof Error && error.message.includes("write data discarded");
+    const clearTerminalWriteRetryTimer = () => {
+      if (terminalWriteRetryTimer !== undefined) {
+        clearTimeout(terminalWriteRetryTimer);
+        terminalWriteRetryTimer = undefined;
+      }
+    };
+    const scheduleDeferredTerminalWriteRetry = () => {
+      if (
+        cancelled ||
+        deferredTerminalWrites.length === 0 ||
+        terminalWriteRetryTimer !== undefined
+      ) {
+        return;
+      }
+      terminalWriteRetryTimer = setTimeout(() => {
+        terminalWriteRetryTimer = undefined;
+        flushDeferredTerminalWrites();
+      }, TERMINAL_WRITE_RETRY_MS);
+    };
+    const tryTerminalWrite = (request: DeferredTerminalWrite) => {
       pendingTerminalWrites += 1;
       try {
-        terminal.write(data, () => {
+        terminal.write(request.data, () => {
           pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-          onParsed?.();
-          flushDeferredTerminalFit();
+          try {
+            request.onParsed?.();
+          } finally {
+            scheduleDeferredTerminalWriteRetry();
+            flushDeferredTerminalFit();
+          }
         });
+        return true;
       } catch (error) {
         pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-        console.warn("[TerminalView] xterm write failed:", error);
-        flushDeferredTerminalFit();
+        if (!request.warned) {
+          request.warned = true;
+          console.warn("[TerminalView] xterm write failed:", error);
+        }
+        return !isXtermWriteBackpressure(error);
       }
+    };
+    function flushDeferredTerminalWrites() {
+      if (cancelled) return;
+      while (deferredTerminalWrites.length > 0) {
+        if (!tryTerminalWrite(deferredTerminalWrites[0])) {
+          scheduleDeferredTerminalWriteRetry();
+          return;
+        }
+        deferredTerminalWrites.shift();
+      }
+      clearTerminalWriteRetryTimer();
+      flushDeferredTerminalFit();
+    }
+    const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
+      const chunks: Array<string | Uint8Array> = [];
+      for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_CHUNK_SIZE) {
+        chunks.push(data.slice(offset, offset + TERMINAL_WRITE_CHUNK_SIZE) as string | Uint8Array);
+      }
+      if (chunks.length === 0) chunks.push(data);
+      const queueWasEmpty = deferredTerminalWrites.length === 0;
+      chunks.forEach((chunk, index) => {
+        deferredTerminalWrites.push({
+          data: chunk,
+          onParsed: index === chunks.length - 1 ? onParsed : undefined,
+          warned: false,
+        });
+      });
+      if (queueWasEmpty) flushDeferredTerminalWrites();
     };
     let unlistenOutput: (() => void) | undefined;
     let inAltScreen = false;
@@ -2562,6 +2745,13 @@ export function TerminalView({
       deferredTerminalFit = undefined;
       deferredResizeRequestedAt = 0;
       clearDeferredResizeQuietTimer();
+      deferredTerminalWrites.length = 0;
+      clearTerminalWriteRetryTimer();
+      remoteResizeSyncAttempt += 1;
+      remoteResizeSyncInFlight = false;
+      remoteResizeSyncTarget = undefined;
+      clearRemoteResizeSyncTimeout();
+      clearRemoteResizeSyncRetry();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
