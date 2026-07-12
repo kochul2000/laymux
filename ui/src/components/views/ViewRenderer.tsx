@@ -191,7 +191,7 @@ export function ViewRenderer({
       );
     case "TerminalView":
       return (
-        <div data-testid="view-terminal" className="h-full">
+        <div data-testid="view-terminal" className="h-full w-full min-w-0 overflow-hidden">
           <TerminalViewWithSyncCwd
             viewConfig={viewConfig}
             workspaceId={workspaceId}

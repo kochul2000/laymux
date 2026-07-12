@@ -356,7 +356,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 33개 + dev 전용 17개)
+#### Tool 목록 (release 33개 + dev 전용 19개)
 
 **터미널 (8)**:
 
@@ -418,7 +418,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
-**Dev 전용 (17)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
+**Dev 전용 (19)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
 
 | Tool | bridge method | 설명 |
 |------|---------------|------|
@@ -439,6 +439,8 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `simulate_hover` | `grid.simulateHover` | hover UI 검증용 pane hover 상태 시뮬레이션 |
 | `set_edit_mode` | `grid.setEditMode` | grid edit mode 설정 |
 | `set_pane_view` | `panes.setView` | pane view config 직접 변경 |
+| `scroll_terminal` | `terminals.scroll` | live xterm viewport 상대 스크롤. PTY 입력 없이 `cols`/`rows`/`baseY`/`viewportY`/`isAtBottom` 반환 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
+| `dump_terminal_buffer` | `terminals.dumpBuffer` | live xterm의 reflow 완료 line model(`text`, `isWrapped`) 조회. WebGL 화면과 실제 버퍼 손상을 분리 진단 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
 
 #### MCP Resources — 구독형 read-only 상태 (issue #202)
 
@@ -650,7 +652,7 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 
 브라우저 remote의 모바일 터치 스크롤/선택은 surface-local 처리다. Remote HTML은 Pointer Events 기반 gesture layer를 두고 일반 한 손 드래그를 텍스트 선택에 쓰지 않는다. normal buffer이며 mouse tracking mode가 꺼진 shell/log 화면에서는 한 손 세로 스와이프가 xterm scrollback을 움직이고, alternate buffer 또는 mouse tracking mode에서는 한 손 스와이프를 TUI 앱 내부 스크롤 입력으로 전달한다. 움직임 없이 long-press가 성립하면 선택 모드에 들어가고, 이후 드래그 또는 표시된 선택 핸들 이동만 xterm selection을 갱신한다. double tap은 단어 선택, triple tap은 줄 선택으로 처리한다. 두 손가락 세로 스와이프는 현재 surface에서 가능한 스크롤 경로로 라우팅한다. mouse tracking mode에서 선택을 시작하면 합성 이벤트에 force-selection modifier를 실어 TUI로 입력이 전달되지 않게 한다. 선택된 텍스트는 footer의 `Copy` 버튼으로 브라우저 클립보드에 복사하며, 이 동작은 Remote API 계약이나 PTY 전역 상태를 바꾸지 않는다.
 
-`cols/rows`는 surface 로컬 값이 아니라 SIGWINCH로 process에 반영되는 PTY 전역 상태다. 따라서 remote lease가 active인 동안 browser remote의 xterm geometry가 PTY 크기를 결정하고, PC WebView는 로컬 renderer를 유지하되 backend PTY resize를 보내지 않는다. PC가 `reclaim_remote_control`로 제어권을 회수하거나 remote lease가 끝나면 visible `TerminalView`가 자기 xterm의 현재 `cols/rows`를 backend PTY에 명시적으로 다시 보내고 renderer `fit()`/atlas rebuild/`refresh()`를 실행한다. hidden `TerminalView`는 이 복구를 dirty로 보류하고 다시 visible이 되는 순간 소비한다.
+`cols/rows`는 surface 로컬 값이 아니라 SIGWINCH로 process에 반영되는 PTY 전역 상태다. 따라서 remote lease가 active인 동안 browser remote의 xterm geometry가 PTY 크기를 결정하고, PC WebView는 로컬 renderer를 유지하되 backend PTY resize를 보내지 않는다. PC가 `reclaim_remote_control`로 제어권을 회수하거나 remote lease가 끝나면 visible `TerminalView`는 공통 write-drain fit을 실행하면서 그 fit의 일반 `onResize` backend 전송을 억제하고, 최종 `cols/rows`를 ConPTY repaint filter로 보호하는 명시적 resize 하나로 동기화한다. backend resize가 성공해야 pending dirty를 지우며, 거부되거나 1초 안에 완료되지 않으면 최신 geometry revision을 100ms 뒤 재시도한다. renderer atlas rebuild와 `refresh()`는 이 fit에 합쳐진다. hidden `TerminalView`는 복구를 dirty로 보류하고 다시 visible이 되는 순간 같은 경로로 소비한다.
 
 | Endpoint | Method | 용도 |
 |---|---|---|

@@ -40,6 +40,16 @@ export interface TerminalBufferDump {
   lines: TerminalBufferLine[];
 }
 
+export interface TerminalViewportState {
+  cols: number;
+  rows: number;
+  /** Bottom-most scroll offset in the active buffer. */
+  baseY: number;
+  /** Absolute line shown at the top of the viewport. */
+  viewportY: number;
+  isAtBottom: boolean;
+}
+
 type BufferDumpFn = (limit: number) => TerminalBufferDump;
 
 const inspectRegistry = new Map<string, BufferDumpFn>();
@@ -54,4 +64,20 @@ export function unregisterTerminalInspector(paneId: string): void {
 
 export function getTerminalInspector(paneId: string): BufferDumpFn | undefined {
   return inspectRegistry.get(paneId);
+}
+
+type ScrollFn = (lines: number) => TerminalViewportState;
+
+const scrollRegistry = new Map<string, ScrollFn>();
+
+export function registerTerminalScroller(paneId: string, fn: ScrollFn): void {
+  scrollRegistry.set(paneId, fn);
+}
+
+export function unregisterTerminalScroller(paneId: string): void {
+  scrollRegistry.delete(paneId);
+}
+
+export function getTerminalScroller(paneId: string): ScrollFn | undefined {
+  return scrollRegistry.get(paneId);
 }

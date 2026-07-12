@@ -59,6 +59,22 @@ struct TerminalTargetParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ScrollTerminalParam {
+    /// Stable terminal ID whose live xterm viewport should move.
+    terminal_id: String,
+    /// Relative row count. Negative scrolls up; positive scrolls down.
+    lines: i32,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DumpTerminalBufferParam {
+    /// Stable terminal ID whose live xterm buffer should be inspected.
+    terminal_id: String,
+    /// Max trailing rows to return. Zero returns the whole buffer; omitted defaults to 300.
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct WriteTerminalParam {
     /// Stable terminal ID (e.g. "terminal-pane-abc12345"). Preferred — survives
     /// layout changes. Provide either this or `pane_number`; `terminal_id` wins
@@ -567,6 +583,8 @@ const DEV_ONLY_TOOLS: &[&str] = &[
     "simulate_hover",
     "set_edit_mode",
     "set_pane_view",
+    "scroll_terminal",
+    "dump_terminal_buffer",
 ];
 
 // ── MCP Handler ───────────────────────────────────────────────────
@@ -1584,6 +1602,38 @@ impl McpHandler {
             "terminals",
             "setFocus",
             json!({ "id": terminal_id }),
+        )
+        .await
+    }
+
+    /// Dev-only: scroll a live xterm viewport without sending input to its PTY.
+    /// Negative lines move into scrollback; positive lines move toward the bottom.
+    #[tool]
+    async fn scroll_terminal(
+        &self,
+        Parameters(p): Parameters<ScrollTerminalParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "terminals",
+            "scroll",
+            json!({ "id": p.terminal_id, "lines": p.lines }),
+        )
+        .await
+    }
+
+    /// Dev-only: inspect xterm's live, reflowed line model.
+    /// Returns text and `isWrapped` for each row, independent of WebGL rendering.
+    #[tool]
+    async fn dump_terminal_buffer(
+        &self,
+        Parameters(p): Parameters<DumpTerminalBufferParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "query",
+            "terminals",
+            "dumpBuffer",
+            json!({ "id": p.terminal_id, "limit": p.limit.unwrap_or(300) }),
         )
         .await
     }
@@ -3844,6 +3894,36 @@ mod tests {
         let p: ResizePaneParam = serde_json::from_str(json).unwrap();
         assert_eq!(p.dw, Some(0.1));
         assert!(p.dh.is_none());
+    }
+
+    #[test]
+    fn scroll_terminal_param_deserialize() {
+        let json = r#"{"terminal_id":"terminal-pane-1234","lines":-40}"#;
+        let p: ScrollTerminalParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.terminal_id, "terminal-pane-1234");
+        assert_eq!(p.lines, -40);
+    }
+
+    #[test]
+    fn scroll_terminal_is_registered_as_dev_only() {
+        let router = McpHandler::tool_router();
+        assert!(router.has_route("scroll_terminal"));
+        assert!(DEV_ONLY_TOOLS.contains(&"scroll_terminal"));
+    }
+
+    #[test]
+    fn dump_terminal_buffer_param_deserialize() {
+        let json = r#"{"terminal_id":"terminal-pane-1234","limit":120}"#;
+        let p: DumpTerminalBufferParam = serde_json::from_str(json).unwrap();
+        assert_eq!(p.terminal_id, "terminal-pane-1234");
+        assert_eq!(p.limit, Some(120));
+    }
+
+    #[test]
+    fn dump_terminal_buffer_is_registered_as_dev_only() {
+        let router = McpHandler::tool_router();
+        assert!(router.has_route("dump_terminal_buffer"));
+        assert!(DEV_ONLY_TOOLS.contains(&"dump_terminal_buffer"));
     }
 
     #[test]

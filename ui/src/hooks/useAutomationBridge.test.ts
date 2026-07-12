@@ -15,6 +15,10 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import {
+  registerTerminalScroller,
+  unregisterTerminalScroller,
+} from "@/lib/terminal-serialize-registry";
 vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
@@ -442,6 +446,67 @@ describe("handleAutomationRequest", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
     expect(useDockStore.getState().focusedDock).toBeNull();
     expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+  });
+
+  it("scrolls a live terminal viewport via the automation bridge", () => {
+    const activePane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const terminalId = `terminal-${activePane.id}`;
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "WSL",
+      syncGroup: "g",
+      workspaceId: "ws-default",
+    });
+    const scroll = vi.fn().mockReturnValue({
+      cols: 74,
+      baseY: 120,
+      viewportY: 80,
+      rows: 24,
+      isAtBottom: false,
+    });
+    registerTerminalScroller(activePane.id, scroll);
+
+    try {
+      const result = handleAutomationRequest({
+        requestId: "scroll-1",
+        category: "action",
+        target: "terminals",
+        method: "scroll",
+        params: { id: terminalId, lines: -40 },
+      });
+
+      expect(result).toEqual({
+        success: true,
+        data: { cols: 74, baseY: 120, viewportY: 80, rows: 24, isAtBottom: false },
+      });
+      expect(scroll).toHaveBeenCalledWith(-40);
+    } finally {
+      unregisterTerminalScroller(activePane.id);
+    }
+  });
+
+  it("rejects terminal viewport scrolling when no live xterm is registered", () => {
+    const activePane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const terminalId = `terminal-${activePane.id}`;
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "WSL",
+      syncGroup: "g",
+      workspaceId: "ws-default",
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "scroll-2",
+      category: "action",
+      target: "terminals",
+      method: "scroll",
+      params: { id: terminalId, lines: -1 },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no live viewport");
   });
 
   it("removes pane", () => {

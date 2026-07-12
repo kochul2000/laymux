@@ -98,6 +98,18 @@ describe("ViewRenderer", () => {
     expect(terminalViewProps.at(-1)?.syncGroup).toBe("MyGroup");
   });
 
+  it("constrains the terminal wrapper to the pane width", () => {
+    render(
+      <ViewRenderer
+        viewType="TerminalView"
+        viewConfig={{ type: "TerminalView" }}
+        workspaceName="Default"
+      />,
+    );
+
+    expect(screen.getByTestId("view-terminal")).toHaveClass("w-full", "min-w-0", "overflow-hidden");
+  });
+
   it("defaults syncGroup to workspaceId when syncGroup is empty", () => {
     render(
       <ViewRenderer
