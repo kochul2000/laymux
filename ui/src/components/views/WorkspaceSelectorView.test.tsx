@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WorkspaceSelectorView } from "./WorkspaceSelectorView";
@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useGridStore } from "@/stores/grid-store";
 import { getListeningPorts, getTerminalSummaries, markNotificationsRead } from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
@@ -112,6 +113,7 @@ describe("WorkspaceSelectorView", () => {
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useRenameWorkspaceStore.setState({ targetId: null, currentName: "" });
 
@@ -810,6 +812,123 @@ describe("WorkspaceSelectorView", () => {
       expect(rects2[0].getAttribute("data-highlighted")).toBe("false");
       expect(rects2[1].getAttribute("data-highlighted")).toBe("true");
     });
+  });
+
+  it("renders mixed pane rows in spatial pane-number order (#436)", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          // Deliberately keep insertion order different from spatial reading order.
+          panes: [
+            { id: "pane-bottom", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "MemoView" } },
+            {
+              id: "pane-top-right",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 0.5,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "pane-top-left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 0.5,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-top-right",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "PS",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-top-left",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    const paneRows = screen
+      .getByTestId("ws-row-2-ws-default")
+      .querySelectorAll<HTMLElement>("[data-testid^='pane-row-']");
+    expect([...paneRows].map((row) => row.dataset.testid)).toEqual([
+      "pane-row-pane-top-left",
+      "pane-row-pane-top-right",
+      "pane-row-pane-bottom",
+    ]);
+    expect(useWorkspaceStore.getState().workspaces[0].panes.map((pane) => pane.id)).toEqual([
+      "pane-bottom",
+      "pane-top-right",
+      "pane-top-left",
+    ]);
+  });
+
+  it("reorders pane rows after a swap while keeping source-index focus and minimap highlights (#436)", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "pane-left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+            { id: "pane-right", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-pane-left",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    useGridStore.getState().setFocusedPane(0);
+
+    render(<WorkspaceSelectorView />);
+
+    act(() => useWorkspaceStore.getState().swapPanes(0, 1));
+
+    const paneRows = screen
+      .getByTestId("ws-row-2-ws-default")
+      .querySelectorAll<HTMLElement>("[data-testid^='pane-row-']");
+    expect([...paneRows].map((row) => row.dataset.testid)).toEqual([
+      "pane-row-pane-right",
+      "pane-row-pane-left",
+    ]);
+    expect(screen.getByTestId("pane-row-pane-left")).toHaveStyle({
+      background: "var(--accent-12)",
+    });
+
+    const leftMinimap = screen.getByTestId("pane-minimap-terminal-pane-left");
+    const minimapRects = leftMinimap.querySelectorAll("rect[data-pane-index]");
+    expect(minimapRects[0]).toHaveAttribute("data-highlighted", "true");
+    expect(minimapRects[1]).toHaveAttribute("data-highlighted", "false");
+    expect(useWorkspaceStore.getState().workspaces[0].panes.map((pane) => pane.id)).toEqual([
+      "pane-left",
+      "pane-right",
+    ]);
   });
 
   it("shows minimap with correct proportions for complex layout", async () => {
