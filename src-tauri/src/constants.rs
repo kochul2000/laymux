@@ -46,6 +46,15 @@ pub const ENV_LAYMUX_CURSOR_TRACE: &str = "LAYMUX_CURSOR_TRACE";
 /// How long a propagation flag remains valid before expiring.
 pub const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Default inactivity window for a browser remote controller lease.
+/// This spans several cloud-tunnel reconnect attempts while the host keeps an
+/// explicit, immediate reclaim path.
+pub const DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 45;
+
+/// Lowest effective remote lease timeout, including for older settings that
+/// persisted the former 5-15 second values.
+pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
+
 /// Maximum number of notifications to keep. When exceeded, oldest read
 /// notifications are evicted first. Unread notifications are never evicted.
 pub const MAX_NOTIFICATIONS: usize = 500;

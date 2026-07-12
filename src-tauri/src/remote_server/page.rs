@@ -127,6 +127,10 @@ mod tests {
         assert!(html.contains("function scheduleOutputReconnect(terminalId, outputLeaseId)"));
         assert!(html.contains("function handleHeartbeatError(err)"));
         assert!(html.contains("let heartbeatAbortController = null;"));
+        assert!(html.contains("const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;"));
+        assert!(html.contains("const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;"));
+        assert!(html.contains("const HEARTBEAT_RETRY_DELAY_MS = 1000;"));
+        assert!(html.contains("const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("const localAppMode ="));
@@ -231,12 +235,23 @@ mod tests {
         assert!(output_stream.contains("stopSocket(!reconnecting);"));
         assert!(output_stream.contains("scheduleOutputReconnect(terminalId, outputLeaseId);"));
         assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
+        assert!(output_stream.contains("scheduleTransientConnectionNotice"));
+        assert!(output_stream.contains("let resetOnNextPayload = reconnecting;"));
+        assert!(output_stream.contains("if (!reconnecting) term.reset();"));
+        assert!(output_stream.contains("if (resetOnNextPayload)"));
+        assert!(output_stream.contains("term.reset();"));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
         assert!(output_stream.contains("loadNavigation(null).catch"));
         assert!(
             !output_stream.contains("loseRemoteControl("),
             "output WebSocket close is recoverable while heartbeat keeps the lease alive"
+        );
+        let reconnect_scheduler =
+            &output_stream[..output_stream.find("function openOutput").unwrap()];
+        assert!(
+            !reconnect_scheduler.contains("setStatus("),
+            "short output interruptions must stay invisible while reconnecting"
         );
     }
 
@@ -257,13 +272,16 @@ mod tests {
         assert!(html.contains("error.status = response.status;"));
         assert!(heartbeat_error.contains("isFatalRemoteControlError(err) || heartbeatTimedOut()"));
         assert!(heartbeat_error.contains("loseRemoteControl(`Control returned to the host."));
-        assert!(heartbeat_error.contains("Retrying before lease timeout"));
+        assert!(heartbeat_error.contains("scheduleTransientConnectionNotice(\"heartbeat\")"));
+        assert!(heartbeat_error.contains("scheduleHeartbeatRetry()"));
         assert!(heartbeat_request.contains("signal: controller.signal"));
+        assert!(heartbeat_request.contains("heartbeatRequestTimeoutMs()"));
         assert!(
-            heartbeat_request.contains("setTimeout(() => controller.abort(), heartbeatTimeoutMs)")
+            heartbeat_request.contains("setTimeout(() => controller.abort(), requestTimeoutMs)")
         );
-        assert!(start_heartbeat.contains("if (heartbeatTimedOut())"));
-        assert!(start_heartbeat.contains(
+        assert!(start_heartbeat.contains("HEARTBEAT_INTERVAL_MAX_MS"));
+        assert!(start_heartbeat.contains("Math.min("));
+        assert!(!start_heartbeat.contains(
             "loseRemoteControl(\"Control returned to the host. Heartbeat timed out.\");"
         ));
         assert!(start_heartbeat.contains("lastHeartbeatOkAt = Date.now();"));

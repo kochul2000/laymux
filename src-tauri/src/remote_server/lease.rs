@@ -5,15 +5,13 @@ use axum::response::Response;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::constants::EVENT_REMOTE_CONTROL_CHANGED;
+use crate::constants::{EVENT_REMOTE_CONTROL_CHANGED, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS};
 use crate::lock_ext::MutexExt;
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 
 use super::access::effective_remote_settings;
 use super::{internal_error, json_error};
-
-const MIN_HEARTBEAT_TIMEOUT_SECONDS: u64 = 5;
 
 /// Internal controller lease for Direct Remote Mode.
 #[derive(Debug, Clone)]
@@ -77,7 +75,7 @@ pub fn reclaim_remote_control(
 pub(crate) fn effective_heartbeat_timeout_seconds(settings: &RemoteSettings) -> u64 {
     settings
         .heartbeat_timeout_seconds
-        .max(MIN_HEARTBEAT_TIMEOUT_SECONDS)
+        .max(MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS)
 }
 
 pub(crate) fn status_from_lease(
@@ -266,6 +264,16 @@ mod tests {
         });
         prune_expired_lease(&mut lease, Duration::from_secs(5));
         assert!(lease.is_none());
+    }
+
+    #[test]
+    fn heartbeat_timeout_preserves_a_reconnect_floor() {
+        let mut settings = Settings::default().remote;
+        settings.heartbeat_timeout_seconds = 5;
+        assert_eq!(effective_heartbeat_timeout_seconds(&settings), 30);
+
+        settings.heartbeat_timeout_seconds = 60;
+        assert_eq!(effective_heartbeat_timeout_seconds(&settings), 60);
     }
 
     #[test]

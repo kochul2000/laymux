@@ -261,7 +261,7 @@ mod tests {
         let legacy: Settings = serde_json::from_str("{}").unwrap();
         assert!(!legacy.remote.enabled);
         assert_eq!(legacy.remote.allowed_ips, vec!["127.0.0.1/32", "::1/128"]);
-        assert_eq!(legacy.remote.heartbeat_timeout_seconds, 15);
+        assert_eq!(legacy.remote.heartbeat_timeout_seconds, 45);
         assert_eq!(legacy.remote.auto_mobile_mode_min_width, 720);
         assert!(!legacy.remote.cloud_enabled);
         assert_eq!(
