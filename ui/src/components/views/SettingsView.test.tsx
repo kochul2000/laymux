@@ -102,6 +102,44 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("settings-view")).toBeInTheDocument();
   });
 
+  it("requires an explicit terminal profile for each extension viewer", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "" }],
+      },
+    });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-fileExplorer"));
+    const profileSelect = screen.getByTestId("fe-ext-viewer-profile-0") as HTMLSelectElement;
+    expect(profileSelect.value).toBe("");
+    expect(screen.getByTestId("fe-ext-viewer-profile-error-0")).toHaveTextContent(
+      "Select a terminal profile.",
+    );
+
+    await user.selectOptions(profileSelect, "WSL");
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().fileExplorer.extensionViewers[0].profile).toBe("WSL");
+  });
+
+  it("shows an explicit error for a viewer profile that no longer exists", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "Deleted" }],
+      },
+    });
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-fileExplorer"));
+    expect(screen.getByTestId("fe-ext-viewer-profile-error-0")).toHaveTextContent(
+      "Selected terminal profile does not exist.",
+    );
+  });
+
   // -- Startup section (renamed from General) --
 
   it("displays Startup section", () => {

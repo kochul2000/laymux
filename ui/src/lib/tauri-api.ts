@@ -18,6 +18,13 @@ export interface TerminalSessionResult {
   };
 }
 
+export interface ViewerStartupRequest {
+  command: string;
+  path: string;
+}
+
+export type TerminalStartupRequest = string | ViewerStartupRequest;
+
 export async function createTerminalSession(
   id: string,
   profile: string,
@@ -27,8 +34,10 @@ export async function createTerminalSession(
   cwdSend: boolean = true,
   cwdReceive: boolean = true,
   cwd?: string,
-  startupCommandOverride?: string,
+  startup?: TerminalStartupRequest,
 ): Promise<TerminalSessionResult> {
+  const startupCommandOverride = typeof startup === "string" ? startup : null;
+  const viewer = startup && typeof startup === "object" ? startup : null;
   return invoke("create_terminal_session", {
     id,
     profile,
@@ -38,7 +47,8 @@ export async function createTerminalSession(
     cwdSend,
     cwdReceive,
     cwd: cwd ?? null,
-    startupCommandOverride: startupCommandOverride ?? null,
+    startupCommandOverride,
+    viewer,
   });
 }
 
@@ -284,6 +294,7 @@ export interface MemoSettings {
 export interface ExtensionViewer {
   extensions: string[];
   command: string;
+  profile: string;
 }
 
 export interface FileExplorerSettings {

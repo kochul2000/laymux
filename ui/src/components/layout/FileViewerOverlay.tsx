@@ -21,7 +21,6 @@ export function FileViewerOverlay() {
   const toggleMaximized = useFileViewerStore((s) => s.toggleMaximized);
   const openFileViewer = useFileViewerStore((s) => s.openFileViewer);
 
-  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const feSettings = useSettingsStore((s) => s.fileExplorer);
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
 
@@ -200,7 +199,6 @@ export function FileViewerOverlay() {
           ) : (
             <FileViewer
               path={path}
-              profile={defaultProfile}
               // Key the viewer terminal by path so re-opening a different file
               // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
               // the TerminalView instead of reusing the previous file's session.

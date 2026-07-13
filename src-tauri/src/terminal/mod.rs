@@ -237,7 +237,8 @@ impl TerminalSession {
     }
 }
 
-enum ShellType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShellType {
     Wsl,
     PowerShell,
     Other,
@@ -248,13 +249,11 @@ static INIT_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Detect shell type from the executable path/name.
 /// Strips directory and .exe extension, then matches against known shells.
-fn detect_shell_type(executable: &str) -> ShellType {
+pub(crate) fn detect_shell_type(executable: &str) -> ShellType {
     let filename = executable.rsplit(&['/', '\\']).next().unwrap_or(executable);
-    let name = filename
-        .strip_suffix(".exe")
-        .unwrap_or(filename)
-        .to_lowercase();
-    match name.as_str() {
+    let lowercase = filename.to_lowercase();
+    let name = lowercase.strip_suffix(".exe").unwrap_or(&lowercase);
+    match name {
         "wsl" => ShellType::Wsl,
         "powershell" | "pwsh" => ShellType::PowerShell,
         _ => ShellType::Other,
@@ -370,6 +369,15 @@ trap '__laymux_preexec' DEBUG
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_shell_type_is_case_insensitive_for_exe_suffix() {
+        assert_eq!(
+            detect_shell_type("C:\\Windows\\System32\\WSL.EXE"),
+            ShellType::Wsl
+        );
+        assert_eq!(detect_shell_type("PowerShell.EXE"), ShellType::PowerShell);
+    }
 
     #[test]
     fn creates_session_with_config() {

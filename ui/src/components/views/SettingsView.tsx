@@ -2677,7 +2677,10 @@ function FileExplorerSection() {
 
   const addViewer = () =>
     updateFe({
-      extensionViewers: [...fe.extensionViewers, { extensions: [".txt"], command: "vi" }],
+      extensionViewers: [
+        ...fe.extensionViewers,
+        { extensions: [".txt"], command: "vi", profile: "" },
+      ],
     });
   const removeViewer = (index: number) =>
     updateFe({ extensionViewers: fe.extensionViewers.filter((_, i) => i !== index) });
@@ -2820,45 +2823,79 @@ function FileExplorerSection() {
             </p>
           </div>
           <div className="min-w-0 flex-1">
-            {fe.extensionViewers.map((viewer, i) => (
-              <div key={i} className="flex items-center gap-2 mb-2">
-                <FocusInput
-                  data-testid={`fe-ext-viewer-ext-${i}`}
-                  className={inputCls}
-                  style={{ width: 120 }}
-                  placeholder=".txt,.log"
-                  value={viewer.extensions.join(",")}
-                  onChange={(e) =>
-                    updateViewer(i, {
-                      extensions: e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                />
-                <FocusInput
-                  data-testid={`fe-ext-viewer-cmd-${i}`}
-                  className={inputCls}
-                  style={{ width: 120 }}
-                  placeholder="vi"
-                  value={viewer.command}
-                  onChange={(e) => updateViewer(i, { command: e.target.value })}
-                />
-                <button
-                  data-testid={`fe-ext-viewer-remove-${i}`}
-                  className="text-xs px-1.5 py-0.5 rounded"
-                  style={{
-                    background: "var(--bg-overlay)",
-                    color: "var(--red)",
-                    border: "1px solid var(--border)",
-                  }}
-                  onClick={() => removeViewer(i)}
-                >
-                  {t("common.remove")}
-                </button>
-              </div>
-            ))}
+            {fe.extensionViewers.map((viewer, i) => {
+              const viewerProfile = viewer.profile ?? "";
+              const profileExists = profiles.some((candidate) => candidate.name === viewerProfile);
+              const profileError = !viewerProfile.trim()
+                ? t("fileExplorer.viewerProfileRequired")
+                : !profileExists
+                  ? t("fileExplorer.viewerProfileMissing")
+                  : null;
+              return (
+                <div key={i} className="mb-2">
+                  <div className="flex items-center gap-2">
+                    <FocusInput
+                      data-testid={`fe-ext-viewer-ext-${i}`}
+                      className={inputCls}
+                      style={{ width: 120 }}
+                      placeholder=".txt,.log"
+                      value={viewer.extensions.join(",")}
+                      onChange={(e) =>
+                        updateViewer(i, {
+                          extensions: e.target.value
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                    />
+                    <FocusInput
+                      data-testid={`fe-ext-viewer-cmd-${i}`}
+                      className={inputCls}
+                      style={{ width: 120 }}
+                      placeholder="vi"
+                      value={viewer.command}
+                      onChange={(e) => updateViewer(i, { command: e.target.value })}
+                    />
+                    <FocusSelect
+                      data-testid={`fe-ext-viewer-profile-${i}`}
+                      className={inputCls}
+                      style={{ width: 140 }}
+                      value={profileExists ? viewerProfile : ""}
+                      onChange={(e) => updateViewer(i, { profile: e.target.value })}
+                    >
+                      <option value="">{t("fileExplorer.viewerProfilePlaceholder")}</option>
+                      {profiles.map((candidate) => (
+                        <option key={candidate.name} value={candidate.name}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                    </FocusSelect>
+                    <button
+                      data-testid={`fe-ext-viewer-remove-${i}`}
+                      className="text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        background: "var(--bg-overlay)",
+                        color: "var(--red)",
+                        border: "1px solid var(--border)",
+                      }}
+                      onClick={() => removeViewer(i)}
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </div>
+                  {profileError && (
+                    <p
+                      className="mt-1 text-[11px]"
+                      style={{ color: "var(--red)" }}
+                      data-testid={`fe-ext-viewer-profile-error-${i}`}
+                    >
+                      {profileError}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
             <button
               data-testid="fe-ext-viewer-add"
               className="text-xs px-2 py-1 rounded"

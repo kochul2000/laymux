@@ -408,7 +408,10 @@
       "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy the path to the clipboard when selecting a file.",
       "extensionViewers": "Extension Viewers",
-      "extensionViewersDesc": "Open files with a shell program per extension",
+      "extensionViewersDesc": "Open files with a shell program and terminal profile per extension",
+      "viewerProfilePlaceholder": "Select profile",
+      "viewerProfileRequired": "Select a terminal profile.",
+      "viewerProfileMissing": "Selected terminal profile does not exist.",
       "addViewer": "+ Add Viewer"
     },
     "issueReporter": {

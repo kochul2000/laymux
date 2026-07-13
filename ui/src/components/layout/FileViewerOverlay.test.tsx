@@ -21,7 +21,7 @@ function useTerminalViewerFor(ext: string) {
   useSettingsStore.setState({
     fileExplorer: {
       ...useSettingsStore.getState().fileExplorer,
-      extensionViewers: [{ extensions: [ext], command: "vi" }],
+      extensionViewers: [{ extensions: [ext], command: "vi", profile: "WSL" }],
     },
   });
 }

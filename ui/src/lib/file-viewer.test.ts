@@ -4,7 +4,6 @@ import {
   isOpenablePath,
   fileExtension,
   resolveViewer,
-  resolveViewerProfile,
   viewerInstanceId,
 } from "./file-viewer";
 import type { ExtensionViewer } from "@/lib/tauri-api";
@@ -63,19 +62,37 @@ describe("fileExtension", () => {
 
 describe("resolveViewer", () => {
   const viewers: ExtensionViewer[] = [
-    { extensions: [".pdf"], command: "evince" },
-    { extensions: [".mp4", ".mkv"], command: "mpv" },
-    { extensions: [".empty"], command: "   " },
+    { extensions: [".pdf"], command: "evince", profile: "Ubuntu" },
+    { extensions: [".mp4", ".mkv"], command: "mpv", profile: "Ubuntu" },
+    { extensions: [".empty"], command: "   ", profile: "Ubuntu" },
   ];
 
   it("returns web viewer when no extension matches", () => {
     expect(resolveViewer("/tmp/a.txt", viewers)).toEqual({ viewerType: "web" });
   });
 
+  it("uses the configured vi terminal viewer for markdown files", () => {
+    const viViewer: ExtensionViewer[] = [
+      { extensions: [".md", ".markdown"], command: "vi", profile: "Ubuntu-24.04" },
+    ];
+
+    expect(resolveViewer("/docs/README.md", viViewer)).toEqual({
+      viewerType: "terminal",
+      command: "vi",
+      profile: "Ubuntu-24.04",
+    });
+    expect(resolveViewer("/docs/guide.markdown", viViewer)).toEqual({
+      viewerType: "terminal",
+      command: "vi",
+      profile: "Ubuntu-24.04",
+    });
+  });
+
   it("returns terminal viewer with command for a matched extension", () => {
     expect(resolveViewer("/tmp/movie.MKV", viewers)).toEqual({
       viewerType: "terminal",
       command: "mpv",
+      profile: "Ubuntu",
     });
   });
 
@@ -83,6 +100,7 @@ describe("resolveViewer", () => {
     expect(resolveViewer("/docs/x.pdf", viewers)).toEqual({
       viewerType: "terminal",
       command: "evince",
+      profile: "Ubuntu",
     });
   });
 
@@ -92,6 +110,15 @@ describe("resolveViewer", () => {
 
   it("returns web for files with no extension", () => {
     expect(resolveViewer("/usr/bin/ls", viewers)).toEqual({ viewerType: "web" });
+  });
+
+  it("returns an explicit error when a matched viewer has no profile", () => {
+    expect(
+      resolveViewer("/docs/README.md", [{ extensions: [".md"], command: "vi", profile: "" }]),
+    ).toEqual({
+      viewerType: "error",
+      message: "Select a terminal profile for the .md viewer.",
+    });
   });
 });
 
@@ -135,29 +162,5 @@ describe("viewerInstanceId", () => {
 
   it("is deterministic for the same path", () => {
     expect(viewerInstanceId("/a/notes.txt")).toBe(viewerInstanceId("/a/notes.txt"));
-  });
-});
-
-describe("resolveViewerProfile", () => {
-  const profiles = [
-    { name: "PowerShell", commandLine: "powershell.exe" },
-    { name: "Ubuntu", commandLine: "wsl.exe -d Ubuntu" },
-  ];
-
-  it("keeps the active profile for Windows paths", () => {
-    expect(resolveViewerProfile("C:\\tmp\\a.txt", "PowerShell", profiles)).toBe("PowerShell");
-  });
-
-  it("switches to a WSL profile for unix paths when active is non-WSL", () => {
-    expect(resolveViewerProfile("/home/me/a.txt", "PowerShell", profiles)).toBe("Ubuntu");
-  });
-
-  it("keeps the active profile for unix paths when it is already WSL", () => {
-    expect(resolveViewerProfile("/home/me/a.txt", "Ubuntu", profiles)).toBe("Ubuntu");
-  });
-
-  it("falls back to the active profile when no WSL profile exists", () => {
-    const onlyWin = [{ name: "PowerShell", commandLine: "powershell.exe" }];
-    expect(resolveViewerProfile("/home/me/a.txt", "PowerShell", onlyWin)).toBe("PowerShell");
   });
 });

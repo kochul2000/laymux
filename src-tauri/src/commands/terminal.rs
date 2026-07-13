@@ -123,6 +123,7 @@ pub fn create_terminal_session(
     cwd_receive: Option<bool>,
     cwd: Option<String>,
     startup_command_override: Option<String>,
+    viewer: Option<super::ViewerStartupRequest>,
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<TerminalSession, String> {
@@ -145,22 +146,39 @@ pub fn create_terminal_session(
     let command_line = matched_profile
         .map(|p| p.command_line.clone())
         .unwrap_or_default();
-    // Use startup_command_override if provided (e.g., "claude --resume <id>" or
-    // extension viewer command like "vi '/path/to/file'").
-    // Validate against known safe patterns to prevent arbitrary command injection.
-    let allowed_viewer_commands: Vec<String> = settings
-        .file_explorer
-        .extension_viewers
-        .iter()
-        .map(|v| v.command.clone())
-        .collect();
-    let validated_override = startup_command_override
-        .filter(|cmd| super::is_valid_startup_command_override(cmd, &allowed_viewer_commands));
-    let startup_command = validated_override.unwrap_or_else(|| {
-        matched_profile
-            .map(|p| p.startup_command.clone())
-            .unwrap_or_default()
-    });
+    if viewer.is_some() && startup_command_override.is_some() {
+        return Err("Viewer startup and startup command override are mutually exclusive".into());
+    }
+
+    let viewer_startup = if let Some(request) = viewer.as_ref() {
+        let selected_profile = matched_profile
+            .ok_or_else(|| format!("Terminal profile '{profile}' does not exist"))?;
+        let default_wsl_distro =
+            super::viewer_requires_default_wsl_distro(request, selected_profile)
+                .then(path_utils::get_default_wsl_distro)
+                .flatten();
+        super::build_viewer_startup(
+            request,
+            selected_profile,
+            &settings.file_explorer.extension_viewers,
+            default_wsl_distro.as_deref(),
+        )?
+    } else {
+        String::new()
+    };
+
+    // The unstructured override is reserved for Claude session restoration.
+    let validated_override =
+        startup_command_override.filter(|cmd| super::is_valid_startup_command_override(cmd));
+    let startup_command = if !viewer_startup.is_empty() {
+        viewer_startup
+    } else {
+        validated_override.unwrap_or_else(|| {
+            matched_profile
+                .map(|p| p.startup_command.clone())
+                .unwrap_or_default()
+        })
+    };
     let starting_directory = cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| {
         matched_profile
             .map(|p| p.starting_directory.clone())

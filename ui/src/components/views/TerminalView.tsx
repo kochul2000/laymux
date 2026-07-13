@@ -25,6 +25,7 @@ import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overri
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
 import {
   createTerminalSession,
+  type ViewerStartupRequest,
   writeToTerminal,
   resizeTerminal,
   closeTerminalSession,
@@ -437,6 +438,8 @@ interface TerminalViewProps {
   lastClaudeSession?: string;
   /** Override the startup command (takes precedence over Claude session restore). */
   startupCommandOverride?: string;
+  /** Structured external viewer command. Rust validates and quotes the path. */
+  viewerStartup?: ViewerStartupRequest;
 }
 
 interface TerminalFitRequest {
@@ -457,6 +460,7 @@ export function TerminalView({
   lastCwd,
   lastClaudeSession,
   startupCommandOverride,
+  viewerStartup,
 }: TerminalViewProps) {
   const { t } = useTranslation("common");
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -2690,7 +2694,7 @@ export function TerminalView({
             cwdSendRef.current,
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
-            startupOverride,
+            viewerStartup ?? startupOverride,
           ).catch((err) => {
             console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
             trackedTerminalWrite(
@@ -2854,7 +2858,7 @@ export function TerminalView({
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
     // destroy/recreate the terminal session. syncGroupRef is used at runtime instead.
-    // paneId, lastCwd: mount-time only for session restore, must NOT trigger re-creation.
+    // paneId, lastCwd, viewerStartup: mount-time only, must NOT trigger re-creation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId, profile, registerInstance, unregisterInstance]);
 
