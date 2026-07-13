@@ -56,7 +56,7 @@
       }
       .app {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
         height: 100%;
       }
       header, footer {
@@ -791,22 +791,19 @@
           min-height: 0;
         }
         footer {
-          align-items: stretch;
-          display: grid;
-          grid-template-columns: 1fr auto auto auto;
+          align-items: center;
+          flex-wrap: wrap;
         }
         footer .status-hint {
           align-self: center;
         }
       }
       @media (max-width: 520px) {
-        footer {
-          grid-template-columns: 1fr 1fr 1fr;
-        }
         footer .status-hint {
-          grid-column: 1 / -1;
+          flex-basis: 100%;
         }
         footer button {
+          flex: 1 1 auto;
           min-width: 0;
         }
       }
@@ -842,6 +839,166 @@
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
         touch-action: none;
         transform: translate(-50%, -50%);
+      }
+      /* --- Special key toolbar (soft keys) ---
+         A client-side row of buttons that send terminal escape sequences via
+         the existing write path. Purely remote-client UI state (localStorage);
+         no host bridge or Remote API contract change. */
+      .key-bar {
+        position: relative;
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+        padding: 5px 6px;
+        border-top: 1px solid var(--border);
+        background: var(--panel);
+      }
+      .key-bar-settings {
+        width: 30px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+      .key-bar-settings:hover {
+        background: var(--hover-bg);
+      }
+      .key-bar-settings.open {
+        border-color: var(--accent-50);
+        color: var(--accent);
+      }
+      .key-row {
+        display: flex;
+        flex: 1 1 auto;
+        gap: 5px;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+      }
+      .key-row::-webkit-scrollbar {
+        height: 5px;
+      }
+      .key-row::-webkit-scrollbar-thumb {
+        border-radius: 3px;
+        background: var(--border);
+      }
+      .key-btn {
+        flex: 0 0 auto;
+        min-width: 34px;
+        padding: 4px 9px;
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        white-space: nowrap;
+        touch-action: manipulation;
+      }
+      .key-btn:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .key-btn:active:not(:disabled) {
+        border-color: var(--accent-50);
+        background: var(--accent-12);
+      }
+      .key-row-empty {
+        align-self: center;
+        padding: 4px 6px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        opacity: 0.85;
+      }
+      .key-toggle.active {
+        border-color: var(--accent-50);
+        color: var(--accent);
+      }
+      .key-popover {
+        position: absolute;
+        left: 6px;
+        bottom: calc(100% + 6px);
+        z-index: 40;
+        width: min(340px, calc(100vw - 24px));
+        max-height: min(60vh, 440px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--panel);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+      }
+      .key-popover-scroll {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px 10px 10px;
+      }
+      .key-popover-title {
+        margin: 10px 0 4px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .key-popover-title:first-child {
+        margin-top: 0;
+      }
+      .key-set-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 4px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+      }
+      .key-set-row:hover {
+        background: var(--hover-bg);
+      }
+      .key-set-row input {
+        flex: 0 0 auto;
+      }
+      .key-set-name {
+        flex: 1 1 auto;
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+      }
+      .key-set-desc {
+        flex: 0 0 auto;
+        max-width: 52%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        opacity: 0.8;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .key-chip-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 2px;
+      }
+      .key-chip {
+        flex: 0 0 auto;
+        min-width: 30px;
+        padding: 3px 8px;
+        background: var(--bg-base);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-chip:hover {
+        background: var(--hover-bg);
+      }
+      .key-chip.selected {
+        border-color: var(--accent);
+        background: var(--accent-12);
+        color: var(--accent);
       }
     </style>
   </head>
@@ -913,10 +1070,18 @@
           </div>
         </div>
       </main>
+      <nav id="keyBar" class="key-bar" aria-label="Special keys" hidden>
+        <button id="keyBarSettings" class="key-bar-settings" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="keyPopover" title="Choose key sets">⚙</button>
+        <div id="keyRow" class="key-row" role="group" aria-label="Special key buttons"></div>
+        <div id="keyPopover" class="key-popover" hidden>
+          <div id="keyPopoverBody" class="key-popover-scroll"></div>
+        </div>
+      </nav>
       <footer>
         <button id="copySelection" disabled>Copy</button>
         <button id="ctrlC" disabled>Ctrl+C</button>
         <button id="focusTerminal" disabled>Keyboard</button>
+        <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
         <div id="terminalMeta" class="status-hint grow">No terminal selected.</div>
       </footer>
     </div>
@@ -958,7 +1123,14 @@
         const focusTerminalButton = $("focusTerminal");
         const copySelectionButton = $("copySelection");
         const ctrlCButton = $("ctrlC");
+        const keyBar = $("keyBar");
+        const keyBarToggleButton = $("keyBarToggle");
+        const keyBarSettingsButton = $("keyBarSettings");
+        const keyRowEl = $("keyRow");
+        const keyPopover = $("keyPopover");
+        const keyPopoverBody = $("keyPopoverBody");
         const tokenKey = "laymux.remote.token";
+        const keyBarKey = "laymux.remote.keybar";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
         const HEARTBEAT_INTERVAL_MAX_MS = 5000;
@@ -1208,6 +1380,7 @@
           ctrlCButton.disabled = !canControl;
           focusTerminalButton.disabled = !canControl;
           copySelectionButton.disabled = !canControl || !hasTerminalSelection();
+          updateKeyBarControls();
         }
 
         function fallbackCopyText(text) {
@@ -2670,6 +2843,221 @@
           }
         }
 
+        // --- Special key toolbar (soft keys) ---
+        // Each key sends a terminal control/escape sequence through the same
+        // enqueueInput -> /remote/v1/terminals/{id}/write path as Ctrl+C. No new
+        // Remote API surface. Cursor keys (arrows/Home/End) are DECCKM-aware.
+        const KEY_DEFS = {
+          esc: { label: "Esc", seq: "\x1b" },
+          tab: { label: "Tab", seq: "\t" },
+          stab: { label: "⇧Tab", seq: "\x1b[Z" },
+          enter: { label: "⏎", seq: "\r" },
+          bksp: { label: "⌫", seq: "\x7f" },
+          up: { label: "↑", cursor: "A" },
+          down: { label: "↓", cursor: "B" },
+          right: { label: "→", cursor: "C" },
+          left: { label: "←", cursor: "D" },
+          home: { label: "Home", cursor: "H" },
+          end: { label: "End", cursor: "F" },
+          ins: { label: "Ins", seq: "\x1b[2~" },
+          del: { label: "Del", seq: "\x1b[3~" },
+          pgup: { label: "PgUp", seq: "\x1b[5~" },
+          pgdn: { label: "PgDn", seq: "\x1b[6~" },
+          "c-a": { label: "^A", seq: "\x01" },
+          "c-c": { label: "^C", seq: "\x03" },
+          "c-d": { label: "^D", seq: "\x04" },
+          "c-e": { label: "^E", seq: "\x05" },
+          "c-k": { label: "^K", seq: "\x0b" },
+          "c-l": { label: "^L", seq: "\x0c" },
+          "c-r": { label: "^R", seq: "\x12" },
+          "c-u": { label: "^U", seq: "\x15" },
+          "c-w": { label: "^W", seq: "\x17" },
+          "c-z": { label: "^Z", seq: "\x1a" },
+          f1: { label: "F1", seq: "\x1bOP" },
+          f2: { label: "F2", seq: "\x1bOQ" },
+          f3: { label: "F3", seq: "\x1bOR" },
+          f4: { label: "F4", seq: "\x1bOS" },
+          f5: { label: "F5", seq: "\x1b[15~" },
+          f6: { label: "F6", seq: "\x1b[17~" },
+          f7: { label: "F7", seq: "\x1b[18~" },
+          f8: { label: "F8", seq: "\x1b[19~" },
+          f9: { label: "F9", seq: "\x1b[20~" },
+          f10: { label: "F10", seq: "\x1b[21~" },
+          f11: { label: "F11", seq: "\x1b[23~" },
+          f12: { label: "F12", seq: "\x1b[24~" },
+        };
+        // Stable render order for both the toolbar and the custom-key palette.
+        const KEY_ORDER = [
+          "esc", "tab", "stab", "up", "down", "left", "right", "home", "end",
+          "enter", "bksp", "ins", "del", "pgup", "pgdn",
+          "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z",
+          "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+        ];
+        const KEY_SETS = [
+          { id: "nav", name: "Navigation", desc: "Arrows · Tab · Esc", keys: ["esc", "tab", "stab", "up", "down", "left", "right", "home", "end"] },
+          { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
+          { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
+          { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
+        ];
+        const DEFAULT_KEYBAR = { visible: false, sets: ["nav"], custom: [] };
+        let keyPopoverOpen = false;
+
+        function loadKeyBarConfig() {
+          try {
+            const raw = JSON.parse(localStorage.getItem(keyBarKey) || "null");
+            if (!raw || typeof raw !== "object") return { visible: false, sets: [...DEFAULT_KEYBAR.sets], custom: [] };
+            return {
+              visible: Boolean(raw.visible),
+              sets: Array.isArray(raw.sets) ? raw.sets.filter((id) => KEY_SETS.some((s) => s.id === id)) : [...DEFAULT_KEYBAR.sets],
+              custom: Array.isArray(raw.custom) ? raw.custom.filter((id) => KEY_DEFS[id]) : [],
+            };
+          } catch (_) {
+            return { visible: false, sets: [...DEFAULT_KEYBAR.sets], custom: [] };
+          }
+        }
+
+        let keyBarConfig = loadKeyBarConfig();
+
+        function saveKeyBarConfig() {
+          try {
+            localStorage.setItem(keyBarKey, JSON.stringify(keyBarConfig));
+          } catch (_) {}
+        }
+
+        // Ordered union of every enabled set plus custom picks, deduped.
+        function resolveKeyIds() {
+          const enabled = new Set();
+          for (const set of KEY_SETS) {
+            if (keyBarConfig.sets.includes(set.id)) set.keys.forEach((id) => enabled.add(id));
+          }
+          keyBarConfig.custom.forEach((id) => enabled.add(id));
+          return KEY_ORDER.filter((id) => enabled.has(id));
+        }
+
+        function keySequence(def) {
+          if (def.cursor) {
+            const appMode = Boolean(terminal && terminal.modes && terminal.modes.applicationCursorKeysMode);
+            return (appMode ? "\x1bO" : "\x1b[") + def.cursor;
+          }
+          return def.seq || "";
+        }
+
+        // Send only; do NOT focus the terminal — focusing raises the native soft
+        // keyboard, which defeats the purpose of these no-keyboard helper keys.
+        function sendKey(id) {
+          const def = KEY_DEFS[id];
+          if (!def) return;
+          const seq = keySequence(def);
+          if (seq) enqueueInput(seq);
+        }
+
+        function updateKeyBarControls() {
+          const canControl = Boolean(leaseId && activeTerminalId);
+          if (!keyRowEl) return;
+          for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
+            btn.disabled = !canControl;
+          }
+        }
+
+        function renderKeyRow() {
+          keyRowEl.textContent = "";
+          const ids = resolveKeyIds();
+          if (ids.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "key-row-empty";
+            empty.textContent = "No keys selected — tap ⚙ to choose.";
+            keyRowEl.append(empty);
+            return;
+          }
+          for (const id of ids) {
+            const def = KEY_DEFS[id];
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "key-btn";
+            btn.dataset.key = id;
+            btn.textContent = def.label;
+            btn.title = def.label;
+            btn.addEventListener("click", () => sendKey(id));
+            keyRowEl.append(btn);
+          }
+          updateKeyBarControls();
+        }
+
+        function renderKeyPopover() {
+          keyPopoverBody.textContent = "";
+          const setsTitle = document.createElement("div");
+          setsTitle.className = "key-popover-title";
+          setsTitle.textContent = "Key sets";
+          keyPopoverBody.append(setsTitle);
+          for (const set of KEY_SETS) {
+            const row = document.createElement("label");
+            row.className = "key-set-row";
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = keyBarConfig.sets.includes(set.id);
+            cb.addEventListener("change", () => {
+              if (cb.checked) {
+                if (!keyBarConfig.sets.includes(set.id)) keyBarConfig.sets.push(set.id);
+              } else {
+                keyBarConfig.sets = keyBarConfig.sets.filter((id) => id !== set.id);
+              }
+              saveKeyBarConfig();
+              renderKeyRow();
+            });
+            const name = document.createElement("span");
+            name.className = "key-set-name";
+            name.textContent = set.name;
+            const desc = document.createElement("span");
+            desc.className = "key-set-desc";
+            desc.textContent = set.desc;
+            row.append(cb, name, desc);
+            keyPopoverBody.append(row);
+          }
+          const customTitle = document.createElement("div");
+          customTitle.className = "key-popover-title";
+          customTitle.textContent = "Custom keys";
+          keyPopoverBody.append(customTitle);
+          const grid = document.createElement("div");
+          grid.className = "key-chip-grid";
+          for (const id of KEY_ORDER) {
+            const def = KEY_DEFS[id];
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "key-chip";
+            chip.textContent = def.label;
+            chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
+            chip.addEventListener("click", () => {
+              if (keyBarConfig.custom.includes(id)) {
+                keyBarConfig.custom = keyBarConfig.custom.filter((k) => k !== id);
+              } else {
+                keyBarConfig.custom.push(id);
+              }
+              chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
+              saveKeyBarConfig();
+              renderKeyRow();
+            });
+            grid.append(chip);
+          }
+          keyPopoverBody.append(grid);
+        }
+
+        function setKeyPopoverOpen(open) {
+          keyPopoverOpen = open;
+          keyPopover.hidden = !open;
+          keyBarSettingsButton.classList.toggle("open", open);
+          keyBarSettingsButton.setAttribute("aria-expanded", open ? "true" : "false");
+          if (open) renderKeyPopover();
+        }
+
+        function setKeyBarVisible(visible, persist = true) {
+          keyBarConfig.visible = visible;
+          keyBar.hidden = !visible;
+          keyBarToggleButton.classList.toggle("active", visible);
+          keyBarToggleButton.setAttribute("aria-pressed", visible ? "true" : "false");
+          if (!visible) setKeyPopoverOpen(false);
+          if (persist) saveKeyBarConfig();
+        }
+
         function fitTerminal(sendResize = true) {
           if (!terminal || !fitAddon) return;
           const rect = terminalHost.getBoundingClientRect();
@@ -2787,6 +3175,8 @@
         setDockPanelOpen(false);
         setNotificationPanelOpen(false);
         setNavigationOpen(true);
+        renderKeyRow();
+        setKeyBarVisible(keyBarConfig.visible, false);
 
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
@@ -2814,6 +3204,17 @@
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => terminal && terminal.focus());
+        keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
+        keyBarSettingsButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          setKeyPopoverOpen(!keyPopoverOpen);
+        });
+        // Dismiss the key-set popover on any outside tap.
+        document.addEventListener("click", (event) => {
+          if (!keyPopoverOpen) return;
+          if (keyPopover.contains(event.target) || keyBarSettingsButton.contains(event.target)) return;
+          setKeyPopoverOpen(false);
+        });
         // Auto-claim on load when autoConnect=1 is present. This is NOT gated on
         // localAppMode so the cloud dashboard flow (external browser) also grabs
         // control on connect — one fewer click. The remote-control enable toggle
