@@ -217,6 +217,25 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_activity_badge_colors_match_desktop() {
+        let html = remote_page_html();
+        // Palette vars ported from ui/src/index.css so badges match the desktop.
+        assert!(html.contains("--claude: #d97757;"));
+        assert!(html.contains("--codex: #10a37f;"));
+        assert!(html.contains("--orange-15: rgba(217, 119, 87, 0.15);"));
+        // Per-app badge classes with desktop-matching color + background.
+        assert!(html.contains(".pane-activity.claude {\n        color: var(--claude);\n        background: var(--orange-15);\n      }"));
+        assert!(html.contains(".pane-activity.codex {\n        color: var(--codex);\n        background: var(--accent-12);\n      }"));
+        // running badge background matches desktop (--active-bg, not --accent-12).
+        assert!(html.contains(".pane-activity.running {\n        color: var(--yellow);\n        background: var(--active-bg);\n      }"));
+        // Class selection mirrors formatActivity: Claude/Codex keep brand hue.
+        assert!(html.contains("function activityClass(activity)"));
+        assert!(html.contains("if (activity.name === \"Claude\") return \"claude\";"));
+        assert!(html.contains("if (activity.name === \"Codex\") return \"codex\";"));
+        assert!(html.contains("`pane-activity ${activityClass(pane.activity)}`"));
+    }
+
+    #[test]
     fn remote_page_gate_requires_enabled_for_tunnel_requests() {
         let addr = "203.0.113.10:1".parse::<SocketAddr>().unwrap();
 

@@ -20,6 +20,9 @@
         --accent-08: rgba(137, 180, 250, 0.08);
         --green: #a6e3a1;
         --red: #f38ba8;
+        --claude: #d97757;
+        --codex: #10a37f;
+        --orange-15: rgba(217, 119, 87, 0.15);
         --yellow: #f9e2af;
         --border: #313244;
         --hover-bg: rgba(255, 255, 255, 0.06);
@@ -690,10 +693,18 @@
       }
       .pane-activity.running {
         color: var(--yellow);
-        background: var(--accent-12);
+        background: var(--active-bg);
       }
       .pane-activity.interactive {
         color: var(--accent);
+        background: var(--accent-12);
+      }
+      .pane-activity.claude {
+        color: var(--claude);
+        background: var(--orange-15);
+      }
+      .pane-activity.codex {
+        color: var(--codex);
         background: var(--accent-12);
       }
       .pane-branch {
@@ -2053,6 +2064,19 @@
           return "";
         }
 
+        // Mirror the desktop WorkspaceSelector activity-badge colors: Claude and
+        // Codex keep their brand hue, other interactive apps use the accent, and
+        // command activity uses the running color. Source of truth: formatActivity
+        // in ui/src/lib/workspace-summary.ts.
+        function activityClass(activity) {
+          if (activity && activity.type === "interactiveApp") {
+            if (activity.name === "Claude") return "claude";
+            if (activity.name === "Codex") return "codex";
+            return "interactive";
+          }
+          return "running";
+        }
+
         function metaText(parts) {
           return parts.filter(Boolean).join(" - ");
         }
@@ -2285,10 +2309,7 @@
           const activity = activityLabel(pane.activity, pane.commandRunning);
           if (activity) {
             const activityEl = document.createElement("span");
-            const activityType = pane.activity && pane.activity.type === "interactiveApp"
-              ? "interactive"
-              : "running";
-            activityEl.className = `pane-activity ${activityType}`;
+            activityEl.className = `pane-activity ${activityClass(pane.activity)}`;
             activityEl.textContent = activity;
             main.append(activityEl);
           }
@@ -2440,10 +2461,7 @@
             const activity = activityLabel(pane.activity, pane.commandRunning);
             if (display.activity && activity) {
               const activityEl = document.createElement("span");
-              const activityType = pane.activity && pane.activity.type === "interactiveApp"
-                ? "interactive"
-                : "running";
-              activityEl.className = `pane-activity ${activityType}`;
+              activityEl.className = `pane-activity ${activityClass(pane.activity)}`;
               activityEl.textContent = activity;
               main.append(activityEl);
             }
