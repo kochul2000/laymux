@@ -1,4 +1,4 @@
-# 0030. Extension viewer 실행 프로필과 경로 변환 책임
+# 0031. Extension viewer 실행 프로필과 경로 변환 책임
 
 - Status: Accepted
 - Date: 2026-07-13

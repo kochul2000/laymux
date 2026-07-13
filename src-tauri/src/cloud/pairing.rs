@@ -56,6 +56,18 @@ pub async fn cloud_connect_start_inner(
     state: Arc<AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<CloudStatus, AppError> {
+    // No cloud action while remote control is disabled — refuse before pairing
+    // opens a browser or contacts the relay. Pairing/connecting requires the
+    // same "원격 제어 허용" gate that governs live remote requests.
+    let remote =
+        crate::remote_server::effective_remote_settings(&state).map_err(AppError::Other)?;
+    if !remote.enabled {
+        return set_cloud_pairing_error(
+            &state,
+            "Enable remote control before connecting to the cloud".into(),
+        );
+    }
+
     match run_pairing_flow(&state).await {
         Ok(status) => match tunnel::start_tunnel_from_settings(state.clone(), app_handle).await {
             Ok(tunnel_status) => Ok(tunnel_status),
