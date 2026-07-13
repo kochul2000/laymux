@@ -43,7 +43,17 @@ pub fn set_remote_runtime_access(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<crate::remote_server::RemoteAccessStatus, String> {
-    crate::remote_server::set_remote_runtime_access(&state, &app, enabled, auth_token)
+    let status =
+        crate::remote_server::set_remote_runtime_access(&state, &app, enabled, auth_token)?;
+    // Bind the cloud tunnel lifecycle to the remote-control gate: disabling
+    // remote control drops any live tunnel (instance goes offline on the relay);
+    // enabling it reconnects a paired instance. See ADR-0029.
+    crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
+        state.inner().clone(),
+        app,
+        status.effective_enabled,
+    );
+    Ok(status)
 }
 
 #[tauri::command]

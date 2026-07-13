@@ -1,6 +1,6 @@
 # 0024. Cloud Native WSS Tunnel
 
-- Status: Accepted
+- Status: Accepted — 터널 연결 게이트 조항은 [ADR-0029](0029-cloud-tunnel-follows-remote-control-gate.md) 로 정정됨
 - Date: 2026-07-06
 - Source: laymux-server `docs/tunnel-protocol.md`, docs/architecture/api-contracts.md
 

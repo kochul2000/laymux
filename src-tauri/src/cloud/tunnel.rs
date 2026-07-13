@@ -34,7 +34,6 @@ use crate::constants::{
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{self, TunnelAuthorized};
-use crate::settings::load_settings;
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 
@@ -254,7 +253,10 @@ pub async fn start_tunnel_from_settings(
 ) -> Result<CloudStatus, AppError> {
     stop_tunnel(&state)?;
 
-    let settings = load_settings().remote;
+    // Effective remote settings (persistent `enabled` OR runtime "원격 제어 허용")
+    // so the tunnel connection lifecycle shares the same control gate that
+    // `remote_guard` uses per request. No cloud presence while control is off.
+    let settings = remote_server::effective_remote_settings(&state).map_err(AppError::Other)?;
     let config = build_tunnel_config(&settings).await?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -285,7 +287,13 @@ pub async fn start_auto_reconnect(
     state: Arc<AppState>,
     app_handle: AppHandle,
 ) -> Result<Option<CloudStatus>, AppError> {
-    let settings = load_settings().remote;
+    let settings = remote_server::effective_remote_settings(&state).map_err(AppError::Other)?;
+    // Remote control disabled → keep no cloud presence (do not open the tunnel,
+    // so the instance never reports online to the relay). Re-enabling remote
+    // control reconciles via `reconcile_cloud_tunnel_for_access`.
+    if !settings.enabled {
+        return Ok(None);
+    }
     if !settings.cloud_enabled || !settings.cloud_auto_reconnect {
         return Ok(None);
     }
@@ -316,7 +324,52 @@ pub fn stop_tunnel(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Tear the cloud tunnel down and mark it offline. Called when remote control
+/// is disabled so the desktop keeps no cloud presence — the paired credentials
+/// stay on disk (status shows "paired" via the retained instance id), but the
+/// live WSS socket is closed so the relay reports the instance offline.
+pub(crate) fn shutdown_cloud_tunnel_offline(state: &AppState) {
+    if let Err(error) = stop_tunnel(state) {
+        tracing::warn!(error = %error, "failed to stop cloud tunnel on remote disable");
+    }
+    // Keep the instance id (still paired), clear connected + any stale error.
+    if let Err(error) = set_cloud_status(state, false, None, None) {
+        tracing::warn!(error = %error, "failed to reset cloud status on remote disable");
+    }
+}
+
+/// Reconcile the cloud tunnel with the remote-control gate after the runtime
+/// remote-access toggle changes. Disabling remote control tears the tunnel
+/// down immediately; (re-)enabling it reconnects a paired + auto-reconnect
+/// instance. This keeps the tunnel connection lifecycle bound to the same
+/// `settings.remote.enabled || runtimeRemoteAccess.enabled` gate that guards
+/// individual remote requests, so "remote disabled" means zero cloud activity.
+pub fn reconcile_cloud_tunnel_for_access(
+    state: Arc<AppState>,
+    app_handle: AppHandle,
+    effective_enabled: bool,
+) {
+    if !effective_enabled {
+        shutdown_cloud_tunnel_offline(&state);
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        match start_auto_reconnect(state, app_handle).await {
+            Ok(Some(_)) => tracing::info!("cloud tunnel reconnected after remote enable"),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(error = %error, "cloud tunnel reconnect after remote enable failed")
+            }
+        }
+    });
+}
+
 async fn build_tunnel_config(settings: &RemoteSettings) -> Result<TunnelConfig, AppError> {
+    if !settings.enabled {
+        return Err(AppError::Other(
+            "Remote control is disabled; cloud tunnel not started".into(),
+        ));
+    }
     if !settings.cloud_enabled {
         return Err(AppError::Other("Cloud tunnel is not enabled".into()));
     }
@@ -1786,6 +1839,64 @@ mod tests {
         assert!(status.connected);
         assert_eq!(status.instance_id.as_deref(), Some("instance-1"));
         assert_eq!(*state.cloud.lock_or_err().unwrap(), status);
+    }
+
+    #[tokio::test]
+    async fn build_tunnel_config_refuses_when_remote_control_disabled() {
+        // Cloud paired (cloudEnabled + tunnelUrl) but remote control off: no
+        // tunnel config is produced, so the desktop never dials the relay and
+        // the instance never reports online. This is the security invariant —
+        // "remote disabled" means zero cloud activity (ADR-0029).
+        let settings = RemoteSettings {
+            enabled: false,
+            cloud_enabled: true,
+            cloud_tunnel_url: Some("wss://relay.example.test/tunnel/instance-1".into()),
+            ..RemoteSettings::default()
+        };
+
+        let error = build_tunnel_config(&settings).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains("Remote control is disabled"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_tunnel_config_refuses_when_cloud_not_paired() {
+        // Remote control on but cloud not paired → still no tunnel.
+        let settings = RemoteSettings {
+            enabled: true,
+            cloud_enabled: false,
+            ..RemoteSettings::default()
+        };
+
+        let error = build_tunnel_config(&settings).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains("Cloud tunnel is not enabled"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn shutdown_cloud_tunnel_offline_disconnects_but_keeps_paired_instance() {
+        // Disabling remote control drops the live connection and clears any
+        // stale error, but keeps the paired instance id so the UI still shows
+        // "paired" (offline), not "disconnected".
+        let state = AppState::new();
+        *state.cloud.lock_or_err().unwrap() = CloudStatus {
+            connected: true,
+            instance_id: Some("instance-1".into()),
+            last_error: Some("stale".into()),
+        };
+
+        shutdown_cloud_tunnel_offline(&state);
+
+        let status = state.cloud.lock_or_err().unwrap().clone();
+        assert!(!status.connected);
+        assert_eq!(status.instance_id.as_deref(), Some("instance-1"));
+        assert_eq!(status.last_error, None);
     }
 
     #[test]
