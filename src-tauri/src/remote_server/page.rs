@@ -114,8 +114,13 @@ mod tests {
         assert!(html.contains("className = \"touch-selection-handle\""));
         assert!(html.contains("new MouseEvent(type"));
         assert!(html.contains("mouseTrackingMode !== \"none\""));
-        assert!(html.contains("id=\"copySelection\""));
+        assert!(!html.contains("id=\"copySelection\""));
         assert!(html.contains("copySelectionToClipboard"));
+        assert!(html.contains("terminal.onSelectionChange(() => {"));
+        assert!(html.contains(
+            "terminalHost.addEventListener(\"mouseup\", copySelectionAfterInteraction);"
+        ));
+        assert!(html.contains("if (fallbackCopyText(text)) return;"));
         assert!(html.contains("const terminalShell = document.querySelector(\".terminal-shell\")"));
         assert!(html.contains("resizeObserver.observe(terminalShell)"));
         assert!(html.contains("rect.width < 20 || rect.height < 20"));
@@ -189,7 +194,8 @@ mod tests {
         assert!(html.contains("id=\"keyBarSettings\""));
         assert!(html.contains("id=\"keyPopover\""));
         assert!(html.contains("id=\"keyRow\""));
-        // Config is client-only UI state persisted to localStorage (ADR-0004).
+        assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
+        // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
         assert!(html
             .contains("const DEFAULT_KEYBAR = { visible: false, sets: [\"nav\"], custom: [] };"));
@@ -207,6 +213,17 @@ mod tests {
         assert!(html.contains("home: { label: \"Home\", cursor: \"H\" }"));
         assert!(html.contains("return (appMode ? \"\\x1bO\" : \"\\x1b[\") + def.cursor;"));
         assert!(html.contains("terminal.modes.applicationCursorKeysMode"));
+        // The compact direction pad maps a four-way pointer flick back through the
+        // same DECCKM-aware arrow definitions and exposes a pressed-state hint.
+        assert!(html.contains("dpad: { label: \"↕↔\", flick: true }"));
+        assert!(html.contains("const KEY_FLICK_THRESHOLD_PX = 18;"));
+        assert!(html.contains("function directionFromFlick(deltaX, deltaY)"));
+        assert!(html.contains("sendKey(direction);"));
+        assert!(html.contains("id=\"keyFlickHint\""));
+        assert!(html.contains("data-flick-direction=\"up\""));
+        assert!(html.contains("data-flick-direction=\"right\""));
+        assert!(html.contains("data-flick-direction=\"down\""));
+        assert!(html.contains("data-flick-direction=\"left\""));
         // A representative fixed sequence: Tab, Delete, and F1 (SS3).
         assert!(html.contains("tab: { label: \"Tab\", seq: \"\\t\" }"));
         assert!(html.contains("del: { label: \"Del\", seq: \"\\x1b[3~\" }"));
@@ -214,6 +231,34 @@ mod tests {
         // Toggle visibility drives the hidden attribute + persistence.
         assert!(html.contains("function setKeyBarVisible(visible, persist = true)"));
         assert!(html.contains("keyBar.hidden = !visible;"));
+    }
+
+    #[test]
+    fn remote_page_mobile_layout_tracks_viewport_without_outer_scroll() {
+        let html = remote_page_html();
+
+        // Ask supporting mobile browsers to resize layout content for the native keyboard,
+        // then use VisualViewport as the cross-browser source for the actual visible height.
+        assert!(html.contains("interactive-widget=resizes-content"));
+        assert!(html.contains("height: var(--remote-viewport-height, 100%);"));
+        assert!(html.contains("function syncRemoteViewportHeight()"));
+        assert!(html.contains("const height = remoteVisualViewport ? remoteVisualViewport.height : window.innerHeight;"));
+        assert!(html.contains(
+            "remoteVisualViewport?.addEventListener(\"resize\", syncRemoteViewportHeight);"
+        ));
+
+        // Horizontal scrolling is confined to the toolbar; its intrinsic width must not
+        // enlarge the document.
+        assert!(html.contains(".key-bar {\n        position: relative;\n        display: flex;\n        width: 100%;\n        min-width: 0;\n        max-width: 100%;"));
+        assert!(html.contains("flex-wrap: nowrap;"));
+        assert!(html.contains("overflow-x: auto;"));
+        assert!(html.contains("scrollbar-width: none;"));
+        assert!(html.contains(".key-row::-webkit-scrollbar {\n        display: none;"));
+        assert!(html.contains("--key-bar-control-height: 26px;"));
+
+        // Showing or hiding a grid row changes terminal geometry and must trigger a fit
+        // even on WebViews whose ResizeObserver delivery is delayed.
+        assert!(html.contains("if (persist) saveKeyBarConfig();\n          scheduleTerminalFit();"));
     }
 
     #[test]

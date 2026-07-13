@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
+    />
     <title>Laymux Remote</title>
     <link rel="stylesheet" href="/remote/vendor/xterm.css" />
     <style>
@@ -43,9 +46,14 @@
         --fs-xs: 10px;
         --fs-sm: 11px;
         --fs-md: 13px;
+        --key-bar-control-height: 26px;
       }
       * { box-sizing: border-box; }
-      html, body { height: 100%; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+      }
       body {
         margin: 0;
         height: 100%;
@@ -60,10 +68,16 @@
       .app {
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto auto;
-        height: 100%;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: var(--remote-viewport-height, 100%);
       }
       header, footer {
         display: flex;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
         gap: 8px;
         align-items: center;
         padding: 6px 8px;
@@ -118,6 +132,7 @@
         position: relative;
         display: grid;
         grid-template-rows: minmax(0, 1fr);
+        min-width: 0;
         min-height: 0;
       }
       .status {
@@ -803,7 +818,7 @@
         }
         footer {
           align-items: center;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
         }
         footer .status-hint {
           align-self: center;
@@ -811,16 +826,22 @@
       }
       @media (max-width: 520px) {
         footer .status-hint {
-          flex-basis: 100%;
+          display: none;
         }
         footer button {
-          flex: 1 1 auto;
+          flex: 1 1 0;
+          width: 0;
           min-width: 0;
+          overflow: hidden;
+          padding-left: 4px;
+          padding-right: 4px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
       }
       @supports (height: 100dvh) {
         .app {
-          height: 100dvh;
+          height: var(--remote-viewport-height, 100dvh);
         }
       }
       .xterm-screen .xterm-decoration-top {
@@ -858,7 +879,10 @@
       .key-bar {
         position: relative;
         display: flex;
-        align-items: stretch;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        align-items: flex-start;
         gap: 6px;
         padding: 5px 6px;
         border-top: 1px solid var(--border);
@@ -866,6 +890,7 @@
       }
       .key-bar-settings {
         width: 30px;
+        height: var(--key-bar-control-height);
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -884,23 +909,23 @@
       .key-row {
         display: flex;
         flex: 1 1 auto;
+        flex-wrap: nowrap;
+        align-items: center;
         gap: 5px;
         min-width: 0;
+        min-height: var(--key-bar-control-height);
         overflow-x: auto;
         overflow-y: hidden;
-        scrollbar-width: thin;
+        scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
       }
       .key-row::-webkit-scrollbar {
-        height: 5px;
-      }
-      .key-row::-webkit-scrollbar-thumb {
-        border-radius: 3px;
-        background: var(--border);
+        display: none;
       }
       .key-btn {
         flex: 0 0 auto;
         min-width: 34px;
+        height: var(--key-bar-control-height);
         padding: 4px 9px;
         background: var(--panel-2);
         color: var(--text);
@@ -916,9 +941,85 @@
         border-color: var(--accent-50);
         background: var(--accent-12);
       }
+      .key-flick-btn {
+        min-width: 42px;
+        touch-action: none;
+        user-select: none;
+      }
+      .key-flick-btn.flicking {
+        border-color: var(--accent-50);
+        background: var(--accent-12);
+        color: var(--accent);
+      }
+      .key-flick-hint {
+        position: fixed;
+        z-index: 60;
+        width: 96px;
+        height: 96px;
+        border: 1px solid var(--accent-50);
+        border-radius: 50%;
+        background: var(--panel);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+      }
+      .key-flick-hint[hidden] {
+        display: none;
+      }
+      .key-flick-arrow,
+      .key-flick-center {
+        position: absolute;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .key-flick-arrow {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        color: var(--text-secondary);
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .key-flick-arrow.active {
+        background: var(--accent-20);
+        color: var(--accent);
+      }
+      .key-flick-arrow[data-flick-direction="up"] {
+        top: 3px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="right"] {
+        top: 50%;
+        right: 3px;
+        transform: translateY(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="down"] {
+        bottom: 3px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="left"] {
+        top: 50%;
+        left: 3px;
+        transform: translateY(-50%);
+      }
+      .key-flick-center {
+        top: 50%;
+        left: 50%;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--text-secondary);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+      }
       .key-row-empty {
-        align-self: center;
-        padding: 4px 6px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        height: var(--key-bar-control-height);
+        padding: 0 6px;
         color: var(--muted);
         font-size: var(--fs-sm);
         opacity: 0.85;
@@ -1082,14 +1183,21 @@
         </div>
       </main>
       <nav id="keyBar" class="key-bar" aria-label="Special keys" hidden>
-        <button id="keyBarSettings" class="key-bar-settings" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="keyPopover" title="Choose key sets">⚙</button>
-        <div id="keyRow" class="key-row" role="group" aria-label="Special key buttons"></div>
+        <div id="keyRow" class="key-row" role="group" aria-label="Special key buttons">
+          <button id="keyBarSettings" class="key-bar-settings" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="keyPopover" title="Choose key sets">⚙</button>
+        </div>
+        <div id="keyFlickHint" class="key-flick-hint" data-direction="" aria-hidden="true" hidden>
+          <span class="key-flick-arrow" data-flick-direction="up">↑</span>
+          <span class="key-flick-arrow" data-flick-direction="right">→</span>
+          <span class="key-flick-arrow" data-flick-direction="down">↓</span>
+          <span class="key-flick-arrow" data-flick-direction="left">←</span>
+          <span class="key-flick-center"></span>
+        </div>
         <div id="keyPopover" class="key-popover" hidden>
           <div id="keyPopoverBody" class="key-popover-scroll"></div>
         </div>
       </nav>
       <footer>
-        <button id="copySelection" disabled>Copy</button>
         <button id="ctrlC" disabled>Ctrl+C</button>
         <button id="focusTerminal" disabled>Keyboard</button>
         <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
@@ -1132,12 +1240,12 @@
         const markAllNotificationsReadButton = $("markAllNotificationsRead");
         const clearNotificationsButton = $("clearNotifications");
         const focusTerminalButton = $("focusTerminal");
-        const copySelectionButton = $("copySelection");
         const ctrlCButton = $("ctrlC");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
         const keyRowEl = $("keyRow");
+        const keyFlickHint = $("keyFlickHint");
         const keyPopover = $("keyPopover");
         const keyPopoverBody = $("keyPopoverBody");
         const tokenKey = "laymux.remote.token";
@@ -1182,6 +1290,7 @@
         let lastTouchTap = { time: 0, x: 0, y: 0, count: 0 };
         let selectionHandles = null;
         let selectionHandleDrag = null;
+        let lastCopiedSelection = "";
 
         // UX contract: long press. This delay is only the local gesture threshold.
         const INTERNAL_TOUCH_LONG_PRESS_DELAY_MS = 500;
@@ -1190,6 +1299,19 @@
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
         const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
         const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
+
+        const remoteVisualViewport = window.visualViewport;
+
+        function syncRemoteViewportHeight() {
+          const height = remoteVisualViewport ? remoteVisualViewport.height : window.innerHeight;
+          if (!Number.isFinite(height) || height <= 0) return;
+          document.documentElement.style.setProperty("--remote-viewport-height", `${Math.round(height)}px`);
+          scheduleTerminalFit();
+        }
+
+        syncRemoteViewportHeight();
+        window.addEventListener("resize", syncRemoteViewportHeight);
+        remoteVisualViewport?.addEventListener("resize", syncRemoteViewportHeight);
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
@@ -1382,15 +1504,10 @@
           }
         }
 
-        function hasTerminalSelection() {
-          return Boolean(terminal && typeof terminal.hasSelection === "function" && terminal.hasSelection());
-        }
-
         function updateTerminalControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
           ctrlCButton.disabled = !canControl;
           focusTerminalButton.disabled = !canControl;
-          copySelectionButton.disabled = !canControl || !hasTerminalSelection();
           updateKeyBarControls();
         }
 
@@ -1406,39 +1523,49 @@
           textarea.select();
           try {
             return Boolean(document.execCommand && document.execCommand("copy"));
+          } catch (_) {
+            return false;
           } finally {
             textarea.remove();
           }
         }
 
         async function writeClipboardText(text) {
+          let clipboardError = null;
           if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(text);
-            return;
+            try {
+              await navigator.clipboard.writeText(text);
+              return;
+            } catch (err) {
+              clipboardError = err;
+            }
           }
-          if (!fallbackCopyText(text)) {
-            throw new Error("Clipboard API unavailable");
-          }
+          if (fallbackCopyText(text)) return;
+          if (clipboardError) throw clipboardError;
+          throw new Error("Clipboard API unavailable");
         }
 
         async function copySelectionToClipboard() {
           if (!terminal || !terminal.hasSelection()) {
-            updateTerminalControls();
+            lastCopiedSelection = "";
             return;
           }
           const text = terminal.getSelection();
           if (!text) {
-            updateTerminalControls();
+            lastCopiedSelection = "";
             return;
           }
+          if (text === lastCopiedSelection) return;
           try {
             await writeClipboardText(text);
-            setStatus("Selection copied.");
+            lastCopiedSelection = text;
           } catch (err) {
             setStatus(`Copy failed: ${err.message || err}`, true);
-          } finally {
-            updateTerminalControls();
           }
+        }
+
+        function copySelectionAfterInteraction() {
+          queueMicrotask(() => copySelectionToClipboard());
         }
 
         function isTouchPointer(event) {
@@ -1747,6 +1874,7 @@
             }
             selectionHandleDrag = null;
             updateSelectionHandles(term);
+            copySelectionAfterInteraction();
           };
 
           for (const handle of [start, end]) {
@@ -1868,6 +1996,7 @@
             resetTouchGesture(element);
             updateTerminalControls();
             updateSelectionHandles(term);
+            copySelectionAfterInteraction();
           };
 
           element.addEventListener("pointerup", finishTouchSelection, pointerOptions);
@@ -1892,6 +2021,7 @@
           terminal.onSelectionChange(() => {
             updateTerminalControls();
             updateSelectionHandles(terminal);
+            if (!terminal.hasSelection()) lastCopiedSelection = "";
           });
           terminal.onScroll?.(() => updateSelectionHandles(terminal));
           if ("ResizeObserver" in window) {
@@ -2869,6 +2999,7 @@
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
+          dpad: { label: "↕↔", flick: true },
           enter: { label: "⏎", seq: "\r" },
           bksp: { label: "⌫", seq: "\x7f" },
           up: { label: "↑", cursor: "A" },
@@ -2906,18 +3037,19 @@
         };
         // Stable render order for both the toolbar and the custom-key palette.
         const KEY_ORDER = [
-          "esc", "tab", "stab", "up", "down", "left", "right", "home", "end",
+          "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
           "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_SETS = [
-          { id: "nav", name: "Navigation", desc: "Arrows · Tab · Esc", keys: ["esc", "tab", "stab", "up", "down", "left", "right", "home", "end"] },
+          { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
           { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         const DEFAULT_KEYBAR = { visible: false, sets: ["nav"], custom: [] };
+        const KEY_FLICK_THRESHOLD_PX = 18;
         let keyPopoverOpen = false;
 
         function loadKeyBarConfig() {
@@ -2969,6 +3101,83 @@
           if (seq) enqueueInput(seq);
         }
 
+        function directionFromFlick(deltaX, deltaY) {
+          if (Math.hypot(deltaX, deltaY) < KEY_FLICK_THRESHOLD_PX) return "";
+          if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            return deltaX > 0 ? "right" : "left";
+          }
+          return deltaY > 0 ? "down" : "up";
+        }
+
+        function showKeyFlickHint(button, direction = "") {
+          const rect = button.getBoundingClientRect();
+          const radius = 48;
+          const margin = 4;
+          const centerX = Math.min(
+            window.innerWidth - radius - margin,
+            Math.max(radius + margin, rect.left + rect.width / 2)
+          );
+          const centerY = Math.min(
+            window.innerHeight - radius - margin,
+            Math.max(radius + margin, rect.top + rect.height / 2)
+          );
+          keyFlickHint.style.left = `${centerX}px`;
+          keyFlickHint.style.top = `${centerY}px`;
+          keyFlickHint.dataset.direction = direction;
+          for (const arrow of keyFlickHint.querySelectorAll("[data-flick-direction]")) {
+            arrow.classList.toggle("active", arrow.dataset.flickDirection === direction);
+          }
+          keyFlickHint.hidden = false;
+        }
+
+        function hideKeyFlickHint() {
+          keyFlickHint.hidden = true;
+          keyFlickHint.dataset.direction = "";
+          for (const arrow of keyFlickHint.querySelectorAll("[data-flick-direction]")) {
+            arrow.classList.remove("active");
+          }
+        }
+
+        function installDirectionalFlick(button) {
+          let gesture = null;
+
+          button.addEventListener("pointerdown", (event) => {
+            if (button.disabled || !event.isPrimary || event.button !== 0) return;
+            event.preventDefault();
+            gesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+            button.setPointerCapture(event.pointerId);
+            button.classList.add("flicking");
+            showKeyFlickHint(button);
+          });
+
+          button.addEventListener("pointermove", (event) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            event.preventDefault();
+            const direction = directionFromFlick(
+              event.clientX - gesture.x,
+              event.clientY - gesture.y
+            );
+            showKeyFlickHint(button, direction);
+          });
+
+          const finishFlick = (event, shouldSend) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            event.preventDefault();
+            const direction = directionFromFlick(
+              event.clientX - gesture.x,
+              event.clientY - gesture.y
+            );
+            gesture = null;
+            button.classList.remove("flicking");
+            hideKeyFlickHint();
+            if (shouldSend && direction) sendKey(direction);
+          };
+
+          button.addEventListener("pointerup", (event) => finishFlick(event, true));
+          button.addEventListener("pointercancel", (event) => finishFlick(event, false));
+          button.addEventListener("contextmenu", (event) => event.preventDefault());
+        }
+
         function updateKeyBarControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
           if (!keyRowEl) return;
@@ -2978,7 +3187,10 @@
         }
 
         function renderKeyRow() {
-          keyRowEl.textContent = "";
+          hideKeyFlickHint();
+          for (const item of keyRowEl.querySelectorAll(".key-btn, .key-row-empty")) {
+            item.remove();
+          }
           const ids = resolveKeyIds();
           if (ids.length === 0) {
             const empty = document.createElement("div");
@@ -2995,7 +3207,14 @@
             btn.dataset.key = id;
             btn.textContent = def.label;
             btn.title = def.label;
-            btn.addEventListener("click", () => sendKey(id));
+            if (def.flick) {
+              btn.classList.add("key-flick-btn");
+              btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
+              btn.title = "Flick up, right, down, or left";
+              installDirectionalFlick(btn);
+            } else {
+              btn.addEventListener("click", () => sendKey(id));
+            }
             keyRowEl.append(btn);
           }
           updateKeyBarControls();
@@ -3074,6 +3293,7 @@
           keyBarToggleButton.setAttribute("aria-pressed", visible ? "true" : "false");
           if (!visible) setKeyPopoverOpen(false);
           if (persist) saveKeyBarConfig();
+          scheduleTerminalFit();
         }
 
         function fitTerminal(sendResize = true) {
@@ -3217,7 +3437,7 @@
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
-        copySelectionButton.addEventListener("click", () => copySelectionToClipboard());
+        terminalHost.addEventListener("mouseup", copySelectionAfterInteraction);
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
@@ -3246,6 +3466,8 @@
           stopHeartbeat();
           stopInputFlush();
           if (resizeObserver) resizeObserver.disconnect();
+          window.removeEventListener("resize", syncRemoteViewportHeight);
+          remoteVisualViewport?.removeEventListener("resize", syncRemoteViewportHeight);
         });
       })();
     </script>

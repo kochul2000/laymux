@@ -24,6 +24,7 @@ export function LocalMobileModeOverlay() {
   return (
     <div className="local-mobile-mode-overlay" data-testid="local-mobile-mode-overlay">
       <iframe
+        allow="clipboard-write"
         className="local-mobile-mode-frame"
         data-testid="local-mobile-mode-frame"
         title="Laymux mobile mode"
