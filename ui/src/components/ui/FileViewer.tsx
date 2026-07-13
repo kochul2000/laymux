@@ -91,7 +91,7 @@ export function FileViewer({
   if (resolution.viewerType === "terminal") {
     const viewerProfile = resolveViewerProfile(path, profile, profiles);
     return (
-      <div className="h-full" data-testid="file-viewer-terminal">
+      <div className="h-full min-w-0 flex-1" data-testid="file-viewer-terminal">
         <TerminalView
           instanceId={viewerInstanceId}
           profile={viewerProfile}

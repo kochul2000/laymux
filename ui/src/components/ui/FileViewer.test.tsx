@@ -109,27 +109,22 @@ describe("FileViewer", () => {
     expect(iframe.getAttribute("srcdoc")).toContain("<table>");
   });
 
-  it("keeps markdown in the built-in preview when vi is configured for .md", async () => {
+  it("starts the vi terminal viewer when vi is configured for .md", async () => {
     useSettingsStore.setState({
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
         extensionViewers: [{ extensions: [".md"], command: "vi" }],
       },
     });
-    vi.mocked(readFileForViewer).mockResolvedValue({
-      kind: "text",
-      content: "# Built-in preview",
-      truncated: false,
-    });
-
     await act(async () => {
       render(<FileViewer {...baseProps} path="/home/user/README.md" />);
     });
 
-    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/README.md");
-    expect(screen.queryByTestId("mock-terminal-view")).not.toBeInTheDocument();
-    expect(screen.getByTestId("file-viewer-preview").getAttribute("srcdoc")).toContain(
-      "<h1>Built-in preview</h1>",
+    expect(readFileForViewer).not.toHaveBeenCalled();
+    expect(screen.getByTestId("file-viewer-terminal")).toHaveClass("h-full", "min-w-0", "flex-1");
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute(
+      "data-startup-command",
+      "vi '/home/user/README.md'",
     );
   });
 

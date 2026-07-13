@@ -1,5 +1,9 @@
-export { filePreviewKind } from "./file-viewer";
-export type { FilePreviewKind } from "./file-viewer";
+import { fileExtension } from "./file-viewer";
+
+export type FilePreviewKind = "html" | "markdown";
+
+const HTML_EXTENSIONS = new Set([".html", ".htm"]);
+const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 
 const DROP_WITH_CONTENT = new Set([
   "script",
@@ -80,6 +84,13 @@ const TAG_ATTRIBUTES: Record<string, Set<string>> = {
   th: new Set(["colspan", "rowspan", "align"]),
   input: new Set(["type", "checked", "disabled"]),
 };
+
+export function filePreviewKind(path: string): FilePreviewKind | null {
+  const ext = fileExtension(path);
+  if (HTML_EXTENSIONS.has(ext)) return "html";
+  if (MARKDOWN_EXTENSIONS.has(ext)) return "markdown";
+  return null;
+}
 
 export function htmlToSafePreviewDocument(html: string): string {
   return buildPreviewDocument(sanitizePreviewHtml(html));
