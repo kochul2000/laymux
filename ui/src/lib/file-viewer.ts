@@ -8,7 +8,10 @@ import type { ExtensionViewer } from "@/lib/tauri-api";
  */
 
 /** Resolved instruction for how a single file should be displayed. */
-export type ViewerResolution = { viewerType: "web" } | { viewerType: "terminal"; command: string };
+export type ViewerResolution =
+  | { viewerType: "web" }
+  | { viewerType: "terminal"; command: string; profile: string }
+  | { viewerType: "error"; message: string };
 
 /**
  * Normalize a raw file path string for the viewer.
@@ -72,22 +75,6 @@ export function fileExtension(path: string): string {
   return segment.slice(dot).toLowerCase();
 }
 
-/** Resolve a terminal profile suited to the given path's filesystem.
- *  Unix paths get a WSL profile when the active profile isn't already WSL-like,
- *  mirroring File Explorer behaviour so external viewers resolve paths. */
-export function resolveViewerProfile(
-  path: string,
-  profile: string,
-  profiles: { name: string; commandLine?: string }[],
-): string {
-  const isUnixPath = path.startsWith("/");
-  if (!isUnixPath) return profile;
-  const current = profiles.find((p) => p.name === profile);
-  if (current?.commandLine?.toLowerCase().includes("wsl")) return profile;
-  const wsl = profiles.find((p) => p.commandLine?.toLowerCase().includes("wsl"));
-  return wsl ? wsl.name : profile;
-}
-
 /**
  * Decide how to render a file: as a built-in web viewer (text/image/binary) or
  * via an external terminal command configured for its extension.
@@ -100,7 +87,13 @@ export function resolveViewer(path: string, extensionViewers: ExtensionViewer[])
   if (ext) {
     const viewer = extensionViewers.find((v) => v.extensions.some((e) => e.toLowerCase() === ext));
     if (viewer && viewer.command.trim().length > 0) {
-      return { viewerType: "terminal", command: viewer.command };
+      if (!viewer.profile?.trim()) {
+        return {
+          viewerType: "error",
+          message: `Select a terminal profile for the ${ext} viewer.`,
+        };
+      }
+      return { viewerType: "terminal", command: viewer.command, profile: viewer.profile };
     }
   }
   return { viewerType: "web" };

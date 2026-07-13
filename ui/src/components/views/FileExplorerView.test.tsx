@@ -771,7 +771,7 @@ describe("FileExplorerView", () => {
     useSettingsStore.setState({
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+        extensionViewers: [{ extensions: [".txt"], command: "vi", profile: "WSL" }],
       },
     });
 

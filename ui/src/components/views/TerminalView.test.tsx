@@ -5334,6 +5334,34 @@ describe("TerminalView", () => {
       });
     });
 
+    it("passes a structured external viewer request to session creation", async () => {
+      const viewerStartup = { command: "vi", path: "C:\\Users\\me\\README.md" };
+      render(
+        <TerminalView
+          instanceId="t-viewer-structured"
+          profile="Ubuntu"
+          syncGroup=""
+          cwdSend={false}
+          cwdReceive={false}
+          viewerStartup={viewerStartup}
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-viewer-structured",
+          "Ubuntu",
+          80,
+          24,
+          "",
+          false,
+          false,
+          undefined,
+          viewerStartup,
+        );
+      });
+    });
+
     it("rejects invalid session ID to prevent command injection", async () => {
       render(
         <TerminalView

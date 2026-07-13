@@ -86,6 +86,21 @@ Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: I
 
 우리가 구현한 기능과 교집합이 되는 항목만 호환. Windows Terminal의 settings.json을 복붙했을 때 해당 항목은 동일하게 동작한다.
 
+### File Explorer 외부 뷰어 설정
+
+`settings.fileExplorer.extensionViewers`의 각 항목은 `{ extensions: string[], command: string, profile: string }` 계약을 사용한다. `profile`은 `settings.profiles[].name`을 명시적으로 참조하며 파일 경로나 기본 profile로 추론하지 않는다. 이전 설정의 역직렬화 호환을 위해 Rust serde는 누락된 `profile`을 빈 문자열로 읽지만, Settings UI와 실행 경로는 빈 값 또는 삭제·변경된 profile 참조를 명시 오류로 표시한다. 내부 개발 단계 정책에 따라 자동 마이그레이션은 제공하지 않는다([ADR-0030](../adr/0030-extension-viewer-profile-path-conversion.md)).
+
+```jsonc
+{
+  "fileExplorer": {
+    "extensionViewers": [
+      { "extensions": [".md", ".markdown"], "command": "vi", "profile": "WSL" },
+      { "extensions": [".log"], "command": "notepad", "profile": "PowerShell" }
+    ]
+  }
+}
+```
+
 ### Claude Code 설정
 
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.
@@ -409,7 +424,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
 | `close_file_viewer` | bridge_request | 파일 뷰어 오버레이 닫기 (`ui.closeFileViewer`). 열려 있지 않으면 no-op — `open_file_viewer`/`show_image`와 짝 |
 
-**FileViewer preview 정책 (#404/#446)** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다. `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용하고, Markdown은 프론트에서 HTML로 변환한 뒤 동일 sanitizer/iframe 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
+**FileViewer preview 정책 (#404/#446)** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다. `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. 일반 `startupCommandOverride`는 `claude --resume <session-id>`만 허용하며 raw viewer 문자열은 거부한다. 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용하고, Markdown은 프론트에서 HTML로 변환한 뒤 동일 sanitizer/iframe 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
 **메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
 
@@ -711,6 +726,7 @@ src-tauri/src/
 ├── commands/                 # Tauri IPC 커맨드 (프론트엔드 진입점)
 │   ├── mod.rs                # pub use 허브 (로직 없음)
 │   ├── terminal.rs           # 터미널 생명주기 (create/close/resize/write)
+│   ├── viewer_startup.rs     # 외부 viewer 매핑 검증·경로 변환·shell quoting
 │   ├── ipc_dispatch.rs       # LX CLI 메시지 라우팅 + CWD 동기화
 │   ├── claude_session.rs     # Claude Code 세션 감지 + 프로세스 트리
 │   ├── file_ops.rs           # 파일 뷰어, 디렉토리 목록

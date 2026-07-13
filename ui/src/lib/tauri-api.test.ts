@@ -65,6 +65,7 @@ describe("tauri-api", () => {
         cwdReceive: true,
         cwd: null,
         startupCommandOverride: null,
+        viewer: null,
       });
       expect(result).toEqual(mockResult);
     });
@@ -86,6 +87,33 @@ describe("tauri-api", () => {
         cwdReceive: false,
         cwd: null,
         startupCommandOverride: null,
+        viewer: null,
+      });
+    });
+
+    it("passes a structured external viewer request without building a shell string", async () => {
+      mockInvoke.mockResolvedValue({
+        id: "viewer-1",
+        title: "Terminal",
+        config: { profile: "Ubuntu", cols: 80, rows: 24, sync_group: "", env: [] },
+      });
+
+      await createTerminalSession("viewer-1", "Ubuntu", 80, 24, "", false, false, undefined, {
+        command: "vi",
+        path: "C:\\Users\\me\\README.md",
+      });
+
+      expect(mockInvoke).toHaveBeenCalledWith("create_terminal_session", {
+        id: "viewer-1",
+        profile: "Ubuntu",
+        cols: 80,
+        rows: 24,
+        syncGroup: "",
+        cwdSend: false,
+        cwdReceive: false,
+        cwd: null,
+        startupCommandOverride: null,
+        viewer: { command: "vi", path: "C:\\Users\\me\\README.md" },
       });
     });
   });

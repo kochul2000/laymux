@@ -47,6 +47,7 @@ ADR 이 필요한 대표 기준:
 | [0027](0027-remote-connection-graceful-recovery.md) | Remote 연결 유예와 무표시 자동 복구 | Accepted |
 | [0028](0028-remote-soft-key-toolbar.md) | Remote 소프트 키 툴바 (클라이언트 전용, 커스터마이저블) | Accepted |
 | [0029](0029-detached-terminal-input-composer.md) | Terminal 분리 입력 컴포저 — PC와 Remote 공통 surface 모델 | Accepted |
+| [0030](0030-extension-viewer-profile-path-conversion.md) | Extension viewer 실행 프로필과 경로 변환 책임 | Accepted |
 
 ## 새 ADR 추가
 

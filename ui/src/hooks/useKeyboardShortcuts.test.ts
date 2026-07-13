@@ -366,7 +366,10 @@ describe("useKeyboardShortcuts", () => {
     // silently discard it — the user closes such viewers with the explicit ✕.
     const fe = useSettingsStore.getState().fileExplorer;
     useSettingsStore.setState({
-      fileExplorer: { ...fe, extensionViewers: [{ extensions: [".txt"], command: "vi" }] },
+      fileExplorer: {
+        ...fe,
+        extensionViewers: [{ extensions: [".txt"], command: "vi", profile: "WSL" }],
+      },
     });
     useFileViewerStore.setState({ open: true, path: "/tmp/notes.txt", maximized: false });
     renderHook(() => useKeyboardShortcuts());

@@ -18,12 +18,13 @@ vi.mock("@/components/views/TerminalView", () => ({
       data-testid="mock-terminal-view"
       data-startup-command={props.startupCommandOverride}
       data-profile={props.profile}
+      data-viewer-command={(props.viewerStartup as { command?: string } | undefined)?.command}
+      data-viewer-path={(props.viewerStartup as { path?: string } | undefined)?.path}
     />
   ),
 }));
 
 const baseProps = {
-  profile: "WSL",
   viewerInstanceId: "test-viewer",
   isFocused: true,
 };
@@ -113,7 +114,7 @@ describe("FileViewer", () => {
     useSettingsStore.setState({
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".md"], command: "vi" }],
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "WSL" }],
       },
     });
     await act(async () => {
@@ -122,9 +123,12 @@ describe("FileViewer", () => {
 
     expect(readFileForViewer).not.toHaveBeenCalled();
     expect(screen.getByTestId("file-viewer-terminal")).toHaveClass("h-full", "min-w-0", "flex-1");
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute("data-profile", "WSL");
+    expect(screen.getByTestId("mock-terminal-view")).not.toHaveAttribute("data-startup-command");
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute("data-viewer-command", "vi");
     expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute(
-      "data-startup-command",
-      "vi '/home/user/README.md'",
+      "data-viewer-path",
+      "/home/user/README.md",
     );
   });
 
@@ -159,7 +163,7 @@ describe("FileViewer", () => {
     useSettingsStore.setState({
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+        extensionViewers: [{ extensions: [".txt"], command: "vi", profile: "WSL" }],
       },
     });
     await act(async () => {
@@ -168,10 +172,12 @@ describe("FileViewer", () => {
     // Terminal viewer path is taken — readFileForViewer is NOT called.
     expect(readFileForViewer).not.toHaveBeenCalled();
     const term = screen.getByTestId("mock-terminal-view");
-    expect(term).toHaveAttribute("data-startup-command", "vi '/home/user/a.txt'");
+    expect(term).toHaveAttribute("data-profile", "WSL");
+    expect(term).toHaveAttribute("data-viewer-command", "vi");
+    expect(term).toHaveAttribute("data-viewer-path", "/home/user/a.txt");
   });
 
-  it("picks a WSL profile for unix paths in the terminal viewer", async () => {
+  it("uses the explicitly selected Windows profile without inferring from the path", async () => {
     useSettingsStore.setState({
       profiles: [
         {
@@ -191,12 +197,52 @@ describe("FileViewer", () => {
       ],
       fileExplorer: {
         ...useSettingsStore.getState().fileExplorer,
-        extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+        extensionViewers: [{ extensions: [".txt"], command: "notepad", profile: "PowerShell" }],
       },
     });
     await act(async () => {
-      render(<FileViewer {...baseProps} profile="PowerShell" path="/home/user/a.txt" />);
+      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
     });
-    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute("data-profile", "WSL");
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute("data-profile", "PowerShell");
+    expect(screen.getByTestId("mock-terminal-view")).toHaveAttribute(
+      "data-viewer-path",
+      "/home/user/a.txt",
+    );
+  });
+
+  it("shows an explicit error instead of inferring a missing viewer profile", async () => {
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "" }],
+      },
+    });
+
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/README.md" />);
+    });
+
+    expect(screen.queryByTestId("mock-terminal-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-error")).toHaveTextContent(
+      "Select a terminal profile for the .md viewer.",
+    );
+  });
+
+  it("shows an explicit error when the configured viewer profile no longer exists", async () => {
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "Deleted" }],
+      },
+    });
+
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/README.md" />);
+    });
+
+    expect(screen.queryByTestId("mock-terminal-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-error")).toHaveTextContent(
+      'Terminal profile "Deleted" does not exist.',
+    );
   });
 });

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
-import { resolveViewer, resolveViewerProfile } from "@/lib/file-viewer";
+import { resolveViewer } from "@/lib/file-viewer";
 import {
   filePreviewKind,
   htmlToSafePreviewDocument,
   markdownToSafePreviewDocument,
 } from "@/lib/file-preview";
-import { shellEscape, parentPath } from "@/lib/file-explorer-parse";
 import { useSettingsStore } from "@/stores/settings-store";
 import { TerminalView } from "@/components/views/TerminalView";
 
@@ -22,8 +21,6 @@ import { TerminalView } from "@/components/views/TerminalView";
 export interface FileViewerProps {
   /** Absolute path of the file to display (already normalized). */
   path: string;
-  /** Terminal profile to use when rendering via an external command viewer. */
-  profile: string;
   /** Stable id used for the spawned viewer terminal (web viewers ignore it). */
   viewerInstanceId: string;
   /** Whether this viewer is currently focused (forwarded to TerminalView). */
@@ -32,13 +29,7 @@ export interface FileViewerProps {
   bodyStyle?: React.CSSProperties;
 }
 
-export function FileViewer({
-  path,
-  profile,
-  viewerInstanceId,
-  isFocused,
-  bodyStyle,
-}: FileViewerProps) {
+export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: FileViewerProps) {
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
   const profiles = useSettingsStore((s) => s.profiles);
 
@@ -89,19 +80,40 @@ export function FileViewer({
   );
 
   if (resolution.viewerType === "terminal") {
-    const viewerProfile = resolveViewerProfile(path, profile, profiles);
+    if (!profiles.some((candidate) => candidate.name === resolution.profile)) {
+      return (
+        <div
+          className="flex h-full items-center justify-center px-4 text-center"
+          style={{ color: "var(--red)" }}
+          data-testid="file-viewer-error"
+        >
+          {`Terminal profile "${resolution.profile}" does not exist.`}
+        </div>
+      );
+    }
     return (
       <div className="h-full min-w-0 flex-1" data-testid="file-viewer-terminal">
         <TerminalView
           instanceId={viewerInstanceId}
-          profile={viewerProfile}
+          profile={resolution.profile}
           syncGroup=""
           cwdSend={false}
           cwdReceive={false}
           isFocused={isFocused}
-          lastCwd={parentPath(path)}
-          startupCommandOverride={`${resolution.command} ${shellEscape(path)}`}
+          viewerStartup={{ command: resolution.command, path }}
         />
+      </div>
+    );
+  }
+
+  if (resolution.viewerType === "error") {
+    return (
+      <div
+        className="flex h-full items-center justify-center px-4 text-center"
+        style={{ color: "var(--red)" }}
+        data-testid="file-viewer-error"
+      >
+        {resolution.message}
       </div>
     );
   }

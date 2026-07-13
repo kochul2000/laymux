@@ -408,7 +408,10 @@
       "copyOnSelect": "선택 시 복사",
       "copyOnSelectDesc": "파일 선택 시 자동으로 경로를 클립보드에 복사.",
       "extensionViewers": "확장자 뷰어",
-      "extensionViewersDesc": "확장자별 셸 프로그램으로 파일 열기",
+      "extensionViewersDesc": "확장자별 셸 프로그램과 터미널 프로필로 파일 열기",
+      "viewerProfilePlaceholder": "프로필 선택",
+      "viewerProfileRequired": "터미널 프로필을 선택하세요.",
+      "viewerProfileMissing": "선택한 터미널 프로필이 존재하지 않습니다.",
       "addViewer": "+ 뷰어 추가"
     },
     "issueReporter": {

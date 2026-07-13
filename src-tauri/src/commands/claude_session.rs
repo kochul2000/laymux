@@ -82,69 +82,11 @@ struct ClaudeSessionFile {
 
 /// Validate that a startup command override is safe to execute.
 ///
-/// Allowed forms:
-/// - `claude --resume <valid_session_id>` — Claude session restore
-/// - `<viewer_command> '<file_path>'` — Extension viewer from settings whitelist
-///
-/// `allowed_viewer_commands` should contain the command names registered in
-/// `settings.fileExplorer.extensionViewers` (e.g., `["vi", "less"]`).
-pub(crate) fn is_valid_startup_command_override(
-    cmd: &str,
-    allowed_viewer_commands: &[String],
-) -> bool {
-    // Check claude --resume pattern first
-    if cmd
-        .strip_prefix("claude --resume ")
+/// The only allowed form is `claude --resume <valid_session_id>`. External
+/// viewers use a structured IPC argument and are validated separately.
+pub(crate) fn is_valid_startup_command_override(cmd: &str) -> bool {
+    cmd.strip_prefix("claude --resume ")
         .is_some_and(is_valid_session_id)
-    {
-        return true;
-    }
-
-    // Check extension viewer pattern: "<command> '<path>'"
-    // The path is single-quoted by shellEscape on the frontend.
-    // shellEscape escapes embedded single quotes as '\'' (end-quote, escaped-quote, start-quote),
-    // so the full argument looks like: 'part1'\''part2'
-    // We validate the structure: command + space + shell-escaped path, no other shell metacharacters.
-    for viewer_cmd in allowed_viewer_commands {
-        if let Some(rest) = cmd.strip_prefix(viewer_cmd.as_str()) {
-            if let Some(after_space) = rest.strip_prefix(' ') {
-                if is_valid_shell_escaped_path(after_space) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-/// Validate a shell-escaped path produced by the frontend's `shellEscape()`.
-///
-/// Accepted format: `'<content>'` where embedded single-quotes are escaped as `'\''`.
-/// The full pattern is one or more `'...'` segments separated by `'\''`.
-/// No shell metacharacters (`;`, `&`, `|`, `$`, `` ` ``, `(`, `)`) are allowed
-/// inside the quoted segments.
-fn is_valid_shell_escaped_path(s: &str) -> bool {
-    // Must start with ' and end with '
-    if !s.starts_with('\'') || !s.ends_with('\'') || s.len() < 2 {
-        return false;
-    }
-
-    // Dangerous shell metacharacters that must not appear even inside quotes.
-    // Single-quoted strings in POSIX shells don't interpret these, but since
-    // the escaped-quote pattern ('\'') temporarily leaves the quoted context,
-    // we reject them to be safe.
-    const DANGEROUS: &[char] = &[';', '&', '|', '$', '`', '(', ')', '\n'];
-
-    // Strip outer quotes and check segments split by '\'' (escaped quote)
-    let inner = &s[1..s.len() - 1];
-    for segment in inner.split("'\\''") {
-        if segment.contains(DANGEROUS) {
-            return false;
-        }
-    }
-
-    true
 }
 
 /// Validate that a Claude session ID contains only safe characters
@@ -393,120 +335,42 @@ mod tests {
 
     #[test]
     fn startup_command_override_accepts_valid_resume() {
-        let no_viewers: &[String] = &[];
+        assert!(is_valid_startup_command_override("claude --resume abc-123"));
         assert!(is_valid_startup_command_override(
-            "claude --resume abc-123",
-            no_viewers
+            "claude --resume session_v2"
         ));
-        assert!(is_valid_startup_command_override(
-            "claude --resume session_v2",
-            no_viewers,
-        ));
-        assert!(is_valid_startup_command_override(
-            "claude --resume A1B2",
-            no_viewers
-        ));
+        assert!(is_valid_startup_command_override("claude --resume A1B2"));
     }
 
     #[test]
     fn startup_command_override_rejects_arbitrary_commands() {
-        let no_viewers: &[String] = &[];
-        assert!(!is_valid_startup_command_override("rm -rf /", no_viewers));
-        assert!(!is_valid_startup_command_override("echo pwned", no_viewers));
+        assert!(!is_valid_startup_command_override("rm -rf /"));
+        assert!(!is_valid_startup_command_override("echo pwned"));
         assert!(!is_valid_startup_command_override(
-            "claude --resume bad; rm -rf /",
-            no_viewers,
+            "claude --resume bad; rm -rf /"
         ));
         assert!(!is_valid_startup_command_override(
-            "claude --resume $(whoami)",
-            no_viewers,
+            "claude --resume $(whoami)"
         ));
         assert!(!is_valid_startup_command_override(
-            "claude --resume id && echo x",
-            no_viewers,
+            "claude --resume id && echo x"
         ));
-        assert!(!is_valid_startup_command_override("", no_viewers));
+        assert!(!is_valid_startup_command_override(""));
+        assert!(!is_valid_startup_command_override("claude --resume "));
+        assert!(!is_valid_startup_command_override("claude --resume"));
         assert!(!is_valid_startup_command_override(
-            "claude --resume ",
-            no_viewers
-        ));
-        assert!(!is_valid_startup_command_override(
-            "claude --resume",
-            no_viewers
-        ));
-        assert!(!is_valid_startup_command_override(
-            "not-claude --resume abc",
-            no_viewers,
+            "not-claude --resume abc"
         ));
     }
 
     #[test]
-    fn startup_command_override_accepts_whitelisted_viewer_command() {
-        let viewers = vec!["vi".to_string(), "less".to_string(), "cat".to_string()];
-        // Simple file path
-        assert!(is_valid_startup_command_override(
-            "vi '/home/user/file.txt'",
-            &viewers
-        ));
-        assert!(is_valid_startup_command_override(
-            "less '/tmp/log.log'",
-            &viewers
-        ));
-        assert!(is_valid_startup_command_override(
-            "cat '/data/notes.md'",
-            &viewers
-        ));
-        // Windows-style path
-        assert!(is_valid_startup_command_override(
-            "vi 'C:\\Users\\test\\file.rs'",
-            &viewers
-        ));
-        // Path with spaces
-        assert!(is_valid_startup_command_override(
-            "vi '/home/user/my file.txt'",
-            &viewers
-        ));
-        // Path with embedded single quote (shellEscape produces: 'it'\''s here')
-        assert!(is_valid_startup_command_override(
-            "vi 'it'\\''s here'",
-            &viewers
-        ));
-    }
-
-    #[test]
-    fn startup_command_override_rejects_non_whitelisted_viewer_command() {
-        let viewers = vec!["vi".to_string(), "less".to_string()];
-        // Command not in whitelist
+    fn startup_command_override_rejects_raw_viewer_commands() {
         assert!(!is_valid_startup_command_override(
-            "rm '/home/user/file.txt'",
-            &viewers
+            "vi '/home/user/file.txt'"
         ));
         assert!(!is_valid_startup_command_override(
-            "bash '/tmp/evil.sh'",
-            &viewers
+            "notepad 'C:\\Users\\me\\README.md'"
         ));
-    }
-
-    #[test]
-    fn startup_command_override_rejects_viewer_with_injection() {
-        let viewers = vec!["vi".to_string()];
-        // Injection attempts inside the "path" argument
-        assert!(!is_valid_startup_command_override(
-            "vi 'file.txt'; rm -rf /",
-            &viewers
-        ));
-        assert!(!is_valid_startup_command_override(
-            "vi 'file.txt' && echo pwned",
-            &viewers
-        ));
-        assert!(!is_valid_startup_command_override("vi $(whoami)", &viewers));
-        assert!(!is_valid_startup_command_override(
-            "vi file.txt; rm -rf /",
-            &viewers
-        ));
-        // No argument at all
-        assert!(!is_valid_startup_command_override("vi", &viewers));
-        assert!(!is_valid_startup_command_override("vi ", &viewers));
     }
 
     #[test]

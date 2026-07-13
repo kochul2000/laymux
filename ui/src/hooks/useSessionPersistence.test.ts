@@ -30,7 +30,7 @@ vi.mock("@/lib/tauri-api", () => {
       fontFamily: "",
       fontSize: 13,
       copyOnSelect: false,
-      extensionViewers: [{ extensions: [".txt"], command: "vi" }],
+      extensionViewers: [{ extensions: [".txt"], command: "vi", profile: "WSL" }],
     },
     layouts: [
       {
@@ -157,7 +157,7 @@ describe("useSessionPersistence", () => {
     });
 
     const { extensionViewers } = useSettingsStore.getState().fileExplorer;
-    expect(extensionViewers).toEqual([{ extensions: [".txt"], command: "vi" }]);
+    expect(extensionViewers).toEqual([{ extensions: [".txt"], command: "vi", profile: "WSL" }]);
   });
 
   it("applies loaded layouts and workspaces to workspace store", async () => {

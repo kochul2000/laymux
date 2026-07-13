@@ -918,6 +918,9 @@ impl Default for MemoSettings {
 pub struct ExtensionViewer {
     pub extensions: Vec<String>,
     pub command: String,
+    /// Explicit terminal profile used to execute the viewer command.
+    #[serde(default)]
+    pub profile: String,
 }
 
 /// FileExplorerView settings.
