@@ -109,6 +109,30 @@ describe("FileViewer", () => {
     expect(iframe.getAttribute("srcdoc")).toContain("<table>");
   });
 
+  it("keeps markdown in the built-in preview when vi is configured for .md", async () => {
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi" }],
+      },
+    });
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "# Built-in preview",
+      truncated: false,
+    });
+
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/README.md" />);
+    });
+
+    expect(readFileForViewer).toHaveBeenCalledWith("/home/user/README.md");
+    expect(screen.queryByTestId("mock-terminal-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-preview").getAttribute("srcdoc")).toContain(
+      "<h1>Built-in preview</h1>",
+    );
+  });
+
   it("renders an image for image content", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "image",

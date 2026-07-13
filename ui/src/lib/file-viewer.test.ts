@@ -72,6 +72,17 @@ describe("resolveViewer", () => {
     expect(resolveViewer("/tmp/a.txt", viewers)).toEqual({ viewerType: "web" });
   });
 
+  it("keeps built-in preview files in the web viewer when an external viewer also matches", () => {
+    const viViewer: ExtensionViewer[] = [
+      { extensions: [".md", ".markdown", ".html", ".htm"], command: "vi" },
+    ];
+
+    expect(resolveViewer("/docs/README.md", viViewer)).toEqual({ viewerType: "web" });
+    expect(resolveViewer("/docs/guide.markdown", viViewer)).toEqual({ viewerType: "web" });
+    expect(resolveViewer("/docs/report.html", viViewer)).toEqual({ viewerType: "web" });
+    expect(resolveViewer("/docs/report.htm", viViewer)).toEqual({ viewerType: "web" });
+  });
+
   it("returns terminal viewer with command for a matched extension", () => {
     expect(resolveViewer("/tmp/movie.MKV", viewers)).toEqual({
       viewerType: "terminal",

@@ -10,6 +10,11 @@ import type { ExtensionViewer } from "@/lib/tauri-api";
 /** Resolved instruction for how a single file should be displayed. */
 export type ViewerResolution = { viewerType: "web" } | { viewerType: "terminal"; command: string };
 
+export type FilePreviewKind = "html" | "markdown";
+
+const HTML_PREVIEW_EXTENSIONS = new Set([".html", ".htm"]);
+const MARKDOWN_PREVIEW_EXTENSIONS = new Set([".md", ".markdown"]);
+
 /**
  * Normalize a raw file path string for the viewer.
  * Trims surrounding whitespace and strips a single pair of wrapping quotes
@@ -72,6 +77,14 @@ export function fileExtension(path: string): string {
   return segment.slice(dot).toLowerCase();
 }
 
+/** Return the built-in preview kind for paths that must stay in the web viewer. */
+export function filePreviewKind(path: string): FilePreviewKind | null {
+  const ext = fileExtension(path);
+  if (HTML_PREVIEW_EXTENSIONS.has(ext)) return "html";
+  if (MARKDOWN_PREVIEW_EXTENSIONS.has(ext)) return "markdown";
+  return null;
+}
+
 /** Resolve a terminal profile suited to the given path's filesystem.
  *  Unix paths get a WSL profile when the active profile isn't already WSL-like,
  *  mirroring File Explorer behaviour so external viewers resolve paths. */
@@ -96,6 +109,10 @@ export function resolveViewerProfile(
  * stay consistent.
  */
 export function resolveViewer(path: string, extensionViewers: ExtensionViewer[]): ViewerResolution {
+  // HTML and Markdown have first-class preview/source modes. They must not be
+  // intercepted by a legacy extension viewer mapping such as `.md -> vi`.
+  if (filePreviewKind(path)) return { viewerType: "web" };
+
   const ext = fileExtension(path);
   if (ext) {
     const viewer = extensionViewers.find((v) => v.extensions.some((e) => e.toLowerCase() === ext));
