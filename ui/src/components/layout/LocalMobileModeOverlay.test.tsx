@@ -16,6 +16,7 @@ describe("LocalMobileModeOverlay", () => {
     const frame = screen.getByTestId("local-mobile-mode-frame");
     expect(screen.getByTestId("local-mobile-mode-overlay")).toBeInTheDocument();
     expect(frame).toHaveAttribute("src", "http://127.0.0.1:19281/remote/?localApp=1");
+    expect(frame).toHaveAttribute("allow", "clipboard-write");
   });
 
   it("exits when the remote page requests desktop mode", async () => {
