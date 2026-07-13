@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+pub(crate) use access::effective_remote_settings;
 pub use access::{
     get_remote_access_status, set_remote_runtime_access, RemoteAccessRuntimeState,
     RemoteAccessStatus,
