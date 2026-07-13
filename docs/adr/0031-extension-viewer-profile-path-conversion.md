@@ -14,6 +14,8 @@
 
 프론트엔드는 viewer `command`와 원본 `path`를 구조화된 IPC 인자로 전달하며 startup command 문자열이나 shell quoting을 만들지 않는다. Rust는 요청의 확장자·command·profile 조합이 `settings.fileExplorer.extensionViewers`와 정확히 일치하고 profile이 존재하는지 검증한다. 선택 profile의 `commandLine`으로 WSL/Windows 실행 환경을 판별하고, 기존 `path_utils`를 통해 Windows drive path와 `/mnt/<drive>` path를 변환하며 pure Linux path를 Windows에서 열 때 explicit/default WSL distro의 UNC path를 사용한다. 변환된 단일 path 인자는 대상 shell 규칙에 맞게 Rust에서 quote한 뒤 whitelisted command에 결합한다.
 
+`\\wsl.localhost\<distro>\...`처럼 source distro가 명시된 pure-Linux 경로를 WSL profile에서 열 때는 profile `commandLine`의 unquoted `-d`/`--distribution`/`--distribution=` 값과 source distro가 대소문자 무시 기준으로 같아야 한다. 다르거나 bare `wsl.exe`라 선택 distro를 확정할 수 없으면 다른 distro의 동일 경로로 축약하지 않고 오류로 거부한다. 현재 terminal spawn parser가 whitespace 분리만 지원하므로 quoted executable/distro는 이 검증에서도 지원하지 않는다. `/mnt/<drive>`는 모든 WSL distro가 공유하는 Windows-backed 경로이므로 distro 일치 검증의 예외다. Windows profile로 전달하는 explicit UNC는 source distro를 그대로 보존한다.
+
 일반 `startupCommandOverride`는 Claude session resume 전용으로 제한하고 extension viewer 실행 우회로 사용하지 않는다.
 
 ## Consequences
@@ -21,5 +23,6 @@
 - 여러 WSL distro와 Windows profile을 mapping별로 정확히 선택할 수 있다.
 - 경로 변환·quoting·allowlist 검증이 Rust 단일 경계에 모여 프론트엔드와 backend의 shell 해석 차이가 사라진다.
 - profile 이름 변경·삭제 시 이를 참조하는 mapping은 자동 추론하지 않고 명시 오류가 된다.
+- explicit WSL pure-Linux 경로는 선택 profile의 distro가 일치할 때만 로컬 Linux 경로로 축약되어 다른 distro의 동명 파일을 잘못 여는 것을 막는다.
 - 기존 `profile` 누락 설정은 마이그레이션하지 않으며 사용자가 Settings에서 실행 profile을 지정해야 한다.
 - 새 shell 환경을 지원할 때 Rust의 환경 판별·path conversion·quoting 정책을 함께 확장해야 한다.
