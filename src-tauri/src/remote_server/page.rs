@@ -181,6 +181,42 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_soft_key_toolbar() {
+        let html = remote_page_html();
+        // Markup: toolbar row, footer toggle, and the settings popover.
+        assert!(html.contains("id=\"keyBar\""));
+        assert!(html.contains("id=\"keyBarToggle\""));
+        assert!(html.contains("id=\"keyBarSettings\""));
+        assert!(html.contains("id=\"keyPopover\""));
+        assert!(html.contains("id=\"keyRow\""));
+        // Config is client-only UI state persisted to localStorage (ADR-0004).
+        assert!(html.contains("laymux.remote.keybar"));
+        assert!(html
+            .contains("const DEFAULT_KEYBAR = { visible: false, sets: [\"nav\"], custom: [] };"));
+        // Predefined sets are selectable and a custom palette exists.
+        assert!(html.contains("id: \"nav\", name: \"Navigation\""));
+        assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
+        assert!(html.contains("id: \"fn\", name: \"Function\""));
+        assert!(html.contains("function resolveKeyIds()"));
+        assert!(html.contains("function renderKeyPopover()"));
+        // Keys reuse the existing write path via enqueueInput, no new API.
+        assert!(html.contains("function sendKey(id)"));
+        assert!(html.contains("if (seq) enqueueInput(seq);"));
+        // Cursor keys (arrows/Home/End) are DECCKM-aware: SS3 in app mode, else CSI.
+        assert!(html.contains("up: { label: \"↑\", cursor: \"A\" }"));
+        assert!(html.contains("home: { label: \"Home\", cursor: \"H\" }"));
+        assert!(html.contains("return (appMode ? \"\\x1bO\" : \"\\x1b[\") + def.cursor;"));
+        assert!(html.contains("terminal.modes.applicationCursorKeysMode"));
+        // A representative fixed sequence: Tab, Delete, and F1 (SS3).
+        assert!(html.contains("tab: { label: \"Tab\", seq: \"\\t\" }"));
+        assert!(html.contains("del: { label: \"Del\", seq: \"\\x1b[3~\" }"));
+        assert!(html.contains("f1: { label: \"F1\", seq: \"\\x1bOP\" }"));
+        // Toggle visibility drives the hidden attribute + persistence.
+        assert!(html.contains("function setKeyBarVisible(visible, persist = true)"));
+        assert!(html.contains("keyBar.hidden = !visible;"));
+    }
+
+    #[test]
     fn remote_page_gate_requires_enabled_for_tunnel_requests() {
         let addr = "203.0.113.10:1".parse::<SocketAddr>().unwrap();
 
