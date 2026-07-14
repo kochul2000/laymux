@@ -36,6 +36,8 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// a writer holds one across `.await` (the body→CR delay); they are acquired
 /// only after the `exec_locks` table mutex has been released, so they sit
 /// outside this ordering.
+/// `settings_update_lock` is also async and is held only across frontend settings
+/// snapshot/validation/apply awaits, never together with a synchronous AppState lock.
 pub struct AppState {
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
@@ -102,6 +104,9 @@ pub struct AppState {
     /// is a `tokio::sync::Mutex` because a writer holds it across the body→CR
     /// `.await` delay.
     pub exec_locks: SharedExecLocks,
+    /// Serializes settings snapshot → validation → persistence across MCP sessions
+    /// and legacy Automation setters so optimistic revisions cannot lose updates.
+    pub settings_update_lock: tokio::sync::Mutex<()>,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -130,6 +135,7 @@ impl AppState {
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
             exec_locks: Arc::new(Mutex::new(HashMap::new())),
+            settings_update_lock: tokio::sync::Mutex::new(()),
         }
     }
 }

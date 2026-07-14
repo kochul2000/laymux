@@ -13,6 +13,8 @@ import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
+import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
+import type { Settings } from "@/lib/tauri-api";
 import type {
   DockPosition,
   ViewInstanceConfig,
@@ -569,23 +571,6 @@ const handlers: HandlerMap = {
     },
   },
 
-  settings: {
-    setProfileDefaults: (p) => {
-      useSettingsStore.getState().setProfileDefaults(p as Record<string, unknown>);
-      return ok({ set: true });
-    },
-    setAppTheme: (p) => {
-      useSettingsStore.getState().setAppearance({ themeId: p.themeId as string });
-      return ok({ set: true });
-    },
-    updateProfile: (p) => {
-      const idx = typeof p.index === "number" ? p.index : 0;
-      const data = p.data as Record<string, unknown>;
-      useSettingsStore.getState().updateProfile(idx, data);
-      return ok({ updated: true });
-    },
-  },
-
   terminals: {
     list: () => {
       const { instances } = useTerminalStore.getState();
@@ -1050,6 +1035,50 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "settings" && request.method === "getSnapshot") {
+    try {
+      return ok({ settings: await collectSettingsSnapshot() });
+    } catch (error) {
+      return err(
+        `Settings snapshot error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (request.target === "settings" && request.method === "applySnapshot") {
+    const settings = request.params.settings;
+    const expectedSettings = request.params.expectedSettings;
+    const revisionIgnoredPaths = request.params.revisionIgnoredPaths;
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      return err("settings object required");
+    }
+    if (
+      expectedSettings !== undefined &&
+      (!expectedSettings || typeof expectedSettings !== "object" || Array.isArray(expectedSettings))
+    ) {
+      return err("expectedSettings must be an object");
+    }
+    if (
+      expectedSettings !== undefined &&
+      (!Array.isArray(revisionIgnoredPaths) ||
+        revisionIgnoredPaths.some((path) => typeof path !== "string"))
+    ) {
+      return err("revisionIgnoredPaths must be a string array when expectedSettings is provided");
+    }
+    try {
+      await saveAndApplySettingsSnapshot(settings as Settings, {
+        includeStructural: false,
+        ...(expectedSettings
+          ? {
+              expectedSettings: expectedSettings as Settings,
+              revisionIgnoredPaths: revisionIgnoredPaths as string[],
+            }
+          : {}),
+      });
+      return ok({ applied: true });
+    } catch (error) {
+      return err(`Settings apply error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   if (request.target === "terminals" && request.method === "prepareForAutomation") {
     return prepareTerminalForAutomation(request.params.id as string);
   }

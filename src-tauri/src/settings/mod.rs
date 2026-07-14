@@ -1,4 +1,7 @@
+pub mod contract;
 pub mod models;
+mod schema;
+mod semantic_validation;
 pub mod validation;
 pub use models::*;
 pub use validation::{SettingsLoadResult, ValidationWarning};

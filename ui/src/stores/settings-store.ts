@@ -107,6 +107,8 @@ export interface PasteSettings {
 
 /** Terminal behavior & rendering. */
 export interface TerminalSettings {
+  /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
+  outputActivityBurst?: { windowMs: number; threshold: number; throttleMs: number };
   /** Automatically copy text to clipboard when selected in terminal. */
   copyOnSelect: boolean;
   /** Terminal scrollbar style: "overlay" renders on top of content, "separate" reserves space. */
@@ -525,6 +527,7 @@ export const DEFAULT_PASTE: PasteSettings = {
 };
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
+  outputActivityBurst: { windowMs: 2000, threshold: 6, throttleMs: 1000 },
   copyOnSelect: true,
   scrollbarStyle: "overlay",
   pathLinkEnabled: true,
