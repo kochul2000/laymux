@@ -3437,7 +3437,10 @@
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
-        terminalHost.addEventListener("mouseup", copySelectionAfterInteraction);
+        // xterm completes a mouse selection from a document-level mouseup handler.
+        // Listen at the same boundary so releasing an outside-terminal drag still
+        // schedules the copy after every listener for this event has run.
+        document.addEventListener("mouseup", copySelectionAfterInteraction);
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));

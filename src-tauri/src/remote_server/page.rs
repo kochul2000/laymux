@@ -117,7 +117,10 @@ mod tests {
         assert!(!html.contains("id=\"copySelection\""));
         assert!(html.contains("copySelectionToClipboard"));
         assert!(html.contains("terminal.onSelectionChange(() => {"));
-        assert!(html.contains(
+        assert!(
+            html.contains("document.addEventListener(\"mouseup\", copySelectionAfterInteraction);")
+        );
+        assert!(!html.contains(
             "terminalHost.addEventListener(\"mouseup\", copySelectionAfterInteraction);"
         ));
         assert!(html.contains("if (fallbackCopyText(text)) return;"));

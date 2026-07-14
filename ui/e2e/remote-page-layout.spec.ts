@@ -185,6 +185,150 @@ test.describe("remote mobile layout", () => {
     }
   });
 
+  test("copies a selection when mouseup lands outside the terminal", async ({ page }) => {
+    await page.addInitScript(() => {
+      class MockTerminal {
+        options: Record<string, unknown>;
+        modes = { applicationCursorKeysMode: false };
+        cols = 80;
+        rows = 24;
+        selection = "";
+
+        constructor(options: Record<string, unknown>) {
+          this.options = options;
+          Object.defineProperty(window, "__mockTerminal", { value: this, configurable: true });
+        }
+
+        loadAddon(_addon: unknown) {}
+        open(_element: HTMLElement) {}
+        onData(_listener: (data: string) => void) {}
+        onResize(_listener: (size: { cols: number; rows: number }) => void) {}
+        onSelectionChange(_listener: () => void) {}
+        onScroll(_listener: () => void) {}
+        hasSelection() {
+          return Boolean(this.selection);
+        }
+        getSelection() {
+          return this.selection;
+        }
+        getSelectionPosition() {
+          return null;
+        }
+        reset() {}
+        refresh(_start: number, _end: number) {}
+        write(_data: string | Uint8Array, callback?: () => void) {
+          callback?.();
+        }
+        focus() {}
+        scrollLines(_amount: number) {}
+      }
+
+      class MockFitAddon {
+        fit() {}
+      }
+
+      class MockResizeObserver {
+        observe(_target: Element) {}
+        disconnect() {}
+      }
+
+      class MockWebSocket {
+        binaryType = "";
+        onopen: (() => void) | null = null;
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onclose: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        close() {}
+      }
+
+      Object.defineProperty(window, "Terminal", { value: MockTerminal, configurable: true });
+      Object.defineProperty(window, "FitAddon", {
+        value: { FitAddon: MockFitAddon },
+        configurable: true,
+      });
+      Object.defineProperty(window, "ResizeObserver", {
+        value: MockResizeObserver,
+        configurable: true,
+      });
+      Object.defineProperty(window, "WebSocket", {
+        value: MockWebSocket,
+        configurable: true,
+      });
+    });
+    await page.route("http://remote.test/", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>remote test</title>",
+      }),
+    );
+    await page.route("**/remote/v1/**", (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname.endsWith("/session/claim")) {
+        return route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+      }
+      if (pathname.endsWith("/navigation")) {
+        return route.fulfill({
+          json: {
+            terminals: [{ id: "term-1", title: "Shell", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+      }
+      return route.fulfill({ json: {} });
+    });
+    await page.goto("http://remote.test/");
+    await page.setContent(await loadRemotePageMarkup(true));
+    await page.locator("#token").fill("test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#ctrlC")).toBeEnabled();
+
+    await page.evaluate(() => {
+      const testWindow = window as Window & {
+        __copiedText?: string[];
+        __mockTerminal?: { selection: string };
+      };
+      testWindow.__copiedText = [];
+      Object.defineProperty(document, "execCommand", {
+        configurable: true,
+        value: (command: string) => {
+          if (command !== "copy") return false;
+          const active = document.activeElement as HTMLTextAreaElement | null;
+          testWindow.__copiedText?.push(active?.value || "");
+          return true;
+        },
+      });
+      document.addEventListener(
+        "mouseup",
+        () => {
+          if (testWindow.__mockTerminal) {
+            testWindow.__mockTerminal.selection = "selected outside terminal";
+          }
+        },
+        { once: true },
+      );
+      document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as Window & { __copiedText?: string[] }).__copiedText || []),
+      )
+      .toEqual(["selected outside terminal"]);
+  });
+
   test("tracks the restored visual viewport height", async ({ page }) => {
     await page.route("http://remote.test/", (route) =>
       route.fulfill({
