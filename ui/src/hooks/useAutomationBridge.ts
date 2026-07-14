@@ -1047,6 +1047,7 @@ export async function handleAsyncAutomationRequest(
   if (request.target === "settings" && request.method === "applySnapshot") {
     const settings = request.params.settings;
     const expectedSettings = request.params.expectedSettings;
+    const revisionIgnoredPaths = request.params.revisionIgnoredPaths;
     if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
       return err("settings object required");
     }
@@ -1056,10 +1057,22 @@ export async function handleAsyncAutomationRequest(
     ) {
       return err("expectedSettings must be an object");
     }
+    if (
+      expectedSettings !== undefined &&
+      (!Array.isArray(revisionIgnoredPaths) ||
+        revisionIgnoredPaths.some((path) => typeof path !== "string"))
+    ) {
+      return err("revisionIgnoredPaths must be a string array when expectedSettings is provided");
+    }
     try {
       await saveAndApplySettingsSnapshot(settings as Settings, {
         includeStructural: false,
-        ...(expectedSettings ? { expectedSettings: expectedSettings as Settings } : {}),
+        ...(expectedSettings
+          ? {
+              expectedSettings: expectedSettings as Settings,
+              revisionIgnoredPaths: revisionIgnoredPaths as string[],
+            }
+          : {}),
       });
       return ok({ applied: true });
     } catch (error) {

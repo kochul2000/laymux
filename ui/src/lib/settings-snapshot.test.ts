@@ -6,7 +6,7 @@ vi.mock("@/lib/tauri-api", () => ({
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
-import { saveSettings } from "@/lib/tauri-api";
+import { getClaudeSessionIds, getTerminalCwds, saveSettings } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -110,6 +110,55 @@ describe("settings snapshot", () => {
 
     expect(saveSettings).not.toHaveBeenCalled();
     expect(useSettingsStore.getState().appearance.themeId).toBe("dracula");
+  });
+
+  it("uses caller-provided revision ignored paths instead of a frontend field list", async () => {
+    const expected = await collectSettingsSnapshot();
+    const candidate = structuredClone(expected);
+    candidate.appearance.themeId = "github-light";
+    const workspace = useWorkspaceStore.getState().workspaces[0];
+    useWorkspaceStore.getState().renameWorkspace(workspace.id, "Concurrent rename");
+
+    await expect(
+      saveAndApplySettingsSnapshot(candidate, {
+        includeStructural: false,
+        expectedSettings: expected,
+        revisionIgnoredPaths: [],
+      }),
+    ).rejects.toThrow("Settings revision conflict");
+
+    await expect(
+      saveAndApplySettingsSnapshot(candidate, {
+        includeStructural: false,
+        expectedSettings: expected,
+        revisionIgnoredPaths: ["/workspaces"],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not repeat backend runtime-state IPC while checking an expected snapshot", async () => {
+    const expected = await collectSettingsSnapshot();
+    const candidate = structuredClone(expected);
+    candidate.appearance.themeId = "github-light";
+    vi.clearAllMocks();
+
+    await saveAndApplySettingsSnapshot(candidate, {
+      includeStructural: false,
+      expectedSettings: expected,
+      revisionIgnoredPaths: [
+        "/workspaces",
+        "/layouts",
+        "/docks",
+        "/workspaceDisplayOrder",
+        "/remote/cloudInstanceId",
+        "/remote/cloudTunnelUrl",
+        "/remote/cloudServerBaseUrl",
+      ],
+    });
+
+    expect(getTerminalCwds).not.toHaveBeenCalled();
+    expect(getClaudeSessionIds).not.toHaveBeenCalled();
+    expect(saveSettings).toHaveBeenCalledTimes(1);
   });
 
   it("restores the latest store snapshot when settings change during persistence", async () => {

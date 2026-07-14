@@ -715,7 +715,19 @@ describe("handleAsyncAutomationRequest", () => {
       category: "action",
       target: "settings",
       method: "applySnapshot",
-      params: { settings, expectedSettings },
+      params: {
+        settings,
+        expectedSettings,
+        revisionIgnoredPaths: [
+          "/workspaces",
+          "/layouts",
+          "/docks",
+          "/workspaceDisplayOrder",
+          "/remote/cloudInstanceId",
+          "/remote/cloudTunnelUrl",
+          "/remote/cloudServerBaseUrl",
+        ],
+      },
     });
 
     expect(result.success).toBe(true);
@@ -741,7 +753,19 @@ describe("handleAsyncAutomationRequest", () => {
       category: "action",
       target: "settings",
       method: "applySnapshot",
-      params: { settings, expectedSettings },
+      params: {
+        settings,
+        expectedSettings,
+        revisionIgnoredPaths: [
+          "/workspaces",
+          "/layouts",
+          "/docks",
+          "/workspaceDisplayOrder",
+          "/remote/cloudInstanceId",
+          "/remote/cloudTunnelUrl",
+          "/remote/cloudServerBaseUrl",
+        ],
+      },
     });
 
     expect(result.success).toBe(false);

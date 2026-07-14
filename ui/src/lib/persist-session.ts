@@ -1,4 +1,4 @@
-﻿import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
+import { saveSettings, saveTerminalOutputCache, cleanTerminalOutputCache } from "@/lib/tauri-api";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";

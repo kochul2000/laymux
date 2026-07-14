@@ -1,6 +1,7 @@
 use laymux_lib::settings::contract::{
-    describe_settings, prepare_settings_update, redact_settings, select_settings_paths,
-    settings_revision, REDACTED_SETTING_VALUE,
+    describe_settings, metadata_for_path, prepare_settings_update, redact_settings,
+    select_settings_paths, sensitive_settings_paths, settings_revision, READ_ONLY_SETTINGS_PATHS,
+    REDACTED_SETTING_VALUE,
 };
 use laymux_lib::settings::Settings;
 use serde_json::json;
@@ -277,6 +278,27 @@ fn sensitive_value_is_redacted_from_reads_and_diffs() {
 }
 
 #[test]
+fn every_sensitive_metadata_path_is_redacted_from_settings_reads() {
+    let sensitive_paths: Vec<_> = sensitive_settings_paths().collect();
+    assert!(!sensitive_paths.is_empty());
+
+    for path in sensitive_paths {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        *value
+            .pointer_mut(path)
+            .unwrap_or_else(|| panic!("sensitive path must exist in Settings: {path}")) =
+            json!("secret");
+        let settings: Settings = serde_json::from_value(value).unwrap();
+
+        assert_eq!(
+            redact_settings(&settings).pointer(path),
+            Some(&json!(REDACTED_SETTING_VALUE)),
+            "{path} must be redacted from full settings responses"
+        );
+    }
+}
+
+#[test]
 fn redacted_token_sentinel_preserves_the_existing_secret() {
     let mut current = Settings::default();
     current.remote.auth_token = "existing-secret".into();
@@ -351,6 +373,16 @@ fn describe_settings_supports_known_fields_omitted_from_serialized_defaults() {
         description["metadata"]["/workspaceDisplayOrder"]["writable"],
         json!(false)
     );
+}
+
+#[test]
+fn read_only_metadata_uses_the_revision_ignored_contract_paths() {
+    for path in READ_ONLY_SETTINGS_PATHS {
+        assert!(
+            !metadata_for_path(path).writable,
+            "{path} must be read-only in metadata"
+        );
+    }
 }
 
 #[test]

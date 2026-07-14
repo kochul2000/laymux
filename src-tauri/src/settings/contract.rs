@@ -4,20 +4,11 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use super::models::Settings;
-use super::schema::{is_sensitive_path, metadata_for_path, metadata_json};
+use super::schema::{is_read_only_path, is_sensitive_path, metadata_json};
+pub use super::schema::{metadata_for_path, sensitive_settings_paths, READ_ONLY_SETTINGS_PATHS};
 use super::semantic_validation;
 
 pub const REDACTED_SETTING_VALUE: &str = "***REDACTED***";
-
-const READ_ONLY_PATHS: &[&str] = &[
-    "/workspaces",
-    "/layouts",
-    "/docks",
-    "/workspaceDisplayOrder",
-    "/remote/cloudInstanceId",
-    "/remote/cloudTunnelUrl",
-    "/remote/cloudServerBaseUrl",
-];
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -70,16 +61,25 @@ pub fn settings_revision(settings: &Settings) -> String {
 }
 
 fn remove_revision_ignored_fields(value: &mut Value) {
-    let Some(root) = value.as_object_mut() else {
+    for path in READ_ONLY_SETTINGS_PATHS {
+        remove_value_at_pointer(value, path);
+    }
+}
+
+fn remove_value_at_pointer(value: &mut Value, path: &str) {
+    let Some((parent_path, encoded_key)) = path.rsplit_once('/') else {
         return;
     };
-    for key in ["workspaces", "layouts", "docks", "workspaceDisplayOrder"] {
-        root.remove(key);
-    }
-    if let Some(remote) = root.get_mut("remote").and_then(Value::as_object_mut) {
-        for key in ["cloudInstanceId", "cloudTunnelUrl", "cloudServerBaseUrl"] {
-            remote.remove(key);
-        }
+    let key = encoded_key.replace("~1", "/").replace("~0", "~");
+    let parent = if parent_path.is_empty() {
+        value
+    } else if let Some(parent) = value.pointer_mut(parent_path) {
+        parent
+    } else {
+        return;
+    };
+    if let Some(object) = parent.as_object_mut() {
+        object.remove(&key);
     }
 }
 
@@ -102,7 +102,9 @@ fn canonicalize_json(value: Value) -> Value {
 
 pub fn redact_settings(settings: &Settings) -> Value {
     let mut value = serde_json::to_value(settings).unwrap_or_else(|_| json!({}));
-    redact_value_at_pointer(&mut value, "/remote/authToken");
+    for path in sensitive_settings_paths() {
+        redact_value_at_pointer(&mut value, path);
+    }
     value
 }
 
@@ -276,7 +278,7 @@ fn deep_merge(base: &mut Value, patch: &Value) {
 }
 
 fn preserve_redacted_sensitive_values(merged: &mut Value, current: &Value, patch: &Value) {
-    for path in ["/remote/authToken"] {
+    for path in sensitive_settings_paths() {
         if patch.pointer(path).and_then(Value::as_str) == Some(REDACTED_SETTING_VALUE) {
             if let (Some(target), Some(existing)) =
                 (merged.pointer_mut(path), current.pointer(path))
@@ -293,7 +295,7 @@ fn collect_read_only_errors(value: &Value, path: &str, errors: &mut Vec<Settings
     };
     for (key, child) in map {
         let child_path = join_pointer(path, key);
-        if READ_ONLY_PATHS.contains(&child_path.as_str()) {
+        if is_read_only_path(&child_path) {
             errors.push(SettingsIssue {
                 code: "read_only".into(),
                 path: child_path,
@@ -337,7 +339,7 @@ fn collect_changes(before: &Value, after: &Value, path: &str, changes: &mut Vec<
 }
 
 fn redact_change_value(path: &str, value: &Value) -> Value {
-    if is_sensitive_path(path) && value.as_str().is_some_and(|value| !value.is_empty()) {
+    if is_sensitive_path(path) && has_sensitive_value(value) {
         json!(REDACTED_SETTING_VALUE)
     } else {
         value.clone()
@@ -346,9 +348,17 @@ fn redact_change_value(path: &str, value: &Value) -> Value {
 
 fn redact_value_at_pointer(value: &mut Value, path: &str) {
     if let Some(secret) = value.pointer_mut(path) {
-        if secret.as_str().is_some_and(|value| !value.is_empty()) {
+        if has_sensitive_value(secret) {
             *secret = json!(REDACTED_SETTING_VALUE);
         }
+    }
+}
+
+fn has_sensitive_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(value) => !value.is_empty(),
+        _ => true,
     }
 }
 

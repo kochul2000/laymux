@@ -2,7 +2,9 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-use crate::settings::contract::{prepare_settings_update, PreparedSettingsUpdate};
+use crate::settings::contract::{
+    prepare_settings_update, PreparedSettingsUpdate, READ_ONLY_SETTINGS_PATHS,
+};
 use crate::settings::models::Settings;
 
 use super::helpers::bridge_request;
@@ -119,7 +121,11 @@ async fn apply_settings_patch_to_current(
         "action",
         "settings",
         "applySnapshot",
-        json!({ "settings": candidate, "expectedSettings": current }),
+        json!({
+            "settings": candidate,
+            "expectedSettings": current,
+            "revisionIgnoredPaths": READ_ONLY_SETTINGS_PATHS,
+        }),
     )
     .await?;
     ensure_frontend_success(&data)?;
@@ -205,10 +211,15 @@ mod tests {
     fn strict_snapshot_parser_rejects_unknown_frontend_fields() {
         let mut value = serde_json::to_value(Settings::default()).unwrap();
         value["futureSetting"] = json!(true);
+        value["terminal"]["futureNestedSetting"] = json!(true);
 
         let (status, Json(body)) = parse_settings_snapshot(value).unwrap_err();
         assert_eq!(status, StatusCode::BAD_GATEWAY);
-        assert_eq!(body["details"]["unknownSettingsPaths"][0], "futureSetting");
+        let paths = body["details"]["unknownSettingsPaths"]
+            .as_array()
+            .expect("unknown paths array");
+        assert!(paths.contains(&json!("futureSetting")));
+        assert!(paths.contains(&json!("terminal.futureNestedSetting")));
     }
 
     #[test]

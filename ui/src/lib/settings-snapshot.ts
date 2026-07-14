@@ -12,18 +12,29 @@ export type { ApplySettingsSnapshotOptions } from "./apply-settings-snapshot";
 
 export interface SaveAndApplySettingsSnapshotOptions extends ApplySettingsSnapshotOptions {
   expectedSettings?: Settings;
+  /** Supplied by the Rust settings contract; never duplicate the path set in the frontend. */
+  revisionIgnoredPaths?: readonly string[];
+}
+
+interface CollectSettingsSnapshotOptions {
+  includeRuntimeStructuralState?: boolean;
 }
 
 /** Collect the current settings-owned state from every frontend store. */
-export async function collectSettingsSnapshot(): Promise<Settings> {
+export async function collectSettingsSnapshot(
+  options: CollectSettingsSnapshotOptions = {},
+): Promise<Settings> {
   const settingsState = useSettingsStore.getState();
   const workspaceState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
-  const [backendCwds, claudeSessionIds] = await Promise.all([
-    getTerminalCwds().catch(() => ({}) as Record<string, string>),
-    getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
-  ]);
+  const [backendCwds, claudeSessionIds] =
+    options.includeRuntimeStructuralState === false
+      ? [{}, {}]
+      : await Promise.all([
+          getTerminalCwds().catch(() => ({}) as Record<string, string>),
+          getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
+        ]);
 
   return {
     language: settingsState.language,
@@ -172,13 +183,15 @@ export async function saveAndApplySettingsSnapshot(
   options: SaveAndApplySettingsSnapshotOptions = {},
 ): Promise<void> {
   if (options.expectedSettings) {
-    const current = await collectSettingsSnapshot();
-    assertExpectedSettings(current, options.expectedSettings);
+    const current = await collectSettingsSnapshot({ includeRuntimeStructuralState: false });
+    assertExpectedSettings(current, options.expectedSettings, options.revisionIgnoredPaths ?? []);
   }
   await saveSettings(settings);
   if (options.expectedSettings) {
-    const latest = await collectSettingsSnapshot();
-    if (!settingsConfigEquals(latest, options.expectedSettings)) {
+    const latest = await collectSettingsSnapshot({ includeRuntimeStructuralState: false });
+    if (
+      !settingsConfigEquals(latest, options.expectedSettings, options.revisionIgnoredPaths ?? [])
+    ) {
       // The candidate is already on disk, but a user edit won the runtime race.
       // Restore that newer store state to disk and leave the live store untouched.
       await saveSettings(latest);
@@ -188,29 +201,50 @@ export async function saveAndApplySettingsSnapshot(
   applySettingsSnapshot(settings, options);
 }
 
-function assertExpectedSettings(current: Settings, expected: Settings): void {
-  if (!settingsConfigEquals(current, expected)) {
+function assertExpectedSettings(
+  current: Settings,
+  expected: Settings,
+  revisionIgnoredPaths: readonly string[],
+): void {
+  if (!settingsConfigEquals(current, expected, revisionIgnoredPaths)) {
     throw new Error("Settings revision conflict: settings changed before saving");
   }
 }
 
-function settingsConfigEquals(left: Settings, right: Settings): boolean {
-  return JSON.stringify(comparableSettings(left)) === JSON.stringify(comparableSettings(right));
+function settingsConfigEquals(
+  left: Settings,
+  right: Settings,
+  revisionIgnoredPaths: readonly string[],
+): boolean {
+  return (
+    JSON.stringify(comparableSettings(left, revisionIgnoredPaths)) ===
+    JSON.stringify(comparableSettings(right, revisionIgnoredPaths))
+  );
 }
 
-function comparableSettings(settings: Settings): unknown {
+function comparableSettings(settings: Settings, revisionIgnoredPaths: readonly string[]): unknown {
   const value = structuredClone(settings) as unknown as Record<string, unknown>;
-  delete value.workspaces;
-  delete value.layouts;
-  delete value.docks;
-  delete value.workspaceDisplayOrder;
-  if (value.remote !== null && typeof value.remote === "object") {
-    const remote = value.remote as Record<string, unknown>;
-    delete remote.cloudInstanceId;
-    delete remote.cloudTunnelUrl;
-    delete remote.cloudServerBaseUrl;
-  }
+  revisionIgnoredPaths.forEach((path) => removeJsonPointer(value, path));
   return canonicalize(value);
+}
+
+function removeJsonPointer(value: Record<string, unknown>, path: string): void {
+  if (!path.startsWith("/")) return;
+  const segments = path
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const key = segments.pop();
+  if (key === undefined) return;
+
+  let parent: unknown = value;
+  for (const segment of segments) {
+    if (parent === null || typeof parent !== "object") return;
+    parent = (parent as Record<string, unknown>)[segment];
+  }
+  if (parent !== null && typeof parent === "object") {
+    delete (parent as Record<string, unknown>)[key];
+  }
 }
 
 function canonicalize(value: unknown): unknown {
