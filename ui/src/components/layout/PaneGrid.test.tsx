@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
 vi.mock("@/components/views/TerminalView", () => ({
@@ -27,6 +27,7 @@ import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -42,6 +43,7 @@ describe("PaneGrid", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -432,5 +434,81 @@ describe("PaneGrid", () => {
     // 백엔드 커맨드는 호출되지 않고, 스토어 요청 카운터가 증가해야 한다.
     expect(propagateCwdOnceMock).not.toHaveBeenCalled();
     expect(useCwdPropagateStore.getState().requests["pane-fe"]).toBe(1);
+  });
+
+  // 흰 화면 방지 backstop: 위치 지정 pane <div> 는 항상 어두운 배경을 가져야 한다
+  // (콘텐츠가 자기 배경을 칠하기 전 브라우저 기본 흰색 노출 차단).
+  it("paints a dark background on the positioned pane div (no white flash)", () => {
+    render(<PaneGrid {...defaultProps} />);
+    expect(screen.getByTestId("test-pane-0").style.background).toContain("var(--bg-base)");
+  });
+});
+
+describe("PaneGrid staggered reveal", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const base = {
+    testIdFn: (_p: GridPane, i: number) => `test-pane-${i}`,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+    containerTestId: "grid",
+  };
+  const placeholderCount = () =>
+    document.querySelectorAll('[data-testid^="pane-loading-placeholder-"]').length;
+  const revealedCount = () =>
+    Number(screen.getByTestId("grid").getAttribute("data-pane-revealed-count"));
+
+  it("mounts only the initial batch, then reveals the rest one frame at a time", () => {
+    act(() => {
+      render(<PaneGrid {...base} panes={makePanes(8)} isFocused={() => false} />);
+    });
+    // Initial batch = 4 revealed, remaining 4 show placeholders.
+    expect(revealedCount()).toBe(4);
+    expect(placeholderCount()).toBe(4);
+
+    for (let i = 0; i < 4; i++) act(() => vi.advanceTimersByTime(16));
+
+    expect(revealedCount()).toBe(8);
+    expect(placeholderCount()).toBe(0);
+  });
+
+  it("reveals small layouts (≤ batch) synchronously with no placeholders", () => {
+    act(() => {
+      render(<PaneGrid {...base} panes={makePanes(3)} isFocused={() => false} />);
+    });
+    expect(revealedCount()).toBe(3);
+    expect(placeholderCount()).toBe(0);
+  });
+
+  it("never shows the focused pane as a placeholder", () => {
+    act(() => {
+      render(<PaneGrid {...base} panes={makePanes(8)} isFocused={(id) => id === "pane-7"} />);
+    });
+    // pane-7 is beyond the array-order initial batch but is focused → revealed.
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+  });
+
+  it("mounts a queued pane immediately when Automation requests it", () => {
+    act(() => {
+      render(<PaneGrid {...base} panes={makePanes(8)} isActive={false} isFocused={() => false} />);
+    });
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).not.toBeNull();
+
+    let release!: () => void;
+    act(() => {
+      release = usePaneRevealStore.getState().requestReveal("pane-7");
+    });
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+
+    act(() => release());
   });
 });

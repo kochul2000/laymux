@@ -266,13 +266,26 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
 const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 // Stagger WebGL context creation to prevent WebView2 GPU process crash.
-// Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
-let webglInitCount = 0;
+// Multiple near-simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
+// This is the next reserved start time, not an in-flight count: a later reveal
+// wave must be placed after every already-reserved slot.
+let webglNextInitAt = 0;
 const WEBGL_STAGGER_MS = 150;
 
-/** Reset the stagger counter (for tests). */
+function monotonicNow(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+/** Reserve the next globally-spaced WebGL initialization slot. */
+export function _reserveWebglInitDelay(now = monotonicNow()): number {
+  const scheduledAt = Math.max(now, webglNextInitAt);
+  webglNextInitAt = scheduledAt + WEBGL_STAGGER_MS;
+  return scheduledAt - now;
+}
+
+/** Reset the stagger timeline (for tests). */
 export function _resetWebglStagger(): void {
-  webglInitCount = 0;
+  webglNextInitAt = 0;
 }
 
 /**
@@ -2578,8 +2591,7 @@ export function TerminalView({
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
         // Stagger creation to prevent simultaneous GPU context init crash.
         if (shouldUseWebgl) {
-          const delay = webglInitCount * WEBGL_STAGGER_MS;
-          webglInitCount++;
+          const delay = _reserveWebglInitDelay();
           webglTimer = setTimeout(() => {
             if (cancelled) return;
             try {
@@ -2695,12 +2707,18 @@ export function TerminalView({
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
             viewerStartup ?? startupOverride,
-          ).catch((err) => {
-            console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
-            trackedTerminalWrite(
-              `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
-            );
-          });
+          )
+            .then(() => {
+              useTerminalStore.getState().updateInstanceInfo(instanceId, {
+                sessionReady: true,
+              });
+            })
+            .catch((err) => {
+              console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
+              trackedTerminalWrite(
+                `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
+              );
+            });
         }
 
         // Restore cached terminal output in parallel (non-blocking).

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -11,6 +11,9 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
+import { usePaneRevealQueue } from "@/hooks/usePaneRevealQueue";
+import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 
 export interface GridPane {
   id: string;
@@ -112,6 +115,26 @@ export function PaneGrid({
   // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
   const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
 
+  // Staggered reveal: mount panes' views a few per frame instead of all in one
+  // commit, so a many-pane workspace never flashes a white/blank screen. Small
+  // layouts (≤ initialBatch) reveal synchronously — behavior unchanged. Only
+  // progresses while active, so a hidden background workspace stays paused.
+  const paneIds = panes.map((p) => p.id);
+  const paneIdsKey = paneIds.join(" ");
+  const focusedPaneId = panes.find((p) => isFocused(p.id))?.id ?? null;
+  const revealRequestCounts = usePaneRevealStore((s) => s.requestCounts);
+  const requestedPaneIds = useMemo(
+    () => new Set(paneIds.filter((paneId) => (revealRequestCounts[paneId] ?? 0) > 0)),
+    // paneIds is recreated on render; the content key tracks layout changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [paneIdsKey, revealRequestCounts],
+  );
+  const revealed = usePaneRevealQueue(paneIds, {
+    active: isActive,
+    focusedPaneId,
+    requestedPaneIds,
+  });
+
   // Drag-to-swap (issue #377). Native HTML5 DnD, same pattern as workspace reorder
   // in WorkspaceSelectorView. dragSrcId 는 현재 드래그 중인 pane, dragOverId 는
   // 드롭 타겟 하이라이트용. dataTransfer 에도 id 를 실어 jsdom/실제 양쪽에서 동작.
@@ -147,6 +170,7 @@ export function PaneGrid({
     <div
       ref={containerRef}
       data-testid={containerTestId}
+      data-pane-revealed-count={revealed.size}
       className={containerClassName}
       style={containerStyle}
     >
@@ -190,6 +214,10 @@ export function PaneGrid({
               width: `${pane.w * 100}%`,
               height: `${pane.h * 100}%`,
               display: isActive ? undefined : "none",
+              // Dark backstop so a freshly-committed pane box is never painted
+              // browser-default white before its view renders its own background
+              // (the white-flash source when many panes mount in one commit).
+              background: "var(--bg-base)",
               borderRight: "2px solid var(--border)",
               borderBottom: "2px solid var(--border)",
             }}
@@ -253,20 +281,24 @@ export function PaneGrid({
                   : undefined,
               }}
             >
-              <ViewRenderer
-                viewType={pane.view.type}
-                viewConfig={pane.view}
-                onSelectView={
-                  onSetPaneView ? (config) => onSetPaneView(pane.id, config) : undefined
-                }
-                workspaceName={workspaceName}
-                workspaceId={workspaceId}
-                paneId={pane.id}
-                isFocused={focused}
-                emptyViewContext={emptyViewContext}
-                location={location}
-                onKeyboardActivity={hover.clear}
-              />
+              {revealed.has(pane.id) ? (
+                <ViewRenderer
+                  viewType={pane.view.type}
+                  viewConfig={pane.view}
+                  onSelectView={
+                    onSetPaneView ? (config) => onSetPaneView(pane.id, config) : undefined
+                  }
+                  workspaceName={workspaceName}
+                  workspaceId={workspaceId}
+                  paneId={pane.id}
+                  isFocused={focused}
+                  emptyViewContext={emptyViewContext}
+                  location={location}
+                  onKeyboardActivity={hover.clear}
+                />
+              ) : (
+                <PaneLoadingPlaceholder data-testid={`pane-loading-placeholder-${i}`} />
+              )}
             </PaneControlBar>
           </div>
         );
