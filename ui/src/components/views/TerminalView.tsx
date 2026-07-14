@@ -2541,6 +2541,9 @@ export function TerminalView({
     let prevW = 0;
     let prevH = 0;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
+    // True while this effect has incremented webglInitCount but not yet released
+    // it. Lets the fire path and the unmount-cleanup path decrement exactly once.
+    let webglStaggerCounted = false;
     // Trailing-debounce handle for container-size reflow (see RESIZE_FIT_DEBOUNCE_MS).
     let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
@@ -2580,14 +2583,23 @@ export function TerminalView({
         if (shouldUseWebgl) {
           const delay = webglInitCount * WEBGL_STAGGER_MS;
           webglInitCount++;
+          webglStaggerCounted = true;
           webglTimer = setTimeout(() => {
-            if (cancelled) return;
+            if (cancelled) return; // cleanup already released the in-flight slot
             try {
               const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
               terminal.loadAddon(webgl);
               webgl.onContextLoss(() => webgl.dispose());
             } catch {
               // WebGL not available — fall back to default renderer
+            } finally {
+              // Context-creation attempt done: release the in-flight slot so a
+              // later pane's stagger delay reflects only concurrent inits, not
+              // the app-lifetime total (which would compound the mount stagger).
+              if (webglStaggerCounted) {
+                webglInitCount = Math.max(0, webglInitCount - 1);
+                webglStaggerCounted = false;
+              }
             }
           }, delay);
         }
@@ -2805,6 +2817,11 @@ export function TerminalView({
       clearRemoteResizeSyncTimeout();
       clearRemoteResizeSyncRetry();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
+      // Timer cleared before firing → release the in-flight WebGL-init slot.
+      if (webglStaggerCounted) {
+        webglInitCount = Math.max(0, webglInitCount - 1);
+        webglStaggerCounted = false;
+      }
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
       if (sessionLimitSubmitTimer !== undefined) clearTimeout(sessionLimitSubmitTimer);

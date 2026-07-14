@@ -510,6 +510,26 @@
   }
 }
 
+/* Placeholder shown in a pane slot while its real view is queued for mounting
+   (staggered reveal — see usePaneRevealQueue). Dark background matches the pane
+   backstop so the user never sees an unpainted white box. */
+.pane-loading-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+}
+
+/* Respect reduced-motion: stop the spinner animation (the reveal queue itself
+   also collapses to a synchronous reveal under prefers-reduced-motion). */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-loading-spinner {
+    animation: none;
+  }
+}
+
 /* Issue #349: floating jump-to-bottom button, shown while scrolled up into
    scrollback. Sits above the overlay caret / loading layers so it stays
    clickable, and clears the overlay scrollbar gutter on the right.

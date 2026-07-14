@@ -5546,6 +5546,41 @@ describe("TerminalView", () => {
       vi.useRealTimers();
     });
 
+    it("resets the WebGL stagger between mount waves (in-flight, not cumulative)", async () => {
+      vi.useFakeTimers();
+      _resetWebglStagger();
+
+      // Wave 1: two terminals mount and both WebGL inits fire (delays 0, 150).
+      render(<TerminalView instanceId="t-wave1a" profile="PowerShell" syncGroup="g" />);
+      render(<TerminalView instanceId="t-wave1b" profile="PowerShell" syncGroup="g" />);
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(WebglAddon).toHaveBeenCalledTimes(2);
+      const afterWave1 = WebglAddon.mock.calls.length;
+
+      // Both inits fired → the in-flight counter is released back to 0. A fresh
+      // terminal must start at delay 0 again (not 2*150 = 300, which the old
+      // lifetime-cumulative counter produced). Advancing only ~2ms proves the
+      // delay reset: with cumulative counting it would not fire until 300ms.
+      render(<TerminalView instanceId="t-wave2" profile="PowerShell" syncGroup="g" />);
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(WebglAddon).toHaveBeenCalledTimes(afterWave1 + 1);
+
+      vi.useRealTimers();
+    });
+
     it("injects pinned bar left content with title when pinned (issue #209)", async () => {
       const { PaneControlContext } = await import("@/components/layout/PaneControlContext");
       const setLeftBarContent = vi.fn();
