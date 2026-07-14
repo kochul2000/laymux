@@ -52,6 +52,7 @@ pub struct PreparedSettingsUpdate {
     pub candidate_revision: Option<String>,
     pub changes: Vec<SettingsChange>,
     pub errors: Vec<SettingsIssue>,
+    pub existing_issues: Vec<SettingsIssue>,
     pub restart_required: bool,
     pub next_use_required: bool,
     #[serde(skip)]
@@ -135,6 +136,7 @@ pub fn describe_settings(paths: &[String]) -> Result<Value, String> {
 
 pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSettingsUpdate {
     let current_revision = settings_revision(current);
+    let baseline_issues = semantic_validation::validate_settings(current);
     let mut errors = Vec::new();
 
     if !patch.is_object() {
@@ -143,12 +145,12 @@ pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSet
             path: "/".into(),
             message: "settings patch는 JSON object여야 합니다.".into(),
         });
-        return invalid_result(current_revision, errors);
+        return invalid_result(current_revision, errors, baseline_issues);
     }
 
     collect_read_only_errors(patch, "", &mut errors);
     if !errors.is_empty() {
-        return invalid_result(current_revision, errors);
+        return invalid_result(current_revision, errors, baseline_issues);
     }
 
     let current_value = serde_json::to_value(current).unwrap_or_else(|_| json!({}));
@@ -164,7 +166,7 @@ pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSet
                 path: "/".into(),
                 message: error.to_string(),
             });
-            return invalid_result(current_revision, errors);
+            return invalid_result(current_revision, errors, baseline_issues);
         }
     };
     let mut ignored = Vec::new();
@@ -179,7 +181,7 @@ pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSet
                 path: "/".into(),
                 message: error.to_string(),
             });
-            return invalid_result(current_revision, errors);
+            return invalid_result(current_revision, errors, baseline_issues);
         }
     };
 
@@ -190,9 +192,17 @@ pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSet
             path,
         });
     }
-    errors.extend(semantic_validation::validate_settings(&candidate));
+    let candidate_value = serde_json::to_value(&candidate).unwrap_or_else(|_| json!({}));
+    let mut existing_issues = Vec::new();
+    for issue in semantic_validation::validate_settings(&candidate) {
+        if issue_is_unchanged_baseline(&issue, &baseline_issues, &current_value, &candidate_value) {
+            existing_issues.push(issue);
+        } else {
+            errors.push(issue);
+        }
+    }
     if !errors.is_empty() {
-        return invalid_result(current_revision, errors);
+        return invalid_result(current_revision, errors, existing_issues);
     }
 
     let before = serde_json::to_value(current).unwrap_or_else(|_| json!({}));
@@ -213,23 +223,40 @@ pub fn prepare_settings_update(current: &Settings, patch: &Value) -> PreparedSet
         candidate_revision: Some(candidate_revision),
         changes,
         errors: Vec::new(),
+        existing_issues,
         restart_required,
         next_use_required,
         candidate: Some(candidate),
     }
 }
 
-fn invalid_result(current_revision: String, errors: Vec<SettingsIssue>) -> PreparedSettingsUpdate {
+fn invalid_result(
+    current_revision: String,
+    errors: Vec<SettingsIssue>,
+    existing_issues: Vec<SettingsIssue>,
+) -> PreparedSettingsUpdate {
     PreparedSettingsUpdate {
         valid: false,
         current_revision,
         candidate_revision: None,
         changes: Vec::new(),
         errors,
+        existing_issues,
         restart_required: false,
         next_use_required: false,
         candidate: None,
     }
+}
+
+fn issue_is_unchanged_baseline(
+    issue: &SettingsIssue,
+    baseline_issues: &[SettingsIssue],
+    current: &Value,
+    candidate: &Value,
+) -> bool {
+    baseline_issues.iter().any(|baseline| {
+        baseline == issue && current.pointer(&issue.path) == candidate.pointer(&issue.path)
+    })
 }
 
 fn deep_merge(base: &mut Value, patch: &Value) {

@@ -169,6 +169,53 @@ fn unknown_app_theme_is_rejected_instead_of_silently_falling_back() {
 }
 
 #[test]
+fn preexisting_semantic_issues_do_not_block_an_unrelated_patch() {
+    let mut current = Settings::default();
+    current.remote.heartbeat_timeout_seconds = 5;
+    current
+        .file_explorer
+        .extension_viewers
+        .push(laymux_lib::settings::ExtensionViewer {
+            extensions: vec![".txt".into()],
+            command: "vi".into(),
+            profile: String::new(),
+        });
+
+    let prepared = prepare_settings_update(
+        &current,
+        &json!({ "appearance": { "themeId": "github-light" } }),
+    );
+
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    assert!(prepared.errors.is_empty());
+    assert!(prepared
+        .existing_issues
+        .iter()
+        .any(|issue| issue.path == "/remote/heartbeatTimeoutSeconds"));
+    assert!(prepared
+        .existing_issues
+        .iter()
+        .any(|issue| issue.path == "/fileExplorer/extensionViewers/0/profile"));
+}
+
+#[test]
+fn changing_a_preexisting_invalid_value_to_another_invalid_value_is_rejected() {
+    let mut current = Settings::default();
+    current.remote.heartbeat_timeout_seconds = 5;
+
+    let prepared = prepare_settings_update(
+        &current,
+        &json!({ "remote": { "heartbeatTimeoutSeconds": 10 } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/remote/heartbeatTimeoutSeconds"));
+}
+
+#[test]
 fn duplicate_profiles_and_bad_extension_viewer_reference_are_rejected() {
     let duplicate = prepare_settings_update(
         &Settings::default(),
