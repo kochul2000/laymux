@@ -19,6 +19,19 @@ describe("DockStore", () => {
     expect(left?.activeView).toBe("WorkspaceSelectorView");
   });
 
+  it("right dock ships Memo + FileExplorer tabs by default", () => {
+    const right = useDockStore.getInitialState().docks.find((d) => d.position === "right")!;
+    expect(right.activeView).toBe("MemoView");
+    expect(right.views).toEqual(["MemoView", "FileExplorerView"]);
+    expect(right.visible).toBe(true);
+  });
+
+  it("top and bottom docks are hidden on first install", () => {
+    const docks = useDockStore.getInitialState().docks;
+    expect(docks.find((d) => d.position === "top")!.visible).toBe(false);
+    expect(docks.find((d) => d.position === "bottom")!.visible).toBe(false);
+  });
+
   it("sets active view on a dock", () => {
     useDockStore.getState().setDockActiveView("right", "SettingsView");
     const right = useDockStore.getState().getDock("right");

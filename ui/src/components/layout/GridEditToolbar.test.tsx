@@ -61,6 +61,9 @@ describe("GridEditToolbar", () => {
     const user = userEvent.setup();
     render(<GridEditToolbar />);
 
+    // Top dock is hidden on first install; clicking toggles it on then off.
+    expect(useDockStore.getState().getDock("top")!.visible).toBe(false);
+    await user.click(screen.getByTestId("dock-toggle-top"));
     expect(useDockStore.getState().getDock("top")!.visible).toBe(true);
     await user.click(screen.getByTestId("dock-toggle-top"));
     expect(useDockStore.getState().getDock("top")!.visible).toBe(false);

@@ -12,10 +12,33 @@ import { persistSession } from "@/lib/persist-session";
 describe("WorkspaceStore", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    // The shipped default workspace now opens as a 2-pane split (first-install
+    // UX). The pane-manipulation tests below assume a single full pane as their
+    // starting point, so collapse the active workspace to one pane here. The
+    // shipped 2-pane default is asserted separately via getInitialState().
+    const st = useWorkspaceStore.getState();
+    useWorkspaceStore.setState({
+      workspaces: st.workspaces.map((w) =>
+        w.id === st.activeWorkspaceId
+          ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] }
+          : w,
+      ),
+    });
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useCwdPropagateStore.setState({ requests: {} });
     localStorage.clear();
     vi.clearAllMocks();
+  });
+
+  it("ships a 2-pane side-by-side split as the default workspace", () => {
+    const init = useWorkspaceStore.getInitialState();
+    const active = init.workspaces.find((w) => w.id === init.activeWorkspaceId)!;
+    expect(active.panes).toHaveLength(2);
+    expect(active.panes[0].w).toBeCloseTo(0.5);
+    expect(active.panes[0].x).toBeCloseTo(0);
+    expect(active.panes[1].w).toBeCloseTo(0.5);
+    expect(active.panes[1].x).toBeCloseTo(0.5);
+    expect(init.layouts[0].panes).toHaveLength(2);
   });
 
   it("starts with default layout and workspace", () => {
@@ -77,9 +100,7 @@ describe("WorkspaceStore", () => {
     addWorkspace("ToRemove", layouts[0].id);
     const wsId = useWorkspaceStore.getState().workspaces[1].id;
 
-    // 삭제 대상 워크스페이스를 활성화한 뒤 split 으로 다중 pane 을 만든다.
-    useWorkspaceStore.getState().setActiveWorkspace(wsId);
-    useWorkspaceStore.getState().splitPane(0, "horizontal");
+    // 삭제 대상 워크스페이스는 기본 2분할 레이아웃이라 이미 pane 2개를 가진다.
     const victimPanes = useWorkspaceStore.getState().workspaces.find((w) => w.id === wsId)!.panes;
     expect(victimPanes).toHaveLength(2);
     const [paneA, paneB] = victimPanes;
@@ -284,7 +305,16 @@ describe("WorkspaceStore", () => {
 
   // 드래그한 pane 을 다른 워크스페이스로 이동 (issue #380)
   describe("movePaneToWorkspace", () => {
-    /** 활성 워크스페이스를 split 해 2개 pane 으로 만들고, 두 번째 워크스페이스를 추가한다. */
+    /** 워크스페이스를 단일 pane 으로 접는다(기본 레이아웃이 2분할이라 명시적 정규화 필요). */
+    const collapseToSinglePane = (id: string) => {
+      useWorkspaceStore.setState((state) => ({
+        workspaces: state.workspaces.map((w) =>
+          w.id === id ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] } : w,
+        ),
+      }));
+    };
+
+    /** 활성 워크스페이스를 split 해 2개 pane 으로 만들고, 단일 pane 짜리 두 번째 워크스페이스를 추가한다. */
     const setupSourceWithTwoPanes = () => {
       const { addWorkspace, layouts, workspaces } = useWorkspaceStore.getState();
       const srcId = workspaces[0].id;
@@ -292,6 +322,7 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.getState().splitPane(0, "vertical");
       addWorkspace("Target", layouts[0].id);
       const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      collapseToSinglePane(tgtId);
       return { srcId, tgtId };
     };
 
@@ -352,6 +383,7 @@ describe("WorkspaceStore", () => {
       const srcId = workspaces[0].id; // single pane
       addWorkspace("Target", layouts[0].id);
       const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      collapseToSinglePane(tgtId);
       const onlyPane = workspaces[0].panes[0];
 
       useWorkspaceStore.getState().movePaneToWorkspace(onlyPane.id, tgtId);

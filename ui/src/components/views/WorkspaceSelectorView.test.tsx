@@ -2257,13 +2257,24 @@ describe("WorkspaceSelectorView", () => {
       dropEffect: "",
     });
 
-    /** 활성 워크스페이스를 split(2 pane) 하고, 두 번째 워크스페이스를 추가한다. */
+    /** 워크스페이스를 단일 pane 으로 접는다(기본 레이아웃이 2분할이라 명시적 정규화 필요). */
+    const collapseToSinglePane = (id: string) => {
+      useWorkspaceStore.setState((state) => ({
+        workspaces: state.workspaces.map((w) =>
+          w.id === id ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] } : w,
+        ),
+      }));
+    };
+
+    /** 활성 워크스페이스를 split(2 pane) 하고, 단일 pane 짜리 두 번째 워크스페이스를 추가한다. */
     const setup = () => {
       const srcId = useWorkspaceStore.getState().workspaces[0].id;
       useWorkspaceStore.getState().setActiveWorkspace(srcId);
+      collapseToSinglePane(srcId);
       useWorkspaceStore.getState().splitPane(0, "vertical");
       useWorkspaceStore.getState().addWorkspace("Target", "default-layout");
       const tgtId = useWorkspaceStore.getState().workspaces[1].id;
+      collapseToSinglePane(tgtId);
       return { srcId, tgtId };
     };
 
