@@ -19,6 +19,16 @@ import { useNotificationStore } from "@/stores/notification-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    // The shipped default workspace now opens as a 2-pane split; tests that
+    // split from a single pane assume one full pane as the starting point.
+    const ws = useWorkspaceStore.getState();
+    useWorkspaceStore.setState({
+      workspaces: ws.workspaces.map((w) =>
+        w.id === ws.activeWorkspaceId
+          ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] }
+          : w,
+      ),
+    });
     useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());

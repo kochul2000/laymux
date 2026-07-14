@@ -234,6 +234,13 @@ describe("useKeyboardShortcuts", () => {
     // out of range — so the user always lands on a focused pane.
     useWorkspaceStore.getState().addWorkspace("WS2", "default-layout");
     const ws2 = useWorkspaceStore.getState().workspaces[1];
+    // The default layout now ships 2 panes; collapse WS2 to a single pane so it
+    // is genuinely the "smaller" target for the clamp assertion below.
+    useWorkspaceStore.setState((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === ws2.id ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] } : w,
+      ),
+    }));
     useWorkspaceStore.getState().setActiveWorkspace("ws-default");
     useDockStore.getState().setFocusedDock(null);
     useGridStore.setState({ focusedPaneIndex: 2 });
@@ -659,7 +666,10 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("Alt+Arrow navigates between docks", () => {
-    // Top dock is visible but has no panes by default — add a view so it's navigable
+    // Top dock is hidden on first install — show it and give it a view so it's navigable.
+    if (!useDockStore.getState().getDock("top")?.visible) {
+      useDockStore.getState().toggleDockVisible("top");
+    }
     useDockStore.getState().setDockActiveView("top", "SettingsView");
     useDockStore.getState().setFocusedDock("left");
     renderHook(() => useKeyboardShortcuts());
@@ -803,10 +813,12 @@ describe("useKeyboardShortcuts", () => {
   });
 
   it("Alt+Arrow in dock when all other docks are hidden stays put", () => {
-    // Hide all docks except left
-    useDockStore.getState().toggleDockVisible("top");
-    useDockStore.getState().toggleDockVisible("bottom");
-    useDockStore.getState().toggleDockVisible("right");
+    // Ensure only the left dock is visible (top/bottom already hidden on first install).
+    for (const pos of ["top", "bottom", "right"] as const) {
+      if (useDockStore.getState().getDock(pos)?.visible) {
+        useDockStore.getState().toggleDockVisible(pos);
+      }
+    }
     useDockStore.getState().setFocusedDock("left");
     renderHook(() => useKeyboardShortcuts());
 
@@ -1258,8 +1270,10 @@ describe("useKeyboardShortcuts", () => {
     fireKey("N", { ctrlKey: true, altKey: true });
 
     const newWs = useWorkspaceStore.getState().workspaces[1];
-    expect(newWs.panes).toHaveLength(1);
+    // Default layout ships a 2-pane split.
+    expect(newWs.panes).toHaveLength(2);
     expect(newWs.panes[0].view.type).toBe("EmptyView");
+    expect(newWs.panes[1].view.type).toBe("EmptyView");
   });
 
   // --- Lowercase Ctrl+Alt letter keys (case-insensitive) ---

@@ -5,6 +5,16 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 describe("PaneBoundaryHandles", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    // The shipped default workspace now opens as a 2-pane split; these tests
+    // assume a single full pane as their starting point.
+    const st = useWorkspaceStore.getState();
+    useWorkspaceStore.setState({
+      workspaces: st.workspaces.map((w) =>
+        w.id === st.activeWorkspaceId
+          ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] }
+          : w,
+      ),
+    });
   });
 
   it("renders nothing when only one pane exists", () => {

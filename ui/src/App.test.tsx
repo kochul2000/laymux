@@ -121,6 +121,11 @@ vi.mock("@/lib/tauri-api", () => {
     cleanTerminalOutputCache: vi.fn().mockResolvedValue(undefined),
     loadWindowGeometry: vi.fn().mockResolvedValue(null),
     saveWindowGeometry: vi.fn().mockResolvedValue(undefined),
+    // The right dock now defaults to MemoView on first launch, which mounts
+    // MemoView and loads/saves memo content — stub these so it doesn't throw.
+    loadMemo: vi.fn().mockResolvedValue(""),
+    saveMemo: vi.fn().mockResolvedValue(undefined),
+    clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   };
 });
 

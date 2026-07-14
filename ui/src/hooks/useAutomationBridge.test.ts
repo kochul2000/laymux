@@ -849,6 +849,16 @@ describe("useAutomationBridge hook", () => {
 describe("identify_caller and enriched responses", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    // The shipped default workspace now opens as a 2-pane split; these tests
+    // split from a single pane, so collapse the active workspace to one pane.
+    const st = useWorkspaceStore.getState();
+    useWorkspaceStore.setState({
+      workspaces: st.workspaces.map((w) =>
+        w.id === st.activeWorkspaceId
+          ? { ...w, panes: [{ ...w.panes[0], x: 0, y: 0, w: 1, h: 1 }] }
+          : w,
+      ),
+    });
     useGridStore.setState(useGridStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
     vi.clearAllMocks();

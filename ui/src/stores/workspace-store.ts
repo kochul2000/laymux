@@ -46,24 +46,23 @@ function ensureUniqueName(name: string, existing: { name: string }[]): string {
   return `${name}-${n}`;
 }
 
+// First-install default: a two-pane, side-by-side split so the workspace
+// opens ready to hold two views.
 const defaultLayout: Layout = {
   id: "default-layout",
   name: "Default",
-  panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "EmptyView" }],
+  panes: [
+    { x: 0, y: 0, w: 0.5, h: 1, viewType: "EmptyView" },
+    { x: 0.5, y: 0, w: 0.5, h: 1, viewType: "EmptyView" },
+  ],
 };
 
 const defaultWorkspace: Workspace = {
   id: "ws-default",
   name: "Default",
   panes: [
-    {
-      id: generateId("pane"),
-      x: 0,
-      y: 0,
-      w: 1,
-      h: 1,
-      view: { type: "EmptyView" },
-    },
+    { id: generateId("pane"), x: 0, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
+    { id: generateId("pane"), x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "EmptyView" } },
   ],
 };
 
