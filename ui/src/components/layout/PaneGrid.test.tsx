@@ -27,6 +27,7 @@ import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -42,6 +43,7 @@ describe("PaneGrid", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -446,6 +448,7 @@ describe("PaneGrid staggered reveal", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -492,5 +495,20 @@ describe("PaneGrid staggered reveal", () => {
     });
     // pane-7 is beyond the array-order initial batch but is focused → revealed.
     expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+  });
+
+  it("mounts a queued pane immediately when Automation requests it", () => {
+    act(() => {
+      render(<PaneGrid {...base} panes={makePanes(8)} isActive={false} isFocused={() => false} />);
+    });
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).not.toBeNull();
+
+    let release!: () => void;
+    act(() => {
+      release = usePaneRevealStore.getState().requestReveal("pane-7");
+    });
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+
+    act(() => release());
   });
 });

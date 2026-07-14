@@ -54,6 +54,8 @@ function sameMembers(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
  * - keep every still-present already-revealed id (add-only: a mounted terminal
  *   is never torn down by the queue),
  * - guarantee the baseline (focused + initial batch, or all) is revealed.
+ * - reveal panes explicitly requested by Automation even while normal queue
+ *   progression is paused.
  *
  * Returns `prev` unchanged (same reference) when nothing changes, so callers
  * relying on referential equality skip needless re-renders.
@@ -64,11 +66,13 @@ export function reconcileReveal(
   focusedPaneId: string | null,
   initialBatch: number,
   revealAll: boolean,
+  requestedPaneIds: Iterable<string> = [],
 ): ReadonlySet<string> {
   const paneSet = new Set(paneIds);
   const next = new Set<string>();
   for (const id of prev) if (paneSet.has(id)) next.add(id);
   for (const id of baselineReveal(paneIds, focusedPaneId, initialBatch, revealAll)) next.add(id);
+  for (const id of requestedPaneIds) if (paneSet.has(id)) next.add(id);
   return sameMembers(prev, next) ? prev : next;
 }
 

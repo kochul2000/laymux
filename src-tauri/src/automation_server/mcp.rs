@@ -769,10 +769,23 @@ impl McpHandler {
         // 테이블이 무효/닫힌 id 호출만으로 커지지 않도록(#427). write_pty 도 동일한
         // not-found 를 내지만, 그 전에 이미 락이 삽입된 뒤다.
         if !self.terminal_exists(terminal_id) {
-            return Err(CallToolResult::error(vec![Content::text(format!(
-                "Terminal '{}' not found",
-                terminal_id
-            ))]));
+            // The id may belong to a real pane whose TerminalView has not yet
+            // passed the staggered reveal queue. The frontend temporarily
+            // reveals it and responds only after backend PTY creation succeeds.
+            let _ = self
+                .bridge_raw(
+                    "action",
+                    "terminals",
+                    "prepareForAutomation",
+                    json!({ "id": terminal_id }),
+                )
+                .await?;
+            if !self.terminal_exists(terminal_id) {
+                return Err(CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found",
+                    terminal_id
+                ))]));
+            }
         }
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
@@ -2019,8 +2032,8 @@ impl McpHandler {
 
     /// Split a pane horizontally or vertically. Returns info about the new pane created.
     /// The response includes a `ready` field: when false, the terminal is allocated but
-    /// not yet registered (React render pending). Poll `list_terminals` or wait ~500ms
-    /// before calling `write_to_terminal` or `execute_command` on the new terminal.
+    /// its PTY is still starting. `write_to_terminal` and `focus_terminal` wait for that
+    /// session automatically before completing.
     #[tool]
     async fn split_pane(
         &self,

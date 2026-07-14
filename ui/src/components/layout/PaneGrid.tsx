@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -13,6 +13,7 @@ import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 import { usePaneRevealQueue } from "@/hooks/usePaneRevealQueue";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 
 export interface GridPane {
   id: string;
@@ -119,8 +120,20 @@ export function PaneGrid({
   // layouts (≤ initialBatch) reveal synchronously — behavior unchanged. Only
   // progresses while active, so a hidden background workspace stays paused.
   const paneIds = panes.map((p) => p.id);
+  const paneIdsKey = paneIds.join(" ");
   const focusedPaneId = panes.find((p) => isFocused(p.id))?.id ?? null;
-  const revealed = usePaneRevealQueue(paneIds, { active: isActive, focusedPaneId });
+  const revealRequestCounts = usePaneRevealStore((s) => s.requestCounts);
+  const requestedPaneIds = useMemo(
+    () => new Set(paneIds.filter((paneId) => (revealRequestCounts[paneId] ?? 0) > 0)),
+    // paneIds is recreated on render; the content key tracks layout changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [paneIdsKey, revealRequestCounts],
+  );
+  const revealed = usePaneRevealQueue(paneIds, {
+    active: isActive,
+    focusedPaneId,
+    requestedPaneIds,
+  });
 
   // Drag-to-swap (issue #377). Native HTML5 DnD, same pattern as workspace reorder
   // in WorkspaceSelectorView. dragSrcId 는 현재 드래그 중인 pane, dragOverId 는

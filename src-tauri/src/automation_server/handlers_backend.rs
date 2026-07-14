@@ -5,7 +5,7 @@ use axum::Json;
 
 use crate::lock_ext::MutexExt;
 
-use super::helpers::{err_json, ok_json};
+use super::helpers::{bridge_request, err_json, ok_json};
 use super::types::{HealthResponse, OutputQuery, WriteBody};
 use super::ServerState;
 
@@ -304,6 +304,37 @@ pub async fn terminal_write(
     Path(id): Path<String>,
     Json(body): Json<WriteBody>,
 ) -> impl IntoResponse {
+    let terminal_exists = match state.app_state.pty_handles.lock_or_err() {
+        Ok(ptys) => ptys.contains_key(&id),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_json("Lock error")),
+            )
+        }
+    };
+
+    // A many-pane workspace may have allocated this deterministic terminal id
+    // while its TerminalView is still behind the frontend reveal queue. Ask the
+    // frontend to mount it and wait for PTY creation before treating it as 404.
+    if !terminal_exists {
+        match bridge_request(
+            &state,
+            "action",
+            "terminals",
+            "prepareForAutomation",
+            serde_json::json!({ "id": id.clone() }),
+        )
+        .await
+        {
+            Ok(data) if data.get("success").and_then(|v| v.as_bool()) == Some(false) => {
+                return (StatusCode::NOT_FOUND, Json(data));
+            }
+            Ok(_) => {}
+            Err(e) => return e,
+        }
+    }
+
     let ptys = match state.app_state.pty_handles.lock_or_err() {
         Ok(p) => p,
         Err(_) => {

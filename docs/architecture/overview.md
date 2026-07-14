@@ -64,8 +64,8 @@ Pane 이 많은 워크스페이스를 활성화하면 모든 `TerminalView` 가 
 
 - **흰색 backstop**: `PaneGrid` 의 위치 지정 pane `<div>` 는 항상 `background: var(--bg-base)` 를 가진다. 콘텐츠 마운트 전에도 어두운 배경 → 흰 번쩍임 없음.
 - **순차 reveal**: `usePaneRevealQueue`(`hooks/`, 순수 로직은 `lib/pane-reveal.ts`)가 reveal 할 paneId 집합을 반환한다. reveal 안 된 pane 은 `ViewRenderer` 대신 `components/ui/PaneLoadingPlaceholder`(어두운 배경 + 기존 `.terminal-loading-spinner` 재사용)를 렌더한다. focused pane + 초기 배치(기본 4)를 즉시 reveal 하고 나머지는 `requestAnimationFrame` 당 1개씩 reveal 한다. reveal 된 pane 은 언마운트하지 않는다(add-only). `isActive` 인 워크스페이스에서만 진행하며, pane 수가 초기 배치 이하이거나 `prefers-reduced-motion` 이면 전부 동기 reveal(소규모 레이아웃은 기존과 동일).
-- **focused 우선**: 포커스된 pane 은 항상 즉시 reveal 된다(placeholder 위에서 키 입력이 유실되거나 `terminal.focus()` 가 실패하는 것을 방지).
-- **WebGL stagger 카운터**: `TerminalView` 의 `webglInitCount` 는 스케줄 시 증가하고 컨텍스트 생성(또는 타이머 취소) 직후 감소하는 **in-flight 동시성** 카운터다. 앱 생애 누적이 아니라 "지금 동시에 생성 중인 WebGL 컨텍스트 수"만 stagger 하므로, 순차 reveal 과 겹쳐도 후속 pane 의 지연이 무한정 커지지 않는다.
+- **focused/Automation 우선**: 포커스된 pane 과 Automation이 쓰기 대상으로 요청한 pane 은 항상 즉시 reveal 된다. Automation 포커스는 아직 마운트되지 않은 deterministic terminal id도 workspace layout에서 찾아 활성화하며, 포커스·쓰기 응답은 PTY 세션 등록 완료까지 기다린다. 쓰기가 비활성 workspace의 queued pane을 깨울 때는 해당 workspace를 세션 생성 동안만 활성화한 뒤 원래 workspace로 복원한다.
+- **WebGL 예약 타임라인**: `TerminalView` 는 마지막 WebGL 초기화 예약 시각 다음에만 새 슬롯을 예약한다(간격 150ms). 실행 완료 개수가 아니라 실제 예약 타임라인을 기준으로 하므로 다음 rAF에서 추가된 reveal wave도 기존 450ms 슬롯과 충돌하지 않는다. 타임라인이 경과한 뒤의 새 wave는 즉시 시작하므로 앱 생애 누적 지연은 없다.
 
 #### 숨김 터미널 자동 종료 (issue #269)
 

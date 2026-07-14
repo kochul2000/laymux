@@ -3,7 +3,6 @@ import {
   DEFAULT_INITIAL_BATCH,
   DEFAULT_PER_FRAME,
   addNextRevealBatch,
-  baselineReveal,
   isRevealComplete,
   reconcileReveal,
 } from "@/lib/pane-reveal";
@@ -17,7 +16,11 @@ export interface PaneRevealQueueOptions {
   initialBatch?: number;
   /** Panes revealed per animation frame. */
   perFrame?: number;
+  /** Panes that Automation must mount without waiting for queue progression. */
+  requestedPaneIds?: ReadonlySet<string>;
 }
+
+const NO_REQUESTED_PANES: ReadonlySet<string> = new Set();
 
 function prefersReducedMotion(): boolean {
   return (
@@ -43,6 +46,7 @@ export function usePaneRevealQueue(
     focusedPaneId,
     initialBatch = DEFAULT_INITIAL_BATCH,
     perFrame = DEFAULT_PER_FRAME,
+    requestedPaneIds = NO_REQUESTED_PANES,
   }: PaneRevealQueueOptions,
 ): ReadonlySet<string> {
   const revealAll = prefersReducedMotion() || paneIds.length <= initialBatch;
@@ -53,16 +57,18 @@ export function usePaneRevealQueue(
   const idsKey = paneIds.join(" ");
 
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() =>
-    baselineReveal(paneIds, focusedPaneId, initialBatch, revealAll),
+    reconcileReveal(new Set(), paneIds, focusedPaneId, initialBatch, revealAll, requestedPaneIds),
   );
 
   // Keep the invariants (prune dead ids, always reveal focused + baseline)
   // whenever the pane set, focus, or reveal-all mode changes.
   useEffect(() => {
-    setRevealed((prev) => reconcileReveal(prev, paneIds, focusedPaneId, initialBatch, revealAll));
+    setRevealed((prev) =>
+      reconcileReveal(prev, paneIds, focusedPaneId, initialBatch, revealAll, requestedPaneIds),
+    );
     // paneIds is tracked by idsKey (content signature), not identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, focusedPaneId, initialBatch, revealAll]);
+  }, [idsKey, focusedPaneId, initialBatch, revealAll, requestedPaneIds]);
 
   // Progressive reveal: each committed batch re-runs this effect (revealed dep)
   // and schedules the next frame, until every present pane is revealed. rAF is

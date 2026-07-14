@@ -67,6 +67,18 @@ describe("usePaneRevealQueue", () => {
     expect(result.current.has("p6")).toBe(true);
   });
 
+  it("reveals an Automation-requested pane while normal progression is paused", () => {
+    const { result, rerender } = renderHook(
+      ({ requested }) =>
+        usePaneRevealQueue(ids(8), opts({ active: false, requestedPaneIds: new Set(requested) })),
+      { initialProps: { requested: [] as string[] } },
+    );
+    expect(result.current.has("p7")).toBe(false);
+
+    act(() => rerender({ requested: ["p7"] }));
+    expect(result.current.has("p7")).toBe(true);
+  });
+
   it("pauses while inactive and resumes when active again", () => {
     const { result, rerender } = renderHook(
       ({ active }) => usePaneRevealQueue(ids(8), opts({ active })),

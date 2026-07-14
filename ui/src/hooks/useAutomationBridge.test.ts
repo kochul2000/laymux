@@ -15,6 +15,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import {
   registerTerminalScroller,
   unregisterTerminalScroller,
@@ -70,6 +71,7 @@ describe("handleAutomationRequest", () => {
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -861,6 +863,7 @@ describe("identify_caller and enriched responses", () => {
     });
     useGridStore.setState(useGridStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
     vi.clearAllMocks();
   });
 
@@ -1313,6 +1316,107 @@ describe("identify_caller and enriched responses", () => {
     });
     expect(result.success).toBe(true);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+  });
+
+  it("focus_terminal wakes an allocated pane before its terminal instance is registered", () => {
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("Queued", layouts[0].id);
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const queuedPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    const terminalId = `terminal-${queuedPane.id}`;
+
+    // Simulate a pane still behind the reveal queue: its deterministic terminal
+    // id exists in workspace layout, but TerminalView has not registered yet.
+    expect(useTerminalStore.getState().instances).toHaveLength(0);
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+
+    const result = handleAutomationRequest({
+      requestId: "ft-queued",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: terminalId },
+    });
+
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  it("focus_terminal response waits until the queued pane has a backend session", async () => {
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("Queued", layouts[0].id);
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    const terminalId = `terminal-${pane.id}`;
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+
+    const pending = handleAsyncAutomationRequest({
+      requestId: "ft-queued-async",
+      category: "action",
+      target: "terminals",
+      method: "setFocus",
+      params: { id: terminalId },
+    });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "PowerShell",
+      syncGroup: "",
+      workspaceId: ws2.id,
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    useTerminalStore.getState().updateInstanceInfo(terminalId, { sessionReady: true });
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(useTerminalStore.getState().instances[0].isFocused).toBe(true);
+  });
+
+  it("write preparation forces reveal and restores the previous workspace after PTY readiness", async () => {
+    const { layouts } = useWorkspaceStore.getState();
+    useWorkspaceStore.getState().addWorkspace("Queued", layouts[0].id);
+    const ws1 = useWorkspaceStore.getState().workspaces[0];
+    const ws2 = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.getState().setActiveWorkspace(ws2.id);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const pane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+    const terminalId = `terminal-${pane.id}`;
+    useWorkspaceStore.getState().setActiveWorkspace(ws1.id);
+
+    const pending = handleAsyncAutomationRequest({
+      requestId: "write-prepare-queued",
+      category: "action",
+      target: "terminals",
+      method: "prepareForAutomation",
+      params: { id: terminalId },
+    });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
+    expect(usePaneRevealStore.getState().requestCounts[pane.id]).toBe(1);
+
+    useTerminalStore.getState().registerInstance({
+      id: terminalId,
+      profile: "PowerShell",
+      syncGroup: "",
+      workspaceId: ws2.id,
+    });
+    useTerminalStore.getState().updateInstanceInfo(terminalId, { sessionReady: true });
+
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws1.id);
+    expect(usePaneRevealStore.getState().requestCounts[pane.id]).toBeUndefined();
   });
 
   it("focus_terminal focuses dock terminal without switching workspace", () => {

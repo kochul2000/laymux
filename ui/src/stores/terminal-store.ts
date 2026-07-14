@@ -18,6 +18,8 @@ export interface TerminalInstance {
   title?: string;
   lastActivityAt: number;
   isFocused: boolean;
+  /** False between React mount and successful backend PTY session creation. */
+  sessionReady?: boolean;
   lastCommand?: string;
   lastExitCode?: number;
   lastCommandAt?: number;
@@ -57,6 +59,7 @@ interface TerminalStoreState {
         | "outputActive"
         | "syncGroup"
         | "activityMessage"
+        | "sessionReady"
       >
     >,
   ) => void;
@@ -77,6 +80,7 @@ export const useTerminalStore = create<TerminalStoreState>()((set, get) => ({
       label: config.label ?? config.profile,
       lastActivityAt: Date.now(),
       isFocused: false,
+      sessionReady: false,
     };
     set((state) => ({
       instances: state.instances.some((i) => i.id === config.id)

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   TerminalView,
   _resetWebglStagger,
+  _reserveWebglInitDelay,
   shouldEnableTerminalWebgl,
   isTerminalScrolledUp,
 } from "./TerminalView";
@@ -186,12 +187,17 @@ vi.mock("@/lib/indented-link-provider", () => ({
 }));
 
 vi.mock("@xterm/addon-webgl", () => {
-  const WebglAddon = vi.fn().mockImplementation(() => ({
-    dispose: vi.fn(),
-    onContextLoss: vi.fn(),
-  }));
+  const WebglAddon = vi.fn().mockImplementation(() => {
+    webglInitTimes.push(Date.now());
+    return {
+      dispose: vi.fn(),
+      onContextLoss: vi.fn(),
+    };
+  });
   return { WebglAddon: WebglAddon };
 });
+
+const webglInitTimes: number[] = [];
 
 const mockSerialize = vi.fn().mockReturnValue("serialized-data");
 vi.mock("@xterm/addon-serialize", () => ({
@@ -280,6 +286,7 @@ describe("TerminalView", () => {
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
+    webglInitTimes.length = 0;
     csiHandlers.clear();
     oscHandlers.clear();
     escHandlers.clear();
@@ -5521,6 +5528,19 @@ describe("TerminalView", () => {
   });
 
   describe("WebGL stagger", () => {
+    it("reserves later reveal waves after the last scheduled slot", () => {
+      _resetWebglStagger();
+      expect(_reserveWebglInitDelay(0)).toBe(0);
+      expect(_reserveWebglInitDelay(0)).toBe(150);
+      expect(_reserveWebglInitDelay(0)).toBe(300);
+      expect(_reserveWebglInitDelay(0)).toBe(450);
+
+      // The first slot has already fired at 16ms, but three reservations remain.
+      // A counter-based scheduler incorrectly returned 450ms (target 466ms),
+      // nearly colliding with the 450ms slot. The timeline reserves 600ms.
+      expect(_reserveWebglInitDelay(16)).toBe(584);
+    });
+
     it("delays WebGL addon creation based on init counter", async () => {
       vi.useFakeTimers();
 
@@ -5546,7 +5566,7 @@ describe("TerminalView", () => {
       vi.useRealTimers();
     });
 
-    it("resets the WebGL stagger between mount waves (in-flight, not cumulative)", async () => {
+    it("does not accumulate delay after the reserved timeline has elapsed", async () => {
       vi.useFakeTimers();
       _resetWebglStagger();
 
@@ -5565,10 +5585,11 @@ describe("TerminalView", () => {
       expect(WebglAddon).toHaveBeenCalledTimes(2);
       const afterWave1 = WebglAddon.mock.calls.length;
 
-      // Both inits fired → the in-flight counter is released back to 0. A fresh
-      // terminal must start at delay 0 again (not 2*150 = 300, which the old
-      // lifetime-cumulative counter produced). Advancing only ~2ms proves the
-      // delay reset: with cumulative counting it would not fire until 300ms.
+      // Once the next allowed slot has passed, a later wave starts immediately;
+      // the reservation timeline does not grow with app-lifetime mount count.
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
       render(<TerminalView instanceId="t-wave2" profile="PowerShell" syncGroup="g" />);
       await act(async () => {
         vi.advanceTimersByTime(1);
@@ -5577,6 +5598,38 @@ describe("TerminalView", () => {
         vi.advanceTimersByTime(1);
       });
       expect(WebglAddon).toHaveBeenCalledTimes(afterWave1 + 1);
+
+      vi.useRealTimers();
+    });
+
+    it("keeps the full stagger interval when a later reveal wave overlaps reservations", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      _resetWebglStagger();
+
+      // Initial reveal reserves four slots. After the first slot fires, a new
+      // pane is mounted on the next frame while 150/300/450ms slots are still
+      // pending. The new reservation must come after the last existing slot,
+      // not after `inFlightCount * 150` from the current frame.
+      for (let i = 0; i < 4; i++) {
+        render(<TerminalView instanceId={`t-overlap-${i}`} profile="PowerShell" syncGroup="g" />);
+      }
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(WebglAddon).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(15);
+      });
+      render(<TerminalView instanceId="t-overlap-late" profile="PowerShell" syncGroup="g" />);
+      await act(async () => {
+        vi.advanceTimersByTime(700);
+      });
+
+      expect(WebglAddon).toHaveBeenCalledTimes(5);
+      const gaps = webglInitTimes.slice(1).map((time, i) => time - webglInitTimes[i]);
+      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(150);
 
       vi.useRealTimers();
     });

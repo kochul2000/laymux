@@ -266,13 +266,26 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
 const NOTIFY_GATE_FALLBACK_MS = 3000;
 
 // Stagger WebGL context creation to prevent WebView2 GPU process crash.
-// Multiple simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
-let webglInitCount = 0;
+// Multiple near-simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
+// This is the next reserved start time, not an in-flight count: a later reveal
+// wave must be placed after every already-reserved slot.
+let webglNextInitAt = 0;
 const WEBGL_STAGGER_MS = 150;
 
-/** Reset the stagger counter (for tests). */
+function monotonicNow(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+/** Reserve the next globally-spaced WebGL initialization slot. */
+export function _reserveWebglInitDelay(now = monotonicNow()): number {
+  const scheduledAt = Math.max(now, webglNextInitAt);
+  webglNextInitAt = scheduledAt + WEBGL_STAGGER_MS;
+  return scheduledAt - now;
+}
+
+/** Reset the stagger timeline (for tests). */
 export function _resetWebglStagger(): void {
-  webglInitCount = 0;
+  webglNextInitAt = 0;
 }
 
 /**
@@ -2541,9 +2554,6 @@ export function TerminalView({
     let prevW = 0;
     let prevH = 0;
     let webglTimer: ReturnType<typeof setTimeout> | undefined;
-    // True while this effect has incremented webglInitCount but not yet released
-    // it. Lets the fire path and the unmount-cleanup path decrement exactly once.
-    let webglStaggerCounted = false;
     // Trailing-debounce handle for container-size reflow (see RESIZE_FIT_DEBOUNCE_MS).
     let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
@@ -2581,25 +2591,15 @@ export function TerminalView({
         // elements). xterm.js v6 built-in renderer does not support customGlyphs.
         // Stagger creation to prevent simultaneous GPU context init crash.
         if (shouldUseWebgl) {
-          const delay = webglInitCount * WEBGL_STAGGER_MS;
-          webglInitCount++;
-          webglStaggerCounted = true;
+          const delay = _reserveWebglInitDelay();
           webglTimer = setTimeout(() => {
-            if (cancelled) return; // cleanup already released the in-flight slot
+            if (cancelled) return;
             try {
               const webgl = new WebglAddon(true); // preserveDrawingBuffer for screenshots
               terminal.loadAddon(webgl);
               webgl.onContextLoss(() => webgl.dispose());
             } catch {
               // WebGL not available — fall back to default renderer
-            } finally {
-              // Context-creation attempt done: release the in-flight slot so a
-              // later pane's stagger delay reflects only concurrent inits, not
-              // the app-lifetime total (which would compound the mount stagger).
-              if (webglStaggerCounted) {
-                webglInitCount = Math.max(0, webglInitCount - 1);
-                webglStaggerCounted = false;
-              }
             }
           }, delay);
         }
@@ -2707,12 +2707,18 @@ export function TerminalView({
             cwdReceiveRef.current,
             shouldRestoreCwd ? lastCwd : undefined,
             viewerStartup ?? startupOverride,
-          ).catch((err) => {
-            console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
-            trackedTerminalWrite(
-              `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
-            );
-          });
+          )
+            .then(() => {
+              useTerminalStore.getState().updateInstanceInfo(instanceId, {
+                sessionReady: true,
+              });
+            })
+            .catch((err) => {
+              console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
+              trackedTerminalWrite(
+                `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
+              );
+            });
         }
 
         // Restore cached terminal output in parallel (non-blocking).
@@ -2817,11 +2823,6 @@ export function TerminalView({
       clearRemoteResizeSyncTimeout();
       clearRemoteResizeSyncRetry();
       if (webglTimer !== undefined) clearTimeout(webglTimer);
-      // Timer cleared before firing → release the in-flight WebGL-init slot.
-      if (webglStaggerCounted) {
-        webglInitCount = Math.max(0, webglInitCount - 1);
-        webglStaggerCounted = false;
-      }
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
       if (sessionLimitSubmitTimer !== undefined) clearTimeout(sessionLimitSubmitTimer);

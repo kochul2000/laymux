@@ -9,6 +9,7 @@ import { useNotificationStore, type NotificationLevel } from "@/stores/notificat
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
@@ -30,6 +31,7 @@ type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
+const TERMINAL_SESSION_READY_TIMEOUT_MS = 4000;
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -178,6 +180,95 @@ function findDockPaneContext(terminalId: string) {
     }
   }
   return null;
+}
+
+/** Resolve a deterministic terminal id from workspace layout, before TerminalView mounts. */
+function findWorkspacePaneContext(terminalId: string) {
+  const { workspaces } = useWorkspaceStore.getState();
+  for (const workspace of workspaces) {
+    const paneIndex = workspace.panes.findIndex(
+      (pane) => pane.view.type === "TerminalView" && toTerminalId(pane.id) === terminalId,
+    );
+    if (paneIndex >= 0) {
+      return { workspace, pane: workspace.panes[paneIndex], paneIndex };
+    }
+  }
+  return null;
+}
+
+function isTerminalSessionReady(terminalId: string): boolean {
+  const terminal = findTerminalInstance(terminalId);
+  // Tests and restored in-memory fixtures created before sessionReady existed
+  // omit the flag; an explicit false is the only not-ready registered state.
+  return terminal !== null && terminal.sessionReady !== false;
+}
+
+function waitForTerminalSessionReady(
+  terminalId: string,
+  timeoutMs = TERMINAL_SESSION_READY_TIMEOUT_MS,
+): Promise<boolean> {
+  if (isTerminalSessionReady(terminalId)) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(ready);
+    };
+    const unsubscribe = useTerminalStore.subscribe(() => {
+      if (isTerminalSessionReady(terminalId)) finish(true);
+    });
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    // Close the check→subscribe race if session creation completed between the
+    // fast-path read above and listener registration.
+    if (isTerminalSessionReady(terminalId)) finish(true);
+  });
+}
+
+/**
+ * Wake a queued terminal for a backend Automation write without leaving the UI
+ * focused on (or switched to) the target. Inactive workspaces are activated only
+ * until the PTY exists because a display:none terminal has no usable dimensions.
+ */
+async function prepareTerminalForAutomation(terminalId: string): Promise<HandlerResult> {
+  if (isTerminalSessionReady(terminalId)) {
+    return ok({ terminalId, ready: true });
+  }
+
+  const terminal = findTerminalInstance(terminalId);
+  const workspaceCtx = findWorkspacePaneContext(terminalId);
+  const dockCtx = findDockPaneContext(terminalId);
+  if (!terminal && !workspaceCtx && !dockCtx) {
+    return err(`Terminal '${terminalId}' not found`);
+  }
+
+  const paneId = workspaceCtx?.pane.id ?? dockCtx?.pane.id;
+  const releaseReveal = paneId ? usePaneRevealStore.getState().requestReveal(paneId) : () => {};
+  const previousWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+  const targetWorkspaceId = workspaceCtx?.workspace.id;
+  const switchedWorkspace =
+    targetWorkspaceId !== undefined && targetWorkspaceId !== previousWorkspaceId;
+
+  if (switchedWorkspace) {
+    useWorkspaceStore.getState().setActiveWorkspace(targetWorkspaceId);
+  }
+
+  try {
+    const ready = await waitForTerminalSessionReady(terminalId);
+    if (!ready) {
+      return err(`Terminal '${terminalId}' did not become ready before timeout`);
+    }
+    return ok({ terminalId, ready: true });
+  } finally {
+    releaseReveal();
+    // Do not override navigation the user performed while this request waited.
+    if (switchedWorkspace && useWorkspaceStore.getState().activeWorkspaceId === targetWorkspaceId) {
+      useWorkspaceStore.getState().setActiveWorkspace(previousWorkspaceId);
+    }
+  }
 }
 
 /** Enrich a pane with its index, spatial number, and terminal ID (null for non-terminal panes). */
@@ -363,9 +454,9 @@ const handlers: HandlerMap = {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];
       const terminalId = newPane?.view.type === "TerminalView" ? toTerminalId(newPane.id) : null;
-      // Check if the terminal instance is already registered (React may not have rendered yet)
-      const { instances } = useTerminalStore.getState();
-      const terminalReady = terminalId ? instances.some((i) => i.id === terminalId) : false;
+      // PTY readiness is stricter than React registration: TerminalView enters
+      // the store before its async backend session creation resolves.
+      const terminalReady = terminalId ? isTerminalSessionReady(terminalId) : false;
       return ok({
         split: true,
         newPane: newPane
@@ -384,7 +475,7 @@ const handlers: HandlerMap = {
         totalPanes: ws?.panes.length ?? 0,
         _hint:
           terminalId && !terminalReady
-            ? "Terminal ID is allocated but not yet registered. Poll list_terminals or wait ~500ms before writing to it."
+            ? "Terminal ID is allocated but its PTY is still starting. write_to_terminal and focus_terminal wait for readiness automatically."
             : undefined,
       });
     },
@@ -584,19 +675,26 @@ const handlers: HandlerMap = {
     setFocus: (p) => {
       const terminalId = p.id as string;
       const terminal = findTerminalInstance(terminalId);
-      if (!terminal) return err(`Terminal '${terminalId}' not found`);
       const dockCtx = findDockPaneContext(terminalId);
+      const workspaceCtx = dockCtx ? null : findWorkspacePaneContext(terminalId);
+      if (!terminal && !dockCtx && !workspaceCtx) {
+        return err(`Terminal '${terminalId}' not found`);
+      }
 
       // Auto-switch workspace if terminal is in a different workspace.
       // Dock terminals are app-global, so focusing them must not switch workspaces.
       const { activeWorkspaceId } = useWorkspaceStore.getState();
-      const switchedWorkspace = !dockCtx && terminal.workspaceId !== activeWorkspaceId;
+      const terminalWorkspaceId = workspaceCtx?.workspace.id ?? terminal?.workspaceId;
+      const switchedWorkspace =
+        !dockCtx && terminalWorkspaceId !== undefined && terminalWorkspaceId !== activeWorkspaceId;
       if (switchedWorkspace) {
-        useWorkspaceStore.getState().setActiveWorkspace(terminal.workspaceId);
+        useWorkspaceStore.getState().setActiveWorkspace(terminalWorkspaceId);
       }
 
       // Update focusedPaneIndex to match the target terminal's pane
-      const paneIndex = resolveTerminalPaneIndex(terminalId, terminal.workspaceId);
+      const paneIndex =
+        workspaceCtx?.paneIndex ??
+        (terminalWorkspaceId ? resolveTerminalPaneIndex(terminalId, terminalWorkspaceId) : -1);
       if (dockCtx) {
         useDockStore.getState().setFocusedDock(dockCtx.dock.position, dockCtx.pane.id);
         useGridStore.getState().setFocusedPane(null);
@@ -607,13 +705,13 @@ const handlers: HandlerMap = {
         }
       }
 
-      useTerminalStore.getState().setTerminalFocus(terminalId);
+      if (terminal) useTerminalStore.getState().setTerminalFocus(terminalId);
       return ok({
         focused: terminalId,
         paneIndex: !dockCtx && paneIndex >= 0 ? paneIndex : undefined,
         dockPosition: dockCtx?.dock.position,
         dockPaneId: dockCtx?.pane.id,
-        switchedWorkspace: switchedWorkspace ? terminal.workspaceId : undefined,
+        switchedWorkspace: switchedWorkspace ? terminalWorkspaceId : undefined,
       });
     },
     // Dump xterm's reflowed buffer (text + isWrapped per line) for automated
@@ -952,6 +1050,19 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "terminals" && request.method === "prepareForAutomation") {
+    return prepareTerminalForAutomation(request.params.id as string);
+  }
+  if (request.target === "terminals" && request.method === "setFocus") {
+    const result = handleAutomationRequest(request);
+    if (!result.success) return result;
+    const terminalId = request.params.id as string;
+    if (!(await waitForTerminalSessionReady(terminalId))) {
+      return err(`Terminal '${terminalId}' did not become ready before timeout`);
+    }
+    useTerminalStore.getState().setTerminalFocus(terminalId);
+    return result;
+  }
   if (request.target === "screenshot" && request.method === "capture") {
     try {
       const paneIndex =
