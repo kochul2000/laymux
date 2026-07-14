@@ -5,6 +5,7 @@ use axum::Json;
 use tauri::Emitter;
 
 use super::helpers::{bridge_request, err_json};
+use super::settings_bridge::{apply_profile_patch, apply_settings_patch};
 use super::types::*;
 use super::ServerState;
 use crate::constants::EVENT_WORKSPACE_STATE_CHANGED;
@@ -805,16 +806,17 @@ pub async fn settings_set_app_theme(
         .get("themeId")
         .and_then(|v| v.as_str())
         .unwrap_or("catppuccin-mocha");
-    match bridge_request(
+    match apply_settings_patch(
         &state,
-        "action",
-        "settings",
-        "setAppTheme",
-        serde_json::json!({ "themeId": theme_id }),
+        &serde_json::json!({ "appearance": { "themeId": theme_id } }),
+        None,
     )
     .await
     {
-        Ok(data) => (StatusCode::OK, Json(data)),
+        Ok(prepared) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "applied": true, "result": prepared })),
+        ),
         Err(e) => e,
     }
 }
@@ -823,8 +825,17 @@ pub async fn settings_set_profile_defaults(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    match bridge_request(&state, "action", "settings", "setProfileDefaults", body).await {
-        Ok(data) => (StatusCode::OK, Json(data)),
+    match apply_settings_patch(
+        &state,
+        &serde_json::json!({ "profileDefaults": body }),
+        None,
+    )
+    .await
+    {
+        Ok(prepared) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "applied": true, "result": prepared })),
+        ),
         Err(e) => e,
     }
 }
@@ -834,16 +845,11 @@ pub async fn settings_update_profile(
     Path(index): Path<usize>,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "settings",
-        "updateProfile",
-        serde_json::json!({ "index": index, "data": body }),
-    )
-    .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)),
+    match apply_profile_patch(&state, index, &body).await {
+        Ok(prepared) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "applied": true, "result": prepared })),
+        ),
         Err(e) => e,
     }
 }

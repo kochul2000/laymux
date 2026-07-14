@@ -55,6 +55,27 @@ pub const DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 45;
 /// persisted the former 5-15 second values.
 pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
 
+// ── Settings enum values ──────────────────────────────────────────
+
+pub const SETTINGS_LANGUAGES: &[&str] = &["system", "ko", "en"];
+pub const APP_THEME_IDS: &[&str] = &["catppuccin-mocha", "dracula", "wsl-dark", "github-light"];
+pub const TERMINAL_SCROLLBAR_STYLES: &[&str] = &["overlay", "separate"];
+pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
+pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
+pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
+pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
+pub const PROFILE_CURSOR_SHAPES: &[&str] = &[
+    "bar",
+    "underscore",
+    "filledBox",
+    "emptyBox",
+    "doubleUnderscore",
+    "vintage",
+];
+pub const PROFILE_BELL_STYLES: &[&str] = &["audible", "none", "window", "taskbar", "all"];
+pub const PROFILE_CLOSE_ON_EXIT_VALUES: &[&str] = &["automatic", "graceful", "always", "never"];
+pub const PROFILE_ANTIALIASING_MODES: &[&str] = &["grayscale", "cleartype", "aliased"];
+
 /// Maximum number of notifications to keep. When exceeded, oldest read
 /// notifications are evicted first. Unread notifications are never evicted.
 pub const MAX_NOTIFICATIONS: usize = 500;

@@ -371,7 +371,18 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 33개 + dev 전용 19개)
+#### Tool 목록 (release 37개 + dev 전용 19개)
+
+**설정 (4)** — release/dev 공통, frontend snapshot bridge 기반([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md)):
+
+| Tool | 구현 방식 | 설명 |
+|------|-----------|------|
+| `get_settings` | `settings.getSnapshot` bridge | 현재 store에서 합성한 설정과 revision 조회. `paths`는 RFC 6901 JSON Pointer 배열이며, `remote.authToken`은 항상 마스킹 |
+| `describe_settings` | Rust settings contract | JSON Schema·기본값·의미·쓰기 가능 여부·민감 여부·적용 시점(`live`/`nextUse`/`restart`) 조회 |
+| `validate_settings` | snapshot bridge + Rust strict validator | 부분 patch dry-run. 객체는 재귀 병합, 배열은 전체 교체하며 오류·diff·후보 revision을 반환하고 저장하지 않음 |
+| `update_settings` | strict validator → `settings.applySnapshot` bridge | 검증된 후보만 `settings.json`에 저장하고 store에 적용. 선택적 `expected_revision`/`expectedRevision` 충돌 검사 지원 |
+
+일반 설정 patch에서 `workspaces`·`layouts`·`docks`·`workspaceDisplayOrder`와 cloud pairing 소유 필드는 읽기 전용이다. revision도 이 필드를 제외한 쓰기 가능한 구성만 해시한다. 알 수 없는 키, 타입/범위/enum 오류, profile 등 교차 참조 오류는 자동 보정하지 않고 거부한다. `remote.authToken`의 `***REDACTED***` 값은 기존 secret 유지 표식이며 새 문자열 또는 빈 문자열만 실제 값을 변경한다. 쓰기 요청은 `AppState` 공용 설정 락으로 snapshot 조회부터 적용까지 직렬화하고, frontend가 저장 전후 기대 snapshot을 재검사해 Settings UI와의 경쟁도 충돌로 반환한다.
 
 **터미널 (8)**:
 
@@ -437,9 +448,9 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 
 | Tool | bridge method | 설명 |
 |------|---------------|------|
-| `set_app_theme` | `settings.setAppTheme` | 앱 테마 변경 |
-| `update_profile` | `settings.updateProfile` | 특정 프로필 부분 갱신 |
-| `set_profile_defaults` | `settings.setProfileDefaults` | 프로필 기본값 부분 갱신 |
+| `set_app_theme` | 공통 settings snapshot/apply 경로 | 앱 테마 변경 |
+| `update_profile` | 공통 settings snapshot/apply 경로 | 특정 프로필 부분 갱신 |
+| `set_profile_defaults` | 공통 settings snapshot/apply 경로 | 프로필 기본값 부분 갱신 |
 | `open_settings` | `ui.openSettings` | Settings 모달 열기 |
 | `close_settings` | `ui.closeSettings` | Settings 모달 닫기 |
 | `toggle_settings` | `ui.toggleSettings` | Settings 모달 토글 |
@@ -742,10 +753,13 @@ src-tauri/src/
 │   ├── claude_session.rs     # Claude Code 세션 감지 + 프로세스 트리
 │   ├── file_ops.rs           # 파일 뷰어, 디렉토리 목록
 │   └── misc.rs               # 설정, 알림, 클립보드, GitHub, 캐시 등
-├── settings/                 # 설정 관리 (현재: mod·models·validation)
+├── settings/                 # 설정 모델·로드 복구·LLM용 엄격 쓰기 계약
 │   ├── mod.rs                # pub use 허브 (io/migration/memo 로직 일부 포함)
 │   ├── models.rs             # 구조체/enum 정의
-│   ├── validation.rs         # 설정 유효성 검증
+│   ├── validation.rs         # 기존 settings.json 로드 복구·경고
+│   ├── contract.rs           # patch 병합·revision·diff·마스킹·schema 응답
+│   ├── schema.rs             # 의미·권한·민감도·적용 시점 메타데이터
+│   ├── semantic_validation.rs # MCP/Automation 쓰기용 엄격 의미 검증
 │   └── (목표) io.rs · migration.rs · memo.rs  # 아직 분할 전 — 점진 전환 대상
 ├── automation_server/        # Automation HTTP API (axum)
 │   ├── mod.rs                # 서버 시작, 라우터 빌드, IP allowlist 미들웨어
@@ -753,7 +767,8 @@ src-tauri/src/
 │   ├── handlers_backend.rs   # 백엔드 직접 처리 핸들러
 │   ├── handlers_bridge.rs    # 프론트엔드 브릿지 핸들러
 │   ├── helpers.rs            # bridge_request, JSON 응답 헬퍼
-│   ├── mcp.rs                # 내장 MCP 서버 (tool 33종 + resource 핸들러, §12.7)
+│   ├── settings_bridge.rs    # frontend settings snapshot/apply 공통 브리지·쓰기 직렬화
+│   ├── mcp.rs                # 내장 MCP 서버 (release tool 37종 + resource 핸들러, §12.7)
 │   └── mcp_resources.rs      # MCP Resources URI 모델·구독 레지스트리
 ├── terminal/mod.rs           # 터미널 모델 (TerminalSession, Config, Notification)
 ├── pty.rs                    # PTY 스폰 및 I/O

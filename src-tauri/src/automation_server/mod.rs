@@ -3,6 +3,7 @@ pub mod handlers_bridge;
 pub mod helpers;
 pub mod mcp;
 pub mod mcp_resources;
+pub mod settings_bridge;
 pub mod types;
 
 // Re-export key types used by other modules

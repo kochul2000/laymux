@@ -3,6 +3,7 @@
 //! Uses `#[tool]` derive macros for automatic tool definition and JSON-RPC 2.0
 //! handling. Mounted via `nest_service("/mcp", ...)` in the existing axum router.
 
+use axum::Json;
 use rmcp::handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters};
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, Content, ListResourceTemplatesResult,
@@ -22,11 +23,19 @@ use tokio::sync::Mutex as TokioMutex;
 use crate::constants::MCP_SERVER_NAME;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
+use crate::settings::contract::{
+    describe_settings as describe_settings_contract, redact_settings, select_settings_paths,
+    settings_revision,
+};
 
 use super::helpers::bridge_request;
 use super::mcp_resources::{
     self, bridge_read_failed, new_peer_id, read_result_json, read_result_text, resource_not_found,
     resource_templates, static_resources, PeerId, ResourceUri, SharedSubscriptionRegistry,
+};
+use super::settings_bridge::{
+    apply_profile_patch, apply_settings_patch, get_settings_snapshot, validate_settings_patch,
+    SettingsBridgeError,
 };
 use super::ServerState;
 
@@ -528,6 +537,35 @@ struct ExecuteCommandParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct GetSettingsParam {
+    /// JSON Pointer paths to return. Omit or pass an empty array for the full settings object.
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DescribeSettingsParam {
+    /// JSON Pointer paths to describe. Omit or pass an empty array for the full schema.
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ValidateSettingsParam {
+    /// Partial settings object. Objects are merged recursively and arrays are replaced.
+    patch: Value,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct UpdateSettingsParam {
+    /// Partial settings object. Objects are merged recursively and arrays are replaced.
+    patch: Value,
+    /// Revision returned by get_settings. A mismatch prevents overwriting a newer change.
+    #[serde(alias = "expectedRevision")]
+    expected_revision: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct SetAppThemeParam {
     /// App theme ID, e.g. "catppuccin-mocha" or "dracula".
     theme_id: String,
@@ -610,6 +648,12 @@ pub struct McpHandler {
 }
 
 impl McpHandler {
+    fn settings_bridge_error((_status, Json(body)): SettingsBridgeError) -> CallToolResult {
+        CallToolResult::error(vec![Content::text(
+            serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()),
+        )])
+    }
+
     pub fn new(
         state: ServerState,
         subscriptions: SharedSubscriptionRegistry,
@@ -1375,6 +1419,84 @@ fn local_interface_ips() -> Vec<String> {
 
 #[tool_router]
 impl McpHandler {
+    /// Read the effective laymux settings from the frontend store.
+    /// Sensitive values are redacted. Use RFC 6901 JSON Pointer paths to limit the response.
+    #[tool]
+    async fn get_settings(
+        &self,
+        Parameters(p): Parameters<GetSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let settings = match get_settings_snapshot(&self.state).await {
+            Ok(settings) => settings,
+            Err(error_value) => return Ok(Self::settings_bridge_error(error_value)),
+        };
+        let selected = match select_settings_paths(&settings, &p.paths) {
+            Ok(selected) => selected,
+            Err(message) => return Ok(CallToolResult::error(vec![Content::text(message)])),
+        };
+        Ok(json_result(&json!({
+            "settings": selected,
+            "revision": settings_revision(&settings),
+        })))
+    }
+
+    /// Describe laymux settings with JSON Schema, defaults, meanings, write permissions,
+    /// sensitivity, and apply timing. Paths use RFC 6901 JSON Pointer syntax.
+    #[tool]
+    async fn describe_settings(
+        &self,
+        Parameters(p): Parameters<DescribeSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match describe_settings_contract(&p.paths) {
+            Ok(description) => Ok(json_result(&description)),
+            Err(message) => Ok(CallToolResult::error(vec![Content::text(message)])),
+        }
+    }
+
+    /// Validate a partial settings patch without saving or changing runtime state.
+    /// Objects merge recursively; arrays replace the whole existing array.
+    #[tool]
+    async fn validate_settings(
+        &self,
+        Parameters(p): Parameters<ValidateSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_current, prepared) = match validate_settings_patch(&self.state, &p.patch).await {
+            Ok(result) => result,
+            Err(error_value) => return Ok(Self::settings_bridge_error(error_value)),
+        };
+        let effective_settings = prepared.candidate.as_ref().map(redact_settings);
+        let mut response = serde_json::to_value(&prepared).unwrap_or_else(|_| json!({}));
+        if let Some(object) = response.as_object_mut() {
+            object.insert(
+                "effectiveSettings".into(),
+                effective_settings.unwrap_or(Value::Null),
+            );
+        }
+        Ok(json_result(&response))
+    }
+
+    /// Validate, persist, and apply a partial settings patch.
+    /// Pass expected_revision from get_settings to prevent lost updates.
+    #[tool]
+    async fn update_settings(
+        &self,
+        Parameters(p): Parameters<UpdateSettingsParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let prepared =
+            match apply_settings_patch(&self.state, &p.patch, p.expected_revision.as_deref()).await
+            {
+                Ok(prepared) => prepared,
+                Err(error_value) => return Ok(Self::settings_bridge_error(error_value)),
+            };
+        let effective_settings = prepared.candidate.as_ref().map(redact_settings);
+        let mut response = serde_json::to_value(&prepared).unwrap_or_else(|_| json!({}));
+        if let Some(object) = response.as_object_mut() {
+            object.insert("applied".into(), Value::Bool(true));
+            object.insert("settings".into(), effective_settings.unwrap_or(Value::Null));
+        }
+        Ok(json_result(&response))
+    }
+
     // ── Terminal (7) ──
 
     /// List terminal instances with id, profile, syncGroup, workspaceId, cwd, paneIndex, and panePosition.
@@ -2508,13 +2630,18 @@ impl McpHandler {
                 "'theme_id' is required and must be non-empty",
             )]));
         }
-        self.bridge(
-            "action",
-            "settings",
-            "setAppTheme",
-            json!({ "themeId": p.theme_id }),
+        match apply_settings_patch(
+            &self.state,
+            &json!({ "appearance": { "themeId": p.theme_id } }),
+            None,
         )
         .await
+        {
+            Ok(prepared) => Ok(json_result(
+                &serde_json::to_value(prepared).unwrap_or_default(),
+            )),
+            Err(error_value) => Ok(Self::settings_bridge_error(error_value)),
+        }
     }
 
     /// Dev-only: merge profile defaults into settings.profileDefaults.
@@ -2527,8 +2654,12 @@ impl McpHandler {
             Ok(data) => data,
             Err(err) => return Ok(err),
         };
-        self.bridge("action", "settings", "setProfileDefaults", data)
-            .await
+        match apply_settings_patch(&self.state, &json!({ "profileDefaults": data }), None).await {
+            Ok(prepared) => Ok(json_result(
+                &serde_json::to_value(prepared).unwrap_or_default(),
+            )),
+            Err(error_value) => Ok(Self::settings_bridge_error(error_value)),
+        }
     }
 
     /// Dev-only: merge a partial profile object into settings.profiles[index].
@@ -2541,13 +2672,20 @@ impl McpHandler {
             Ok(data) => data,
             Err(err) => return Ok(err),
         };
-        self.bridge(
-            "action",
-            "settings",
-            "updateProfile",
-            json!({ "index": p.index, "data": data }),
-        )
-        .await
+        let index = match usize::try_from(p.index) {
+            Ok(index) => index,
+            Err(_) => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "profile index is out of range",
+                )]))
+            }
+        };
+        match apply_profile_patch(&self.state, index, &data).await {
+            Ok(prepared) => Ok(json_result(
+                &serde_json::to_value(prepared).unwrap_or_default(),
+            )),
+            Err(error_value) => Ok(Self::settings_bridge_error(error_value)),
+        }
     }
 
     /// Dev-only: open the settings modal.
@@ -3937,6 +4075,54 @@ mod tests {
         let router = McpHandler::tool_router();
         assert!(router.has_route("dump_terminal_buffer"));
         assert!(DEV_ONLY_TOOLS.contains(&"dump_terminal_buffer"));
+    }
+
+    #[test]
+    fn settings_contract_tools_are_registered_and_release_visible() {
+        let router = McpHandler::tool_router();
+        let release_tools = McpHandler::visible_tools_from_router(&router, false);
+        let release_names: Vec<&str> = release_tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect();
+
+        for name in [
+            "get_settings",
+            "describe_settings",
+            "validate_settings",
+            "update_settings",
+        ] {
+            assert!(
+                router.has_route(name),
+                "settings tool not registered: {name}"
+            );
+            assert!(
+                release_names.contains(&name),
+                "settings tool must be release-visible: {name}",
+            );
+            assert!(!DEV_ONLY_TOOLS.contains(&name));
+        }
+    }
+
+    #[test]
+    fn settings_contract_params_deserialize() {
+        let get: GetSettingsParam =
+            serde_json::from_str(r#"{"paths":["/appearance/themeId"]}"#).unwrap();
+        assert_eq!(get.paths, vec!["/appearance/themeId"]);
+
+        let describe: DescribeSettingsParam = serde_json::from_str("{}").unwrap();
+        assert!(describe.paths.is_empty());
+
+        let validate: ValidateSettingsParam =
+            serde_json::from_str(r#"{"patch":{"language":"ko"}}"#).unwrap();
+        assert_eq!(validate.patch["language"], "ko");
+
+        let update: UpdateSettingsParam = serde_json::from_str(
+            r#"{"patch":{"appearance":{"themeId":"dracula"}},"expected_revision":"abc"}"#,
+        )
+        .unwrap();
+        assert_eq!(update.patch["appearance"]["themeId"], "dracula");
+        assert_eq!(update.expected_revision.as_deref(), Some("abc"));
     }
 
     #[test]

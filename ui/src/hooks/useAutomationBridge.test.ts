@@ -23,6 +23,9 @@ import {
 vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
+  saveSettings: vi.fn().mockResolvedValue(undefined),
+  getTerminalCwds: vi.fn().mockResolvedValue({}),
+  getClaudeSessionIds: vi.fn().mockResolvedValue({}),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -674,6 +677,76 @@ describe("handleAsyncAutomationRequest", () => {
     document.body.innerHTML = "";
     document.documentElement.querySelectorAll("canvas").forEach((node) => node.remove());
     vi.mocked(html2canvas).mockReset();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  it("returns a full frontend settings snapshot for backend validation", async () => {
+    const result = await handleAsyncAutomationRequest({
+      requestId: "settings-snapshot",
+      category: "query",
+      target: "settings",
+      method: "getSnapshot",
+      params: {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toHaveProperty("settings.appearance.themeId", "catppuccin-mocha");
+    expect(result.data).toHaveProperty("settings.workspaces");
+    expect(result.data).toHaveProperty("settings.docks");
+  });
+
+  it("persists and applies a backend-validated settings snapshot", async () => {
+    const current = await handleAsyncAutomationRequest({
+      requestId: "settings-current",
+      category: "query",
+      target: "settings",
+      method: "getSnapshot",
+      params: {},
+    });
+    const expectedSettings = (current.data as { settings: import("@/lib/tauri-api").Settings })
+      .settings;
+    const settings = structuredClone(expectedSettings);
+    settings.appearance.themeId = "github-light";
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "settings-apply",
+      category: "action",
+      target: "settings",
+      method: "applySnapshot",
+      params: { settings, expectedSettings },
+    });
+
+    expect(result.success).toBe(true);
+    expect(useSettingsStore.getState().appearance.themeId).toBe("github-light");
+  });
+
+  it("rejects applying a stale backend settings snapshot", async () => {
+    const current = await handleAsyncAutomationRequest({
+      requestId: "settings-current",
+      category: "query",
+      target: "settings",
+      method: "getSnapshot",
+      params: {},
+    });
+    const expectedSettings = (current.data as { settings: import("@/lib/tauri-api").Settings })
+      .settings;
+    const settings = structuredClone(expectedSettings);
+    settings.appearance.themeId = "github-light";
+    useSettingsStore.getState().setAppearance({ themeId: "dracula" });
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "settings-stale-apply",
+      category: "action",
+      target: "settings",
+      method: "applySnapshot",
+      params: { settings, expectedSettings },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Settings revision conflict");
+    expect(useSettingsStore.getState().appearance.themeId).toBe("dracula");
   });
 
   it("composites terminal canvases when no blocking overlay is visible", async () => {

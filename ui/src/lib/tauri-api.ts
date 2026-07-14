@@ -341,6 +341,7 @@ export interface ProfileDefaults {
   font?: FontSettings;
   restoreCwd?: boolean;
   restoreOutput?: boolean;
+  maxOutputCacheKB?: number;
   syncCwd?: SyncCwdConfig;
 }
 

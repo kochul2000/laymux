@@ -11,9 +11,9 @@
 - [x] **OSC 파이프라인** — Rust 단일 패스 파싱·훅·디스패치, 프리셋 12종 ([ADR-0001](./adr/0001-osc-rust-single-pass.md))
 - [x] **SyncGroup / CWD 동기화** — 단일 소스 + activity 가드 전파 ([ADR-0003](./adr/0003-cwd-single-source-syncgroup.md))
 - [x] **WorkspaceSelectorView** — cmux 클론, 미니맵, activity-aware 상태 계산, 알림 시스템 ([ADR-0005](./adr/0005-display-state-raw-separation-compute.md))
-- [x] **Settings** — Windows Terminal 호환 교집합, settings.json/localStorage 분리
+- [x] **Settings** — Windows Terminal 호환 교집합, settings.json/localStorage 분리 + LLM 자기설명·dry-run·엄격 patch 계약 ([ADR-0032](./adr/0032-llm-settings-introspection-and-safe-mutation.md))
 - [x] **Automation API** — axum REST, 고정 포트 + IP allowlist 무인증 ([ADR-0002](./adr/0002-automation-api-fixed-port-ip-allowlist.md))
-- [x] **내장 MCP 서버** — rmcp HTTP `/mcp`, tool 33종 ([ADR-0006](./adr/0006-embedded-mcp-server.md))
+- [x] **내장 MCP 서버** — rmcp HTTP `/mcp`, release tool 37종 + dev 전용 19종 ([ADR-0006](./adr/0006-embedded-mcp-server.md), [ADR-0017](./adr/0017-mcp-dev-only-tools.md))
 - [x] **MCP Resources** — 구독형 read-only 상태 노출 (issue #202)
 - [x] **세션 영속 / 캐시** — 출력·CWD 복원, 안정 pane ID, 숨김 터미널 자동 종료(#269)
 - [x] **Pane 식별자 3종** — terminalId / paneIndex / paneNumber, 번호 주소 지정 + 배지 복사 ([ADR-0007](./adr/0007-pane-identifier-trio.md), #256·#276)

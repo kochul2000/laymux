@@ -1,9 +1,10 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS;
 
 /// Color scheme definition (Windows Terminal compatible).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ColorScheme {
     pub name: String,
@@ -50,7 +51,7 @@ pub struct ColorScheme {
 }
 
 /// Padding settings for terminal profile.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct PaddingSettings {
     #[serde(default = "default_padding_val")]
     pub top: u16,
@@ -78,7 +79,7 @@ impl Default for PaddingSettings {
 }
 
 /// Terminal profile (Windows Terminal compatible).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub name: String,
@@ -95,6 +96,12 @@ pub struct Profile {
     pub hidden: bool,
     #[serde(default = "default_cursor_shape")]
     pub cursor_shape: String,
+    /// Whether the terminal cursor blinks for this profile.
+    #[serde(default = "default_true")]
+    pub cursor_blink: bool,
+    /// Stabilize the shell cursor while interactive TUIs repaint it.
+    #[serde(default = "default_true")]
+    pub stabilize_interactive_cursor: bool,
     #[serde(default)]
     pub padding: PaddingSettings,
     #[serde(default = "default_scrollback_lines")]
@@ -137,6 +144,8 @@ impl Default for Profile {
             starting_directory: String::new(),
             hidden: false,
             cursor_shape: default_cursor_shape(),
+            cursor_blink: true,
+            stabilize_interactive_cursor: true,
             padding: PaddingSettings::default(),
             scrollback_lines: default_scrollback_lines(),
             opacity: default_opacity(),
@@ -174,14 +183,14 @@ fn default_antialiasing_mode() -> String {
 }
 
 /// Keybinding entry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Keybinding {
     pub keys: String,
     pub command: String,
 }
 
 /// Font settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct FontSettings {
     #[serde(default = "default_font_face")]
     pub face: String,
@@ -214,13 +223,17 @@ impl Default for FontSettings {
 }
 
 /// Profile defaults — inheritable settings for all profiles.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDefaults {
     #[serde(default)]
     pub color_scheme: String,
     #[serde(default = "default_cursor_shape")]
     pub cursor_shape: String,
+    #[serde(default = "default_true")]
+    pub cursor_blink: bool,
+    #[serde(default = "default_true")]
+    pub stabilize_interactive_cursor: bool,
     #[serde(default)]
     pub padding: PaddingSettings,
     #[serde(default = "default_scrollback_lines")]
@@ -245,6 +258,10 @@ pub struct ProfileDefaults {
     /// Whether to restore terminal output on restart.
     #[serde(default = "default_true")]
     pub restore_output: bool,
+    /// Maximum serialized terminal output cache per terminal, in KiB.
+    #[serde(default = "default_max_output_cache_kb", rename = "maxOutputCacheKB")]
+    #[schemars(rename = "maxOutputCacheKB")]
+    pub max_output_cache_kb: u32,
     /// CWD sync behavior: "default" or { send: bool, receive: bool }. Opaque to backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_cwd: Option<serde_json::Value>,
@@ -255,6 +272,8 @@ impl Default for ProfileDefaults {
         Self {
             color_scheme: String::new(),
             cursor_shape: default_cursor_shape(),
+            cursor_blink: true,
+            stabilize_interactive_cursor: true,
             padding: PaddingSettings::default(),
             scrollback_lines: default_scrollback_lines(),
             opacity: default_opacity(),
@@ -266,13 +285,18 @@ impl Default for ProfileDefaults {
             font: FontSettings::default(),
             restore_cwd: true,
             restore_output: true,
+            max_output_cache_kb: default_max_output_cache_kb(),
             sync_cwd: None,
         }
     }
 }
 
+fn default_max_output_cache_kb() -> u32 {
+    256
+}
+
 /// Layout pane definition.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutPane {
     pub x: f64,
@@ -286,7 +310,7 @@ pub struct LayoutPane {
 }
 
 /// Layout definition.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Layout {
     pub id: String,
     pub name: String,
@@ -294,7 +318,7 @@ pub struct Layout {
 }
 
 /// Workspace pane view config.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct WorkspacePaneView {
     #[serde(rename = "type")]
     pub view_type: String,
@@ -303,7 +327,7 @@ pub struct WorkspacePaneView {
 }
 
 /// Workspace pane definition.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct WorkspacePane {
     /// Stable pane identifier, persisted across restarts. Empty string means unassigned (migrated).
     #[serde(default)]
@@ -318,7 +342,7 @@ pub struct WorkspacePane {
 }
 
 /// Workspace definition.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
@@ -330,7 +354,7 @@ pub struct Workspace {
 }
 
 /// Claude Code sync-cwd propagation mode.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum ClaudeSyncCwdMode {
@@ -342,7 +366,7 @@ pub enum ClaudeSyncCwdMode {
 }
 
 /// Status message display mode for Claude Code in WorkspaceSelectorView.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub enum ClaudeStatusMessageMode {
@@ -358,7 +382,7 @@ pub enum ClaudeStatusMessageMode {
 }
 
 /// Claude Code integration settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeSettings {
     #[serde(default)]
@@ -430,7 +454,7 @@ fn default_session_max_age_hours() -> u64 {
 }
 
 /// Status message display mode for Codex in WorkspaceSelectorView.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub enum CodexStatusMessageMode {
@@ -446,7 +470,7 @@ pub enum CodexStatusMessageMode {
 }
 
 /// Codex integration settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
     /// Status message display mode (default: "bullet-title").
@@ -471,7 +495,7 @@ fn default_codex_status_message_delimiter() -> String {
 }
 
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[derive(Default)]
 pub enum PathEllipsisMode {
@@ -497,7 +521,7 @@ fn default_burst_throttle_ms() -> u64 {
 }
 
 /// DEC 2026 burst detection parameters for TUI output activity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputActivityBurstSettings {
     /// Sliding window size (ms) for counting DEC 2026h events.
@@ -534,7 +558,7 @@ impl OutputActivityBurstSettings {
 }
 
 /// Terminal behavior & rendering settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     #[serde(default)]
@@ -545,6 +569,15 @@ pub struct TerminalSettings {
     /// Terminal scrollbar style: "overlay" (default) or "separate".
     #[serde(default = "default_scrollbar_style")]
     pub scrollbar_style: String,
+    /// Enable selection-based file/directory path links.
+    #[serde(default = "default_true")]
+    pub path_link_enabled: bool,
+    /// Maximum selected text length considered for a path link.
+    #[serde(default = "default_path_link_max_length")]
+    pub path_link_max_length: u32,
+    /// Show the floating jump-to-bottom button while scrolled up.
+    #[serde(default = "default_true")]
+    pub show_scroll_to_bottom_button: bool,
 }
 
 impl Default for TerminalSettings {
@@ -553,12 +586,19 @@ impl Default for TerminalSettings {
             output_activity_burst: OutputActivityBurstSettings::default(),
             copy_on_select: true,
             scrollbar_style: default_scrollbar_style(),
+            path_link_enabled: true,
+            path_link_max_length: default_path_link_max_length(),
+            show_scroll_to_bottom_button: true,
         }
     }
 }
 
+fn default_path_link_max_length() -> u32 {
+    256
+}
+
 /// App-wide appearance settings (theme + non-terminal font).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
     /// App UI theme id (e.g. "catppuccin-mocha"). Separate from terminal color schemes.
@@ -585,7 +625,7 @@ impl Default for AppearanceSettings {
 }
 
 /// Paste / clipboard behavior settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PasteSettings {
     /// Smart paste master toggle.
@@ -635,7 +675,7 @@ impl Default for PasteSettings {
 }
 
 /// Pane control bar settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlBarSettings {
     /// Seconds of mouse inactivity before hiding the pane control bar. 0 = never hide.
@@ -664,7 +704,7 @@ impl Default for ControlBarSettings {
 }
 
 /// Dock behavior settings (distinct from the structural `docks` array).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DockSettings {
     /// Keep dock state in background when hidden.
@@ -690,7 +730,7 @@ impl Default for DockSettings {
 }
 
 /// Notification behavior settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationSettings {
     /// When to auto-dismiss notifications as read:
@@ -712,7 +752,7 @@ impl Default for NotificationSettings {
 }
 
 /// Which elements to display in WorkspaceSelectorView pane rows.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDisplaySettings {
     #[serde(default = "default_true")]
@@ -740,7 +780,7 @@ impl Default for WorkspaceDisplaySettings {
 }
 
 /// WorkspaceSelectorView settings (display toggles, sort order, lifecycle).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSelectorSettings {
     /// Display toggles for pane rows.
@@ -782,7 +822,7 @@ fn default_view_font_size() -> u16 {
 }
 
 /// Issue reporter settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueReporterSettings {
     /// Shell prefix for running gh commands.
@@ -833,7 +873,7 @@ impl Default for IssueReporterSettings {
 }
 
 /// Paragraph copy feature settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoParagraphCopySettings {
     #[serde(default = "default_true")]
@@ -856,7 +896,7 @@ impl Default for MemoParagraphCopySettings {
 }
 
 /// MemoView settings (padding, copy features, etc.).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoSettings {
     #[serde(default = "default_view_padding")]
@@ -913,7 +953,7 @@ impl Default for MemoSettings {
 }
 
 /// File extension → shell command viewer mapping.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionViewer {
     pub extensions: Vec<String>,
@@ -924,7 +964,7 @@ pub struct ExtensionViewer {
 }
 
 /// FileExplorerView settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FileExplorerSettings {
     /// Shell profile name for background shell. Empty = use defaultProfile.
@@ -969,7 +1009,7 @@ impl Default for FileExplorerSettings {
 }
 
 /// Direct Remote Mode server settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSettings {
     /// User-facing browser remote API/UI switch. Defaults off.
@@ -1086,7 +1126,7 @@ impl Default for RemoteSettings {
 }
 
 /// Dock pane definition (persisted view config with position).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DockPaneSetting {
     #[serde(default)]
@@ -1108,7 +1148,7 @@ fn default_one() -> f64 {
 }
 
 /// Dock configuration in settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DockSetting {
     pub position: String,
@@ -1133,7 +1173,7 @@ fn default_true() -> bool {
 }
 
 /// Root settings structure.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// App UI language: "system" (OS locale), "ko", or "en". Opaque to the
