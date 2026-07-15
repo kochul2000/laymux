@@ -46,3 +46,6 @@ test-results/
 *~
 tmp/
 .tmp/
+
+# serena MCP (removed)
+/.serena/
