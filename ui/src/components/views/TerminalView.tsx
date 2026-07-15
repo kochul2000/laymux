@@ -103,6 +103,7 @@ import {
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
+import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
 
@@ -2609,9 +2610,13 @@ export function TerminalView({
 
         // Register serializer for shutdown save
         if (paneId) {
-          registerTerminalSerializer(paneId, () => serializeAddon.serialize());
+          registerTerminalSerializer(paneId, () =>
+            serializeAddon.serialize(TERMINAL_OUTPUT_SERIALIZE_OPTIONS),
+          );
         }
-        registerTerminalSerializer(instanceId, () => serializeAddon.serialize());
+        registerTerminalSerializer(instanceId, () =>
+          serializeAddon.serialize(TERMINAL_OUTPUT_SERIALIZE_OPTIONS),
+        );
 
         // Register buffer inspector for automated reflow verification (issue #285).
         // Exposes xterm's reflowed line model (text + isWrapped) so the
@@ -2726,7 +2731,7 @@ export function TerminalView({
           loadTerminalOutputCache(paneId)
             .then((cached) => {
               if (cancelled || !cached || cached.length === 0) return;
-              trackedTerminalWrite(cached);
+              trackedTerminalWrite(normalBufferOnly(cached));
               trackedTerminalWrite("\r\n\x1b[90m--- session restored ---\x1b[0m");
               // Push restored content into scrollback so shell init
               // clear-screen sequences don't destroy it

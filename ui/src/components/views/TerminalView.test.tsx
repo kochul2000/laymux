@@ -5420,6 +5420,54 @@ describe("TerminalView", () => {
       });
     });
 
+    it("repairs a cache saved while the alternate buffer was active", async () => {
+      const normalBuffer = "old scrollback\r\nlast normal line";
+      const cached = `${normalBuffer}\x1b[?1049h\x1b[Hstale Claude frame`;
+      mockLoadTerminalOutputCache.mockResolvedValueOnce(cached);
+
+      render(
+        <TerminalView
+          instanceId="t-restore-alt"
+          paneId="pane-restore-alt"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
+        expect(calls).toContain(normalBuffer);
+        expect(calls).not.toContain(cached);
+      });
+    });
+
+    it("serializes output caches without alternate buffers or live terminal modes", async () => {
+      render(
+        <TerminalView
+          instanceId="t-ser-options"
+          paneId="pane-ser-options"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockRegisterTerminalSerializer).toHaveBeenCalledWith(
+          "pane-ser-options",
+          expect.any(Function),
+        );
+      });
+
+      const serializer = mockRegisterTerminalSerializer.mock.calls.find(
+        ([id]) => id === "pane-ser-options",
+      )?.[1] as (() => string) | undefined;
+      expect(serializer?.()).toBe("serialized-data");
+      expect(mockSerialize).toHaveBeenCalledWith({
+        excludeAltBuffer: true,
+        excludeModes: true,
+      });
+    });
+
     it("registers serializer on mount and unregisters on unmount", async () => {
       const { unmount } = render(
         <TerminalView
