@@ -167,7 +167,7 @@ export interface WorkspaceSelectorSettings {
   /** Path ellipsis direction. "start" (default) shows the end of the path, "end" shows the beginning. */
   pathEllipsis: PathEllipsisMode;
   /**
-   * Seconds a pane/workspace must stay hidden (in the hide mode) before its terminal (PTY)
+   * Seconds a pane/workspace must stay hidden before its terminal (PTY)
    * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
    */
   hiddenAutoCloseSeconds: number;

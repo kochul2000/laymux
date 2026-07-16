@@ -1,7 +1,7 @@
 /**
  * Pure helpers for the "auto-close hidden terminals" feature (issue #269).
  *
- * When a pane or workspace stays hidden (via the WorkspaceSelectorView hide mode)
+ * When a pane or workspace stays hidden (via the WorkspaceSelectorView list actions)
  * for longer than the configured timeout, its terminal (PTY) is torn down to free
  * memory/CPU. Eviction is implemented by unmounting the pane's `TerminalView`
  * (WorkspaceArea stops rendering it); the existing `TerminalView` unmount cleanup

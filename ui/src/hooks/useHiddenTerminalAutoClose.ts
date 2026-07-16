@@ -12,7 +12,7 @@ import {
 const TICK_INTERVAL_MS = 5000;
 
 /**
- * Auto-closes terminals that stay hidden past `convenience.hiddenAutoCloseSeconds`
+ * Auto-closes terminals that stay hidden past `workspaceSelector.hiddenAutoCloseSeconds`
  * (issue #269). The hook tracks how long each hidden pane has been hidden and,
  * once the timeout elapses, records the pane in `uiStore.evictedPaneIds`.
  * `WorkspaceArea` then stops rendering that pane, unmounting its `TerminalView`,
@@ -60,13 +60,39 @@ export function useHiddenTerminalAutoClose() {
       ui.setEvictedPaneIds(evictPaneIds);
     };
 
-    // Run once on mount so panes that are already hidden (e.g. hidden state
-    // restored from a previous session) start their countdown right away, then
-    // poll on an interval. Hide toggles made after mount are picked up on the
-    // next tick (within TICK_INTERVAL_MS) — the hook does not subscribe to store
-    // changes.
+    // Raw-state transitions are evaluated synchronously. The interval is only
+    // responsible for noticing that an existing timeout has elapsed.
     evaluate();
+    const unsubscribeUi = useUiStore.subscribe((state, previous) => {
+      if (
+        state.hiddenPaneIds !== previous.hiddenPaneIds ||
+        state.hiddenWorkspaceIds !== previous.hiddenWorkspaceIds
+      ) {
+        evaluate();
+      }
+    });
+    const unsubscribeWorkspaces = useWorkspaceStore.subscribe((state, previous) => {
+      if (
+        state.activeWorkspaceId !== previous.activeWorkspaceId ||
+        state.workspaces !== previous.workspaces
+      ) {
+        evaluate();
+      }
+    });
+    const unsubscribeSettings = useSettingsStore.subscribe((state, previous) => {
+      if (
+        state.workspaceSelector.hiddenAutoCloseSeconds !==
+        previous.workspaceSelector.hiddenAutoCloseSeconds
+      ) {
+        evaluate();
+      }
+    });
     const timer = setInterval(evaluate, TICK_INTERVAL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      unsubscribeUi();
+      unsubscribeWorkspaces();
+      unsubscribeSettings();
+    };
   }, []);
 }

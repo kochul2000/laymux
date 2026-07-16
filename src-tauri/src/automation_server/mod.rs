@@ -285,7 +285,7 @@ pub fn build_router(
             "/api/v1/ui/notifications",
             post(ui_toggle_notification_panel),
         )
-        .route("/api/v1/ui/hide-mode/toggle", post(ui_toggle_hide_mode))
+        .route("/api/v1/ui/hidden-items", post(ui_set_hidden_items_open))
         .route(
             "/api/v1/ui/hidden/workspace/{id}/toggle",
             post(ui_toggle_workspace_hidden),

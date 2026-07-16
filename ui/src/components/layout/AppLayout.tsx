@@ -18,6 +18,7 @@ import { getPaneInstanceId } from "@/lib/view-instance-id";
 import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
+import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
 
 function ModalOverlay({
   testIdPrefix,
@@ -156,6 +157,7 @@ function DockResizeHandle({ position }: { position: DockPosition }) {
 
 export function AppLayout() {
   useAppTheme();
+  useHiddenItemsCoordinator();
   useHiddenTerminalAutoClose();
   const docks = useDockStore((s) => s.docks);
   const layoutMode = useDockStore((s) => s.layoutMode);

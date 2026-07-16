@@ -50,6 +50,7 @@ ADR 이 필요한 대표 기준:
 | [0030](0030-cloud-tunnel-follows-remote-control-gate.md) | 클라우드 터널 연결은 원격 제어 게이트를 따른다 (0024 정정) | Accepted |
 | [0031](0031-extension-viewer-profile-path-conversion.md) | Extension viewer 실행 프로필과 경로 변환 책임 | Accepted |
 | [0032](0032-llm-settings-introspection-and-safe-mutation.md) | LLM 설정 계약 — 자기설명·엄격 검증·민감값 보호 | Accepted |
+| [0033](0033-hidden-items-shelf-set-contract.md) | 숨긴 항목 보관함 — raw 숨김 상태와 결정론적 set 계약 | Accepted |
 
 ## 새 ADR 추가
 

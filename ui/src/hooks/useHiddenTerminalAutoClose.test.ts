@@ -69,11 +69,42 @@ describe("useHiddenTerminalAutoClose", () => {
     act(() => vi.advanceTimersByTime(15_000));
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
 
-    // Un-hide wsB -> next tick drops the eviction.
+    // Un-hide wsB -> the store subscription drops the eviction immediately.
     act(() => {
       useUiStore.getState().toggleWorkspaceHidden("wsB");
-      vi.advanceTimersByTime(5_000);
     });
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+  });
+
+  it("resets the timestamp across hide → unhide → immediate re-hide", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    const { unmount } = renderHook(() => useHiddenTerminalAutoClose());
+
+    act(() => useUiStore.getState().setWorkspaceHidden("wsB", true));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
+
+    act(() => {
+      useUiStore.getState().setWorkspaceHidden("wsB", false, ["p2"]);
+      useUiStore.getState().setWorkspaceHidden("wsB", true);
+    });
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
+    unmount();
+  });
+
+  it("re-evaluates immediately when the active workspace changes", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ hiddenAutoCloseSeconds: 10 });
+    useUiStore.getState().setWorkspaceHidden("wsB", true);
+    renderHook(() => useHiddenTerminalAutoClose());
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(true);
+
+    act(() => useWorkspaceStore.getState().setActiveWorkspace("wsB"));
     expect(useUiStore.getState().evictedPaneIds.has("p2")).toBe(false);
   });
 

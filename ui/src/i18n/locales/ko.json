@@ -475,9 +475,30 @@
       "manualTitle": "정렬: 수동 (드래그하여 재정렬)",
       "notificationTitle": "정렬: 알림순 (최근 항목 우선)"
     },
-    "hideMode": {
-      "enter": "숨김 모드 진입",
-      "apply": "적용하고 숨김 모드 종료"
+    "hiddenItems": {
+      "title": "숨긴 항목",
+      "titleCount": "숨긴 항목 {{count}}",
+      "chip": "숨김 {{count}}",
+      "hideFromList": "목록에서 숨기기",
+      "hidePaneDescription": "이 Pane 요약 행을 워크스페이스 목록에서 숨기기",
+      "showAgain": "다시 표시",
+      "showOnly": "표시만",
+      "showAndOpen": "다시 표시하고 열기",
+      "showAndFocus": "다시 표시하고 포커스",
+      "restoreAll": "모두 표시",
+      "undo": "되돌리기",
+      "close": "숨긴 항목 닫기",
+      "workspaces": "워크스페이스",
+      "panes": "Pane",
+      "nestedPaneCount_one": "개별 숨김 Pane {{count}}",
+      "nestedPaneCount_other": "개별 숨김 Pane {{count}}",
+      "hiddenMessage": "{{name}}을(를) 목록에서 숨겼습니다",
+      "lastWorkspace": "마지막 workspace는 숨길 수 없습니다",
+      "hideAndMove": "숨기고 다음 workspace로 이동",
+      "showAndOpenLabel": "{{name}}을(를) 다시 표시하고 열기",
+      "showOnlyWorkspaceLabel": "{{name}}을(를) 다시 표시만 하기",
+      "showAndFocusLabel": "{{workspace}}의 {{pane}}번 Pane을 다시 표시하고 포커스",
+      "showOnlyPaneLabel": "{{workspace}}의 {{pane}}번 Pane을 다시 표시만 하기"
     },
     "layout": {
       "options": "레이아웃 옵션",
@@ -496,8 +517,6 @@
       "renamePrompt": "레이아웃 이름 변경:"
     },
     "item": {
-      "showWorkspace": "워크스페이스 표시",
-      "hideWorkspace": "워크스페이스 숨김",
       "duplicateWorkspace": "워크스페이스 복제 (Ctrl+Alt+D)",
       "renameWorkspace": "워크스페이스 이름 변경 (Ctrl+Alt+R)",
       "closeWorkspace": "워크스페이스 닫기 (Ctrl+Alt+W)"

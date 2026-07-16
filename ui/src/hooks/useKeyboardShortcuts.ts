@@ -348,7 +348,12 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
       // users don't see a sudden "unhidden" copy. See issue #218.
       useUiStore
         .getState()
-        .propagateHiddenOnDuplicate(activeWorkspaceId, result.newWorkspaceId, result.paneIdMap);
+        .propagateHiddenOnDuplicate(
+          activeWorkspaceId,
+          result.newWorkspaceId,
+          result.paneIdMap,
+          true,
+        );
       switchWorkspace(result.newWorkspaceId);
     }
   },

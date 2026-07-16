@@ -1321,7 +1321,7 @@ describe("useKeyboardShortcuts", () => {
     expect(useUiStore.getState().hiddenPaneIds.has(dupPaneId)).toBe(true);
   });
 
-  it("Ctrl+Alt+D duplicates hidden workspace flag onto the new workspace (#218)", () => {
+  it("Ctrl+Alt+D never makes the newly active duplicate hidden (#218, #459)", () => {
     const source = useWorkspaceStore.getState().getActiveWorkspace()!;
     useUiStore.getState().toggleWorkspaceHidden(source.id);
 
@@ -1330,7 +1330,8 @@ describe("useKeyboardShortcuts", () => {
 
     const newWsId = useWorkspaceStore.getState().activeWorkspaceId;
     expect(newWsId).not.toBe(source.id);
-    expect(useUiStore.getState().hiddenWorkspaceIds.has(newWsId)).toBe(true);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has(source.id)).toBe(true);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has(newWsId)).toBe(false);
   });
 
   it("Ctrl+Alt+w (lowercase) closes current workspace", () => {

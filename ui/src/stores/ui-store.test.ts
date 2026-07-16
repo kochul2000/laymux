@@ -4,6 +4,7 @@ import { useSettingsStore } from "./settings-store";
 
 describe("ui-store", () => {
   beforeEach(() => {
+    localStorage.clear();
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
@@ -82,24 +83,18 @@ describe("ui-store", () => {
     expect(useUiStore.getState().isAppFocused).toBe(true);
   });
 
-  // -- unified hide mode --
+  // -- hidden-items shelf --
 
-  it("starts with hide mode off", () => {
-    expect(useUiStore.getState().hideMode).toBe(false);
+  it("starts with the hidden-items shelf closed", () => {
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
   });
 
-  it("toggles hide mode", () => {
-    useUiStore.getState().toggleHideMode();
-    expect(useUiStore.getState().hideMode).toBe(true);
-    useUiStore.getState().toggleHideMode();
-    expect(useUiStore.getState().hideMode).toBe(false);
-  });
-
-  it("exitHideMode turns off hide mode", () => {
-    useUiStore.getState().toggleHideMode();
-    expect(useUiStore.getState().hideMode).toBe(true);
-    useUiStore.getState().exitHideMode();
-    expect(useUiStore.getState().hideMode).toBe(false);
+  it("sets the hidden-items shelf deterministically", () => {
+    useUiStore.getState().setHiddenShelfOpen(true);
+    useUiStore.getState().setHiddenShelfOpen(true);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(true);
+    useUiStore.getState().setHiddenShelfOpen(false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
   });
 
   // -- hidden pane ids --
@@ -123,6 +118,33 @@ describe("ui-store", () => {
     expect(useUiStore.getState().hiddenPaneIds.has("pane-2")).toBe(true);
   });
 
+  it("setPaneHidden is idempotent and unhide clears eviction immediately", () => {
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    const hiddenRef = useUiStore.getState().hiddenPaneIds;
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    expect(useUiStore.getState().hiddenPaneIds).toBe(hiddenRef);
+
+    useUiStore.getState().setEvictedPaneIds(new Set(["pane-1", "pane-2"]));
+    useUiStore.getState().setPaneHidden("pane-1", false);
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-1")).toBe(false);
+    expect(useUiStore.getState().evictedPaneIds).toEqual(new Set(["pane-2"]));
+  });
+
+  it("persists explicit pane hidden transitions to the existing localStorage key", () => {
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-panes") ?? "null")).toEqual(["pane-1"]);
+
+    useUiStore.getState().setPaneHidden("pane-1", false);
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-panes") ?? "null")).toEqual([]);
+  });
+
+  it("closes the shelf when the last pane is restored", () => {
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    useUiStore.getState().setHiddenShelfOpen(true);
+    useUiStore.getState().setPaneHidden("pane-1", false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+  });
+
   // -- hidden workspace ids --
 
   it("starts with no hidden workspaces", () => {
@@ -140,6 +162,68 @@ describe("ui-store", () => {
     useUiStore.getState().toggleWorkspaceHidden("ws-1");
     useUiStore.getState().toggleWorkspaceHidden("ws-2");
     expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(2);
+  });
+
+  it("setWorkspaceHidden is idempotent and restoring clears child evictions", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-1", true, ["pane-1", "pane-2"]);
+    const hiddenRef = useUiStore.getState().hiddenWorkspaceIds;
+    useUiStore.getState().setWorkspaceHidden("ws-1", true, ["pane-1", "pane-2"]);
+    expect(useUiStore.getState().hiddenWorkspaceIds).toBe(hiddenRef);
+
+    useUiStore.getState().setEvictedPaneIds(new Set(["pane-1", "pane-2", "pane-3"]));
+    useUiStore.getState().setWorkspaceHidden("ws-1", false, ["pane-1", "pane-2"]);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(false);
+    expect(useUiStore.getState().evictedPaneIds).toEqual(new Set(["pane-3"]));
+  });
+
+  it("persists explicit workspace hidden transitions to the existing localStorage key", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-1", true);
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-workspaces") ?? "null")).toEqual([
+      "ws-1",
+    ]);
+
+    useUiStore.getState().setWorkspaceHidden("ws-1", false);
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-workspaces") ?? "null")).toEqual([]);
+  });
+
+  it("closes the shelf when the last workspace is restored", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-1", true);
+    useUiStore.getState().setHiddenShelfOpen(true);
+    useUiStore.getState().setWorkspaceHidden("ws-1", false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+  });
+
+  it("restoreAllHidden clears both hidden sets and evictions atomically", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-1", true);
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    useUiStore.getState().setEvictedPaneIds(new Set(["pane-1"]));
+
+    useUiStore.getState().restoreAllHidden();
+
+    expect(useUiStore.getState()).toMatchObject({ hiddenShelfOpen: false });
+    expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(0);
+    expect(useUiStore.getState().hiddenPaneIds.size).toBe(0);
+    expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+  });
+
+  it("pruneHiddenIds removes stale persisted IDs and evictions", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-valid", true);
+    useUiStore.getState().setWorkspaceHidden("ws-stale", true);
+    useUiStore.getState().setPaneHidden("pane-valid", true);
+    useUiStore.getState().setPaneHidden("pane-stale", true);
+    useUiStore.getState().setEvictedPaneIds(new Set(["pane-valid", "pane-stale"]));
+
+    useUiStore.getState().pruneHiddenIds(new Set(["ws-valid"]), new Set(["pane-valid"]));
+
+    expect(useUiStore.getState().hiddenWorkspaceIds).toEqual(new Set(["ws-valid"]));
+    expect(useUiStore.getState().hiddenPaneIds).toEqual(new Set(["pane-valid"]));
+    expect(useUiStore.getState().evictedPaneIds).toEqual(new Set(["pane-valid"]));
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-workspaces") ?? "null")).toEqual([
+      "ws-valid",
+    ]);
+    expect(JSON.parse(localStorage.getItem("laymux-hidden-panes") ?? "null")).toEqual([
+      "pane-valid",
+    ]);
   });
 
   // -- evicted (auto-closed) pane ids (issue #269) --
@@ -177,6 +261,13 @@ describe("ui-store", () => {
 
     it("does not add a workspace hidden flag when source is visible", () => {
       useUiStore.getState().propagateHiddenOnDuplicate("ws-src", "ws-dup", {});
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-dup")).toBe(false);
+    });
+
+    it("does not hide a duplicate that will immediately become active", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-src", true);
+      useUiStore.getState().propagateHiddenOnDuplicate("ws-src", "ws-dup", {}, true);
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-src")).toBe(true);
       expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-dup")).toBe(false);
     });
 

@@ -103,3 +103,68 @@ test.describe("WorkspaceSelectorView - Listening Ports", () => {
     }
   });
 });
+
+test.describe("WorkspaceSelectorView - Hidden Items Shelf", () => {
+  test("hides, restores with both action modes, and restores all", async ({ appPage: page }) => {
+    // Create an active three-pane workspace while keeping the default workspace
+    // available as the workspace-level hide target.
+    await page.getByTestId("layout-create-dev-split").click();
+    const workspaceItems = page.locator("[data-testid^='workspace-item-']");
+    await expect(workspaceItems).toHaveCount(2);
+    const splitWorkspaceTestId = await workspaceItems.nth(1).getAttribute("data-testid");
+    expect(splitWorkspaceTestId).toBeTruthy();
+    const defaultWorkspace = page.getByTestId("workspace-item-ws-default");
+    const splitWorkspace = page.getByTestId(splitWorkspaceTestId!);
+    await expect(splitWorkspace).toHaveAttribute("data-active", "true");
+
+    await defaultWorkspace.hover();
+    await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
+
+    const splitPaneRows = splitWorkspace.locator("[data-testid^='pane-row-']");
+    await expect(splitPaneRows).toHaveCount(3);
+    const secondPaneRow = splitPaneRows.nth(1);
+    await secondPaneRow.hover();
+    await secondPaneRow.locator("[data-testid^='pane-hide-']").click();
+    await expect(splitPaneRows).toHaveCount(2);
+
+    const chip = page.getByTestId("hidden-items-chip");
+    await expect(chip).toContainText("2");
+    await expect(chip).toHaveAttribute("aria-expanded", "false");
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-expanded", "true");
+
+    const shelf = page.getByTestId("hidden-items-shelf");
+    await expect(shelf).toBeVisible();
+    await expect(shelf.locator(".hidden-shelf-row")).toHaveCount(2);
+
+    // Show-only restores the workspace without changing the active workspace.
+    await shelf.locator("[data-testid^='hidden-workspace-show-only-']").click();
+    await expect(defaultWorkspace).toBeVisible();
+    await expect(defaultWorkspace).toHaveAttribute("data-active", "false");
+    await expect(splitWorkspace).toHaveAttribute("data-active", "true");
+    await expect(chip).toContainText("1");
+
+    // Primary pane action restores and focuses the original pane index.
+    await shelf.locator("[data-testid^='hidden-pane-primary-']").click();
+    await expect(page.getByTestId("hidden-items-chip")).toHaveCount(0);
+    await expect(page.getByTestId("hidden-items-shelf")).toHaveCount(0);
+    await expect(splitPaneRows).toHaveCount(3);
+    await expect(
+      page.getByTestId("workspace-pane-1").getByTestId("pane-focus-indicator"),
+    ).toBeVisible();
+
+    // A second hide cycle exercises the atomic restore-all path.
+    await defaultWorkspace.hover();
+    await defaultWorkspace.locator("[data-testid^='workspace-hide-']").click();
+    const thirdPaneRow = splitPaneRows.nth(2);
+    await thirdPaneRow.hover();
+    await thirdPaneRow.locator("[data-testid^='pane-hide-']").click();
+    await page.getByTestId("hidden-items-chip").click();
+    await page.getByTestId("hidden-items-restore-all").click();
+
+    await expect(page.getByTestId("hidden-items-chip")).toHaveCount(0);
+    await expect(page.getByTestId("hidden-items-shelf")).toHaveCount(0);
+    await expect(workspaceItems).toHaveCount(2);
+    await expect(splitPaneRows).toHaveCount(3);
+  });
+});
