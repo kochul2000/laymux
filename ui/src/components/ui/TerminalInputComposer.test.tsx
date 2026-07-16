@@ -11,7 +11,6 @@ const labels: TerminalInputComposerLabels = {
   composer: "Composer",
   editor: "Terminal input",
   placeholder: "Type before sending",
-  insert: "Insert",
   send: "Send",
 };
 
@@ -24,7 +23,6 @@ function renderComposer(
     labels,
     onModeChange: vi.fn(),
     onTextChange: vi.fn(),
-    onInsert: vi.fn(),
     onSend: vi.fn(),
     testId: "composer",
     ...overrides,
@@ -51,12 +49,11 @@ describe("TerminalInputComposer", () => {
     expect(onModeChange).toHaveBeenCalledWith("composer");
   });
 
-  it("renders the controlled draft and dispatches edit, Insert, and Send actions", async () => {
+  it("renders the controlled draft and exposes one Send action", async () => {
     const user = userEvent.setup();
     const onTextChange = vi.fn();
-    const onInsert = vi.fn();
     const onSend = vi.fn();
-    renderComposer({ onTextChange, onInsert, onSend });
+    renderComposer({ onTextChange, onSend });
 
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toHaveValue("draft");
@@ -64,9 +61,8 @@ describe("TerminalInputComposer", () => {
 
     await user.type(textarea, "!");
     expect(onTextChange).toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Insert" }));
+    expect(screen.queryByRole("button", { name: "Insert" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send" }));
-    expect(onInsert).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
@@ -111,6 +107,16 @@ describe("TerminalInputComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
 
     fireEvent.compositionEnd(textarea, { data: "한" });
+    const legacyImeEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(legacyImeEnter, "keyCode", { value: 229 });
+    textarea.dispatchEvent(legacyImeEnter);
+    expect(legacyImeEnter.defaultPrevented).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
   });
@@ -127,7 +133,6 @@ describe("TerminalInputComposer", () => {
           labels={labels}
           onModeChange={setMode}
           onTextChange={vi.fn()}
-          onInsert={vi.fn()}
           onSend={onSend}
         />
       );
@@ -155,16 +160,14 @@ describe("TerminalInputComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps textarea editing enabled but disables both actions while in flight", async () => {
+  it("keeps textarea editing enabled but disables Send while in flight", async () => {
     const user = userEvent.setup();
     const onTextChange = vi.fn();
-    const onInsert = vi.fn();
     const onSend = vi.fn();
-    renderComposer({ inFlight: true, onTextChange, onInsert, onSend });
+    renderComposer({ inFlight: true, onTextChange, onSend });
 
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Insert" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     expect(screen.getByTestId("composer")).toHaveAttribute("aria-busy", "true");
 
@@ -180,7 +183,6 @@ describe("TerminalInputComposer", () => {
     expect(screen.getByRole("button", { name: "Direct" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Composer" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Insert" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
@@ -190,7 +192,6 @@ describe("TerminalInputComposer", () => {
     expect(screen.getByRole("button", { name: "Direct" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Composer" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Insert" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
@@ -207,7 +208,6 @@ describe("TerminalInputComposer", () => {
           labels={labels}
           onModeChange={setMode}
           onTextChange={setText}
-          onInsert={vi.fn()}
           onSend={vi.fn()}
           testId="composer"
         />

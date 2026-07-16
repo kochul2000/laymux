@@ -1,6 +1,6 @@
 # 0029. Terminal 분리 입력 컴포저 — PC와 Remote 공통 surface 모델
 
-- Status: Accepted
+- Status: Superseded by [0033](0033-single-send-terminal-composer.md)
 - Date: 2026-07-13
 - Source: 사용자 요청(PC와 Remote에서 텍스트 입력과 실제 셸 화면을 분리해 커서 튐과 입력 불편 완화) · PR #445 P1/P2 리뷰(Remote/PC attach mode 복구와 snapshot-delta 원자성, 영속 output cache ordering, Direct/Cloud sequenced wire envelope, backend owner 검증, blocking PTY write와 protocol/owner gate 분리, 강제 reclaim 가능한 I/O, 전역 lease 선형화, sticky 만료, claim/heartbeat 우선순위와 reservation 진행성, in-flight draft 보호) · ADR-0004 · ADR-0008 · ADR-0011 · ADR-0013 · ADR-0015 · ADR-0024 · ADR-0027 · ADR-0028 · `docs/terminal/` 커서 research 정본
 

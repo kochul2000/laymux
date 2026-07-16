@@ -134,7 +134,6 @@ describe("composer draft state", () => {
     const draft = updateComposerDraftText(createComposerDraftState(), "한글\ntext");
     const started = beginComposerSubmission(draft, {
       terminalId: "terminal-a",
-      submit: true,
       token: "token-a",
     });
 
@@ -143,14 +142,12 @@ describe("composer draft state", () => {
       terminalId: "terminal-a",
       revision: 1,
       text: "한글\ntext",
-      submit: true,
       token: "token-a",
     });
     expect(started?.draft.inFlight).toEqual(started?.submission);
     expect(
       beginComposerSubmission(started!.draft, {
         terminalId: "terminal-a",
-        submit: false,
         token: "token-b",
       }),
     ).toBeNull();
@@ -160,7 +157,6 @@ describe("composer draft state", () => {
     const draft = updateComposerDraftText(createComposerDraftState(), "send me");
     const started = beginComposerSubmission(draft, {
       terminalId: "terminal-a",
-      submit: true,
       token: "token-a",
     })!;
 
@@ -173,7 +169,6 @@ describe("composer draft state", () => {
     const draft = updateComposerDraftText(createComposerDraftState(), "first");
     const started = beginComposerSubmission(draft, {
       terminalId: "terminal-a",
-      submit: false,
       token: "token-a",
     })!;
     const edited = updateComposerDraftText(started.draft, "first + next");
@@ -191,7 +186,6 @@ describe("composer draft state", () => {
       const draft = updateComposerDraftText(createComposerDraftState(), "keep me");
       const started = beginComposerSubmission(draft, {
         terminalId: "terminal-a",
-        submit: true,
         token: "token-a",
       })!;
 
@@ -207,7 +201,6 @@ describe("composer draft state", () => {
     const draft = updateComposerDraftText(createComposerDraftState(), "keep me");
     const started = beginComposerSubmission(draft, {
       terminalId: "terminal-b",
-      submit: true,
       token: "current-token",
     })!;
 
@@ -222,7 +215,6 @@ describe("composer draft state", () => {
   it("supports an empty Send snapshot without inventing a text revision", () => {
     const started = beginComposerSubmission(createComposerDraftState(), {
       terminalId: "terminal-a",
-      submit: true,
       token: "empty-send",
     })!;
 

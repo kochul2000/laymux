@@ -57,7 +57,6 @@ export interface ComposerSubmissionSnapshot {
   terminalId: string;
   revision: number;
   text: string;
-  submit: boolean;
   token: ComposerSubmissionToken;
 }
 
@@ -69,7 +68,6 @@ export interface ComposerDraftState {
 
 export interface BeginComposerSubmissionOptions {
   terminalId: string;
-  submit: boolean;
   /** Tests and adapters may provide a token; otherwise a runtime-local token is generated. */
   token?: ComposerSubmissionToken;
 }
@@ -188,7 +186,6 @@ export function beginComposerSubmission(
     terminalId: options.terminalId,
     revision: state.revision,
     text: state.text,
-    submit: options.submit,
     token: options.token ?? createComposerSubmissionToken(),
   };
 

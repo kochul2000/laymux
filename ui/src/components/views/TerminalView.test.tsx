@@ -6223,21 +6223,24 @@ describe("TerminalView desktop input composer", () => {
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
-  it("sends Insert and clears only the submitted unchanged desktop draft", async () => {
-    render(<TerminalView instanceId="t-composer-insert" profile="PowerShell" syncGroup="" />);
+  it("sends one submitted composer action and clears the unchanged desktop draft", async () => {
+    render(<TerminalView instanceId="t-composer-send" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-insert-mode-composer"));
+    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-mode-composer"));
     const textarea = screen.getByTestId(
-      "terminal-input-composer-t-composer-insert-textarea",
+      "terminal-input-composer-t-composer-send-textarea",
     ) as HTMLTextAreaElement;
     await vi.waitFor(() =>
-      expect(screen.getByTestId("terminal-input-composer-t-composer-insert-insert")).toBeEnabled(),
+      expect(screen.getByTestId("terminal-input-composer-t-composer-send-send")).toBeEnabled(),
     );
     fireEvent.change(textarea, { target: { value: "한글\nsecond" } });
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-insert-insert"));
+    expect(
+      screen.queryByTestId("terminal-input-composer-t-composer-send-insert"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-send"));
 
-    expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-insert", "한글\nsecond", false);
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
   });
 

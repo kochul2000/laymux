@@ -595,7 +595,34 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
   await expect(page.locator("#composerSend")).toBeEnabled();
 });
 
-test("IME Enter is protected while Insert, Send and raw soft keys use their distinct paths", async ({
+test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await connect(page);
+  await page.locator("#inputModeToggle").click();
+
+  const editor = page.locator("#composerInput");
+  await expect(page.locator("#composerSend")).toBeEnabled();
+  await expect(page.locator("#composerInsert")).toHaveCount(0);
+
+  await editor.fill("line");
+  await editor.press("Shift+Enter");
+  await expect(editor).toHaveValue("line\n");
+  expect(remote.inputs).toHaveLength(0);
+
+  await editor.fill("send me");
+  await editor.press("Enter");
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body).toEqual({
+    leaseId: "lease-1",
+    text: "send me",
+    submit: true,
+  });
+  await expect(editor).toHaveValue("");
+});
+
+test("coarse-pointer Composer keeps Enter as a newline and sends only from its button", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: true });
@@ -603,6 +630,7 @@ test("IME Enter is protected while Insert, Send and raw soft keys use their dist
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#composerSend")).toBeEnabled();
+  await expect(page.locator("#composerInsert")).toHaveCount(0);
   await editor.fill("한글 조합");
   await editor.dispatchEvent("compositionstart");
   await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
@@ -611,24 +639,14 @@ test("IME Enter is protected while Insert, Send and raw soft keys use their dist
   await editor.dispatchEvent("compositionend");
 
   await editor.fill("line");
-  await editor.press("Shift+Enter");
+  await editor.press("Enter");
   await expect(editor).toHaveValue("line\n");
   expect(remote.inputs).toHaveLength(0);
 
-  await editor.fill("insert me");
-  await page.locator("#composerInsert").click();
+  await editor.fill("send me");
+  await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body).toEqual({
-    leaseId: "lease-1",
-    text: "insert me",
-    submit: false,
-  });
-  await expect(editor).toHaveValue("");
-
-  await editor.fill("send me");
-  await editor.press("Enter");
-  await expect.poll(() => remote.inputs.length).toBe(2);
-  expect(remote.inputs[1].body).toEqual({
     leaseId: "lease-1",
     text: "send me",
     submit: true,
@@ -739,7 +757,7 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   });
   await expect.poll(() => remote.inputs.length).toBe(1);
   await expect(send).toBeDisabled();
-  await expect(page.locator("#composerInsert")).toBeDisabled();
+  await expect(page.locator("#composerInsert")).toHaveCount(0);
   await expect(editor).toBeEnabled();
 
   await editor.fill("edited while pending");

@@ -13,7 +13,6 @@
       "composerInput": "Composer",
       "composerEditor": "Terminal input draft",
       "composerPlaceholder": "Type text to send",
-      "composerInsert": "Insert",
       "composerSend": "Send"
     },
     "remoteControl": {

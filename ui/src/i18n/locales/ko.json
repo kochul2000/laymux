@@ -13,7 +13,6 @@
       "composerInput": "입력칸",
       "composerEditor": "터미널 입력 초안",
       "composerPlaceholder": "전송할 내용을 입력하세요",
-      "composerInsert": "입력",
       "composerSend": "전송"
     },
     "remoteControl": {

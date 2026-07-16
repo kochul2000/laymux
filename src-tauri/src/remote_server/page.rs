@@ -245,7 +245,7 @@ mod tests {
         assert!(html.contains("id=\"inputModeToggle\""));
         assert!(html.contains("id=\"terminalComposer\""));
         assert!(html.contains("id=\"composerInput\""));
-        assert!(html.contains("id=\"composerInsert\""));
+        assert!(!html.contains("id=\"composerInsert\""));
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
@@ -262,16 +262,18 @@ mod tests {
         // revision and text guard conditional clearing after an async response.
         assert!(html.contains("/input`, {"));
         assert!(html.contains("body: JSON.stringify({ leaseId: activeLeaseId, text, submit })"));
-        assert!(html.contains("function commitComposer(submit)"));
+        assert!(html.contains("function commitComposer()"));
         assert!(html.contains("draft.inFlight !== submission"));
         assert!(html.contains("draft.revision === submission.revision"));
         assert!(html.contains("draft.text === submission.text"));
 
-        // IME confirmation Enter never submits. Shift+Enter remains a native
-        // textarea newline and ordinary Enter sends the current snapshot.
+        // IME confirmation Enter never submits. Fine-pointer clients send on
+        // ordinary Enter, while Shift+Enter and coarse-pointer Enter remain
+        // native textarea newlines.
         assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
         assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
         assert!(html.contains("event.isComposing || composerIsComposing || event.keyCode === 229"));
+        assert!(html.contains("matchMedia(\"(pointer: coarse)\").matches"));
         assert!(html.contains("if (event.shiftKey) return;"));
 
         // Composer actions stay closed until a valid V1 snapshot header/state +

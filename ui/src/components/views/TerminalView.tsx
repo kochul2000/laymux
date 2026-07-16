@@ -560,16 +560,15 @@ export function TerminalView({
     writeDesktopInputModePreference(next);
   };
 
-  const submitComposerDraft = (submit: boolean) => {
+  const submitComposerDraft = () => {
     if (!localControlAvailableRef.current || !outputProtocolReadyRef.current) return;
     const started = beginComposerSubmission(composerDraftRef.current, {
       terminalId: instanceId,
-      submit,
     });
     if (!started) return;
     storeComposerDraft(started.draft);
     dismissTerminalResponseNotification(instanceId);
-    writeTerminalInput(instanceId, started.submission.text, submit)
+    writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
         storeComposerDraft(
           settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
@@ -3743,7 +3742,6 @@ export function TerminalView({
           composer: t("terminal.composerInput"),
           editor: t("terminal.composerEditor"),
           placeholder: t("terminal.composerPlaceholder"),
-          insert: t("terminal.composerInsert"),
           send: t("terminal.composerSend"),
         }}
         textareaRef={composerTextareaRef}
@@ -3756,8 +3754,7 @@ export function TerminalView({
         onTextChange={(text) =>
           storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
         }
-        onInsert={() => submitComposerDraft(false)}
-        onSend={() => submitComposerDraft(true)}
+        onSend={submitComposerDraft}
       />
     </div>
   );

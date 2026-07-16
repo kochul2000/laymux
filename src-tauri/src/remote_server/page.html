@@ -195,10 +195,11 @@
         display: flex;
         flex-direction: column;
         align-self: stretch;
+        justify-content: flex-end;
         gap: 6px;
       }
       .composer-actions button {
-        flex: 1 1 0;
+        flex: 0 0 auto;
         min-width: 62px;
       }
       .remote-body {
@@ -1245,7 +1246,6 @@
                 placeholder="Type here before sending to the terminal"
               ></textarea>
               <div class="composer-actions" role="group" aria-label="Composer actions">
-                <button id="composerInsert" type="button">Insert</button>
                 <button id="composerSend" class="primary" type="button">Send</button>
               </div>
             </section>
@@ -1297,7 +1297,6 @@
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
         const composerInput = $("composerInput");
-        const composerInsertButton = $("composerInsert");
         const composerSendButton = $("composerSend");
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
@@ -1552,7 +1551,6 @@
           const canEdit = Boolean(leaseId && activeTerminalId && composerMode);
           const canCommit = Boolean(canEdit && composerReady && draft && !draft.inFlight);
           composerInput.disabled = !canEdit;
-          composerInsertButton.disabled = !canCommit || !draft.text;
           composerSendButton.disabled = !canCommit;
         }
 
@@ -3444,7 +3442,7 @@
           updateComposerControls();
         }
 
-        function commitComposer(submit) {
+        function commitComposer() {
           if (!leaseId || !activeTerminalId || !composerReady) return;
           const terminalId = activeTerminalId;
           const activeLeaseId = leaseId;
@@ -3456,7 +3454,6 @@
             terminalId,
             revision: draft.revision,
             text: draft.text,
-            submit: Boolean(submit),
             abortController: new AbortController(),
           };
           draft.inFlight = submission;
@@ -3466,7 +3463,7 @@
             terminalId,
             activeLeaseId,
             submission.text,
-            submission.submit,
+            true,
             submission.abortController.signal
           )
             .then(() => {
@@ -4010,12 +4007,12 @@
         composerInput.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
+          if (matchMedia("(pointer: coarse)").matches) return;
           if (event.shiftKey) return;
           event.preventDefault();
-          commitComposer(true);
+          commitComposer();
         });
-        composerInsertButton.addEventListener("click", () => commitComposer(false));
-        composerSendButton.addEventListener("click", () => commitComposer(true));
+        composerSendButton.addEventListener("click", () => commitComposer());
         keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
         keyBarSettingsButton.addEventListener("click", (event) => {
           event.stopPropagation();

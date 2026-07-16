@@ -7,7 +7,6 @@ export interface TerminalInputComposerLabels {
   composer: string;
   editor: string;
   placeholder: string;
-  insert: string;
   send: string;
 }
 
@@ -22,7 +21,6 @@ export interface TerminalInputComposerProps {
   textareaRef?: Ref<HTMLTextAreaElement>;
   onModeChange: (mode: InputMode) => void;
   onTextChange: (text: string) => void;
-  onInsert: () => void;
   onSend: () => void;
   className?: string;
   testId?: string;
@@ -43,7 +41,6 @@ export function TerminalInputComposer({
   textareaRef,
   onModeChange,
   onTextChange,
-  onInsert,
   onSend,
   className,
   testId,
@@ -58,7 +55,13 @@ export function TerminalInputComposer({
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey) return;
-    if (compositionActiveRef.current || event.nativeEvent.isComposing) return;
+    if (
+      compositionActiveRef.current ||
+      event.nativeEvent.isComposing ||
+      event.nativeEvent.keyCode === 229
+    ) {
+      return;
+    }
 
     // Plain Enter is the Send gesture. While an action is already in flight,
     // consume repeats without turning them into accidental draft newlines.
@@ -146,16 +149,6 @@ export function TerminalInputComposer({
           />
 
           <div className="terminal-input-composer-actions flex min-w-0 justify-end gap-2">
-            <button
-              type="button"
-              data-testid={childTestId("insert")}
-              disabled={actionDisabled}
-              className="hover-bg rounded border px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-              onClick={onInsert}
-            >
-              {labels.insert}
-            </button>
             <button
               type="button"
               data-testid={childTestId("send")}
