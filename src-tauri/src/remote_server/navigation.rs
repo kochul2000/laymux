@@ -59,6 +59,13 @@ pub(super) fn build_remote_navigation_payload(
         &frontend_by_id,
     );
 
+    // `workspaces.list` returns raw panes, while `workspaces.getActive` adds the
+    // derived paneNumber/paneIndex metadata needed by the remote selector.
+    let active_workspace_source = active_workspace_data
+        .get("workspace")
+        .filter(|workspace| !workspace.is_null())
+        .filter(|workspace| string_field(workspace, "id") == Some(active_workspace_id));
+
     let workspaces = workspaces_data
         .get("workspaces")
         .and_then(Value::as_array)
@@ -71,6 +78,11 @@ pub(super) fn build_remote_navigation_payload(
             )
             .into_iter()
             .map(|workspace| {
+                let workspace = if string_field(workspace, "id") == Some(active_workspace_id) {
+                    active_workspace_source.unwrap_or(workspace)
+                } else {
+                    workspace
+                };
                 summarize_workspace(
                     workspace,
                     active_workspace_id,
@@ -243,7 +255,7 @@ fn summarize_workspace_panes(
     notifications: &[Value],
     hidden_pane_ids: &HashSet<String>,
 ) -> Vec<Value> {
-    panes
+    let mut summaries = panes
         .iter()
         .enumerate()
         .map(|(index, pane)| {
@@ -260,7 +272,16 @@ fn summarize_workspace_panes(
                 None,
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    summaries.sort_by_key(|pane| {
+        let pane_number = number_field(pane, "paneNumber");
+        (
+            pane_number.is_none(),
+            pane_number.unwrap_or_default(),
+            number_field(pane, "paneIndex").unwrap_or(i64::MAX),
+        )
+    });
+    summaries
 }
 
 fn summarize_dock(
@@ -958,6 +979,68 @@ mod tests {
             "Cascadia Mono"
         );
         assert_eq!(payload["terminals"][0]["paneNumber"], 1);
+    }
+
+    #[test]
+    fn navigation_payload_orders_workspace_panes_by_spatial_number() {
+        let workspaces_data = json!({
+            "activeWorkspaceId": "ws-1",
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "Main",
+                    "panes": [
+                        { "id": "top-left", "view": { "type": "MemoView" }, "x": 0, "y": 0, "w": 0.5, "h": 0.5 },
+                        { "id": "bottom-left", "view": { "type": "MemoView" }, "x": 0, "y": 0.5, "w": 0.5, "h": 0.5 },
+                        { "id": "right", "view": { "type": "MemoView" }, "x": 0.5, "y": 0, "w": 0.5, "h": 1 }
+                    ]
+                }
+            ]
+        });
+        let active_workspace_data = json!({
+            "workspace": {
+                "id": "ws-1",
+                "name": "Main",
+                "focusedPaneIndex": 1,
+                "focusedPaneNumber": 3,
+                "panes": [
+                    { "id": "top-left", "paneIndex": 0, "paneNumber": 1, "view": { "type": "MemoView" }, "x": 0, "y": 0, "w": 0.5, "h": 0.5 },
+                    { "id": "bottom-left", "paneIndex": 1, "paneNumber": 3, "view": { "type": "MemoView" }, "x": 0, "y": 0.5, "w": 0.5, "h": 0.5 },
+                    { "id": "right", "paneIndex": 2, "paneNumber": 2, "view": { "type": "MemoView" }, "x": 0.5, "y": 0, "w": 0.5, "h": 1 }
+                ]
+            }
+        });
+
+        let payload = build_remote_navigation_payload(
+            &workspaces_data,
+            &active_workspace_data,
+            &json!({ "docks": [] }),
+            &json!({ "instances": [] }),
+            &json!({ "notifications": [] }),
+            &json!({ "hiddenWorkspaceIds": [], "hiddenPaneIds": [] }),
+            &[],
+        );
+
+        assert_eq!(
+            payload["workspaces"][0]["panes"],
+            payload["activeWorkspace"]["panes"]
+        );
+        for panes in [
+            payload["workspaces"][0]["panes"].as_array().unwrap(),
+            payload["activeWorkspace"]["panes"].as_array().unwrap(),
+        ] {
+            let pane_numbers = panes
+                .iter()
+                .map(|pane| pane["paneNumber"].as_u64().unwrap())
+                .collect::<Vec<_>>();
+            let pane_indices = panes
+                .iter()
+                .map(|pane| pane["paneIndex"].as_u64().unwrap())
+                .collect::<Vec<_>>();
+
+            assert_eq!(pane_numbers, vec![1, 2, 3]);
+            assert_eq!(pane_indices, vec![0, 2, 1]);
+        }
     }
 
     #[test]
