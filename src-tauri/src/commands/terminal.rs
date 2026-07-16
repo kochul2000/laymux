@@ -12,12 +12,14 @@ use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::osc;
 use crate::osc_hooks::{self, CommandStatusField, OscAction};
-use crate::output_buffer::TerminalOutputBuffer;
 use crate::path_utils;
 use crate::pty;
 use crate::pty_trace;
+use crate::remote_server::{begin_human_control_operation, HumanControlOrigin, HumanControlPermit};
 use crate::state::AppState;
 use crate::terminal::{TerminalConfig, TerminalSession};
+use crate::terminal_output::{self, TerminalOutputAttachment};
+use crate::terminal_protocol::encode_terminal_input;
 
 /// Resolve whether Claude Code is currently detected for `terminal_id`,
 /// combining the per-terminal `claude_detected` atomic with the shared
@@ -200,19 +202,25 @@ pub fn create_terminal_session(
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
 
-    // Check for duplicate
-    {
+    // Check and reserve while holding the terminal catalog lock. Close takes
+    // the same lock before selecting a generation, so it cannot observe an
+    // empty output registry and then tear down this newly-created id.
+    let output_registration = {
         let terminals = state.terminals.lock_or_err()?;
         if terminals.contains_key(&id) {
             return Err(format!("Session '{id}' already exists"));
         }
-    }
 
-    // Create output buffer for this terminal
-    {
-        let mut buffers = state.output_buffers.lock_or_err()?;
-        buffers.insert(id.clone(), TerminalOutputBuffer::default());
-    }
+        // Install one generation-scoped protocol/ring session before PTY
+        // output can arrive. Any error before `commit()` rolls this exact
+        // generation back without touching a replacement session.
+        terminal_output::register_terminal_output_session(
+            &state.terminal_protocol_states,
+            &state.output_buffers,
+            &id,
+        )?
+    };
+    let output_session = output_registration.session();
 
     // Spawn PTY with unified OSC processing in the output callback.
     let terminal_id = id.clone();
@@ -225,6 +233,7 @@ pub fn create_terminal_session(
         burst.throttle_ms,
     ));
     let presets = osc_hooks::default_presets();
+    let pty_output_session = Arc::clone(&output_session);
     let pty_handle = pty::spawn_pty(&session, move |data| {
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
@@ -238,14 +247,29 @@ pub fn create_terminal_session(
             );
         }
 
-        // IMPORTANT: Each lock below is acquired and released independently (never nested).
-        // Do NOT combine these blocks — nested locks would violate the AppState lock ordering
-        // (terminals → output_buffers → known_claude_terminals) and risk deadlock.
+        // The protocol gate and output ring are intentionally nested in the
+        // documented protocol → output order so attach observes one prefix.
+        // Every other AppState lock below remains independent of that pair.
 
-        // Write to output buffer
-        if let Ok(mut buffers) = state_for_pty.output_buffers.lock_or_err() {
-            if let Some(buf) = buffers.get_mut(&terminal_id) {
-                buf.push(&data);
+        // Parse protocol modes and append bytes under one prefix gate. The v2
+        // event carries the exact byte range for listener-before-attach clients.
+        match pty_output_session.record_output(&data) {
+            Ok(Some(delta)) => {
+                let _ = app_clone.emit(
+                    &format!("{EVENT_TERMINAL_OUTPUT_V2_PREFIX}{terminal_id}"),
+                    delta,
+                );
+            }
+            Ok(None) => {
+                tracing::debug!(
+                    terminal_id = %terminal_id,
+                    generation = pty_output_session.generation(),
+                    "dropped PTY output from retired terminal generation"
+                );
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(terminal_id = %terminal_id, error = %err, "failed to record PTY output");
             }
         }
 
@@ -707,10 +731,21 @@ pub fn create_terminal_session(
     {
         let state_for_timer = Arc::clone(&*state);
         let timer_terminal_id = id.clone();
+        let timer_output_session = Arc::clone(&output_session);
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(NOTIFY_GATE_FALLBACK_MS));
             if let Ok(mut terms) = state_for_timer.terminals.lock_or_err() {
-                if let Some(session) = terms.get_mut(&timer_terminal_id) {
+                let same_generation = terminal_output::terminal_output_session_for(
+                    &state_for_timer.terminal_protocol_states,
+                    &timer_terminal_id,
+                )
+                .ok()
+                .flatten()
+                .is_some_and(|current| Arc::ptr_eq(&current, &timer_output_session));
+                if same_generation {
+                    let Some(session) = terms.get_mut(&timer_terminal_id) else {
+                        return;
+                    };
                     session.notify_gate_armed = true;
                 }
             }
@@ -732,24 +767,67 @@ pub fn create_terminal_session(
         },
     );
 
-    {
-        let mut terminals = state.terminals.lock_or_err()?;
-        terminals.insert(id.clone(), session);
-    }
-
-    {
-        let mut ptys = state.pty_handles.lock_or_err()?;
-        ptys.insert(id.clone(), pty_handle);
-    }
-
-    // Register in sync group if non-empty
+    // Publish every id-keyed table and commit the output generation while the
+    // terminal catalog lock excludes close/create for this id. In particular,
+    // close cannot retire the generation between the terminal and PTY inserts.
+    let mut terminals = match state.terminals.lock_or_err() {
+        Ok(terminals) => terminals,
+        Err(error) => {
+            return Err(terminate_uninstalled_pty(&pty_handle, error.to_string()));
+        }
+    };
+    let mut groups = match state.sync_groups.lock_or_err() {
+        Ok(groups) => groups,
+        Err(error) => {
+            drop(terminals);
+            return Err(terminate_uninstalled_pty(&pty_handle, error.to_string()));
+        }
+    };
+    let mut ptys = match state.pty_handles.lock_or_err() {
+        Ok(ptys) => ptys,
+        Err(error) => {
+            drop(groups);
+            drop(terminals);
+            return Err(terminate_uninstalled_pty(&pty_handle, error.to_string()));
+        }
+    };
+    terminals.insert(id.clone(), session);
+    ptys.insert(id.clone(), pty_handle);
     if !sync_group.is_empty() {
-        let mut groups = state.sync_groups.lock_or_err()?;
         groups
             .entry(sync_group.clone())
-            .or_insert_with(|| crate::terminal::SyncGroup::new(sync_group))
+            .or_insert_with(|| crate::terminal::SyncGroup::new(sync_group.clone()))
             .add_terminal(id.clone());
     }
+    drop(ptys);
+    drop(groups);
+
+    // The terminal/session/PTY tables are now fully installed. From this point
+    // normal close owns retirement; the create rollback guard is disarmed.
+    if let Err(error) = output_registration.commit() {
+        let handle = state
+            .pty_handles
+            .lock_or_err()
+            .ok()
+            .and_then(|mut ptys| ptys.remove(&id));
+        terminals.remove(&id);
+        if !sync_group.is_empty() {
+            if let Ok(mut groups) = state.sync_groups.lock_or_err() {
+                if let Some(group) = groups.get_mut(&sync_group) {
+                    group.remove_terminal(&id);
+                    if group.terminal_ids.is_empty() {
+                        groups.remove(&sync_group);
+                    }
+                }
+            }
+        }
+        drop(terminals);
+        return Err(match handle {
+            Some(handle) => terminate_uninstalled_pty(&handle, error),
+            None => format!("{error}; failed to recover the uncommitted PTY handle"),
+        });
+    }
+    drop(terminals);
 
     // Notify MCP resource bridge that the terminal catalog grew. This drives
     // `notifications/resources/list_changed` on all subscribed peers (advertised
@@ -764,6 +842,16 @@ pub fn create_terminal_session(
     Ok(result)
 }
 
+fn terminate_uninstalled_pty(handle: &pty::PtyHandle, error: impl std::fmt::Display) -> String {
+    let error = error.to_string();
+    match handle.terminate() {
+        Ok(()) => error,
+        Err(cleanup_error) => {
+            format!("{error}; failed to terminate uninstalled PTY: {cleanup_error}")
+        }
+    }
+}
+
 #[tauri::command]
 pub fn resize_terminal(
     id: String,
@@ -771,23 +859,69 @@ pub fn resize_terminal(
     rows: u16,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
-    // Update config
+    resize_terminal_inner(&state, &id, cols, rows, HumanControlOrigin::Local)
+}
+
+pub fn resize_terminal_inner(
+    state: &AppState,
+    id: &str,
+    cols: u16,
+    rows: u16,
+    origin: HumanControlOrigin,
+) -> Result<(), String> {
+    if cols == 0 || rows == 0 {
+        return Err("terminal size must be positive".into());
+    }
+    let permit = begin_human_control_operation(state, origin, id)?;
+    permit.ensure_current()?;
     {
         let mut terminals = state.terminals.lock_or_err()?;
         let session = terminals
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or_else(|| format!("Session '{id}' not found"))?;
         session.config.cols = cols;
         session.config.rows = rows;
     }
 
-    // Resize PTY
-    let ptys = state.pty_handles.lock_or_err()?;
-    if let Some(handle) = ptys.get(&id) {
-        handle.resize(cols, rows)?;
+    let handle = state.pty_handles.lock_or_err()?.get(id).cloned();
+    permit.ensure_current()?;
+    if let Some(handle) = handle {
+        // Never retain the terminal or PTY map lock across platform I/O.
+        let deadline = permit.deadline();
+        let pending = permit.enqueue_pty_job(|| handle.enqueue_resize(cols, rows, deadline))?;
+        let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
+        // Resize is a single synchronous platform operation. A post-check
+        // reports an owner change during it as ambiguous; owner transitions
+        // are otherwise barred while this permit remains registered.
+        return finish_human_control_io(permit, &handle, result);
     }
 
-    Ok(())
+    permit.finish()
+}
+
+/// Finish one owner-checked physical operation without publishing a false
+/// cancellation acknowledgement. A platform call that outlives bounded PTY
+/// teardown transfers its worker completion token into the owner barrier.
+fn finish_human_control_io(
+    permit: HumanControlPermit<'_>,
+    handle: &pty::PtyHandle,
+    result: Result<(), String>,
+) -> Result<(), String> {
+    match result {
+        Ok(()) => permit.finish(),
+        Err(error) => {
+            if let Some(completion) = handle.pending_control_completion() {
+                permit
+                    .quarantine(completion)
+                    .map_err(|quarantine_error| {
+                        format!(
+                            "{error}; failed to retain terminal cancellation barrier: {quarantine_error}"
+                        )
+                    })?;
+            }
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -796,24 +930,99 @@ pub fn write_to_terminal(
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    write_to_terminal_inner(&state, &id, data.as_bytes(), HumanControlOrigin::Local)
+}
+
+pub fn write_to_terminal_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    origin: HumanControlOrigin,
+) -> Result<(), String> {
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
             direction = "ui->pty",
             bytes = data.len(),
-            signals = ?pty_trace::detect_terminal_signals(data.as_bytes()),
-            preview = %pty_trace::summarize_terminal_bytes(data.as_bytes()),
+            signals = ?pty_trace::detect_terminal_signals(data),
+            preview = %pty_trace::summarize_terminal_bytes(data),
             "PTY write"
         );
     }
 
-    let ptys = state.pty_handles.lock_or_err()?;
-
-    let handle = ptys
-        .get(&id)
+    let permit = begin_human_control_operation(state, origin, id)?;
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(id)
+        .cloned()
         .ok_or_else(|| format!("Session '{id}' not found"))?;
 
-    handle.write(data.as_bytes())
+    let deadline = permit.deadline();
+    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, deadline))?;
+    let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
+    finish_human_control_io(permit, &handle, result)
+}
+
+#[tauri::command]
+pub fn write_terminal_input(
+    id: String,
+    text: String,
+    submit: bool,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_terminal_input_inner(&state, &id, &text, submit, HumanControlOrigin::Local)
+}
+
+pub fn write_terminal_input_inner(
+    state: &AppState,
+    id: &str,
+    text: &str,
+    submit: bool,
+    origin: HumanControlOrigin,
+) -> Result<(), String> {
+    let permit = begin_human_control_operation(state, origin, id)?;
+    permit.ensure_current()?;
+    let protocol_gate = terminal_output::protocol_gate_for(&state.terminal_protocol_states, id)?;
+    let bracketed_paste = {
+        let protocol = protocol_gate.lock_or_err()?;
+        protocol.bracketed_paste()
+    };
+    let encoded = encode_terminal_input(
+        text,
+        submit,
+        bracketed_paste,
+        TERMINAL_STRUCTURED_INPUT_MAX_BYTES,
+    )
+    .map_err(|err| err.to_string())?;
+    permit.ensure_current()?;
+    if encoded.is_empty() {
+        return permit.finish();
+    }
+
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    let deadline = permit.deadline();
+    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(&encoded, deadline))?;
+    let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
+    finish_human_control_io(permit, &handle, result)
+}
+
+#[tauri::command]
+pub fn attach_terminal_output(
+    id: String,
+    state: State<Arc<AppState>>,
+) -> Result<TerminalOutputAttachment, String> {
+    terminal_output::attach_terminal_output(
+        &state.terminal_protocol_states,
+        &state.output_buffers,
+        &id,
+        TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
+    )
 }
 
 #[tauri::command]
@@ -822,25 +1031,21 @@ pub fn close_terminal_session(
     state: State<Arc<AppState>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    // Remove PTY handle and terminate the child process tree before dropping it.
-    {
-        let mut ptys = state.pty_handles.lock_or_err()?;
-        if let Some(handle) = ptys.remove(&id) {
-            handle.terminate()?;
-        }
-    }
-
-    // Remove output buffer
-    {
-        let mut buffers = state.output_buffers.lock_or_err()?;
-        buffers.remove(&id);
-    }
-
+    // Hold the terminal catalog from generation selection through all
+    // id-keyed cleanup. Create performs its duplicate check and generation
+    // reservation under the same lock, so close cannot consume state from a
+    // newer terminal that reused this id.
     let mut terminals = state.terminals.lock_or_err()?;
+    terminal_output::retire_terminal_output_for_close(
+        &state.terminal_protocol_states,
+        &state.output_buffers,
+        &id,
+    )?;
 
     let session = terminals
         .remove(&id)
         .ok_or_else(|| format!("Session '{id}' not found"))?;
+    let handle = state.pty_handles.lock_or_err()?.remove(&id);
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
@@ -896,6 +1101,15 @@ pub fn close_terminal_session(
         serde_json::json!({ "op": "closed", "terminalId": id }),
     ) {
         tracing::warn!(error = %e, terminal_id = %id, "failed to emit terminals-list-changed on close");
+    }
+
+    // The old handle was selected while create was excluded, but potentially
+    // blocking platform shutdown happens only after every AppState lock is
+    // released. A replacement generation may now start without being mistaken
+    // for the process being terminated here.
+    drop(terminals);
+    if let Some(handle) = handle {
+        handle.terminate()?;
     }
 
     Ok(())
@@ -1253,9 +1467,248 @@ fn dispatch_osc_action(
 mod tests {
     use super::*;
     use crate::claude_activity::ClaudeTitleResult;
+    use crate::remote_server::RemoteControlLease;
+    use std::io::Write;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    struct SharedTestWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedTestWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct BlockingTestWriter {
+        started: Option<mpsc::Sender<()>>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl Write for BlockingTestWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
+            self.release
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(std::io::Error::other)?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn enable_test_remote_access(state: &AppState) {
+        let mut runtime = state.remote_access.lock_or_err().unwrap();
+        runtime.enabled = true;
+        runtime.auth_token = Some("test-token".into());
+    }
+
+    fn set_test_remote_lease(state: &AppState, lease_id: &str) {
+        state.remote_control.lock_or_err().unwrap().lease = Some(RemoteControlLease {
+            lease_id: lease_id.into(),
+            remote_addr: "127.0.0.1:1".into(),
+            client_name: None,
+            last_heartbeat: Instant::now(),
+        });
+    }
+
+    fn remote_origin(lease_id: &str) -> HumanControlOrigin {
+        HumanControlOrigin::Remote {
+            lease_id: lease_id.into(),
+        }
+    }
 
     fn test_session() -> TerminalSession {
         TerminalSession::new("t1".into(), TerminalConfig::default())
+    }
+
+    #[test]
+    fn human_raw_structured_and_resize_paths_share_the_same_owner_gate() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        state
+            .terminals
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), test_session());
+        state
+            .terminal_protocol_states
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), terminal_output::new_protocol_gate());
+        let written = Arc::new(Mutex::new(Vec::new()));
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(SharedTestWriter(Arc::clone(&written)))),
+        );
+
+        write_to_terminal_inner(&state, "t1", b"local-raw", HumanControlOrigin::Local).unwrap();
+        write_terminal_input_inner(&state, "t1", "local-input", true, HumanControlOrigin::Local)
+            .unwrap();
+
+        set_test_remote_lease(&state, "lease-1");
+        assert!(write_to_terminal_inner(
+            &state,
+            "t1",
+            b"rejected-local",
+            HumanControlOrigin::Local,
+        )
+        .is_err());
+        assert!(write_terminal_input_inner(
+            &state,
+            "t1",
+            "rejected-local",
+            true,
+            HumanControlOrigin::Local,
+        )
+        .is_err());
+        assert!(write_to_terminal_inner(&state, "t1", b"wrong", remote_origin("wrong")).is_err());
+        assert!(
+            write_terminal_input_inner(&state, "t1", "wrong", true, remote_origin("wrong"),)
+                .is_err()
+        );
+
+        write_to_terminal_inner(&state, "t1", b"remote-raw", remote_origin("lease-1")).unwrap();
+        write_terminal_input_inner(&state, "t1", "remote-input", true, remote_origin("lease-1"))
+            .unwrap();
+
+        // Config-only resize still passes through the exact same owner gate
+        // when a PTY handle is absent (session restoration window).
+        state.pty_handles.lock_or_err().unwrap().remove("t1");
+        assert!(resize_terminal_inner(&state, "t1", 90, 30, HumanControlOrigin::Local).is_err());
+        assert!(resize_terminal_inner(&state, "t1", 90, 30, remote_origin("wrong")).is_err());
+        resize_terminal_inner(&state, "t1", 120, 40, remote_origin("lease-1")).unwrap();
+
+        let session = state.terminals.lock_or_err().unwrap();
+        let session = session.get("t1").unwrap();
+        assert_eq!((session.config.cols, session.config.rows), (120, 40));
+        assert_eq!(
+            &*written.lock().unwrap(),
+            b"local-rawlocal-input\rremote-rawremote-input\r"
+        );
+    }
+
+    #[test]
+    fn structured_write_holds_no_app_state_table_lock_during_pty_io() {
+        let state = Arc::new(AppState::new());
+        let protocol_gate = terminal_output::new_protocol_gate();
+        state
+            .terminal_protocol_states
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), Arc::clone(&protocol_gate));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(BlockingTestWriter {
+                started: Some(started_tx),
+                release: release_rx,
+            })),
+        );
+
+        let worker_state = Arc::clone(&state);
+        let worker = thread::spawn(move || {
+            write_terminal_input_inner(
+                &worker_state,
+                "t1",
+                "blocking input",
+                true,
+                HumanControlOrigin::Local,
+            )
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("test writer should enter physical I/O");
+
+        assert!(state.pty_handles.try_lock().is_ok());
+        assert!(state.terminals.try_lock().is_ok());
+        assert!(state.terminal_protocol_states.try_lock().is_ok());
+        assert!(protocol_gate.try_lock().is_ok());
+        assert!(state.remote_access.try_lock().is_ok());
+        assert!(state.remote_control.try_lock().is_ok());
+
+        release_tx.send(()).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn owner_transition_waits_for_a_blocked_pty_worker_to_acknowledge_cancellation() {
+        let state = Arc::new(AppState::new());
+        enable_test_remote_access(&state);
+        set_test_remote_lease(&state, "lease-1");
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(BlockingTestWriter {
+                started: Some(started_tx),
+                release: release_rx,
+            })),
+        );
+
+        let worker_state = Arc::clone(&state);
+        let worker = thread::spawn(move || {
+            write_to_terminal_inner(
+                &worker_state,
+                "t1",
+                b"blocked remote write",
+                remote_origin("lease-1"),
+            )
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("test writer should enter physical I/O");
+
+        let transition = state
+            .remote_control
+            .lock_or_err()
+            .unwrap()
+            .begin_remote_owner_transition(Instant::now());
+        assert!(transition.is_some());
+
+        let error = worker
+            .join()
+            .unwrap()
+            .expect_err("the stale remote write must fail closed");
+        assert!(error.contains("ownership changed"));
+
+        {
+            let control = state.remote_control.lock_or_err().unwrap();
+            assert!(control.transitioning);
+            assert!(control.has_active_operations());
+        }
+        assert!(begin_human_control_operation(&state, HumanControlOrigin::Local, "t1").is_err());
+
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let status = crate::remote_server::get_remote_control_status(&state).unwrap();
+            if !status.transitioning {
+                assert!(!status.active);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "PTY worker acknowledgement timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let permit =
+            begin_human_control_operation(&state, HumanControlOrigin::Local, "t1").unwrap();
+        permit.finish().unwrap();
     }
 
     // ── resolve_propagate_source (issue #293) ──

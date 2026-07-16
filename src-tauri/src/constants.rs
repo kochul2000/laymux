@@ -16,6 +16,7 @@ pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
+pub const EVENT_TERMINAL_OUTPUT_V2_PREFIX: &str = "terminal-output-v2-";
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -83,6 +84,36 @@ pub const MAX_NOTIFICATIONS: usize = 500;
 /// Maximum number of bytes to write to a PTY in a single `write_all()` call.
 /// ConPTY on Windows can silently truncate large writes; chunking prevents this.
 pub const PTY_WRITE_CHUNK_SIZE: usize = 1024;
+
+/// Maximum queued PTY input/resize jobs per terminal.
+pub const PTY_CONTROL_QUEUE_CAPACITY: usize = 64;
+/// End-to-end deadline for a human PTY input or resize job.
+pub const PTY_CONTROL_JOB_TIMEOUT_MS: u64 = 15_000;
+/// Poll cadence used while waiting for owner cancellation or worker completion.
+pub const PTY_CONTROL_WAIT_POLL_MS: u64 = 10;
+/// Grace after cancellation before the PTY is faulted and terminated.
+pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
+/// Final bounded wait for the platform worker to acknowledge PTY termination.
+pub const PTY_CONTROL_TERMINATE_GRACE_MS: u64 = 250;
+/// Shared upper bound for one owner transition, including worker polling,
+/// cancellation grace, terminal teardown, and scheduler slack.
+pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
+
+/// Maximum complete physical payload accepted by the human structured-input
+/// API, including bracketed-paste markers and an optional submit CR.
+pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
+
+/// Delay suggested to a Remote client when a Local human-input operation is
+/// already draining ahead of its claim reservation.
+pub const REMOTE_CLAIM_RETRY_AFTER_MS: u64 = 25;
+
+/// Absolute lifetime of the one-shot claim reservation returned with
+/// `input_busy`. The reservation survives completion of the operation it was
+/// created behind, preventing another Local key job from overtaking the retry.
+pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
+
+/// Desktop attach returns the retained output ring (currently capped at 1 MiB).
+pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = 1024 * 1024;
 
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal

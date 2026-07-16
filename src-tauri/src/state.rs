@@ -6,6 +6,7 @@ use std::time::Instant;
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty::PtyHandle;
 use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
+use crate::terminal_output::SharedTerminalProtocolStates;
 
 /// Global application state shared across all commands and PTY callbacks.
 ///
@@ -14,23 +15,25 @@ use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
 /// When acquiring multiple locks, always follow this order to prevent deadlocks:
 ///
 /// 1. `terminals`
-/// 2. `output_buffers`
-/// 3. `known_claude_terminals`
-/// 4. `known_codex_terminals`
-/// 5. `last_detected_interactive_app`
-/// 6. `recently_exited_interactive_app`
-/// 7. `notifications`
-/// 8. `sync_groups`
-/// 9. `propagated_terminals`
-/// 10. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
-/// 11. `remote_access`
-/// 12. `remote_control`
-/// 13. `cloud_tunnel`
-/// 14. `cloud`
-/// 15. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
+/// 2. terminal-output session registry
+/// 3. `terminal_protocol_states` compatibility table / per-terminal protocol gate
+/// 4. `output_buffers` compatibility table / per-terminal output ring
+/// 5. `known_claude_terminals`
+/// 6. `known_codex_terminals`
+/// 7. `last_detected_interactive_app`
+/// 8. `recently_exited_interactive_app`
+/// 9. `notifications`
+/// 10. `sync_groups`
+/// 11. `propagated_terminals`
+/// 12. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 13. `remote_access`
+/// 14. `remote_control`
+/// 15. `cloud_tunnel`
+/// 16. `cloud`
+/// 17. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
 ///     never across `.await` and never while holding another `AppState` lock)
 ///
-/// Never acquire a higher-numbered lock while holding a lower-numbered one.
+/// Never acquire a lower-numbered lock while holding a higher-numbered one.
 ///
 /// The per-terminal locks *inside* `exec_locks` are `tokio::sync::Mutex` because
 /// a writer holds one across `.await` (the body→CR delay); they are acquired
@@ -44,6 +47,10 @@ pub struct AppState {
     pub pty_handles: Mutex<HashMap<String, PtyHandle>>,
     pub ipc_socket_path: Mutex<Option<String>>,
     pub output_buffers: Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
+    /// Generation-scoped terminal output registry plus the compatibility
+    /// protocol-gate index. The canonical session owns protocol state, ring
+    /// identity, retirement, and subscribers as one Arc lifetime.
+    pub terminal_protocol_states: SharedTerminalProtocolStates,
     pub automation_channels:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>,
     pub automation_port: Mutex<Option<u16>>,
@@ -121,6 +128,7 @@ impl AppState {
             pty_handles: Mutex::new(HashMap::new()),
             ipc_socket_path: Mutex::new(None),
             output_buffers: Arc::new(Mutex::new(HashMap::new())),
+            terminal_protocol_states: SharedTerminalProtocolStates::default(),
             automation_channels: Mutex::new(HashMap::new()),
             automation_port: Mutex::new(None),
             propagated_terminals: Mutex::new(HashMap::new()),

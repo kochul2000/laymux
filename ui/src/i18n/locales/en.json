@@ -7,7 +7,14 @@
     },
     "terminal": {
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
-      "scrollToBottom": "Scroll to bottom"
+      "scrollToBottom": "Scroll to bottom",
+      "inputMode": "Terminal input mode",
+      "directInput": "Direct",
+      "composerInput": "Composer",
+      "composerEditor": "Terminal input draft",
+      "composerPlaceholder": "Type text to send",
+      "composerInsert": "Insert",
+      "composerSend": "Send"
     },
     "remoteControl": {
       "title": "Remote control active",

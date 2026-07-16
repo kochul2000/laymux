@@ -154,7 +154,7 @@ mod tests {
         assert!(html.contains("Control returned to the host"));
         assert!(html.contains("connection-panel.attention"));
         assert!(html.contains("Host has control. Connect again to request control."));
-        assert!(html.contains("term.write(payload, scheduleTerminalRefresh)"));
+        assert!(html.contains("queueTerminalWrite(payload)"));
         assert!(html.contains("cols < 1 || rows < 1"));
         assert!(html.contains("id=\"navToggle\""));
         assert!(!html.contains("<h1>Laymux Remote</h1>"));
@@ -234,6 +234,61 @@ mod tests {
         // Toggle visibility drives the hidden attribute + persistence.
         assert!(html.contains("function setKeyBarVisible(visible, persist = true)"));
         assert!(html.contains("keyBar.hidden = !visible;"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_detached_input_composer() {
+        let html = remote_page_html();
+
+        // The focused Remote surface exposes the same Direct/Composer choice on
+        // fine-pointer desktops and coarse-pointer mobile clients.
+        assert!(html.contains("id=\"inputModeToggle\""));
+        assert!(html.contains("id=\"terminalComposer\""));
+        assert!(html.contains("id=\"composerInput\""));
+        assert!(html.contains("id=\"composerInsert\""));
+        assert!(html.contains("id=\"composerSend\""));
+        assert!(html.contains("laymux.remote.inputMode"));
+        assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
+
+        // Mode and unsent drafts are terminal-local runtime state. Only the
+        // preferred default mode is persisted.
+        assert!(html.contains("const inputModeByTerminalId = new Map()"));
+        assert!(html.contains("const composerDraftByTerminalId = new Map()"));
+        assert!(html.contains("revision: 0, inFlight: null"));
+        assert!(html.contains("function renderInputSurface"));
+        assert!(!html.contains("laymux.remote.composerDraft"));
+
+        // A commit is a single structured Remote request. Its captured token,
+        // revision and text guard conditional clearing after an async response.
+        assert!(html.contains("/input`, {"));
+        assert!(html.contains("body: JSON.stringify({ leaseId: activeLeaseId, text, submit })"));
+        assert!(html.contains("function commitComposer(submit)"));
+        assert!(html.contains("draft.inFlight !== submission"));
+        assert!(html.contains("draft.revision === submission.revision"));
+        assert!(html.contains("draft.text === submission.text"));
+
+        // IME confirmation Enter never submits. Shift+Enter remains a native
+        // textarea newline and ordinary Enter sends the current snapshot.
+        assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
+        assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
+        assert!(html.contains("event.isComposing || composerIsComposing || event.keyCode === 229"));
+        assert!(html.contains("if (event.shiftKey) return;"));
+
+        // Composer actions stay closed until a valid V1 snapshot header/state +
+        // binary frame pair has established the active output attachment.
+        assert!(html.contains("header.type !== \"terminal.output\""));
+        assert!(html.contains("header.version !== 1"));
+        assert!(html.contains("header.phase === \"snapshot\""));
+        assert!(html.contains("let outputProtocolFailed = false"));
+        assert!(html.contains("outputProtocolFailed = true"));
+        assert!(html.contains("outputProtocolFailed ||"));
+        assert!(html.contains("composerReady = true"));
+
+        // Direct mode keeps xterm input, while Composer moves focus/caret to the
+        // native textarea and hides the inactive xterm application cursor.
+        assert!(html.contains("cursorInactiveStyle = \"none\""));
+        assert!(html.contains("scheduleTerminalFit();"));
+        assert!(html.contains("if (currentInputMode() === \"direct\")"));
     }
 
     #[test]
@@ -340,9 +395,10 @@ mod tests {
         assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
         assert!(output_stream.contains("scheduleTransientConnectionNotice"));
         assert!(output_stream.contains("let resetOnNextPayload = reconnecting;"));
-        assert!(output_stream.contains("if (!reconnecting) term.reset();"));
+        assert!(output_stream.contains("if (!reconnecting) queueTerminalReset();"));
         assert!(output_stream.contains("if (resetOnNextPayload)"));
-        assert!(output_stream.contains("term.reset();"));
+        assert!(output_stream.contains("queueTerminalReset();"));
+        assert!(output_stream.contains("terminalOutputGeneration"));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
         assert!(output_stream.contains("loadNavigation(null).catch"));

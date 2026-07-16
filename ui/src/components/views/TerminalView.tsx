@@ -27,9 +27,11 @@ import {
   createTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
+  writeTerminalInput,
   resizeTerminal,
   closeTerminalSession,
-  onTerminalOutput,
+  attachTerminalOutput,
+  onTerminalOutputV2,
   smartPaste,
   clipboardWriteText,
   setTerminalCwdSend,
@@ -106,6 +108,26 @@ import {
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
+import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
+import {
+  beginComposerSubmission,
+  readRuntimeComposerDraft,
+  readRuntimeInputMode,
+  settleComposerSubmission,
+  subscribeRuntimeComposerDraft,
+  updateComposerDraftText,
+  writeDesktopInputModePreference,
+  writeRuntimeComposerDraft,
+  writeRuntimeInputMode,
+  type ComposerDraftState,
+  type InputMode,
+} from "@/lib/terminal-input-composer-state";
+import {
+  normalizeTerminalOutputAttachment,
+  normalizeTerminalOutputDelta,
+  TerminalOutputAttachCoordinator,
+  type TerminalOutputDelta,
+} from "@/lib/terminal-output-attach-coordinator";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -161,16 +183,27 @@ function markBackendInteractiveTerminal(instanceId: string, activity: TerminalAc
   }
 }
 
+function dismissTerminalResponseNotification(instanceId: string): void {
+  const notifStore = useNotificationStore.getState();
+  const dismissMode = useSettingsStore.getState().notifications.dismiss;
+  if (dismissMode === "workspace") {
+    const wsId = resolveWorkspaceId(instanceId);
+    if (notifStore.getUnreadCount(wsId) > 0) notifStore.markWorkspaceAsRead(wsId);
+  } else if (dismissMode === "paneFocus" && notifStore.hasUnreadForTerminal(instanceId)) {
+    notifStore.markTerminalAsRead(instanceId);
+  }
+}
+
 /**
  * Plain browser-clipboard paste. Shared by two spots in `runTerminalPaste`:
  * the smartPaste-off fast path and the Rust-clipboard error fallback.
  * `logPrefix` disambiguates the two in warnings.
  */
-function pasteFromBrowserClipboard(terminal: Terminal, logPrefix: string): void {
+function pasteFromBrowserClipboard(writeText: (text: string) => void, logPrefix: string): void {
   navigator.clipboard
     .readText()
     .then((text) => {
-      if (text) terminal.paste(text);
+      if (text) writeText(text);
     })
     .catch((err) => {
       console.warn(`[TerminalView] ${logPrefix} failed:`, err);
@@ -217,10 +250,10 @@ function runTerminalCopy(terminal: Terminal): void {
  * call site) means an override binding like Ctrl+Shift+V still pastes — just
  * as plain text — instead of silently doing nothing.
  */
-function runTerminalPaste(terminal: Terminal, profile: string): void {
+function runTerminalPaste(writeText: (text: string) => void, profile: string): void {
   const { paste } = useSettingsStore.getState();
   if (!paste.smart) {
-    pasteFromBrowserClipboard(terminal, "plain paste");
+    pasteFromBrowserClipboard(writeText, "plain paste");
     return;
   }
   smartPaste(paste.imageDir, profile)
@@ -241,12 +274,12 @@ function runTerminalPaste(terminal: Terminal, profile: string): void {
               removeLineBreak: paste.removeLineBreak,
             });
       if (shouldBlockLargePaste(content, paste.largeWarning)) return;
-      terminal.paste(content);
+      writeText(content);
     })
     .catch((err) => {
       // Rust clipboard failed — fall back to browser clipboard → xterm paste
       console.warn("[TerminalView] smart paste failed, falling back to browser clipboard:", err);
-      pasteFromBrowserClipboard(terminal, "fallback paste");
+      pasteFromBrowserClipboard(writeText, "fallback paste");
     });
 }
 
@@ -481,6 +514,7 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCaretRef = useRef<HTMLDivElement>(null);
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const terminalReflowFrameRef = useRef<number | null>(null);
   const pendingRendererFitRequestRef = useRef<TerminalFitRequest | null>(null);
@@ -496,8 +530,92 @@ export function TerminalView({
   // Until the initial lease status is known, do not let this local surface
   // write or resize the shared PTY. A remote controller may already own it.
   const remoteControlStatusKnownRef = useRef(false);
+  const [localControlAvailable, setLocalControlAvailable] = useState(false);
+  const localControlAvailableRef = useRef(false);
+  const [outputProtocolReady, setOutputProtocolReady] = useState(false);
+  const outputProtocolReadyRef = useRef(false);
+  const [inputMode, setInputMode] = useState<InputMode>(() => readRuntimeInputMode(instanceId));
+  const inputModeRef = useRef(inputMode);
+  const lastComposerLayoutModeRef = useRef(inputMode);
+  const [composerDraft, setComposerDraft] = useState<ComposerDraftState>(() =>
+    readRuntimeComposerDraft(instanceId),
+  );
+  const composerDraftRef = useRef(composerDraft);
+  const currentInstanceIdRef = useRef(instanceId);
+  currentInstanceIdRef.current = instanceId;
+
+  const storeComposerDraft = (next: ComposerDraftState, terminalId = instanceId) => {
+    const stored = writeRuntimeComposerDraft(terminalId, next);
+    // The subscription normally updates the active mount synchronously. Keep
+    // this fallback for the tiny pre-effect window before it is installed.
+    if (currentInstanceIdRef.current === terminalId && composerDraftRef.current !== stored) {
+      composerDraftRef.current = next;
+      setComposerDraft(next);
+    }
+  };
+
+  const changeInputMode = (next: InputMode) => {
+    inputModeRef.current = writeRuntimeInputMode(instanceId, next);
+    setInputMode(next);
+    writeDesktopInputModePreference(next);
+  };
+
+  const submitComposerDraft = (submit: boolean) => {
+    if (!localControlAvailableRef.current || !outputProtocolReadyRef.current) return;
+    const started = beginComposerSubmission(composerDraftRef.current, {
+      terminalId: instanceId,
+      submit,
+    });
+    if (!started) return;
+    storeComposerDraft(started.draft);
+    dismissTerminalResponseNotification(instanceId);
+    writeTerminalInput(instanceId, started.submission.text, submit)
+      .then(() => {
+        storeComposerDraft(
+          settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
+            token: started.submission.token,
+            outcome: "success",
+          }),
+          started.submission.terminalId,
+        );
+      })
+      .catch((error) => {
+        console.warn("[TerminalView] composer input failed:", error);
+        storeComposerDraft(
+          settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
+            token: started.submission.token,
+            outcome: "ambiguous",
+          }),
+          started.submission.terminalId,
+        );
+      });
+  };
+
+  const writeStructuredPaste = (text: string) => {
+    if (!localControlAvailableRef.current || !outputProtocolReadyRef.current || !text) return;
+    dismissTerminalResponseNotification(instanceId);
+    writeTerminalInput(instanceId, text, false).catch((error) => {
+      console.warn("[TerminalView] terminal paste failed:", error);
+    });
+  };
   const localTerminalControlAllowed = () =>
     remoteControlStatusKnownRef.current && !remoteControlActiveRef.current;
+
+  useEffect(() => {
+    const nextMode = readRuntimeInputMode(instanceId);
+    const nextDraft = readRuntimeComposerDraft(instanceId);
+    inputModeRef.current = nextMode;
+    composerDraftRef.current = nextDraft;
+    outputProtocolReadyRef.current = false;
+    setInputMode(nextMode);
+    setComposerDraft(nextDraft);
+    setOutputProtocolReady(false);
+    return subscribeRuntimeComposerDraft(instanceId, (draft) => {
+      if (currentInstanceIdRef.current !== instanceId) return;
+      composerDraftRef.current = draft;
+      setComposerDraft(draft);
+    });
+  }, [instanceId]);
   // Marks that a reflow trigger fired while the container was hidden. The
   // ResizeObserver's hidden→visible branch consumes this in addition to
   // `prevWasHidden` so the deferred fit() + atlas rebuild fires exactly
@@ -663,6 +781,7 @@ export function TerminalView({
       allowProposedApi: true,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
+      cursorInactiveStyle: inputModeRef.current === "composer" ? "none" : "outline",
       ...(cursorOptions.cursorWidth ? { cursorWidth: cursorOptions.cursorWidth } : {}),
       fontSize: resolvedFont.size,
       fontFamily: `'${resolvedFont.face}', 'Cascadia Mono', 'Consolas', monospace`,
@@ -846,12 +965,21 @@ export function TerminalView({
     terminalRef.current = terminal;
 
     let prevHideNativeCursor: boolean | undefined;
+    let prevNativeCursorInputMode: InputMode | undefined;
     const applyNativeCursorVisibility = () => {
+      const currentInputMode = inputModeRef.current;
       const hideNativeCursor =
+        currentInputMode === "composer" ||
         compositionPreviewRef.current.active ||
         (stabilizeInteractiveCursorRef.current && isOverlayCaretActivity(activityRef.current));
-      if (hideNativeCursor === prevHideNativeCursor) return;
+      if (
+        hideNativeCursor === prevHideNativeCursor &&
+        currentInputMode === prevNativeCursorInputMode
+      ) {
+        return;
+      }
       prevHideNativeCursor = hideNativeCursor;
+      prevNativeCursorInputMode = currentInputMode;
 
       const state = useSettingsStore.getState();
       const liveProfile = state.profiles.find((p) => p.name === profile);
@@ -872,6 +1000,7 @@ export function TerminalView({
         state.profileDefaults?.cursorBlink ??
         defaultProfileDefaults.cursorBlink;
       const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
+      terminal.options.cursorInactiveStyle = currentInputMode === "composer" ? "none" : "outline";
 
       if (hideNativeCursor) {
         terminal.options.theme = {
@@ -1536,6 +1665,11 @@ export function TerminalView({
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
 
+      // In composer mode, keyboard focus belongs to the native textarea.
+      // xterm-generated protocol replies do not pass this keyboard handler and
+      // remain available through onData below.
+      if (inputModeRef.current === "composer") return false;
+
       // 한/영·한자 등 IME 모드 전환 키가 조합 중 xterm 에 들어가면
       // CompositionHelper 가 stale 범위로 강제 finalize 해 이미 커밋된
       // 음절을 재전송한다(한글 중복 입력). xterm 진입 자체를 차단한다 —
@@ -1553,7 +1687,7 @@ export function TerminalView({
         // back to plain clipboard paste when it's off, so override bindings
         // like Ctrl+Shift+V still work regardless of the toggle.
         e.preventDefault();
-        runTerminalPaste(terminal, profile);
+        runTerminalPaste(writeStructuredPaste, profile);
         return false;
       }
 
@@ -1751,14 +1885,7 @@ export function TerminalView({
       // 0010·0012): "workspace" clears the whole workspace, "paneFocus" only
       // this pane, "manual" never auto-clears. Guarded by a cheap unread read
       // so the common no-unread keystroke path does no state write / re-render.
-      const notifStore = useNotificationStore.getState();
-      const dismissMode = useSettingsStore.getState().notifications.dismiss;
-      if (dismissMode === "workspace") {
-        const wsId = resolveWorkspaceId(instanceId);
-        if (notifStore.getUnreadCount(wsId) > 0) notifStore.markWorkspaceAsRead(wsId);
-      } else if (dismissMode === "paneFocus") {
-        if (notifStore.hasUnreadForTerminal(instanceId)) notifStore.markTerminalAsRead(instanceId);
-      }
+      dismissTerminalResponseNotification(instanceId);
     });
 
     const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
@@ -1876,6 +2003,7 @@ export function TerminalView({
     // Listen for terminal output from backend PTY
     let cancelled = false;
     let pendingTerminalWrites = 0;
+    let outputAttachParserBusy = false;
     type DeferredTerminalWrite = {
       data: string | Uint8Array;
       onParsed?: () => void;
@@ -2031,6 +2159,7 @@ export function TerminalView({
     const flushDeferredTerminalFit = () => {
       if (
         cancelled ||
+        outputAttachParserBusy ||
         pendingTerminalWrites > 0 ||
         deferredTerminalWrites.length > 0 ||
         !deferredTerminalFit
@@ -2151,7 +2280,17 @@ export function TerminalView({
       });
       if (queueWasEmpty) flushDeferredTerminalWrites();
     };
+    const trackedTerminalWriteAsync = (data: string | Uint8Array) =>
+      new Promise<void>((resolve) => trackedTerminalWrite(data, resolve));
     let unlistenOutput: (() => void) | undefined;
+    let outputListenerReady: Promise<void> = Promise.resolve();
+    let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputAttachEpoch = 0;
+    let outputAttachInFlight = false;
+    let terminalSessionReady = false;
+    let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
+    const outputCoordinator = new TerminalOutputAttachCoordinator();
+    let terminalOutputWriteChain = Promise.resolve();
     let inAltScreen = false;
     let recentOutputTail = "";
     // Separate, larger rolling buffer for Claude modal detection only.
@@ -2187,12 +2326,15 @@ export function TerminalView({
     // CR is sent as a standalone write after the text has landed in the input
     // box so long custom messages still submit reliably.
     const SESSION_LIMIT_SUBMIT_CR_DELAY_MS = 150;
-    const processTerminalOutput = (data: Uint8Array) => {
+    const processTerminalOutput = (data: Uint8Array, onParsed?: () => void) => {
       if (cancelled) return;
       if (data.length === 0) return;
       lastTerminalOutputAt = Date.now();
       clearDeferredResizeQuietTimer();
-      trackedTerminalWrite(data, startSyncOutputMonitor);
+      trackedTerminalWrite(data, () => {
+        startSyncOutputMonitor();
+        onParsed?.();
+      });
       const text = streamDecoder.decode(data, { stream: true });
       const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
@@ -2507,12 +2649,119 @@ export function TerminalView({
         });
       }
     };
+    const setOutputReady = (ready: boolean) => {
+      outputProtocolReadyRef.current = ready;
+      if (!cancelled) setOutputProtocolReady(ready);
+    };
+    const scheduleOutputReattach = () => {
+      if (cancelled || outputAttachRetryTimer !== undefined) return;
+      // Invalidate every continuation belonging to the old snapshot before
+      // accepting more listener deltas. The old parser chain may still finish
+      // its current xterm write, but the next attach is serialized behind it
+      // and starts with reset(), so stale work can never publish readiness.
+      outputAttachEpoch += 1;
+      outputAttachInFlight = false;
+      outputAttachParserBusy = true;
+      setOutputReady(false);
+      outputCoordinator.beginAttach();
+      outputAttachRetryTimer = setTimeout(() => {
+        outputAttachRetryTimer = undefined;
+        void startOutputAttach();
+      }, TERMINAL_WRITE_RETRY_MS);
+    };
+    const startOutputAttach = async () => {
+      if (cancelled || !terminalSessionReady || outputAttachInFlight) return;
+      outputAttachInFlight = true;
+      outputAttachParserBusy = true;
+      const epoch = ++outputAttachEpoch;
+      const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
+      try {
+        const [rawAttachment, cached] = await Promise.all([
+          attachTerminalOutput(instanceId),
+          cacheRestorePromise,
+        ]);
+        if (!isCurrentAttach()) return;
+        const attachment = normalizeTerminalOutputAttachment(rawAttachment);
+
+        terminalOutputWriteChain = terminalOutputWriteChain.then(async () => {
+          if (!isCurrentAttach()) return;
+          terminal.reset();
+          if (cached) {
+            await trackedTerminalWriteAsync(cached);
+            if (!isCurrentAttach()) return;
+            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m");
+            if (!isCurrentAttach()) return;
+            await trackedTerminalWriteAsync("\r\n".repeat(terminal.rows));
+            if (!isCurrentAttach()) return;
+          }
+          if (attachment.snapshot.length > 0) {
+            await new Promise<void>((resolve) =>
+              processTerminalOutput(attachment.snapshot, resolve),
+            );
+            if (!isCurrentAttach()) return;
+          }
+
+          // Cache/snapshot may contain historic DEC mode changes. Apply the
+          // backend's state last, to xterm only, before live sequenced deltas.
+          await trackedTerminalWriteAsync(
+            attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
+          );
+          if (!isCurrentAttach()) return;
+          const buffered = outputCoordinator.completeAttach(attachment);
+          if (buffered.kind === "gap") {
+            console.warn("[TerminalView] terminal output gap during attach", buffered);
+            scheduleOutputReattach();
+            return;
+          }
+          for (let index = 0; index < buffered.chunks.length; index += 1) {
+            const chunk = buffered.chunks[index];
+            if (index === buffered.chunks.length - 1) {
+              await new Promise<void>((resolve) => processTerminalOutput(chunk, resolve));
+            } else {
+              processTerminalOutput(chunk);
+            }
+            if (!isCurrentAttach()) return;
+          }
+          if (isCurrentAttach()) setOutputReady(true);
+        });
+        await terminalOutputWriteChain;
+      } catch (error) {
+        if (!cancelled && epoch === outputAttachEpoch) {
+          console.warn("[TerminalView] terminal output attach failed:", error);
+          scheduleOutputReattach();
+        }
+      } finally {
+        if (epoch === outputAttachEpoch) {
+          outputAttachInFlight = false;
+          outputAttachParserBusy = false;
+          flushDeferredTerminalFit();
+          if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach();
+        }
+      }
+    };
+
     writeTerminalDisplayData = processTerminalOutput;
-    onTerminalOutput(instanceId, (rawData) => {
+    outputListenerReady = onTerminalOutputV2(instanceId, (payload) => {
       if (cancelled) return;
-      const data = conptyResizeRepaintFilter.filter(rawData);
-      scheduleConptyRepaintExpiry();
-      processTerminalOutput(data);
+      let result;
+      try {
+        const delta: TerminalOutputDelta = normalizeTerminalOutputDelta(payload);
+        result = outputCoordinator.ingest(delta);
+      } catch (error) {
+        console.warn("[TerminalView] malformed terminal output delta:", error);
+        scheduleOutputReattach();
+        return;
+      }
+      if (result.kind === "gap") {
+        console.warn("[TerminalView] terminal output gap", result);
+        scheduleOutputReattach();
+        return;
+      }
+      for (const rawData of result.chunks) {
+        const data = conptyResizeRepaintFilter.filter(rawData);
+        scheduleConptyRepaintExpiry();
+        processTerminalOutput(data);
+      }
     }).then((unlisten) => {
       if (cancelled) {
         unlisten();
@@ -2531,7 +2780,7 @@ export function TerminalView({
         terminal.clearSelection();
       } else {
         // No selection → paste via the shared smart-paste pipeline.
-        runTerminalPaste(terminal, profile);
+        runTerminalPaste(writeStructuredPaste, profile);
       }
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
@@ -2699,6 +2948,24 @@ export function TerminalView({
             ? `claude --resume ${safeSessionId}`
             : undefined;
 
+        cacheRestorePromise =
+          shouldRestoreOutput && paneId
+            ? loadTerminalOutputCache(paneId)
+                .then((cached) =>
+                  cancelled || !cached || cached.length === 0 ? null : normalBufferOnly(cached),
+                )
+                .catch((err) => {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  if (!msg.startsWith("Cache not found:")) {
+                    console.warn(
+                      `[TerminalView] Unexpected error restoring cache for ${paneId}:`,
+                      err,
+                    );
+                  }
+                  return null;
+                })
+            : Promise.resolve(null);
+
         // Start PTY session immediately (don't wait for cache restore).
         // Cache restore runs in parallel so the shell starts booting ASAP.
         if (!cancelled) {
@@ -2714,34 +2981,22 @@ export function TerminalView({
             viewerStartup ?? startupOverride,
           )
             .then(() => {
+              terminalSessionReady = true;
               useTerminalStore.getState().updateInstanceInfo(instanceId, {
                 sessionReady: true,
               });
+              outputListenerReady
+                .then(() => startOutputAttach())
+                .catch((error) => {
+                  console.warn("[TerminalView] terminal output listener failed:", error);
+                  setOutputReady(false);
+                });
             })
             .catch((err) => {
               console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
               trackedTerminalWrite(
                 `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
               );
-            });
-        }
-
-        // Restore cached terminal output in parallel (non-blocking).
-        if (shouldRestoreOutput && paneId) {
-          loadTerminalOutputCache(paneId)
-            .then((cached) => {
-              if (cancelled || !cached || cached.length === 0) return;
-              trackedTerminalWrite(normalBufferOnly(cached));
-              trackedTerminalWrite("\r\n\x1b[90m--- session restored ---\x1b[0m");
-              // Push restored content into scrollback so shell init
-              // clear-screen sequences don't destroy it
-              trackedTerminalWrite("\r\n".repeat(terminal.rows));
-            })
-            .catch((err) => {
-              const msg = err instanceof Error ? err.message : String(err);
-              if (!msg.startsWith("Cache not found:")) {
-                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
-              }
             });
         }
       } else if (sessionCreated && width > 0 && height > 0) {
@@ -2811,6 +3066,9 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      outputAttachEpoch += 1;
+      outputProtocolReadyRef.current = false;
+      if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);
       clearConptyRepaintExpiryTimer();
       conptyResizeRepaintFilter.disarm();
       writeTerminalDisplayData = undefined;
@@ -2849,7 +3107,7 @@ export function TerminalView({
       wrapperEl?.removeEventListener("mousedown", handleModifierLinkClick, true);
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();
-      wrapperRef.current?.classList.remove("terminal-ime-composition-active");
+      wrapperEl?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
       stopSyncOutputMonitor();
@@ -2992,7 +3250,11 @@ export function TerminalView({
   });
   stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
   const effectiveCursorBlink = cursorBlink;
-  const nativeCursorHidden = stabilizeInteractiveCursor && isOverlayCaretActivity(activity);
+  // CSS cursor layers do not cover the WebGL addon's cursor because it is
+  // painted into the main canvas. Include composer mode in the xterm option
+  // path as well, so both DOM and WebGL renderers lose the application cursor.
+  const nativeCursorHidden =
+    inputMode === "composer" || (stabilizeInteractiveCursor && isOverlayCaretActivity(activity));
   const effectiveNativeCursorBlink = nativeCursorHidden ? false : effectiveCursorBlink;
   // Coalesce all reflow requests into a single rAF. Calling fit() +
   // clearTextureAtlas() + refresh() multiple times per tick (or even twice
@@ -3024,6 +3286,16 @@ export function TerminalView({
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let statusRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let listenerRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let statusEventRevision = 0;
+    let statusQueryEpoch = 0;
+
+    // A listener must be installed before the initial snapshot can authorize
+    // Local control. Until that barrier succeeds, keep the surface fail-closed.
+    remoteControlStatusKnownRef.current = false;
+    localControlAvailableRef.current = false;
+    setLocalControlAvailable(false);
 
     const stopPolling = () => {
       if (pollTimer !== undefined) {
@@ -3032,18 +3304,24 @@ export function TerminalView({
       }
     };
 
+    const stopStatusRetry = () => {
+      if (statusRetryTimer !== undefined) {
+        clearTimeout(statusRetryTimer);
+        statusRetryTimer = undefined;
+      }
+    };
+
     const applyRemoteControlStatus = (status: { active: boolean }) => {
+      stopStatusRetry();
       const wasActive = remoteControlActiveRef.current;
       remoteControlStatusKnownRef.current = true;
       remoteControlActiveRef.current = status.active;
+      localControlAvailableRef.current = !status.active;
+      setLocalControlAvailable(!status.active);
       if (status.active) {
         if (pollTimer === undefined) {
           pollTimer = setInterval(() => {
-            getRemoteControlStatus()
-              .then((next) => {
-                if (!cancelled) applyRemoteControlStatus(next);
-              })
-              .catch(() => {});
+            void refreshRemoteControlStatus();
           }, REMOTE_CONTROL_STATUS_POLL_MS);
         }
         return;
@@ -3060,30 +3338,103 @@ export function TerminalView({
       runTerminalRendererReflow(term, true);
     };
 
-    getRemoteControlStatus()
-      .then((status) => {
-        if (!cancelled) applyRemoteControlStatus(status);
-      })
-      .catch(() => {
-        if (!cancelled) remoteControlStatusKnownRef.current = true;
-      });
+    const scheduleStatusRetry = () => {
+      if (cancelled || statusRetryTimer !== undefined) return;
+      statusRetryTimer = setTimeout(() => {
+        statusRetryTimer = undefined;
+        void refreshRemoteControlStatus();
+      }, REMOTE_CONTROL_STATUS_POLL_MS);
+    };
 
-    onRemoteControlChanged(applyRemoteControlStatus)
-      .then((cleanup) => {
-        if (cancelled) cleanup();
-        else unlisten = cleanup;
-      })
-      .catch(() => {});
+    async function refreshRemoteControlStatus(): Promise<void> {
+      const queryEpoch = ++statusQueryEpoch;
+      const eventRevision = statusEventRevision;
+      try {
+        const status = await getRemoteControlStatus();
+        if (cancelled || queryEpoch !== statusQueryEpoch || eventRevision !== statusEventRevision) {
+          return;
+        }
+        applyRemoteControlStatus(status);
+      } catch {
+        if (cancelled || queryEpoch !== statusQueryEpoch || eventRevision !== statusEventRevision) {
+          return;
+        }
+        // Never turn an unknown owner into Local on an IPC failure. Active
+        // status keeps its regular polling; the initial unknown state retries.
+        if (!remoteControlStatusKnownRef.current) scheduleStatusRetry();
+      }
+    }
+
+    const handleRemoteControlChanged = (status: { active: boolean }) => {
+      if (cancelled) return;
+      statusEventRevision += 1;
+      statusQueryEpoch += 1;
+      applyRemoteControlStatus(status);
+    };
+
+    const scheduleListenerRetry = () => {
+      if (cancelled || listenerRetryTimer !== undefined) return;
+      listenerRetryTimer = setTimeout(() => {
+        listenerRetryTimer = undefined;
+        installRemoteControlListener();
+      }, REMOTE_CONTROL_STATUS_POLL_MS);
+    };
+
+    function installRemoteControlListener(): void {
+      onRemoteControlChanged(handleRemoteControlChanged)
+        .then((cleanup) => {
+          if (cancelled) {
+            cleanup();
+            return;
+          }
+          unlisten = cleanup;
+          void refreshRemoteControlStatus();
+        })
+        .catch(() => {
+          if (cancelled) return;
+          remoteControlStatusKnownRef.current = false;
+          localControlAvailableRef.current = false;
+          setLocalControlAvailable(false);
+          scheduleListenerRetry();
+        });
+    }
+
+    installRemoteControlListener();
 
     return () => {
       cancelled = true;
+      statusQueryEpoch += 1;
       stopPolling();
+      stopStatusRetry();
+      if (listenerRetryTimer !== undefined) clearTimeout(listenerRetryTimer);
       unlisten?.();
     };
   }, []);
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
+  useEffect(() => {
+    const layoutChanged = lastComposerLayoutModeRef.current !== inputMode;
+    lastComposerLayoutModeRef.current = inputMode;
+    const frame = requestAnimationFrame(() => {
+      const term = terminalRef.current;
+      if (inputMode === "composer") {
+        term?.blur();
+        if (isFocused) composerTextareaRef.current?.focus();
+      } else if (isFocused && term && openedRef.current) {
+        term.focus();
+      }
+      if (layoutChanged) {
+        if (isContainerHiddenRef.current) {
+          reflowDirtyRef.current = true;
+        } else {
+          guardedTerminalFitRef.current?.({});
+        }
+      }
+      overlayCaretUpdaterRef.current?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [inputMode, isFocused, localControlAvailable]);
   // Option-only updates: theme, font (just the values), and cursor settings.
   // This effect must NOT call fit()/clearTextureAtlas()/refresh() directly —
   // cursor and theme changes do not move cell geometry, and triggering an
@@ -3115,6 +3466,7 @@ export function TerminalView({
       // so rgba(0,0,0,0) renders as opaque black. Hide the native cursor by
       // matching it to the background color instead.
       const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
+      term.options.cursorInactiveStyle = inputMode === "composer" ? "none" : "outline";
       term.options.theme = nativeCursorHidden
         ? {
             ...resolvedTheme,
@@ -3151,6 +3503,7 @@ export function TerminalView({
     font,
     cursorShape,
     effectiveNativeCursorBlink,
+    inputMode,
     nativeCursorHidden,
     stabilizeInteractiveCursor,
   ]);
@@ -3285,76 +3638,127 @@ export function TerminalView({
 
   return (
     <div
-      ref={wrapperRef}
-      data-testid={`terminal-view-${instanceId}`}
-      className={`relative h-full w-full min-w-0 overflow-hidden ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""}`}
-      style={wrapperStyle}
+      className="terminal-surface flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
+      style={{ background: termBg }}
+      onKeyDownCapture={(event) => {
+        if (!matchesKeybinding(event, "terminal.toggleInputMode")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        changeInputMode(inputMode === "direct" ? "composer" : "direct");
+      }}
     >
       <div
-        data-testid={`terminal-background-${instanceId}`}
-        className="terminal-background-layer"
-        aria-hidden
-      >
-        <div className="terminal-loading-spinner" />
-      </div>
-      <div
-        ref={containerRef}
-        data-testid={`terminal-xterm-host-${instanceId}`}
-        className="terminal-xterm-host"
-      />
-      <div
-        ref={compositionPreviewRefEl}
-        data-testid={`terminal-composition-preview-${instanceId}`}
-        className="terminal-composition-preview pointer-events-none absolute"
-        style={{
-          background: termBg,
-          opacity: 0,
-          color: termFg,
-          fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+        ref={wrapperRef}
+        data-testid={`terminal-view-${instanceId}`}
+        className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${scrollbarClass} ${nativeCursorHidden ? "terminal-native-cursor-hidden" : ""} ${inputMode === "composer" ? "terminal-composer-active" : ""}`}
+        style={wrapperStyle}
+        onFocusCapture={(event) => {
+          if (
+            inputMode === "composer" &&
+            (event.target as HTMLElement).closest(".xterm-helper-textarea")
+          ) {
+            requestAnimationFrame(() => composerTextareaRef.current?.focus());
+          }
         }}
-      />
-      <div
-        ref={overlayCaretRef}
-        data-testid={`terminal-overlay-caret-${instanceId}`}
-        className="terminal-overlay-caret pointer-events-none absolute"
-        style={{ opacity: 0 }}
-      />
-      <div
-        data-testid={`terminal-loading-${instanceId}`}
-        className={`terminal-loading-overlay ${isReady ? "" : "visible"}`}
-        aria-hidden={isReady}
+        onPasteCapture={(event) => {
+          if (inputMode !== "direct") return;
+          const text = event.clipboardData.getData("text/plain");
+          event.preventDefault();
+          event.stopPropagation();
+          if (text) writeStructuredPaste(text);
+        }}
       >
-        <div className="terminal-loading-spinner" />
-      </div>
-      {showScrollToBottom && showScrollToBottomButtonSetting && (
-        <button
-          type="button"
-          data-testid={`terminal-scroll-to-bottom-${instanceId}`}
-          className="terminal-scroll-to-bottom"
-          title={t("terminal.scrollToBottom")}
-          aria-label={t("terminal.scrollToBottom")}
-          onClick={() => {
-            const term = terminalRef.current;
-            if (!term) return;
-            term.scrollToBottom();
-            setShowScrollToBottom(false);
-          }}
+        <div
+          data-testid={`terminal-background-${instanceId}`}
+          className="terminal-background-layer"
+          aria-hidden
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="butt"
-            strokeLinejoin="round"
-            aria-hidden
+          <div className="terminal-loading-spinner" />
+        </div>
+        <div
+          ref={containerRef}
+          data-testid={`terminal-xterm-host-${instanceId}`}
+          className="terminal-xterm-host"
+        />
+        <div
+          ref={compositionPreviewRefEl}
+          data-testid={`terminal-composition-preview-${instanceId}`}
+          className="terminal-composition-preview pointer-events-none absolute"
+          style={{
+            background: termBg,
+            opacity: 0,
+            color: termFg,
+            fontFamily: `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`,
+          }}
+        />
+        <div
+          ref={overlayCaretRef}
+          data-testid={`terminal-overlay-caret-${instanceId}`}
+          className="terminal-overlay-caret pointer-events-none absolute"
+          style={{ opacity: 0 }}
+        />
+        <div
+          data-testid={`terminal-loading-${instanceId}`}
+          className={`terminal-loading-overlay ${isReady ? "" : "visible"}`}
+          aria-hidden={isReady}
+        >
+          <div className="terminal-loading-spinner" />
+        </div>
+        {showScrollToBottom && showScrollToBottomButtonSetting && (
+          <button
+            type="button"
+            data-testid={`terminal-scroll-to-bottom-${instanceId}`}
+            className="terminal-scroll-to-bottom"
+            title={t("terminal.scrollToBottom")}
+            aria-label={t("terminal.scrollToBottom")}
+            onClick={() => {
+              const term = terminalRef.current;
+              if (!term) return;
+              term.scrollToBottom();
+              setShowScrollToBottom(false);
+            }}
           >
-            <path d="m5 8.5 7 7 7-7" />
-          </svg>
-        </button>
-      )}
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="butt"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="m5 8.5 7 7 7-7" />
+            </svg>
+          </button>
+        )}
+      </div>
+      <TerminalInputComposer
+        mode={inputMode}
+        text={composerDraft.text}
+        labels={{
+          inputMode: t("terminal.inputMode"),
+          direct: t("terminal.directInput"),
+          composer: t("terminal.composerInput"),
+          editor: t("terminal.composerEditor"),
+          placeholder: t("terminal.composerPlaceholder"),
+          insert: t("terminal.composerInsert"),
+          send: t("terminal.composerSend"),
+        }}
+        textareaRef={composerTextareaRef}
+        inFlight={composerDraft.inFlight !== null}
+        disabled={!localControlAvailable}
+        commitDisabled={!outputProtocolReady}
+        autoFocus={isFocused}
+        testId={`terminal-input-composer-${instanceId}`}
+        onModeChange={changeInputMode}
+        onTextChange={(text) =>
+          storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
+        }
+        onInsert={() => submitComposerDraft(false)}
+        onSend={() => submitComposerDraft(true)}
+      />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
+import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -72,6 +73,7 @@ const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
 });
 const mockRefresh = vi.fn();
 const mockClearTextureAtlas = vi.fn();
+const mockReset = vi.fn();
 const mockRegisterCsiHandler = vi.fn();
 const mockRegisterOscHandler = vi.fn();
 const mockRegisterEscHandler = vi.fn();
@@ -123,6 +125,7 @@ vi.mock("@xterm/xterm", () => ({
     clearSelection = mockClearSelection;
     refresh = mockRefresh;
     clearTextureAtlas = mockClearTextureAtlas;
+    reset = mockReset;
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
@@ -229,9 +232,21 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
+const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
+  state: {
+    version: 1,
+    snapshotStartSeq: 0,
+    snapshotSeq: 0,
+    protocolRevision: 0,
+    modes: { bracketedPaste: false },
+  },
+  snapshot: [],
+});
+let mockOutputSequence = 0;
 const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
   active: false,
   leaseId: null,
@@ -258,9 +273,35 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalInput: (...args: unknown[]) => mockWriteTerminalInput(...args),
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
-  onTerminalOutput: (...args: unknown[]) => mockOnTerminalOutput(...args),
+  attachTerminalOutput: (...args: unknown[]) => mockAttachTerminalOutput(...args),
+  onTerminalOutputV2: (terminalId: string, callback: (payload: unknown) => void) => {
+    const forward = (data: Uint8Array | Record<string, unknown>) => {
+      if ("seqStart" in data) {
+        callback(data);
+        return;
+      }
+      const raw = new Uint8Array(data as Uint8Array);
+      const seqStart = mockOutputSequence;
+      mockOutputSequence += raw.length;
+      callback({ seqStart, seqEnd: mockOutputSequence, data: Array.from(raw) });
+    };
+    let attachWaitTurns = 0;
+    const exposeRegisteredListenerAfterAttach = () => {
+      attachWaitTurns += 1;
+      if (mockAttachTerminalOutput.mock.calls.length === 0 && attachWaitTurns < 20) {
+        queueMicrotask(exposeRegisteredListenerAfterAttach);
+        return;
+      }
+      // Existing TerminalView tests model an already-attached stream. Expose
+      // their callback only after the empty mock snapshot pipeline settles.
+      queueMicrotask(() => queueMicrotask(() => void mockOnTerminalOutput(terminalId, forward)));
+    };
+    queueMicrotask(exposeRegisteredListenerAfterAttach);
+    return Promise.resolve(vi.fn());
+  },
   getRemoteControlStatus: (...args: unknown[]) => mockGetRemoteControlStatus(...args),
   onRemoteControlChanged: (...args: unknown[]) => mockOnRemoteControlChanged(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
@@ -275,6 +316,14 @@ vi.mock("@/lib/tauri-api", () => ({
   markCodexTerminal: (...args: unknown[]) => mockMarkCodexTerminal(...args),
 }));
 
+async function waitForTerminalInputReady(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+    expect(mockAttachTerminalOutput).toHaveBeenCalled();
+    expect(mockOnTerminalOutput).toHaveBeenCalled();
+  });
+}
+
 describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -282,6 +331,7 @@ describe("TerminalView", () => {
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useNotificationStore.setState({ notifications: [] });
     localStorage.clear();
+    clearRuntimeComposerState();
     capturedKeyHandler = null;
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
@@ -292,6 +342,7 @@ describe("TerminalView", () => {
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
     capturedRemoteControlChanged = null;
+    mockOutputSequence = 0;
     capturedResizeHandler = null;
     capturedScrollHandler = null;
     mockBufferActive.cursorX = 0;
@@ -2275,6 +2326,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
     expect(capturedKeyHandler).not.toBeNull();
 
     // Simulate Ctrl+V keydown
@@ -2290,7 +2342,11 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith("C:\\test\\file.png");
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(
+        expect.any(String),
+        "C:\\test\\file.png",
+        false,
+      );
     });
   });
 
@@ -2302,6 +2358,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -2312,7 +2369,7 @@ describe("TerminalView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith("hello world");
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(expect.any(String), "hello world", false);
     });
   });
 
@@ -2328,13 +2385,14 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
     capturedKeyHandler!(event);
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith(pasted);
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(expect.any(String), pasted, false);
     });
   });
 
@@ -2350,13 +2408,18 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
     capturedKeyHandler!(event);
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith("C:\\test\\one.txt C:\\test\\two.txt");
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(
+        expect.any(String),
+        "C:\\test\\one.txt C:\\test\\two.txt",
+        false,
+      );
     });
   });
 
@@ -2380,13 +2443,18 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
     capturedKeyHandler!(event);
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith('"C:\\My Files\\one.txt"\n"C:\\test\\two.txt"');
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(
+        expect.any(String),
+        '"C:\\My Files\\one.txt"\n"C:\\test\\two.txt"',
+        false,
+      );
     });
   });
 
@@ -2398,13 +2466,18 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForTerminalInputReady();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
     capturedKeyHandler!(event);
 
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith("C:\\test\\file.png");
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(
+        expect.any(String),
+        "C:\\test\\file.png",
+        false,
+      );
     });
   });
 
@@ -2529,6 +2602,8 @@ describe("TerminalView", () => {
 
     render(<TerminalView instanceId="t-rc1" profile="PowerShell" syncGroup="" />);
 
+    await waitForTerminalInputReady();
+
     const container = screen.getByTestId("terminal-view-t-rc1");
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     container.dispatchEvent(event);
@@ -2539,7 +2614,7 @@ describe("TerminalView", () => {
 
     // Right-click paste uses terminal.paste() for bracketed paste support (same as Ctrl+V)
     await vi.waitFor(() => {
-      expect(mockPaste).toHaveBeenCalledWith("pasted text");
+      expect(mockWriteTerminalInput).toHaveBeenCalledWith(expect.any(String), "pasted text", false);
     });
   });
 
@@ -4111,6 +4186,7 @@ describe("TerminalView", () => {
     const observers: Observer[] = [];
     const originalResizeObserver = globalThis.ResizeObserver;
     const finishWrites: Array<() => void> = [];
+    const written: Array<string | Uint8Array> = [];
     globalThis.ResizeObserver = class {
       private obs: Observer;
       constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
@@ -4135,7 +4211,8 @@ describe("TerminalView", () => {
       disconnect() {}
     } as unknown as typeof ResizeObserver;
     mockLoadTerminalOutputCache.mockResolvedValueOnce("large cached terminal output");
-    mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+    mockWrite.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      written.push(data);
       if (callback) finishWrites.push(callback);
     });
 
@@ -4150,7 +4227,7 @@ describe("TerminalView", () => {
       );
       await vi.waitFor(() => {
         expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-resize-restore");
-        expect(finishWrites).toHaveLength(3);
+        expect(finishWrites).toHaveLength(1);
       });
       const obs = observers[0];
       const target = obs.target as Element;
@@ -4165,9 +4242,16 @@ describe("TerminalView", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(mockFit).not.toHaveBeenCalled();
 
-      act(() => {
-        for (const finish of finishWrites.splice(0)) finish();
-      });
+      for (let index = 0; index < 4; index += 1) {
+        const finish = finishWrites.shift();
+        expect(finish).toBeTypeOf("function");
+        act(() => finish?.());
+        if (index < 3) {
+          await vi.waitFor(() => expect(finishWrites).toHaveLength(1));
+          expect(mockFit).not.toHaveBeenCalled();
+        }
+      }
+      expect(written.at(-1)).toBe("\x1b[?2004l");
       await vi.waitFor(() => {
         expect(mockFit).toHaveBeenCalledTimes(1);
       });
@@ -5952,6 +6036,289 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     const wrapper = screen.getByTestId("terminal-view-t-sb-separate");
     // 14px scrollbar slider + 12px clearance.
     expect(wrapper.style.getPropertyValue("--terminal-scroll-btn-right")).toBe("26px");
+  });
+});
+
+describe("TerminalView desktop input composer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
+    useNotificationStore.setState({ notifications: [] });
+    localStorage.clear();
+    clearRuntimeComposerState();
+    mockOutputSequence = 0;
+    capturedKeyHandler = null;
+    capturedResizeHandler = null;
+    mockGetRemoteControlStatus.mockResolvedValue({
+      active: false,
+      leaseId: null,
+      remoteAddr: null,
+      clientName: null,
+      heartbeatTimeoutSeconds: 15,
+    });
+    mockWriteTerminalInput.mockResolvedValue(undefined);
+  });
+
+  it("toggles the desktop composer through the registered keybinding", async () => {
+    render(<TerminalView instanceId="t-composer-toggle" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    const composer = screen.getByTestId("terminal-input-composer-t-composer-toggle");
+    expect(composer).toHaveAttribute("data-mode", "direct");
+    expect(screen.queryByTestId("terminal-input-composer-t-composer-toggle-textarea")).toBeNull();
+
+    fireEvent.keyDown(composer.parentElement!, { key: "m", ctrlKey: true, altKey: true });
+
+    expect(composer).toHaveAttribute("data-mode", "composer");
+    expect(
+      screen.getByTestId("terminal-input-composer-t-composer-toggle-textarea"),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("laymux.desktop.inputMode")).toBe("composer");
+  });
+
+  it("hides the native WebGL cursor in Composer and restores it in Direct", async () => {
+    const terminalId = "t-composer-webgl-cursor";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    const terminal = createdTerminals.at(-1)!;
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+
+    await vi.waitFor(() => {
+      expect(terminal.options.cursorInactiveStyle).toBe("none");
+      expect(screen.getByTestId(`terminal-view-${terminalId}`)).toHaveClass(
+        "terminal-native-cursor-hidden",
+      );
+    });
+
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-direct`));
+    await vi.waitFor(() => {
+      expect(terminal.options.cursorInactiveStyle).toBe("outline");
+      expect(screen.getByTestId(`terminal-view-${terminalId}`)).not.toHaveClass(
+        "terminal-native-cursor-hidden",
+      );
+    });
+  });
+
+  it("installs the Remote owner listener before requesting its initial snapshot", async () => {
+    let resolveListener!: (cleanup: () => void) => void;
+    mockOnRemoteControlChanged.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveListener = resolve;
+      }),
+    );
+
+    render(
+      <TerminalView instanceId="t-owner-listener-barrier" profile="PowerShell" syncGroup="" />,
+    );
+    await vi.waitFor(() => expect(mockOnRemoteControlChanged).toHaveBeenCalledTimes(1));
+    expect(mockGetRemoteControlStatus).not.toHaveBeenCalled();
+
+    await act(async () => resolveListener(vi.fn()));
+    await vi.waitFor(() => expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it("discards a stale Local snapshot that resolves after a Remote owner event", async () => {
+    let resolveStatus!: (status: { active: boolean }) => void;
+    localStorage.setItem("laymux.desktop.inputMode", "composer");
+    mockGetRemoteControlStatus.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+
+    const terminalId = "t-owner-stale-snapshot";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1));
+
+    act(() => capturedRemoteControlChanged?.({ active: true }));
+    await act(async () => resolveStatus({ active: false }));
+
+    expect(screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`)).toBeDisabled();
+  });
+
+  it("keeps an unknown owner fail-closed and retries a failed status snapshot", async () => {
+    vi.useFakeTimers();
+    let unmount: (() => void) | undefined;
+    try {
+      localStorage.setItem("laymux.desktop.inputMode", "composer");
+      mockGetRemoteControlStatus.mockRejectedValueOnce(new Error("IPC unavailable"));
+
+      const terminalId = "t-owner-status-retry";
+      ({ unmount } = render(
+        <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+      ));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`)).toBeDisabled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`)).toBeEnabled();
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed and reattaches after a malformed V2 output delta", async () => {
+    const terminalId = "t-composer-malformed-output";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    const send = screen.getByTestId(`terminal-input-composer-${terminalId}-send`);
+    await vi.waitFor(() => expect(send).toBeEnabled());
+
+    const registeredOutput = mockOnTerminalOutput.mock.calls.find(
+      ([registeredTerminalId]) => registeredTerminalId === terminalId,
+    );
+    const emitOutput = registeredOutput?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    const attachCallsBeforeMalformedDelta = mockAttachTerminalOutput.mock.calls.length;
+    // Keep the recovery attach pending so readiness cannot bounce back to true
+    // before the fail-closed assertion observes it.
+    mockAttachTerminalOutput.mockReturnValueOnce(new Promise(() => {}));
+
+    act(() => {
+      emitOutput?.({ seqStart: 0, seqEnd: 2, data: [0x61] });
+    });
+
+    expect(send).toBeDisabled();
+    await vi.waitFor(() => {
+      expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(
+        attachCallsBeforeMalformedDelta,
+      );
+    });
+  });
+
+  it("routes a native terminal paste through structured input", async () => {
+    const terminalId = "t-composer-native-paste";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    mockWriteTerminalInput.mockClear();
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.paste(screen.getByTestId(`terminal-xterm-host-${terminalId}`), {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "first\nsecond" : ""),
+      },
+    });
+
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith(terminalId, "first\nsecond", false);
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("sends Insert and clears only the submitted unchanged desktop draft", async () => {
+    render(<TerminalView instanceId="t-composer-insert" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-insert-mode-composer"));
+    const textarea = screen.getByTestId(
+      "terminal-input-composer-t-composer-insert-textarea",
+    ) as HTMLTextAreaElement;
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("terminal-input-composer-t-composer-insert-insert")).toBeEnabled(),
+    );
+    fireEvent.change(textarea, { target: { value: "한글\nsecond" } });
+    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-insert-insert"));
+
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-insert", "한글\nsecond", false);
+    await vi.waitFor(() => expect(textarea.value).toBe(""));
+  });
+
+  it("blocks duplicate Send while preserving edits made in flight", async () => {
+    let resolveInput!: () => void;
+    mockWriteTerminalInput.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveInput = resolve;
+      }),
+    );
+    render(<TerminalView instanceId="t-composer-flight" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-flight-mode-composer"));
+    const textarea = screen.getByTestId(
+      "terminal-input-composer-t-composer-flight-textarea",
+    ) as HTMLTextAreaElement;
+    const send = screen.getByTestId("terminal-input-composer-t-composer-flight-send");
+    await vi.waitFor(() => expect(send).toBeEnabled());
+    fireEvent.change(textarea, { target: { value: "first" } });
+    fireEvent.click(send);
+    fireEvent.click(send);
+    expect(mockWriteTerminalInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-flight", "first", true);
+
+    fireEvent.change(textarea, { target: { value: "first + next" } });
+    await act(async () => resolveInput());
+    expect(textarea.value).toBe("first + next");
+  });
+
+  it("updates a replacement mount when an earlier mount's submission settles", async () => {
+    let resolveInput!: () => void;
+    mockWriteTerminalInput.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveInput = resolve;
+      }),
+    );
+    const terminalId = "t-composer-remount-flight";
+    const first = render(
+      <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    const firstTextarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    fireEvent.change(firstTextarea, { target: { value: "pending across remount" } });
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-send`));
+    first.unmount();
+
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    const replacementTextarea = await screen.findByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    );
+    expect(replacementTextarea).toHaveValue("pending across remount");
+    expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeDisabled();
+
+    await act(async () => resolveInput());
+    await vi.waitFor(() => {
+      expect(replacementTextarea).toHaveValue("");
+      expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeEnabled();
+    });
+  });
+
+  it("keeps the desktop draft but disables editing while Remote owns the PTY", async () => {
+    localStorage.setItem("laymux.desktop.inputMode", "composer");
+    mockGetRemoteControlStatus.mockResolvedValueOnce({
+      active: true,
+      leaseId: "lease-remote",
+      remoteAddr: "127.0.0.1:4000",
+      clientName: "phone",
+      heartbeatTimeoutSeconds: 15,
+    });
+    render(<TerminalView instanceId="t-composer-remote" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(
+        screen.getByTestId("terminal-input-composer-t-composer-remote-textarea"),
+      ).toBeDisabled();
+    });
+    expect(screen.getByTestId("terminal-input-composer-t-composer-remote-send")).toBeDisabled();
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
   });
 });
 

@@ -22,11 +22,14 @@ pub mod port_detect;
 pub mod process;
 pub mod process_tree;
 pub mod pty;
+mod pty_control;
 pub mod pty_trace;
 pub mod remote_server;
 pub mod settings;
 pub mod state;
 pub mod terminal;
+pub mod terminal_output;
+pub mod terminal_protocol;
 
 use std::sync::Arc;
 use tauri::image::Image;
@@ -136,6 +139,8 @@ pub fn run() {
             commands::create_terminal_session,
             commands::resize_terminal,
             commands::write_to_terminal,
+            commands::write_terminal_input,
+            commands::attach_terminal_output,
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,
             commands::mark_claude_terminal,
