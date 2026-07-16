@@ -16,6 +16,8 @@ async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
 }
 
 test.describe("remote mobile layout", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.setContent(await loadRemotePageMarkup());
@@ -258,10 +260,11 @@ test.describe("remote mobile layout", () => {
       outputSocket = socket;
     });
 
+    const cdp = await page.context().newCDPSession(page);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await expect(page.locator("#focusTerminal")).toBeEnabled();
-    await page.locator("#focusTerminal").click();
+    await page.locator("#focusTerminal").tap();
 
     const helperTextarea = page.locator(".xterm-helper-textarea");
     await expect(helperTextarea).toBeFocused();
@@ -353,7 +356,7 @@ test.describe("remote mobile layout", () => {
 
     const pressKey = async (id: string, sequence: string) => {
       const writeIndex = writes.length;
-      await page.locator(`[data-key="${id}"]`).click();
+      await page.locator(`[data-key="${id}"]`).tap();
       await expect(helperTextarea).toBeFocused();
       await expect.poll(() => writes.length).toBe(writeIndex + 1);
       expect(writes[writeIndex]).toBe(sequence);
@@ -367,10 +370,15 @@ test.describe("remote mobile layout", () => {
       const writeIndex = writes.length;
       const x = box!.x + box!.width / 2;
       const y = box!.y + box!.height / 2;
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x + dx, y + dy);
-      await page.mouse.up();
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y, id: 1 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await expect(helperTextarea).toBeFocused();
       await expect.poll(() => writes.length).toBe(writeIndex + 1);
       expect(writes[writeIndex]).toBe(sequence);
