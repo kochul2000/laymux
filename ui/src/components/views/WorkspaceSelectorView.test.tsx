@@ -7,6 +7,7 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
+import { useDockStore } from "@/stores/dock-store";
 import { getListeningPorts, getTerminalSummaries, markNotificationsRead } from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
@@ -114,6 +115,7 @@ describe("WorkspaceSelectorView", () => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useRenameWorkspaceStore.setState({ targetId: null, currentName: "" });
 
@@ -1837,9 +1839,9 @@ describe("WorkspaceSelectorView", () => {
     expect(wsRow.textContent).toContain("MEM");
   });
 
-  // ======================= Pane Hide Mode =======================
+  // ======================= Hidden Items =======================
 
-  describe("unified hide mode", () => {
+  describe("hidden items shelf (issue #459)", () => {
     beforeEach(() => {
       useWorkspaceStore.setState({
         workspaces: [
@@ -1853,7 +1855,7 @@ describe("WorkspaceSelectorView", () => {
                 y: 0,
                 w: 0.5,
                 h: 1,
-                view: { type: "TerminalView", profile: "WSL" },
+                view: { type: "TerminalView", profile: "WSL", lastCwd: "~/server" },
               },
               {
                 id: "pane-b",
@@ -1868,7 +1870,7 @@ describe("WorkspaceSelectorView", () => {
           {
             id: "ws-2",
             name: "Project B",
-            panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+            panes: [{ id: "p2", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
           },
           {
             id: "ws-3",
@@ -1877,6 +1879,7 @@ describe("WorkspaceSelectorView", () => {
           },
         ],
         activeWorkspaceId: "ws-1",
+        workspaceDisplayOrder: ["ws-1", "ws-2", "ws-3"],
       });
       useTerminalStore.setState({
         instances: [
@@ -1886,6 +1889,7 @@ describe("WorkspaceSelectorView", () => {
             syncGroup: "ws-1",
             workspaceId: "ws-1",
             label: "WSL",
+            cwd: "~/server",
             lastActivityAt: 0,
             isFocused: true,
           },
@@ -1900,342 +1904,201 @@ describe("WorkspaceSelectorView", () => {
           },
         ],
       });
+      useGridStore.setState({ focusedPaneIndex: 0 });
     });
 
-    it("shows hide mode toggle button", () => {
+    it("removes the global hide-mode button", () => {
       render(<WorkspaceSelectorView />);
-      expect(screen.getByTestId("hide-mode-toggle")).toBeInTheDocument();
+      expect(screen.queryByTestId("hide-mode-toggle")).not.toBeInTheDocument();
     });
 
-    it("entering hide mode shows eye icons on workspaces and panes", () => {
-      useUiStore.getState().toggleHideMode();
+    it("offers immediate workspace and pane hide actions in the normal list", () => {
       render(<WorkspaceSelectorView />);
-      // Workspace eye icons
-      expect(screen.getByTestId("workspace-eye-ws-1")).toBeInTheDocument();
-      expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
-      expect(screen.getByTestId("workspace-eye-ws-3")).toBeInTheDocument();
-      // Pane eye icons
-      expect(screen.getByTestId("pane-eye-pane-a")).toBeInTheDocument();
-      expect(screen.getByTestId("pane-eye-pane-b")).toBeInTheDocument();
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
+      expect(screen.getByTestId("workspace-hide-ws-2")).toHaveAttribute(
+        "aria-label",
+        "Hide from list",
+      );
+
+      fireEvent.mouseEnter(screen.getByTestId("pane-row-pane-a"));
+      expect(screen.getByTestId("pane-hide-pane-a")).toHaveAttribute(
+        "aria-label",
+        "Hide from list",
+      );
     });
 
-    it("hiding a pane collapses it from the list in normal mode", () => {
-      useUiStore.getState().togglePaneHidden("pane-a");
+    it("renders only visible workspace and pane rows after hiding", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setPaneHidden("pane-a", true);
       render(<WorkspaceSelectorView />);
-      const paneRow = screen.getByTestId("pane-row-pane-a");
-      expect(paneRow.className).toContain("workspace-pane-row-collapsed");
-      expect(paneRow).toHaveAttribute("aria-hidden", "true");
-      expect(screen.getByText("PS")).toBeInTheDocument();
-    });
 
-    it("hiding a workspace collapses it from the list in normal mode", () => {
-      useUiStore.getState().toggleWorkspaceHidden("ws-2");
-      render(<WorkspaceSelectorView />);
-      const hidden = screen.getByTestId("workspace-item-ws-2");
-      expect(hidden.className).toContain("workspace-item-collapsed");
-      expect(hidden).toHaveAttribute("aria-hidden", "true");
+      expect(screen.queryByTestId("workspace-item-ws-2")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("pane-row-pane-a")).not.toBeInTheDocument();
       expect(screen.getByTestId("workspace-item-ws-1")).toBeInTheDocument();
-      expect(screen.getByTestId("workspace-item-ws-3")).toBeInTheDocument();
+      expect(screen.getByTestId("pane-row-pane-b")).toBeInTheDocument();
     });
 
-    it("expands hidden workspaces while hide mode is active", () => {
-      useUiStore.getState().toggleWorkspaceHidden("ws-2");
-      useUiStore.getState().toggleHideMode();
+    it("shows a valid hidden count chip with disclosure semantics and ignores stale IDs", () => {
+      useUiStore.setState({
+        hiddenWorkspaceIds: new Set(["ws-2", "ws-stale"]),
+        hiddenPaneIds: new Set(["pane-a", "pane-stale"]),
+      });
       render(<WorkspaceSelectorView />);
 
-      const hidden = screen.getByTestId("workspace-item-ws-2");
-      expect(hidden.className).not.toContain("workspace-item-collapsed");
-      expect(hidden).not.toHaveAttribute("aria-hidden", "true");
-      expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
+      const chip = screen.getByTestId("hidden-items-chip");
+      expect(chip).toHaveTextContent("Hidden 2");
+      expect(chip).toHaveAttribute("aria-expanded", "false");
+      expect(chip).toHaveAttribute("aria-controls", "hidden-items-shelf");
     });
 
-    it("active workspace is never hidden even if in hiddenWorkspaceIds", () => {
-      useUiStore.getState().toggleWorkspaceHidden("ws-1");
+    it("groups hidden workspaces and panes without duplicating a child pane", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setPaneHidden("p2", true);
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
       render(<WorkspaceSelectorView />);
-      expect(screen.getByTestId("workspace-item-ws-1")).toBeInTheDocument();
+
+      expect(screen.getByTestId("hidden-items-shelf")).toBeInTheDocument();
+      expect(screen.getByTestId("hidden-workspace-ws-2")).toHaveTextContent(
+        "1 individually hidden pane",
+      );
+      expect(screen.queryByTestId("hidden-pane-p2")).not.toBeInTheDocument();
+      expect(screen.getByTestId("hidden-pane-pane-a")).toHaveTextContent("Project A");
+      expect(screen.getByTestId("hidden-items-chip")).toHaveTextContent("Hidden 3");
     });
 
-    it("hide mode toggle shows total hidden count", () => {
-      useUiStore.getState().toggleWorkspaceHidden("ws-2");
-      useUiStore.getState().togglePaneHidden("pane-a");
+    it("restores a workspace without changing the active workspace via the eye button", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
       render(<WorkspaceSelectorView />);
-      const toggle = screen.getByTestId("hide-mode-toggle");
-      expect(toggle.textContent).toContain("2");
+
+      fireEvent.click(screen.getByTestId("hidden-workspace-show-only-ws-2"));
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(false);
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
     });
 
-    // -- issue #321: hover quick hide button on workspace items --
+    it("restores and opens a workspace through the row primary action", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
 
-    describe("workspace hover quick hide button (issue #321)", () => {
-      it("shows a hide button on hover without entering hide mode", () => {
-        render(<WorkspaceSelectorView />);
-        const item = screen.getByTestId("workspace-item-ws-2");
-        fireEvent.mouseEnter(item);
-        expect(screen.getByTestId("workspace-hide-ws-2")).toBeInTheDocument();
-      });
-
-      it("clicking the hide button hides the workspace immediately (no hide mode)", () => {
-        render(<WorkspaceSelectorView />);
-        const item = screen.getByTestId("workspace-item-ws-2");
-        fireEvent.mouseEnter(item);
-        fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
-
-        expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(true);
-        expect(useUiStore.getState().hideMode).toBe(false);
-        // Non-active hidden workspace collapses right away
-        expect(screen.getByTestId("workspace-item-ws-2").className).toContain(
-          "workspace-item-collapsed",
-        );
-      });
-
-      it("clicking the hide button on a hidden active workspace un-hides it", () => {
-        useUiStore.getState().toggleWorkspaceHidden("ws-1"); // ws-1 is active → stays expanded
-        render(<WorkspaceSelectorView />);
-        const item = screen.getByTestId("workspace-item-ws-1");
-        fireEvent.mouseEnter(item);
-        fireEvent.click(screen.getByTestId("workspace-hide-ws-1"));
-        expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(false);
-      });
-
-      it("hide button click does not select the workspace", () => {
-        render(<WorkspaceSelectorView />);
-        const item = screen.getByTestId("workspace-item-ws-2");
-        fireEvent.mouseEnter(item);
-        fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
-        expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
-      });
-
-      it("is not rendered while hide mode is active (eye buttons take over)", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const item = screen.getByTestId("workspace-item-ws-2");
-        fireEvent.mouseEnter(item);
-        expect(screen.queryByTestId("workspace-hide-ws-2")).not.toBeInTheDocument();
-        expect(screen.getByTestId("workspace-eye-ws-2")).toBeInTheDocument();
-      });
+      fireEvent.click(screen.getByTestId("hidden-workspace-primary-ws-2"));
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(false);
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
     });
 
-    // -- issue #218: duplicate preserves hide state --
+    it("provides distinct tooltips for primary and show-only restore actions", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
 
-    it("duplicateWorkspace copies hidden workspace flag onto the duplicate", () => {
-      // Hide ws-2 in the source, then duplicate it.
-      useUiStore.getState().toggleWorkspaceHidden("ws-2");
-      const result = useWorkspaceStore.getState().duplicateWorkspace("ws-2");
-      expect(result).not.toBeNull();
-      useUiStore
-        .getState()
-        .propagateHiddenOnDuplicate("ws-2", result!.newWorkspaceId, result!.paneIdMap);
-      expect(useUiStore.getState().hiddenWorkspaceIds.has(result!.newWorkspaceId)).toBe(true);
+      expect(screen.getByTestId("hidden-workspace-primary-ws-2")).toHaveAttribute(
+        "title",
+        "Show again and open",
+      );
+      expect(screen.getByTestId("hidden-workspace-show-only-ws-2")).toHaveAttribute(
+        "title",
+        "Show only",
+      );
+      expect(screen.getByTestId("hidden-pane-primary-pane-a")).toHaveAttribute(
+        "title",
+        "Show again and focus",
+      );
+      expect(screen.getByTestId("hidden-pane-show-only-pane-a")).toHaveAttribute(
+        "title",
+        "Show only",
+      );
     });
 
-    it("duplicateWorkspace copies hidden pane flags onto the new pane IDs", () => {
-      // Hide pane-a (inside ws-1) then duplicate ws-1.
-      useUiStore.getState().togglePaneHidden("pane-a");
-      const result = useWorkspaceStore.getState().duplicateWorkspace("ws-1");
-      expect(result).not.toBeNull();
-      useUiStore
-        .getState()
-        .propagateHiddenOnDuplicate("ws-1", result!.newWorkspaceId, result!.paneIdMap);
+    it("distinguishes show-only from show-and-focus for panes", () => {
+      useUiStore.getState().setPaneHidden("p2", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      const { rerender } = render(<WorkspaceSelectorView />);
 
-      const newPaneA = result!.paneIdMap["pane-a"];
-      const newPaneB = result!.paneIdMap["pane-b"];
-      expect(useUiStore.getState().hiddenPaneIds.has(newPaneA)).toBe(true);
-      // pane-b was not hidden in the source, so it stays visible in the duplicate.
-      expect(useUiStore.getState().hiddenPaneIds.has(newPaneB)).toBe(false);
+      fireEvent.click(screen.getByTestId("hidden-pane-show-only-p2"));
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+
+      act(() => {
+        useUiStore.getState().setPaneHidden("p2", true);
+        useUiStore.getState().setHiddenShelfOpen(true);
+        useDockStore.getState().setFocusedDock("left");
+      });
+      rerender(<WorkspaceSelectorView />);
+      fireEvent.click(screen.getByTestId("hidden-pane-primary-p2"));
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+      expect(useDockStore.getState().focusedDock).toBeNull();
     });
 
-    // Issue #203: hide mode toggle should be visually emphasized when active
-    // so users clearly perceive it as the primary action while in hide mode.
-    describe("hide mode toggle visual emphasis (issue #203)", () => {
-      it("marks the toggle as inactive when hide mode is off", () => {
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.getAttribute("data-active")).toBe("false");
-      });
+    it("moves to the next visible workspace before hiding the active one", () => {
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
+      fireEvent.click(screen.getByTestId("workspace-hide-ws-1"));
 
-      it("marks the toggle as active when hide mode is on", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.getAttribute("data-active")).toBe("true");
-      });
-
-      it("exposes aria-pressed=false when hide mode is off", () => {
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.getAttribute("aria-pressed")).toBe("false");
-      });
-
-      it("exposes aria-pressed=true when hide mode is on", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.getAttribute("aria-pressed")).toBe("true");
-      });
-
-      it("applies the accent hover utility class when hide mode is on", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.className).toContain("hover-bg-accent");
-      });
-
-      it("applies the default hover utility class when hide mode is off", () => {
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        expect(toggle.className).toContain("hover-bg");
-        expect(toggle.className).not.toContain("hover-bg-accent");
-      });
-
-      it("uses a stronger accent background when hide mode is on", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        // Background should reference the accent-20 variable (stronger than
-        // the previous accent-12) so the button reads as the primary action.
-        expect(toggle.style.background).toContain("--accent-20");
-      });
-
-      it("uses an accent border when hide mode is on", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const toggle = screen.getByTestId("hide-mode-toggle");
-        // Border (any side) should reference --accent to highlight the
-        // active state beyond the fill alone.
-        const borderish = [
-          toggle.style.border,
-          toggle.style.borderColor,
-          toggle.style.borderTopColor,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        expect(borderish).toContain("--accent");
-      });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-1")).toBe(true);
+      expect(screen.queryByTestId("workspace-item-ws-1")).not.toBeInTheDocument();
     });
 
-    // Per-item eye buttons (workspace-eye-*, pane-eye-*) need a visually
-    // distinct color when the item is hidden so the user can tell at a
-    // glance that the item is currently hidden and the button will restore
-    // it. Previously the hidden state used --text-secondary, which combined
-    // with the row's 0.35 opacity fade to make the icon almost invisible.
-    describe("per-item eye button hidden-state color", () => {
-      it("workspace-eye uses --accent when the workspace is visible", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("workspace-eye-ws-2");
-        expect(eye.style.color).toContain("--accent");
-        expect(eye.style.color).not.toContain("--yellow");
-      });
+    it("disables hiding the last visible workspace", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setWorkspaceHidden("ws-3", true);
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
 
-      it("workspace-eye uses --yellow when the workspace is hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().toggleWorkspaceHidden("ws-2");
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("workspace-eye-ws-2");
-        expect(eye.style.color).toContain("--yellow");
-      });
+      const button = screen.getByTestId("workspace-hide-ws-1");
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "The last workspace cannot be hidden");
+    });
 
-      it("pane-eye uses --accent when the pane is visible", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        expect(eye.style.color).toContain("--accent");
-        expect(eye.style.color).not.toContain("--yellow");
-      });
+    it("shows an undo snackbar and restores with an idempotent set action", () => {
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("pane-row-pane-a"));
+      fireEvent.click(screen.getByTestId("pane-hide-pane-a"));
 
-      it("pane-eye uses --yellow when the pane is hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().togglePaneHidden("pane-a");
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        expect(eye.style.color).toContain("--yellow");
-      });
+      expect(screen.getByRole("status")).toHaveTextContent("hidden from the list");
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      fireEvent.click(screen.getByTestId("undo-snackbar-action"));
+      expect(useUiStore.getState().hiddenPaneIds.has("pane-a")).toBe(false);
+    });
 
-      // The hidden row as a whole fades to opacity 0.35 to recede into the
-      // background. The eye button must stay at full opacity so the user
-      // can still read it as the affordance to restore the item.
-      it("workspace-eye keeps full opacity even when the workspace is hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().toggleWorkspaceHidden("ws-2");
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("workspace-eye-ws-2");
-        // Opacity either unset or explicitly 1 — never the row-fade value.
-        const op = eye.style.opacity;
-        expect(op === "" || op === "1").toBe(true);
-      });
+    it("restore all atomically clears state and closes the shelf", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      useUiStore.getState().setEvictedPaneIds(new Set(["pane-a"]));
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
 
-      it("pane-eye keeps full opacity even when the pane is hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().togglePaneHidden("pane-a");
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        const op = eye.style.opacity;
-        expect(op === "" || op === "1").toBe(true);
-      });
+      fireEvent.click(screen.getByTestId("hidden-items-restore-all"));
+      expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(0);
+      expect(useUiStore.getState().hiddenPaneIds.size).toBe(0);
+      expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
+      expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
+    });
 
-      // Hover affordance: clicking the per-item eye is the whole point of
-      // hide mode, so the button itself must react to hover. Inline
-      // background/padding previously suppressed any CSS :hover feedback.
-      it("workspace-eye carries the row-eye-btn class so CSS hover applies", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("workspace-eye-ws-2");
-        expect(eye.className).toContain("row-eye-btn");
-      });
+    it("returns focus to the chip when the shelf is explicitly closed", async () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      render(<WorkspaceSelectorView />);
+      const chip = screen.getByTestId("hidden-items-chip");
+      fireEvent.click(chip);
+      fireEvent.click(screen.getByTestId("hidden-items-close"));
+      await waitFor(() => expect(chip).toHaveFocus());
+    });
 
-      it("pane-eye carries the row-eye-btn class so CSS hover applies", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        expect(eye.className).toContain("row-eye-btn");
-      });
+    it("moves focus to the next hidden row after a show-only restore", async () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setWorkspaceHidden("ws-3", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
 
-      it("workspace-eye does not pin inline background (lets CSS :hover win)", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("workspace-eye-ws-2");
-        expect(eye.style.background).toBe("");
-        expect(eye.style.backgroundColor).toBe("");
-      });
-
-      it("pane-eye does not pin inline background (lets CSS :hover win)", () => {
-        useUiStore.getState().toggleHideMode();
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        expect(eye.style.background).toBe("");
-        expect(eye.style.backgroundColor).toBe("");
-      });
-
-      // Structural contract: the fade that signals "this row is hidden" must
-      // live on a sibling wrapper, not on the row's outer element. Otherwise
-      // CSS opacity cascades down to the eye button and washes out the
-      // yellow cue the user relies on.
-      it("does not apply opacity to the workspace-item outer element when hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().toggleWorkspaceHidden("ws-2");
-        render(<WorkspaceSelectorView />);
-        const outer = screen.getByTestId("workspace-item-ws-2");
-        expect(outer.style.opacity === "" || outer.style.opacity === "1").toBe(true);
-      });
-
-      it("does not apply opacity to the pane row outer element when the pane is hidden", () => {
-        useUiStore.getState().toggleHideMode();
-        useUiStore.getState().togglePaneHidden("pane-a");
-        render(<WorkspaceSelectorView />);
-        const eye = screen.getByTestId("pane-eye-pane-a");
-        // Walk up from the eye button to its row container and check none of
-        // the ancestors up to (and including) the workspace-item root apply
-        // the 0.35 fade directly to the eye's line.
-        const row = eye.closest<HTMLElement>('[data-testid^="ws-row-2-"]') ?? null;
-        expect(row).not.toBeNull();
-        // Inside Row 2 the pane's own containing element must not be a
-        // direct opacity-0.35 ancestor of the eye button.
-        let node: HTMLElement | null = eye.parentElement;
-        while (node && node !== row) {
-          const op = node.style.opacity;
-          expect(op === "" || op === "1").toBe(true);
-          node = node.parentElement;
-        }
-      });
+      const first = screen.getByTestId("hidden-workspace-show-only-ws-2");
+      first.focus();
+      fireEvent.click(first);
+      await waitFor(() =>
+        expect(screen.getByTestId("hidden-workspace-primary-ws-3")).toHaveFocus(),
+      );
     });
   });
 

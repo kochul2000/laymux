@@ -138,6 +138,12 @@ pub struct FocusTerminalBody {
     pub id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HiddenItemsOpenBody {
+    pub open: bool,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -198,7 +204,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/v1/settings/profile-defaults"),
     ("PUT", "/api/v1/settings/profiles/{index}"),
     ("POST", "/api/v1/ui/notifications"),
-    ("POST", "/api/v1/ui/hide-mode/toggle"),
+    ("POST", "/api/v1/ui/hidden-items"),
     ("POST", "/api/v1/ui/hidden/workspace/{id}/toggle"),
     ("POST", "/api/v1/ui/hidden/pane/{id}/toggle"),
     ("*", "/mcp"),
@@ -207,6 +213,11 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use tower::ServiceExt;
 
     #[test]
     fn automation_request_serializes() {
@@ -333,5 +344,52 @@ mod tests {
         assert!(body.ids.is_none());
         assert!(body.before.is_none());
         assert!(body.read_only.is_none());
+    }
+
+    #[test]
+    fn hidden_items_open_body_requires_a_boolean() {
+        let body: HiddenItemsOpenBody = serde_json::from_str(r#"{"open":true}"#).unwrap();
+        assert!(body.open);
+        assert!(serde_json::from_str::<HiddenItemsOpenBody>(r#"{"open":"true"}"#).is_err());
+        assert!(serde_json::from_str::<HiddenItemsOpenBody>("{}").is_err());
+        assert!(serde_json::from_str::<HiddenItemsOpenBody>(r#"{"open":true,"extra":1}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn hidden_items_route_rejects_non_boolean_or_incomplete_json() {
+        async fn extract_hidden_items(Json(body): Json<HiddenItemsOpenBody>) -> StatusCode {
+            if body.open {
+                StatusCode::OK
+            } else {
+                StatusCode::NO_CONTENT
+            }
+        }
+
+        let app = Router::new().route("/api/v1/ui/hidden-items", post(extract_hidden_items));
+        for (body, expected) in [
+            (r#"{"open":true}"#, StatusCode::OK),
+            (r#"{"open":false}"#, StatusCode::NO_CONTENT),
+            (r#"{"open":"true"}"#, StatusCode::UNPROCESSABLE_ENTITY),
+            (r#"{}"#, StatusCode::UNPROCESSABLE_ENTITY),
+            (
+                r#"{"open":true,"extra":1}"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/v1/ui/hidden-items")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), expected, "body: {body}");
+        }
+    }
+
+    #[test]
+    fn hidden_items_route_replaces_hide_mode_toggle() {
+        assert!(REGISTERED_ROUTES.contains(&("POST", "/api/v1/ui/hidden-items")));
+        assert!(!REGISTERED_ROUTES.contains(&("POST", "/api/v1/ui/hide-mode/toggle")));
     }
 }

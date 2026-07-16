@@ -22,6 +22,7 @@ import type {
   Workspace,
   WorkspacePane,
 } from "@/stores/types";
+import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 
 interface HandlerResult {
   success: boolean;
@@ -861,12 +862,12 @@ const handlers: HandlerMap = {
 
   ui: {
     state: () => {
-      const { hideMode, hiddenPaneIds, hiddenWorkspaceIds, notificationPanelOpen } =
+      const { hiddenShelfOpen, hiddenPaneIds, hiddenWorkspaceIds, notificationPanelOpen } =
         useUiStore.getState();
       const { focusedDock, focusedDockPaneId } = useDockStore.getState();
       const { workspaceSelector } = useSettingsStore.getState();
       return ok({
-        hideMode,
+        hiddenShelfOpen,
         hiddenPaneIds: [...hiddenPaneIds],
         hiddenWorkspaceIds: [...hiddenWorkspaceIds],
         focusedDock,
@@ -908,21 +909,29 @@ const handlers: HandlerMap = {
       useUiStore.getState().setSettingsNavTarget(target);
       return ok({ navigated: true, section: target });
     },
-    toggleHideMode: () => {
-      useUiStore.getState().toggleHideMode();
-      return ok({ hideMode: useUiStore.getState().hideMode });
+    setHiddenItemsOpen: (p) => {
+      if (typeof p.open !== "boolean") return err("'open' must be a boolean");
+      useUiStore.getState().setHiddenShelfOpen(p.open);
+      return ok({ open: useUiStore.getState().hiddenShelfOpen });
     },
     toggleWorkspaceHidden: (p) => {
       const id = typeof p.id === "string" ? p.id : null;
       if (!id) return err("id required");
-      useUiStore.getState().toggleWorkspaceHidden(id);
-      return ok({ hidden: useUiStore.getState().hiddenWorkspaceIds.has(id) });
+      const hidden = !useUiStore.getState().hiddenWorkspaceIds.has(id);
+      const result = setWorkspaceHiddenWithFallback(id, hidden);
+      if (result.blocked) return err("workspace not found or last visible workspace");
+      return ok({ hidden: result.hidden, fallbackWorkspaceId: result.fallbackWorkspaceId });
     },
     togglePaneHidden: (p) => {
       const id = typeof p.id === "string" ? p.id : null;
       if (!id) return err("id required");
-      useUiStore.getState().togglePaneHidden(id);
-      return ok({ hidden: useUiStore.getState().hiddenPaneIds.has(id) });
+      const paneExists = useWorkspaceStore
+        .getState()
+        .workspaces.some((workspace) => workspace.panes.some((pane) => pane.id === id));
+      if (!paneExists) return err(`pane '${id}' not found`);
+      const hidden = !useUiStore.getState().hiddenPaneIds.has(id);
+      useUiStore.getState().setPaneHidden(id, hidden);
+      return ok({ hidden });
     },
     // Open the unified file viewer overlay (#277/#279). Backs the MCP
     // `open_file_viewer` tool and the REST endpoint.

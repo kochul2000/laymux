@@ -36,8 +36,8 @@ interface UiState {
   settingsNavTarget: string | null;
   /** Whether the app window is currently focused (not blurred to another app). */
   isAppFocused: boolean;
-  /** Whether hide mode is active in WorkspaceSelectorView (unified for workspaces + panes). */
-  hideMode: boolean;
+  /** Whether the non-persistent hidden-items shelf is open. */
+  hiddenShelfOpen: boolean;
   /** Set of pane IDs hidden in WorkspaceSelectorView. */
   hiddenPaneIds: Set<string>;
   /** Set of workspace IDs hidden in WorkspaceSelectorView. */
@@ -60,10 +60,13 @@ interface UiState {
   closeRemoteAccessModal: () => void;
   setSettingsNavTarget: (target: string | null) => void;
   setAppFocused: (focused: boolean) => void;
-  toggleHideMode: () => void;
-  exitHideMode: () => void;
+  setHiddenShelfOpen: (open: boolean) => void;
+  setPaneHidden: (paneId: string, hidden: boolean) => void;
+  setWorkspaceHidden: (workspaceId: string, hidden: boolean, paneIds?: string[]) => void;
+  restoreAllHidden: () => void;
+  pruneHiddenIds: (validWorkspaceIds: Set<string>, validPaneIds: Set<string>) => void;
   togglePaneHidden: (paneId: string) => void;
-  toggleWorkspaceHidden: (workspaceId: string) => void;
+  toggleWorkspaceHidden: (workspaceId: string, paneIds?: string[]) => void;
   /**
    * Replace the set of auto-evicted pane IDs. The reference is preserved when
    * the new set is value-equal so Zustand subscribers do not re-render
@@ -82,16 +85,17 @@ interface UiState {
     sourceWorkspaceId: string,
     newWorkspaceId: string,
     paneIdMap: Record<string, string>,
+    newWorkspaceWillBeActive?: boolean,
   ) => void;
 }
 
-export const useUiStore = create<UiState>()((set) => ({
+export const useUiStore = create<UiState>()((set, get) => ({
   settingsModalOpen: false,
   notificationPanelOpen: false,
   remoteAccessModalOpen: false,
   settingsNavTarget: null,
   isAppFocused: true,
-  hideMode: false,
+  hiddenShelfOpen: false,
   hiddenPaneIds: loadHiddenIds(HIDDEN_PANES_KEY),
   hiddenWorkspaceIds: loadHiddenIds(HIDDEN_WORKSPACES_KEY),
   evictedPaneIds: new Set(),
@@ -124,32 +128,130 @@ export const useUiStore = create<UiState>()((set) => ({
   closeRemoteAccessModal: () => set({ remoteAccessModalOpen: false }),
   setSettingsNavTarget: (target) => set({ settingsNavTarget: target }),
   setAppFocused: (focused) => set({ isAppFocused: focused }),
-  toggleHideMode: () => set((state) => ({ hideMode: !state.hideMode })),
-  exitHideMode: () => set({ hideMode: false }),
-  togglePaneHidden: (paneId) =>
+  setHiddenShelfOpen: (open) =>
+    set((state) => (state.hiddenShelfOpen === open ? state : { hiddenShelfOpen: open })),
+  setPaneHidden: (paneId, hidden) =>
     set((state) => {
-      const next = new Set(state.hiddenPaneIds);
-      if (next.has(paneId)) next.delete(paneId);
-      else next.add(paneId);
-      saveHiddenIds(HIDDEN_PANES_KEY, next);
-      return { hiddenPaneIds: next };
+      const currentlyHidden = state.hiddenPaneIds.has(paneId);
+      const needsEvictionClear = !hidden && state.evictedPaneIds.has(paneId);
+      const remainingHiddenPaneCount =
+        currentlyHidden && !hidden ? state.hiddenPaneIds.size - 1 : state.hiddenPaneIds.size;
+      const shouldCloseShelf =
+        !hidden &&
+        remainingHiddenPaneCount === 0 &&
+        state.hiddenWorkspaceIds.size === 0 &&
+        state.hiddenShelfOpen;
+      if (currentlyHidden === hidden && !needsEvictionClear && !shouldCloseShelf) return state;
+
+      let next = state.hiddenPaneIds;
+      if (currentlyHidden !== hidden) {
+        next = new Set(state.hiddenPaneIds);
+        if (hidden) next.add(paneId);
+        else next.delete(paneId);
+        saveHiddenIds(HIDDEN_PANES_KEY, next);
+      }
+
+      const patch: Partial<UiState> = {};
+      if (currentlyHidden !== hidden) patch.hiddenPaneIds = next;
+      if (needsEvictionClear) {
+        const nextEvicted = new Set(state.evictedPaneIds);
+        nextEvicted.delete(paneId);
+        patch.evictedPaneIds = nextEvicted;
+      }
+      if (shouldCloseShelf) patch.hiddenShelfOpen = false;
+      return patch;
     }),
-  toggleWorkspaceHidden: (workspaceId) =>
+  setWorkspaceHidden: (workspaceId, hidden, paneIds = []) =>
     set((state) => {
-      const next = new Set(state.hiddenWorkspaceIds);
-      if (next.has(workspaceId)) next.delete(workspaceId);
-      else next.add(workspaceId);
-      saveHiddenIds(HIDDEN_WORKSPACES_KEY, next);
-      return { hiddenWorkspaceIds: next };
+      const currentlyHidden = state.hiddenWorkspaceIds.has(workspaceId);
+      const paneIdSet = new Set(paneIds);
+      const needsEvictionClear =
+        !hidden && paneIds.some((paneId) => state.evictedPaneIds.has(paneId));
+      const remainingHiddenWorkspaceCount =
+        currentlyHidden && !hidden
+          ? state.hiddenWorkspaceIds.size - 1
+          : state.hiddenWorkspaceIds.size;
+      const shouldCloseShelf =
+        !hidden &&
+        remainingHiddenWorkspaceCount === 0 &&
+        state.hiddenPaneIds.size === 0 &&
+        state.hiddenShelfOpen;
+      if (currentlyHidden === hidden && !needsEvictionClear && !shouldCloseShelf) return state;
+
+      let next = state.hiddenWorkspaceIds;
+      if (currentlyHidden !== hidden) {
+        next = new Set(state.hiddenWorkspaceIds);
+        if (hidden) next.add(workspaceId);
+        else next.delete(workspaceId);
+        saveHiddenIds(HIDDEN_WORKSPACES_KEY, next);
+      }
+
+      const patch: Partial<UiState> = {};
+      if (currentlyHidden !== hidden) patch.hiddenWorkspaceIds = next;
+      if (needsEvictionClear) {
+        patch.evictedPaneIds = new Set(
+          [...state.evictedPaneIds].filter((paneId) => !paneIdSet.has(paneId)),
+        );
+      }
+      if (shouldCloseShelf) patch.hiddenShelfOpen = false;
+      return patch;
     }),
+  restoreAllHidden: () =>
+    set((state) => {
+      if (state.hiddenWorkspaceIds.size > 0) saveHiddenIds(HIDDEN_WORKSPACES_KEY, new Set());
+      if (state.hiddenPaneIds.size > 0) saveHiddenIds(HIDDEN_PANES_KEY, new Set());
+      if (
+        state.hiddenWorkspaceIds.size === 0 &&
+        state.hiddenPaneIds.size === 0 &&
+        state.evictedPaneIds.size === 0 &&
+        !state.hiddenShelfOpen
+      ) {
+        return state;
+      }
+      return {
+        hiddenWorkspaceIds: new Set<string>(),
+        hiddenPaneIds: new Set<string>(),
+        evictedPaneIds: new Set<string>(),
+        hiddenShelfOpen: false,
+      };
+    }),
+  pruneHiddenIds: (validWorkspaceIds, validPaneIds) =>
+    set((state) => {
+      const nextWorkspaces = new Set(
+        [...state.hiddenWorkspaceIds].filter((id) => validWorkspaceIds.has(id)),
+      );
+      const nextPanes = new Set([...state.hiddenPaneIds].filter((id) => validPaneIds.has(id)));
+      const nextEvicted = new Set([...state.evictedPaneIds].filter((id) => validPaneIds.has(id)));
+      const workspacesChanged = !setsEqual(state.hiddenWorkspaceIds, nextWorkspaces);
+      const panesChanged = !setsEqual(state.hiddenPaneIds, nextPanes);
+      const evictedChanged = !setsEqual(state.evictedPaneIds, nextEvicted);
+      const shouldCloseShelf = nextWorkspaces.size + nextPanes.size === 0 && state.hiddenShelfOpen;
+      if (!workspacesChanged && !panesChanged && !evictedChanged && !shouldCloseShelf) return state;
+      if (workspacesChanged) saveHiddenIds(HIDDEN_WORKSPACES_KEY, nextWorkspaces);
+      if (panesChanged) saveHiddenIds(HIDDEN_PANES_KEY, nextPanes);
+      return {
+        ...(workspacesChanged ? { hiddenWorkspaceIds: nextWorkspaces } : {}),
+        ...(panesChanged ? { hiddenPaneIds: nextPanes } : {}),
+        ...(evictedChanged ? { evictedPaneIds: nextEvicted } : {}),
+        ...(shouldCloseShelf ? { hiddenShelfOpen: false } : {}),
+      };
+    }),
+  togglePaneHidden: (paneId) => get().setPaneHidden(paneId, !get().hiddenPaneIds.has(paneId)),
+  toggleWorkspaceHidden: (workspaceId, paneIds = []) =>
+    get().setWorkspaceHidden(workspaceId, !get().hiddenWorkspaceIds.has(workspaceId), paneIds),
   setEvictedPaneIds: (ids) =>
     set((state) => (setsEqual(state.evictedPaneIds, ids) ? state : { evictedPaneIds: ids })),
-  propagateHiddenOnDuplicate: (sourceWorkspaceId, newWorkspaceId, paneIdMap) =>
+  propagateHiddenOnDuplicate: (
+    sourceWorkspaceId,
+    newWorkspaceId,
+    paneIdMap,
+    newWorkspaceWillBeActive = false,
+  ) =>
     set((state) => {
       const patch: Partial<UiState> = {};
 
       // Workspace-level flag: if the source is hidden, mirror onto the duplicate.
-      if (state.hiddenWorkspaceIds.has(sourceWorkspaceId)) {
+      if (state.hiddenWorkspaceIds.has(sourceWorkspaceId) && !newWorkspaceWillBeActive) {
         const nextWs = new Set(state.hiddenWorkspaceIds);
         nextWs.add(newWorkspaceId);
         saveHiddenIds(HIDDEN_WORKSPACES_KEY, nextWs);

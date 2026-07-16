@@ -69,12 +69,12 @@ Pane 이 많은 워크스페이스를 활성화하면 모든 `TerminalView` 가 
 
 #### 숨김 터미널 자동 종료 (issue #269)
 
-WorkspaceSelectorView의 hide mode로 숨긴 워크스페이스/Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 워크스페이스 숨김은 hide mode 외에도 워크스페이스 항목 hover 시 컨트롤 버튼(복제·이름변경·닫기 옆)의 눈 아이콘으로 즉시 토글할 수 있다(issue #321, 동일한 `uiStore.toggleWorkspaceHidden` 경로 재사용).
+WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스/Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 숨긴 항목은 selector 하단의 유효 개수 chip과 보관함에서 복원한다([ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md)).
 
 - **설정**: `workspaceSelector.hiddenAutoCloseSeconds`(초, `0` = 비활성화). Rust `WorkspaceSelectorSettings`와 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영구 저장된다.
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**
-- **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 5초 주기로 타이머를 평가하고, 타임아웃이 지난 Pane id를 `uiStore.evictedPaneIds`에 기록한다. 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
-- **정밀도**: 판정이 5초(`TICK_INTERVAL_MS`) 폴링으로 이루어지므로, 숨김 시작 스탬프와 만료 판정 모두 틱 경계에 정렬된다. 따라서 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).
+- **오케스트레이션**: `useHiddenTerminalAutoClose` 훅(AppLayout에서 1회 구동)이 hidden/active/settings raw state 변경을 즉시 평가하고, 5초 interval은 타임아웃 만료 판정에만 사용한다. 타임아웃이 지난 Pane id는 `uiStore.evictedPaneIds`에 기록하며 비활성화(`0`) 시 타이머와 기존 eviction을 즉시 클리어한다.
+- **정밀도**: 숨김 시작·해제 stamp는 raw state 전환을 구독해 즉시 기록·초기화한다. 만료 판정만 5초(`TICK_INTERVAL_MS`) tick 경계에서 수행하므로 실제 종료 시점은 설정한 타임아웃보다 최대 ~1틱(약 5초) 늦을 수 있다(리소스 절약이 목적이라 지연 자체는 무해). 또한 `Date.now()` 벽시계 기준이므로 시스템 절전→복귀 시 숨김 경과 시간을 한꺼번에 인식해 복귀 직후 evict될 수 있다(역시 의도된 동작).
 - **실제 종료 경로**: WorkspaceArea는 비활성 워크스페이스에서 `evictedPaneIds`에 포함된 Pane을 렌더 목록에서 제외한다 → 해당 `TerminalView`가 언마운트되며 기존 언마운트 클린업(`closeTerminalSession`)이 PTY를 정리한다. 다시 표시(un-hide)하면 eviction에서 빠지고 재마운트되어 새 PTY가 생성된다. 별도의 종료 IPC를 추가하지 않고 검증된 unmount→close 경로를 재사용한다.
 
 ---

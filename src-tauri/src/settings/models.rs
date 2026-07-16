@@ -792,7 +792,7 @@ pub struct WorkspaceSelectorSettings {
     /// Path ellipsis direction. "start" (default) shows the end of the path.
     #[serde(default)]
     pub path_ellipsis: PathEllipsisMode,
-    /// Seconds a pane/workspace must stay hidden (in hide mode) before its terminal (PTY)
+    /// Seconds a pane/workspace must stay hidden before its terminal (PTY)
     /// is automatically closed to save resources. 0 = disabled. See issue #269.
     #[serde(default)]
     pub hidden_auto_close_seconds: u64,
