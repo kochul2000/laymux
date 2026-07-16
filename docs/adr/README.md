@@ -55,8 +55,9 @@ ADR 이 필요한 대표 기준:
 ## 새 ADR 추가
 
 1. `0000-template.md` 를 다음 번호로 복사 (`NNNN-kebab-case-제목.md`, 4자리 zero-pad).
-2. Context / Decision / Consequences 작성, Status=Accepted.
+2. Context / Decision / Alternatives Considered / Consequences 작성. 리뷰 중에는 Status=Proposed, 방향 승인 후 머지할 때는 Status=Accepted.
 3. 이 표에 한 줄 추가.
-4. 기존 결정을 번복하면 → 새 ADR 작성 + 옛 ADR 의 Status 만 `Superseded by [NNNN]` 로 변경 (본문은 고치지 않는다).
+4. PR 직전 최신 `main` 기준으로 번호 충돌 여부를 다시 확인.
+5. 기존 결정을 번복하면 → 새 ADR 작성 + 옛 ADR 의 Status 만 `Superseded by [NNNN]` 로 변경 (본문은 고치지 않는다).
 
 > 초기 ADR(0001–0008)은 구 `ARCHITECTURE.md` 와 `CLAUDE.md` 의 설계 규칙에 흩어져 있던 결정들을 이전한 것이다. 각 ADR 의 `Source` 가 원 출처를 가리킨다.
