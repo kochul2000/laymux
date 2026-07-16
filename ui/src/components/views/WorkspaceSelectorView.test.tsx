@@ -1914,6 +1914,12 @@ describe("WorkspaceSelectorView", () => {
 
     it("offers immediate workspace and pane hide actions in the normal list", () => {
       render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
+      expect(screen.getByTestId("workspace-hide-ws-1")).toHaveAttribute(
+        "aria-label",
+        "Hide and move to the next workspace",
+      );
+
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
       expect(screen.getByTestId("workspace-hide-ws-2")).toHaveAttribute(
         "aria-label",
@@ -2099,6 +2105,41 @@ describe("WorkspaceSelectorView", () => {
       await waitFor(() =>
         expect(screen.getByTestId("hidden-workspace-primary-ws-3")).toHaveFocus(),
       );
+    });
+
+    it.each([
+      ["primary", "hidden-workspace-primary-ws-2"],
+      ["show-only", "hidden-workspace-show-only-ws-2"],
+    ])(
+      "moves keyboard focus into the workspace controls after restoring the last item via %s",
+      async (_, testId) => {
+        const user = userEvent.setup();
+        useUiStore.getState().setWorkspaceHidden("ws-2", true);
+        useUiStore.getState().setHiddenShelfOpen(true);
+        render(<WorkspaceSelectorView />);
+
+        screen.getByTestId(testId).focus();
+        await user.keyboard("{Enter}");
+
+        await waitFor(() => expect(screen.getByTestId("sort-order-toggle")).toHaveFocus());
+        expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("hidden-items-chip")).not.toBeInTheDocument();
+      },
+    );
+
+    it("moves keyboard focus into the workspace controls after restoring all items", async () => {
+      const user = userEvent.setup();
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
+
+      screen.getByTestId("hidden-items-restore-all").focus();
+      await user.keyboard("{Enter}");
+
+      await waitFor(() => expect(screen.getByTestId("sort-order-toggle")).toHaveFocus());
+      expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("hidden-items-chip")).not.toBeInTheDocument();
     });
   });
 

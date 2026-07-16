@@ -329,7 +329,7 @@ function WorkspaceItem({
               }}
               disabled={!canHideWorkspace}
               className="hidden-item-action-btn workspace-quick-hide hover-bg cursor-pointer"
-              aria-label={t("hiddenItems.hideFromList")}
+              aria-label={isActive ? t("hiddenItems.hideAndMove") : t("hiddenItems.hideFromList")}
               title={
                 !canHideWorkspace
                   ? t("hiddenItems.lastWorkspace")
@@ -1010,6 +1010,7 @@ export function WorkspaceSelectorView() {
   const [undoItem, setUndoItem] = useState<HiddenUndoItem | null>(null);
   const undoNonceRef = useRef(0);
   const hiddenChipRef = useRef<HTMLButtonElement>(null);
+  const sortOrderToggleRef = useRef<HTMLButtonElement>(null);
   const dismissUndo = useCallback(() => setUndoItem(null), []);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -1307,6 +1308,7 @@ export function WorkspaceSelectorView() {
             </button>
           )}
           <button
+            ref={sortOrderToggleRef}
             data-testid="sort-order-toggle"
             onClick={() =>
               setWorkspaceSelector({
@@ -1483,6 +1485,7 @@ export function WorkspaceSelectorView() {
           items={hiddenItems}
           paneDetailsById={paneDetailsById}
           onClose={handleCloseHiddenShelf}
+          onFocusAfterEmpty={() => sortOrderToggleRef.current?.focus()}
           onRestoreAll={() => {
             restoreAllHidden();
             setUndoItem(null);

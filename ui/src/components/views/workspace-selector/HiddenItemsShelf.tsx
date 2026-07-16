@@ -11,6 +11,7 @@ interface HiddenItemsShelfProps {
   items: DerivedHiddenItems;
   paneDetailsById: Map<string, HiddenPaneDetails>;
   onClose: () => void;
+  onFocusAfterEmpty: () => void;
   onRestoreAll: () => void;
   onRestoreWorkspace: (item: HiddenWorkspaceItem, open: boolean) => void;
   onRestorePane: (item: HiddenPaneItem, focus: boolean) => void;
@@ -34,6 +35,7 @@ export function HiddenItemsShelf({
   items,
   paneDetailsById,
   onClose,
+  onFocusAfterEmpty,
   onRestoreAll,
   onRestoreWorkspace,
   onRestorePane,
@@ -58,6 +60,10 @@ export function HiddenItemsShelf({
   }, [items.count]);
 
   const prepareFocusAfterRemoval = (key: string) => {
+    if (items.count === 1) {
+      onFocusAfterEmpty();
+      return;
+    }
     pendingFocusIndexRef.current = Math.max(0, rowKeys.indexOf(key));
   };
 
@@ -76,7 +82,10 @@ export function HiddenItemsShelf({
           type="button"
           data-testid="hidden-items-restore-all"
           className="hidden-shelf-text-button hover-bg"
-          onClick={onRestoreAll}
+          onClick={() => {
+            onFocusAfterEmpty();
+            onRestoreAll();
+          }}
         >
           {t("hiddenItems.restoreAll")}
         </button>
