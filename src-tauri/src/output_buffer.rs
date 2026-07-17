@@ -1,13 +1,31 @@
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 const DEFAULT_MAX_SIZE: usize = 1024 * 1024; // 1MB
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalOutputSlice {
+    pub seq_start: u64,
+    pub seq_end: u64,
+    pub data: Vec<u8>,
+}
+
+/// Cloneable handle to one terminal's sequenced output ring.
+///
+/// Clones share the same storage. This lets the legacy `output_buffers` table
+/// remain a cheap read index while the generation-scoped terminal output
+/// session owns the authoritative ring.
+#[derive(Clone)]
 pub struct TerminalOutputBuffer {
+    inner: Arc<Mutex<TerminalOutputBufferInner>>,
+}
+
+struct TerminalOutputBufferInner {
     buffer: VecDeque<u8>,
     max_size: usize,
     /// Timestamp of the last push (used for output activity detection).
-    pub last_output_at: Option<Instant>,
+    last_output_at: Option<Instant>,
     /// Monotonically increasing byte counter (total bytes ever pushed).
     /// Unlike `len()`, this never decreases when the ring buffer wraps.
     write_seq: u64,
@@ -16,39 +34,68 @@ pub struct TerminalOutputBuffer {
 impl TerminalOutputBuffer {
     pub fn new(max_size: usize) -> Self {
         Self {
-            buffer: VecDeque::with_capacity(max_size.min(8192)),
-            max_size,
-            last_output_at: None,
-            write_seq: 0,
+            inner: Arc::new(Mutex::new(TerminalOutputBufferInner {
+                buffer: VecDeque::with_capacity(max_size.min(8192)),
+                max_size,
+                last_output_at: None,
+                write_seq: 0,
+            })),
         }
+    }
+
+    fn lock_inner(&self) -> MutexGuard<'_, TerminalOutputBufferInner> {
+        // Output history is diagnostic/recoverable state. If a prior holder
+        // panicked, retain the bytes and sequence instead of cascading the
+        // poison through every output reader.
+        match self.inner.lock() {
+            Ok(inner) => inner,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    pub fn same_storage(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     pub fn push(&mut self, data: &[u8]) {
-        self.last_output_at = Some(Instant::now());
-        self.write_seq += data.len() as u64;
+        let _ = self.push_sequenced(data);
+    }
 
-        if data.len() >= self.max_size {
+    /// Append bytes and capture their exact range under one ring lock.
+    pub(crate) fn push_sequenced(&self, data: &[u8]) -> TerminalOutputSlice {
+        let mut inner = self.lock_inner();
+        let seq_start = inner.write_seq;
+        inner.last_output_at = Some(Instant::now());
+        inner.write_seq = inner.write_seq.saturating_add(data.len() as u64);
+
+        if data.len() >= inner.max_size {
             // Data larger than buffer: keep only the tail
-            self.buffer.clear();
-            let start = data.len() - self.max_size;
-            self.buffer.extend(&data[start..]);
-            return;
+            inner.buffer.clear();
+            let start = data.len() - inner.max_size;
+            inner.buffer.extend(&data[start..]);
+        } else {
+            let new_len = inner.buffer.len() + data.len();
+            if new_len > inner.max_size {
+                let to_remove = new_len - inner.max_size;
+                inner.buffer.drain(..to_remove);
+            }
+            inner.buffer.extend(data);
         }
 
-        let new_len = self.buffer.len() + data.len();
-        if new_len > self.max_size {
-            let to_remove = new_len - self.max_size;
-            self.buffer.drain(..to_remove);
+        TerminalOutputSlice {
+            seq_start,
+            seq_end: inner.write_seq,
+            data: data.to_vec(),
         }
-        self.buffer.extend(data);
     }
 
     pub fn recent_lines(&self, n: usize) -> String {
-        if self.buffer.is_empty() || n == 0 {
+        let inner = self.lock_inner();
+        if inner.buffer.is_empty() || n == 0 {
             return String::new();
         }
 
-        let bytes: Vec<u8> = self.buffer.iter().copied().collect();
+        let bytes: Vec<u8> = inner.buffer.iter().copied().collect();
         let text = String::from_utf8_lossy(&bytes);
         let lines: Vec<&str> = text.lines().collect();
 
@@ -60,41 +107,100 @@ impl TerminalOutputBuffer {
     }
 
     pub fn recent_bytes(&self, n: usize) -> Vec<u8> {
-        if n >= self.buffer.len() {
-            self.buffer.iter().copied().collect()
-        } else {
-            let start = self.buffer.len() - n;
-            self.buffer.iter().skip(start).copied().collect()
+        let inner = self.lock_inner();
+        recent_bytes_from(&inner, n)
+    }
+
+    /// Sequence number of the oldest byte still retained by the ring.
+    pub fn start_seq(&self) -> u64 {
+        let inner = self.lock_inner();
+        start_seq_from(&inner)
+    }
+
+    /// Return an exact, sequenced tail snapshot.
+    pub fn snapshot(&self, max_bytes: usize) -> TerminalOutputSlice {
+        let inner = self.lock_inner();
+        let data = recent_bytes_from(&inner, max_bytes);
+        let seq_end = inner.write_seq;
+        TerminalOutputSlice {
+            seq_start: seq_end.saturating_sub(data.len() as u64),
+            seq_end,
+            data,
         }
     }
 
     /// Monotonically increasing sequence number (total bytes ever pushed).
     pub fn write_seq(&self) -> u64 {
-        self.write_seq
+        self.lock_inner().write_seq
     }
 
     /// Return bytes written since `since_seq`, clamped to what the buffer still holds.
     pub fn bytes_since(&self, since_seq: u64) -> Vec<u8> {
-        let new_bytes = self.write_seq.saturating_sub(since_seq) as usize;
-        if new_bytes == 0 {
-            return Vec::new();
+        let inner = self.lock_inner();
+        bytes_since_from(&inner, since_seq)
+    }
+
+    /// Return every byte after `since_seq` with its exact sequence range.
+    ///
+    /// `None` means the caller fell behind the ring and must reattach from a
+    /// fresh snapshot. Silently clamping would hide an output gap and could
+    /// leave a terminal surface with stale protocol modes.
+    pub fn delta_since(&self, since_seq: u64) -> Option<TerminalOutputSlice> {
+        let inner = self.lock_inner();
+        if since_seq < start_seq_from(&inner) || since_seq > inner.write_seq {
+            return None;
         }
-        // If more bytes arrived than the buffer can hold, return everything we have
-        let available = new_bytes.min(self.buffer.len());
-        self.recent_bytes(available)
+        let data = bytes_since_from(&inner, since_seq);
+        Some(TerminalOutputSlice {
+            seq_start: since_seq,
+            seq_end: inner.write_seq,
+            data,
+        })
     }
 
     pub fn clear(&mut self) {
-        self.buffer.clear();
+        self.lock_inner().buffer.clear();
     }
 
     pub fn len(&self) -> usize {
-        self.buffer.len()
+        self.lock_inner().buffer.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
+        self.lock_inner().buffer.is_empty()
     }
+
+    pub fn last_output_at(&self) -> Option<Instant> {
+        self.lock_inner().last_output_at
+    }
+
+    #[cfg(test)]
+    fn max_size(&self) -> usize {
+        self.lock_inner().max_size
+    }
+}
+
+fn recent_bytes_from(inner: &TerminalOutputBufferInner, n: usize) -> Vec<u8> {
+    if n >= inner.buffer.len() {
+        inner.buffer.iter().copied().collect()
+    } else {
+        let start = inner.buffer.len() - n;
+        inner.buffer.iter().skip(start).copied().collect()
+    }
+}
+
+fn start_seq_from(inner: &TerminalOutputBufferInner) -> u64 {
+    inner.write_seq.saturating_sub(inner.buffer.len() as u64)
+}
+
+fn bytes_since_from(inner: &TerminalOutputBufferInner, since_seq: u64) -> Vec<u8> {
+    let new_bytes = inner.write_seq.saturating_sub(since_seq) as usize;
+    if new_bytes == 0 {
+        return Vec::new();
+    }
+    // If more bytes arrived than the buffer can hold, return everything we have
+    let available = new_bytes.min(inner.buffer.len());
+    recent_bytes_from(inner, available)
 }
 
 impl Default for TerminalOutputBuffer {
@@ -186,7 +292,7 @@ mod tests {
     #[test]
     fn default_uses_1mb() {
         let buf = TerminalOutputBuffer::default();
-        assert_eq!(buf.max_size, 1024 * 1024);
+        assert_eq!(buf.max_size(), 1024 * 1024);
     }
 
     #[test]
@@ -250,5 +356,35 @@ mod tests {
         let seq = buf.write_seq();
         let new = buf.bytes_since(seq);
         assert!(new.is_empty());
+    }
+
+    #[test]
+    fn snapshot_reports_the_exact_retained_sequence_range() {
+        let mut buf = TerminalOutputBuffer::new(5);
+        buf.push(b"abcdefgh");
+
+        let snapshot = buf.snapshot(3);
+
+        assert_eq!(snapshot.seq_start, 5);
+        assert_eq!(snapshot.seq_end, 8);
+        assert_eq!(snapshot.data, b"fgh");
+        assert_eq!(buf.start_seq(), 3);
+    }
+
+    #[test]
+    fn delta_since_rejects_a_sequence_gap_instead_of_clamping() {
+        let mut buf = TerminalOutputBuffer::new(5);
+        buf.push(b"abcdefgh");
+
+        assert!(buf.delta_since(2).is_none());
+        assert_eq!(
+            buf.delta_since(3).unwrap(),
+            TerminalOutputSlice {
+                seq_start: 3,
+                seq_end: 8,
+                data: b"defgh".to_vec(),
+            }
+        );
+        assert!(buf.delta_since(9).is_none());
     }
 }

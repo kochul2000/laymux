@@ -7,7 +7,13 @@
     },
     "terminal": {
       "pasteConfirm": "붙여넣을 텍스트가 {{bytes}}바이트입니다. 계속하시겠습니까?",
-      "scrollToBottom": "맨 아래로 이동"
+      "scrollToBottom": "맨 아래로 이동",
+      "inputMode": "터미널 입력 방식",
+      "directInput": "직접 입력",
+      "composerInput": "입력칸",
+      "composerEditor": "터미널 입력 초안",
+      "composerPlaceholder": "전송할 내용을 입력하세요",
+      "composerSend": "전송"
     },
     "remoteControl": {
       "title": "원격 제어 중",

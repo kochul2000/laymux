@@ -25,6 +25,26 @@ export interface ViewerStartupRequest {
 
 export type TerminalStartupRequest = string | ViewerStartupRequest;
 
+// React effect cleanup cannot await an async close before a replacement
+// effect starts. Serialize create/close for each terminal id so an unmount
+// during create becomes create→close, and an immediate remount becomes
+// create→close→create instead of racing two backend lifecycle commands.
+const terminalLifecycleChains = new Map<string, Promise<void>>();
+
+function enqueueTerminalLifecycle<T>(id: string, task: () => Promise<T>): Promise<T> {
+  const previous = terminalLifecycleChains.get(id) ?? Promise.resolve();
+  const result = previous.catch(() => undefined).then(task);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  terminalLifecycleChains.set(id, settled);
+  void settled.finally(() => {
+    if (terminalLifecycleChains.get(id) === settled) terminalLifecycleChains.delete(id);
+  });
+  return result;
+}
+
 export async function createTerminalSession(
   id: string,
   profile: string,
@@ -38,22 +58,51 @@ export async function createTerminalSession(
 ): Promise<TerminalSessionResult> {
   const startupCommandOverride = typeof startup === "string" ? startup : null;
   const viewer = startup && typeof startup === "object" ? startup : null;
-  return invoke("create_terminal_session", {
-    id,
-    profile,
-    cols,
-    rows,
-    syncGroup,
-    cwdSend,
-    cwdReceive,
-    cwd: cwd ?? null,
-    startupCommandOverride,
-    viewer,
-  });
+  return enqueueTerminalLifecycle(id, () =>
+    invoke("create_terminal_session", {
+      id,
+      profile,
+      cols,
+      rows,
+      syncGroup,
+      cwdSend,
+      cwdReceive,
+      cwd: cwd ?? null,
+      startupCommandOverride,
+      viewer,
+    }),
+  );
 }
 
 export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
+}
+
+export async function writeTerminalInput(id: string, text: string, submit: boolean): Promise<void> {
+  return invoke("write_terminal_input", { id, text, submit });
+}
+
+export interface TerminalAttachState {
+  version: number;
+  snapshotStartSeq: number;
+  snapshotSeq: number;
+  protocolRevision: number;
+  modes: { bracketedPaste: boolean };
+}
+
+export interface TerminalOutputAttachmentPayload {
+  state: TerminalAttachState;
+  snapshot: number[];
+}
+
+export interface TerminalOutputDeltaPayload {
+  seqStart: number;
+  seqEnd: number;
+  data: number[];
+}
+
+export async function attachTerminalOutput(id: string): Promise<TerminalOutputAttachmentPayload> {
+  return invoke("attach_terminal_output", { id });
 }
 
 export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
@@ -61,7 +110,7 @@ export async function resizeTerminal(id: string, cols: number, rows: number): Pr
 }
 
 export async function closeTerminalSession(id: string): Promise<void> {
-  return invoke("close_terminal_session", { id });
+  return enqueueTerminalLifecycle(id, () => invoke("close_terminal_session", { id }));
 }
 
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {
@@ -604,6 +653,16 @@ export function onTerminalOutput(
 ): Promise<UnlistenFn> {
   return listen<number[]>(`terminal-output-${terminalId}`, (event) => {
     callback(new Uint8Array(event.payload));
+  });
+}
+
+/** Listen for sequenced terminal output used by listener-before-attach surfaces. */
+export function onTerminalOutputV2(
+  terminalId: string,
+  callback: (delta: TerminalOutputDeltaPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalOutputDeltaPayload>(`terminal-output-v2-${terminalId}`, (event) => {
+    callback(event.payload);
   });
 }
 

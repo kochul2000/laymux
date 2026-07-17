@@ -13,7 +13,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  type TerminalSessionResult,
   createTerminalSession,
+  attachTerminalOutput,
+  writeTerminalInput,
   writeToTerminal,
   resizeTerminal,
   closeTerminalSession,
@@ -28,6 +31,7 @@ import {
   cloudDisconnect,
   setRemoteRuntimeAccess,
   onTerminalOutput,
+  onTerminalOutputV2,
   onOpenFile,
 } from "./tauri-api";
 
@@ -129,6 +133,34 @@ describe("tauri-api", () => {
     });
   });
 
+  describe("structured terminal input", () => {
+    it("invokes write_terminal_input with text and submit intent", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await writeTerminalInput("t1", "한글\nline", true);
+      expect(mockInvoke).toHaveBeenCalledWith("write_terminal_input", {
+        id: "t1",
+        text: "한글\nline",
+        submit: true,
+      });
+    });
+
+    it("requests one atomic output attachment", async () => {
+      const attachment = {
+        state: {
+          version: 1,
+          snapshotStartSeq: 3,
+          snapshotSeq: 5,
+          protocolRevision: 2,
+          modes: { bracketedPaste: true },
+        },
+        snapshot: [65, 66],
+      };
+      mockInvoke.mockResolvedValue(attachment);
+      await expect(attachTerminalOutput("t1")).resolves.toEqual(attachment);
+      expect(mockInvoke).toHaveBeenCalledWith("attach_terminal_output", { id: "t1" });
+    });
+  });
+
   describe("resizeTerminal", () => {
     it("invokes resize_terminal", async () => {
       mockInvoke.mockResolvedValue(undefined);
@@ -148,6 +180,58 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("close_terminal_session", {
         id: "t1",
       });
+    });
+
+    it("serializes create, unmount close, and immediate remount create per terminal id", async () => {
+      const calls: string[] = [];
+      let resolveFirstCreate!: (value: TerminalSessionResult) => void;
+      let resolveClose!: () => void;
+      const session: TerminalSessionResult = {
+        id: "lifecycle-1",
+        title: "Terminal",
+        config: {
+          profile: "PowerShell",
+          cols: 80,
+          rows: 24,
+          sync_group: "",
+          env: [],
+        },
+      };
+      mockInvoke.mockImplementation((command) => {
+        calls.push(command);
+        if (calls.length === 1) {
+          return new Promise((resolve) => {
+            resolveFirstCreate = resolve as (value: TerminalSessionResult) => void;
+          });
+        }
+        if (command === "close_terminal_session") {
+          return new Promise<void>((resolve) => {
+            resolveClose = resolve;
+          });
+        }
+        return Promise.resolve(session);
+      });
+
+      const firstCreate = createTerminalSession("lifecycle-1", "PowerShell", 80, 24, "");
+      await vi.waitFor(() => expect(calls).toEqual(["create_terminal_session"]));
+      const close = closeTerminalSession("lifecycle-1");
+      const replacement = createTerminalSession("lifecycle-1", "PowerShell", 80, 24, "");
+      await Promise.resolve();
+      expect(calls).toEqual(["create_terminal_session"]);
+
+      resolveFirstCreate(session);
+      await firstCreate;
+      await vi.waitFor(() =>
+        expect(calls).toEqual(["create_terminal_session", "close_terminal_session"]),
+      );
+      resolveClose();
+      await close;
+      await expect(replacement).resolves.toEqual(session);
+      expect(calls).toEqual([
+        "create_terminal_session",
+        "close_terminal_session",
+        "create_terminal_session",
+      ]);
     });
   });
 
@@ -270,6 +354,20 @@ describe("tauri-api", () => {
       await onTerminalOutput("t1", callback);
 
       expect(mockListen).toHaveBeenCalledWith("terminal-output-t1", expect.any(Function));
+    });
+
+    it("listens for versioned sequenced output events", async () => {
+      mockListen.mockResolvedValue(vi.fn());
+      const callback = vi.fn();
+      await onTerminalOutputV2("t1", callback);
+
+      expect(mockListen).toHaveBeenCalledWith("terminal-output-v2-t1", expect.any(Function));
+      const handler = mockListen.mock.calls.at(-1)?.[1] as
+        | ((event: { payload: unknown }) => void)
+        | undefined;
+      const payload = { seqStart: 4, seqEnd: 6, data: [65, 66] };
+      handler?.({ payload });
+      expect(callback).toHaveBeenCalledWith(payload);
     });
   });
 

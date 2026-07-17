@@ -233,6 +233,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
   { id: "terminal.copy", label: "터미널 복사", defaultKeys: "Ctrl+C", group: "Terminal" },
   { id: "terminal.paste", label: "터미널 붙여넣기", defaultKeys: "Ctrl+V", group: "Terminal" },
   {
+    id: "terminal.toggleInputMode",
+    label: "터미널 직접 입력/입력칸 전환",
+    defaultKeys: "Ctrl+Alt+M",
+    group: "Terminal",
+  },
+  {
     id: "terminal.zoomIn",
     label: "터미널 폰트 확대 (view 인스턴스 오버라이드)",
     defaultKeys: "Ctrl+=",

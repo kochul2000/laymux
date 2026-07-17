@@ -36,6 +36,11 @@ use crate::lock_ext::MutexExt;
 use crate::remote_server::{self, TunnelAuthorized};
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
+use crate::terminal_output::{
+    self, TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
+    TerminalOutputSubscribedAttachment, TerminalOutputSubscriptionEvent,
+    TERMINAL_OUTPUT_PROTOCOL_NAME, TERMINAL_OUTPUT_PROTOCOL_VERSION,
+};
 
 const CONTROL_STREAM_ID: &str = "0";
 const FRAME_READY: &str = "ready";
@@ -64,7 +69,6 @@ const HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTPUT_INITIAL_BYTES: usize = 64 * 1024;
-const OUTPUT_POLL_MS: u64 = 50;
 const LEASE_CHECK_MS: u64 = 500;
 const STREAM_DATA_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_BACKOFF_SECONDS: u64 = 30;
@@ -213,6 +217,60 @@ impl StreamErrorPayload {
             code: code.into(),
             retryable,
         }
+    }
+}
+
+/// Metadata attached to one Cloud `stream.data` terminal-output frame.
+///
+/// The Cloud relay turns this object into the common browser header/binary pair.
+/// Attach state lives on `websocket.accept`, so data frames intentionally carry
+/// only the exact byte range represented by their base64 payload.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct TunnelTerminalOutputMetadata {
+    version: u8,
+    phase: TerminalOutputPhase,
+    seq_start: u64,
+    seq_end: u64,
+    byte_length: usize,
+}
+
+impl TunnelTerminalOutputMetadata {
+    fn snapshot(attachment: &TerminalOutputAttachment) -> Self {
+        Self {
+            version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+            phase: TerminalOutputPhase::Snapshot,
+            seq_start: attachment.state.snapshot_start_seq,
+            seq_end: attachment.state.snapshot_seq,
+            byte_length: attachment.snapshot.len(),
+        }
+    }
+
+    fn delta(delta: &TerminalOutputDelta) -> Self {
+        Self {
+            version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+            phase: TerminalOutputPhase::Delta,
+            seq_start: delta.seq_start,
+            seq_end: delta.seq_end,
+            byte_length: delta.data.len(),
+        }
+    }
+
+    fn validate(self, data: &[u8]) -> Result<(), AppError> {
+        let range_length = self
+            .seq_end
+            .checked_sub(self.seq_start)
+            .ok_or_else(|| AppError::Other("terminal output sequence range is reversed".into()))?;
+        let data_length = u64::try_from(data.len())
+            .map_err(|_| AppError::Other("terminal output payload is too large".into()))?;
+        if range_length != data_length || self.byte_length != data.len() {
+            return Err(AppError::Other(format!(
+                "terminal output metadata mismatch: range={range_length}, byteLength={}, actual={}",
+                self.byte_length,
+                data.len()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1282,9 +1340,9 @@ async fn stream_terminal_output_over_tunnel(
         }
     }
 
-    let (initial, mut seq) = match terminal_output_snapshot(&app_state, &terminal_id) {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => {
+    let subscribed = match terminal_output_subscription(&app_state, &terminal_id) {
+        Ok(subscribed) => subscribed,
+        Err(AppError::SessionNotFound(_)) => {
             let _ = send_stream_error(
                 &outbound_tx,
                 &stream_id,
@@ -1303,6 +1361,9 @@ async fn stream_terminal_output_over_tunnel(
             return;
         }
     };
+    let attachment = subscribed.attachment;
+    let generation = subscribed.generation;
+    let mut subscription = subscribed.subscription;
 
     // Handshake: the server holds the output stream pending a
     // `stream.open{kind:"websocket.accept"}` on the same stream_id. Without it
@@ -1315,7 +1376,11 @@ async fn stream_terminal_output_over_tunnel(
         TunnelFrame::new(
             &stream_id,
             FRAME_STREAM_OPEN,
-            json!({ "kind": KIND_WEBSOCKET_ACCEPT }),
+            json!({
+                "kind": KIND_WEBSOCKET_ACCEPT,
+                "outputProtocol": TERMINAL_OUTPUT_PROTOCOL_NAME,
+                "attachState": &attachment.state,
+            }),
         ),
     )
     .await
@@ -1324,43 +1389,81 @@ async fn stream_terminal_output_over_tunnel(
         return;
     }
 
-    if !initial.is_empty()
-        && send_stream_data(&outbound_tx, &stream_id, &initial)
-            .await
-            .is_err()
+    if send_terminal_output_data(
+        &outbound_tx,
+        &stream_id,
+        TunnelTerminalOutputMetadata::snapshot(&attachment),
+        &attachment.snapshot,
+    )
+    .await
+    .is_err()
     {
         return;
     }
 
-    let mut output_interval = interval(Duration::from_millis(OUTPUT_POLL_MS));
     let mut lease_check = interval(Duration::from_millis(LEASE_CHECK_MS));
     let mut sent_error = false;
     loop {
         tokio::select! {
-            _ = output_interval.tick() => {
-                let bytes = match terminal_output_delta(&app_state, &terminal_id, &mut seq) {
-                    Ok(Some(bytes)) => bytes,
-                    Ok(None) => {
+            event = subscription.recv() => {
+                let delta = match event {
+                    Some(TerminalOutputSubscriptionEvent::Delta(delta)) => delta,
+                    Some(TerminalOutputSubscriptionEvent::Retired { generation: retired_generation }) => {
                         let _ = send_stream_error(
                             &outbound_tx,
                             &stream_id,
-                            StreamErrorPayload::new("terminal_not_found", "terminal session not found", false),
+                            StreamErrorPayload::new(
+                                "terminal_not_found",
+                                format!(
+                                    "terminal output generation {retired_generation} was retired"
+                                ),
+                                false,
+                            ),
                         ).await;
                         sent_error = true;
                         break;
                     }
-                    Err(error) => {
+                    Some(TerminalOutputSubscriptionEvent::Gap {
+                        generation: gap_generation,
+                        expected_seq,
+                        retained_start_seq,
+                        current_seq,
+                    }) => {
                         let _ = send_stream_error(
                             &outbound_tx,
                             &stream_id,
-                            StreamErrorPayload::new("lock_failed", error.to_string(), false),
+                            StreamErrorPayload::new(
+                                "terminal_output_gap",
+                                format!(
+                                    "terminal output generation {gap_generation} gap at seq {expected_seq}; retained range is [{retained_start_seq}, {current_seq})"
+                                ),
+                                true,
+                            ),
+                        ).await;
+                        sent_error = true;
+                        break;
+                    }
+                    None => {
+                        let _ = send_stream_error(
+                            &outbound_tx,
+                            &stream_id,
+                            StreamErrorPayload::new(
+                                "terminal_not_found",
+                                format!("terminal output generation {generation} stopped"),
+                                false,
+                            ),
                         ).await;
                         sent_error = true;
                         break;
                     }
                 };
 
-                if !bytes.is_empty() && send_stream_data(&outbound_tx, &stream_id, &bytes).await.is_err() {
+                if send_terminal_output_data(
+                    &outbound_tx,
+                    &stream_id,
+                    TunnelTerminalOutputMetadata::delta(&delta),
+                    &delta.data,
+                ).await.is_err() {
                     break;
                 }
             }
@@ -1400,31 +1503,22 @@ async fn stream_terminal_output_over_tunnel(
     }
 }
 
-fn terminal_output_snapshot(
+fn terminal_output_subscription(
     app_state: &AppState,
     terminal_id: &str,
-) -> Result<Option<(Vec<u8>, u64)>, AppError> {
-    let buffers = app_state.output_buffers.lock_or_err()?;
-    Ok(buffers.get(terminal_id).map(|buffer| {
-        (
-            buffer.recent_bytes(OUTPUT_INITIAL_BYTES),
-            buffer.write_seq(),
-        )
-    }))
-}
-
-fn terminal_output_delta(
-    app_state: &AppState,
-    terminal_id: &str,
-    seq: &mut u64,
-) -> Result<Option<Vec<u8>>, AppError> {
-    let buffers = app_state.output_buffers.lock_or_err()?;
-    let Some(buffer) = buffers.get(terminal_id) else {
-        return Ok(None);
-    };
-    let bytes = buffer.bytes_since(*seq);
-    *seq = buffer.write_seq();
-    Ok(Some(bytes))
+) -> Result<TerminalOutputSubscribedAttachment, AppError> {
+    terminal_output::attach_and_subscribe_terminal_output(
+        &app_state.terminal_protocol_states,
+        terminal_id,
+        OUTPUT_INITIAL_BYTES,
+    )
+    .map_err(|error| {
+        if error == format!("Session '{terminal_id}' not found") {
+            AppError::SessionNotFound(terminal_id.into())
+        } else {
+            AppError::Other(error)
+        }
+    })
 }
 
 fn remote_output_timeout_seconds(app_state: &AppState) -> u64 {
@@ -1457,6 +1551,64 @@ async fn send_stream_data(
             json!({
                 "encoding": ENCODING_BASE64,
                 "data": BASE64.encode(data),
+            }),
+        ),
+    )
+    .await
+}
+
+async fn send_terminal_output_data(
+    outbound_tx: &OutboundSender,
+    stream_id: &str,
+    metadata: TunnelTerminalOutputMetadata,
+    data: &[u8],
+) -> Result<(), AppError> {
+    metadata.validate(data)?;
+    if data.is_empty() && metadata.phase == TerminalOutputPhase::Delta {
+        return Ok(());
+    }
+
+    // Empty snapshots are significant: they establish sequence zero and clear a
+    // stale browser surface. Unlike an idle delta, they still get one data frame.
+    if data.is_empty() {
+        return send_terminal_output_chunk(outbound_tx, stream_id, metadata, data).await;
+    }
+
+    for (index, chunk) in data.chunks(STREAM_DATA_CHUNK_BYTES).enumerate() {
+        let offset = index
+            .checked_mul(STREAM_DATA_CHUNK_BYTES)
+            .ok_or_else(|| AppError::Other("terminal output chunk offset overflow".into()))?;
+        let offset = u64::try_from(offset)
+            .map_err(|_| AppError::Other("terminal output chunk offset is too large".into()))?;
+        let chunk_len = u64::try_from(chunk.len())
+            .map_err(|_| AppError::Other("terminal output chunk is too large".into()))?;
+        let chunk_metadata = TunnelTerminalOutputMetadata {
+            seq_start: metadata.seq_start + offset,
+            seq_end: metadata.seq_start + offset + chunk_len,
+            byte_length: chunk.len(),
+            ..metadata
+        };
+        send_terminal_output_chunk(outbound_tx, stream_id, chunk_metadata, chunk).await?;
+    }
+    Ok(())
+}
+
+async fn send_terminal_output_chunk(
+    outbound_tx: &OutboundSender,
+    stream_id: &str,
+    metadata: TunnelTerminalOutputMetadata,
+    data: &[u8],
+) -> Result<(), AppError> {
+    metadata.validate(data)?;
+    send_frame(
+        outbound_tx,
+        TunnelFrame::new(
+            stream_id,
+            FRAME_STREAM_DATA,
+            json!({
+                "encoding": ENCODING_BASE64,
+                "data": BASE64.encode(data),
+                "output": metadata,
             }),
         ),
     )
@@ -1615,7 +1767,6 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
-    use crate::output_buffer::TerminalOutputBuffer;
     use crate::settings::{save_settings, Settings};
 
     struct EnvVarGuard {
@@ -1685,13 +1836,21 @@ mod tests {
         assert_eq!(normalize_remote_output_timeout_seconds(Some(60)), 60);
     }
 
-    fn state_with_terminal_output_and_lease(lease_id: &str) -> Arc<AppState> {
+    fn state_with_terminal_output_capacity_and_lease(
+        lease_id: &str,
+        _capacity: usize,
+        initial: &[u8],
+    ) -> Arc<AppState> {
         let state = Arc::new(AppState::new());
-        let mut buffer = TerminalOutputBuffer::default();
-        buffer.push(b"initial output");
-        {
-            let mut buffers = state.output_buffers.lock_or_err().unwrap();
-            buffers.insert("term-1".into(), buffer);
+        let registration = crate::terminal_output::register_terminal_output_session(
+            &state.terminal_protocol_states,
+            &state.output_buffers,
+            "term-1",
+        )
+        .unwrap();
+        let session = registration.commit().unwrap();
+        if !initial.is_empty() {
+            session.record_output(initial).unwrap();
         }
         {
             let mut control = state.remote_control.lock_or_err().unwrap();
@@ -1703,6 +1862,18 @@ mod tests {
             });
         }
         state
+    }
+
+    fn state_with_terminal_output_and_lease(lease_id: &str) -> Arc<AppState> {
+        state_with_terminal_output_capacity_and_lease(lease_id, 1024 * 1024, b"initial output")
+    }
+
+    fn output_metadata(frame: &TunnelFrame) -> &Value {
+        frame
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("output"))
+            .expect("terminal stream.data must carry output metadata")
     }
 
     async fn spawn_output_stream(
@@ -1823,6 +1994,20 @@ mod tests {
         );
 
         assert_eq!(decode_stream_data(&frame).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn terminal_output_metadata_rejects_a_byte_range_mismatch() {
+        let metadata = TunnelTerminalOutputMetadata {
+            version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+            phase: TerminalOutputPhase::Delta,
+            seq_start: 10,
+            seq_end: 14,
+            byte_length: 3,
+        };
+
+        let error = metadata.validate(b"abc").unwrap_err();
+        assert!(error.to_string().contains("metadata mismatch"));
     }
 
     #[test]
@@ -2009,6 +2194,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some(KIND_WEBSOCKET_ACCEPT)
         );
+        let accept = first.payload.as_ref().unwrap();
+        assert_eq!(accept["outputProtocol"], TERMINAL_OUTPUT_PROTOCOL_NAME);
+        assert_eq!(accept["attachState"]["version"], 1);
+        assert_eq!(accept["attachState"]["snapshotStartSeq"], 0);
+        assert_eq!(accept["attachState"]["snapshotSeq"], 14);
+        assert_eq!(accept["attachState"]["modes"]["bracketedPaste"], false);
 
         let second = timeout(Duration::from_secs(1), rx.recv())
             .await
@@ -2017,6 +2208,12 @@ mod tests {
         assert_eq!(second.stream_id, "srv-output");
         assert_eq!(second.frame_type, FRAME_STREAM_DATA);
         assert_eq!(decode_stream_data(&second).unwrap(), b"initial output");
+        let output = output_metadata(&second);
+        assert_eq!(output["version"], 1);
+        assert_eq!(output["phase"], "snapshot");
+        assert_eq!(output["seqStart"], 0);
+        assert_eq!(output["seqEnd"], 14);
+        assert_eq!(output["byteLength"], 14);
 
         shutdown_tx.send(true).unwrap();
         timeout(Duration::from_secs(1), join)
@@ -2049,6 +2246,14 @@ mod tests {
                 .and_then(Value::as_str),
             Some(KIND_WEBSOCKET_ACCEPT)
         );
+        assert_eq!(
+            first.payload.as_ref().unwrap()["outputProtocol"],
+            TERMINAL_OUTPUT_PROTOCOL_NAME
+        );
+        assert_eq!(
+            first.payload.as_ref().unwrap()["attachState"]["snapshotSeq"],
+            14
+        );
 
         let second = timeout(Duration::from_secs(1), rx.recv())
             .await
@@ -2057,12 +2262,184 @@ mod tests {
         assert_eq!(second.stream_id, "srv-output");
         assert_eq!(second.frame_type, FRAME_STREAM_DATA);
         assert_eq!(decode_stream_data(&second).unwrap(), b"initial output");
+        assert_eq!(output_metadata(&second)["phase"], "snapshot");
 
         shutdown_tx.send(true).unwrap();
         timeout(Duration::from_secs(1), join)
             .await
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_sends_exact_delta_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let (mut rx, shutdown_tx, join) = spawn_output_stream(Arc::clone(&state), "lease-1").await;
+
+        let _accept = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let _snapshot = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let session = crate::terminal_output::terminal_output_session_for(
+            &state.terminal_protocol_states,
+            "term-1",
+        )
+        .unwrap()
+        .unwrap();
+        session.record_output(b"delta").unwrap();
+
+        let delta = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delta.frame_type, FRAME_STREAM_DATA);
+        assert_eq!(decode_stream_data(&delta).unwrap(), b"delta");
+        let output = output_metadata(&delta);
+        assert_eq!(output["version"], 1);
+        assert_eq!(output["phase"], "delta");
+        assert_eq!(output["seqStart"], 14);
+        assert_eq!(output["seqEnd"], 19);
+        assert_eq!(output["byteLength"], 5);
+
+        shutdown_tx.send(true).unwrap();
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_accept_captures_protocol_mode_with_snapshot_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let output = b"\x1b[?2004hhello";
+        let state = state_with_terminal_output_capacity_and_lease("lease-1", 64, output);
+        let (mut rx, shutdown_tx, join) = spawn_output_stream(state, "lease-1").await;
+
+        let accept = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let attach = &accept.payload.as_ref().unwrap()["attachState"];
+        assert_eq!(attach["snapshotStartSeq"], 0);
+        assert_eq!(attach["snapshotSeq"], output.len());
+        assert_eq!(attach["protocolRevision"], 1);
+        assert_eq!(attach["modes"]["bracketedPaste"], true);
+
+        let snapshot = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(decode_stream_data(&snapshot).unwrap(), output);
+        let metadata = output_metadata(&snapshot);
+        assert_eq!(metadata["seqStart"], attach["snapshotStartSeq"]);
+        assert_eq!(metadata["seqEnd"], attach["snapshotSeq"]);
+        assert_eq!(metadata["byteLength"], output.len());
+
+        shutdown_tx.send(true).unwrap();
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_sends_empty_snapshot_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let state = state_with_terminal_output_capacity_and_lease("lease-1", 8, b"");
+        let (mut rx, shutdown_tx, join) = spawn_output_stream(state, "lease-1").await;
+
+        let accept = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(accept.frame_type, FRAME_STREAM_OPEN);
+        assert_eq!(
+            accept.payload.as_ref().unwrap()["attachState"]["snapshotSeq"],
+            0
+        );
+
+        let snapshot = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.frame_type, FRAME_STREAM_DATA);
+        assert!(decode_stream_data(&snapshot).unwrap().is_empty());
+        let output = output_metadata(&snapshot);
+        assert_eq!(output["phase"], "snapshot");
+        assert_eq!(output["seqStart"], 0);
+        assert_eq!(output["seqEnd"], 0);
+        assert_eq!(output["byteLength"], 0);
+
+        shutdown_tx.send(true).unwrap();
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn terminal_output_stream_reports_gap_instead_of_clamping() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+
+        save_remote_enabled(true);
+        let state = state_with_terminal_output_capacity_and_lease("lease-1", 5, b"abcde");
+        let (mut rx, _shutdown_tx, join) = spawn_output_stream(Arc::clone(&state), "lease-1").await;
+
+        let _accept = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        // Keep the outbound queue backpressured after the accept. Once the
+        // bounded subscriber queue fills, the generation must fail with an
+        // explicit gap instead of silently polling a clamped ring suffix.
+        let session = crate::terminal_output::terminal_output_session_for(
+            &state.terminal_protocol_states,
+            "term-1",
+        )
+        .unwrap()
+        .unwrap();
+        for _ in 0..512 {
+            session.record_output(b"x").unwrap();
+        }
+
+        let error = timeout(Duration::from_secs(1), async {
+            loop {
+                let frame = rx.recv().await.expect("gap frame");
+                if frame.frame_type == FRAME_STREAM_ERROR {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
+        assert_eq!(error_code(&error), Some("terminal_output_gap"));
+
+        timeout(Duration::from_secs(1), join)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(rx.recv().await.is_none());
     }
 
     #[tokio::test]

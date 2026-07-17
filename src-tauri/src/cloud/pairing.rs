@@ -523,6 +523,8 @@ pub(crate) fn persist_pairing_result(
     settings.remote.cloud_tunnel_url = Some(complete.tunnel_url);
     settings.remote.cloud_server_base_url = Some(complete.server_base_url);
     save_settings(&settings).map_err(AppError::Other)?;
+    crate::remote_server::update_persistent_cloud_settings_snapshot(state, &settings.remote)
+        .map_err(AppError::Other)?;
 
     let status = CloudStatus {
         connected: false,
@@ -835,6 +837,18 @@ mod tests {
         );
         assert_eq!(
             settings.remote.cloud_server_base_url.as_deref(),
+            Some("https://relay.example.test")
+        );
+        let effective = crate::remote_server::effective_remote_settings(&state).unwrap();
+        assert!(effective.cloud_enabled);
+        assert_eq!(effective.relay_base_url, "http://127.0.0.1:8000");
+        assert_eq!(effective.cloud_instance_id.as_deref(), Some("instance-1"));
+        assert_eq!(
+            effective.cloud_tunnel_url.as_deref(),
+            Some("wss://relay.example.test/tunnel/instance-1")
+        );
+        assert_eq!(
+            effective.cloud_server_base_url.as_deref(),
             Some("https://relay.example.test")
         );
         assert_eq!(

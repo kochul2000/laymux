@@ -140,9 +140,24 @@ pub fn load_settings_validated() -> Result<crate::settings::SettingsLoadResult, 
 }
 
 #[tauri::command]
-pub fn reset_settings() -> Result<crate::settings::Settings, String> {
+pub fn reset_settings(
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<crate::settings::Settings, String> {
     let default_settings = crate::settings::Settings::default();
     crate::settings::save_settings(&default_settings)?;
+    let enabled_change = crate::remote_server::update_persistent_remote_settings(
+        &state,
+        &app,
+        default_settings.remote.clone(),
+    )?;
+    if let Some(enabled) = enabled_change {
+        crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
+            state.inner().clone(),
+            app,
+            enabled,
+        );
+    }
     Ok(default_settings)
 }
 
@@ -152,8 +167,22 @@ pub fn get_settings_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn save_settings(settings: crate::settings::Settings) -> Result<(), String> {
-    crate::settings::save_settings(&settings)
+pub fn save_settings(
+    settings: crate::settings::Settings,
+    state: State<Arc<AppState>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::settings::save_settings(&settings)?;
+    let enabled_change =
+        crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
+    if let Some(enabled) = enabled_change {
+        crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
+            state.inner().clone(),
+            app,
+            enabled,
+        );
+    }
+    Ok(())
 }
 
 #[tauri::command]

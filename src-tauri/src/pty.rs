@@ -1,13 +1,15 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::process::headless_command;
+use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::terminal::TerminalSession;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
@@ -63,25 +65,43 @@ fn is_wsl_command(cmd_path: &str) -> bool {
 /// ConPTY on Windows can silently truncate a single oversized `write_all()`
 /// call, so chunking prevents paste data loss. This is a free function so that
 /// both [`PtyHandle::write`] and unit tests exercise the same code path.
+#[cfg(test)]
 fn chunked_write_to(writer: &mut dyn Write, data: &[u8]) -> Result<(), String> {
+    chunked_write_to_guarded(writer, data, || true)
+}
+
+pub(crate) fn chunked_write_to_guarded(
+    writer: &mut dyn Write,
+    data: &[u8],
+    mut is_current_owner: impl FnMut() -> bool,
+) -> Result<(), String> {
     for chunk in data.chunks(PTY_WRITE_CHUNK_SIZE) {
+        if !is_current_owner() {
+            return Err("terminal controller ownership changed during input".into());
+        }
         writer
             .write_all(chunk)
             .map_err(|e| format!("Write error: {e}"))?;
         writer.flush().map_err(|e| format!("Flush error: {e}"))?;
+        // A synchronous OS write cannot recall an already accepted prefix.
+        // Revalidate afterwards so the control worker reports that ambiguity
+        // and never starts a later chunk for the obsolete owner.
+        if !is_current_owner() {
+            return Err("terminal controller ownership changed during input".into());
+        }
     }
     Ok(())
 }
 
 /// Handle to a running PTY process, providing write and resize capabilities.
+#[derive(Clone)]
 pub struct PtyHandle {
-    /// `Option` so `terminate()` can `.take()` the inner writer and actually
-    /// drop it. Plain `drop(guard)` on a `MutexGuard` only releases the lock;
-    /// the underlying `Box<dyn Write + Send>` stays alive inside the `Arc`.
-    writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    /// Same `Option` trick as `writer` — dropping the master is what closes
-    /// the (Con)PTY device and delivers HUP to the shell.
-    master: Arc<Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>>,
+    /// Owns the writer on one terminal-specific FIFO thread.
+    control: Arc<PtyControlWorker>,
+    /// Independent lifecycle handle: it is never protected by the writer
+    /// worker, so cancellation can close the PTY even when stdin is blocked.
+    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
+    child_killer: Arc<Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>>,
     /// PID of the direct child process spawned by the PTY (`None` if the
     /// platform does not expose process IDs, e.g. serial connections).
     /// Used for Claude Code session matching via process tree traversal.
@@ -93,6 +113,7 @@ pub struct PtyHandle {
     /// handle is closed). Lets `terminate()` safely skip taskkill when the
     /// child has already exited on its own.
     child_exited: Arc<AtomicBool>,
+    input_faulted: Arc<AtomicBool>,
 }
 
 impl PtyHandle {
@@ -102,13 +123,25 @@ impl PtyHandle {
     const GRACEFUL_SHUTDOWN_TOTAL: Duration = Duration::from_millis(150);
     const GRACEFUL_SHUTDOWN_STEP: Duration = Duration::from_millis(10);
 
+    #[cfg(test)]
+    pub(crate) fn from_test_writer(writer: Box<dyn Write + Send>) -> Self {
+        let master = Arc::new(Mutex::new(None));
+        Self {
+            control: PtyControlWorker::spawn(writer, Arc::clone(&master))
+                .expect("test PTY control worker"),
+            master,
+            child_killer: Arc::new(Mutex::new(None)),
+            child_pid: None,
+            child_exited: Arc::new(AtomicBool::new(true)),
+            input_faulted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Close the PTY master and terminate the direct child process tree if
     /// possible. Order of operations:
     ///
-    /// 1. Take the inner writer and master out of their `Mutex<Option<_>>`
-    ///    slots so the `Box`es actually drop → shell stdin sees EOF and the
-    ///    ConPTY device closes (HUP on Unix), allowing shutdown traps/exit
-    ///    hooks to run.
+    /// 1. Close/cancel the input worker, then drop the independent master so
+    ///    ConPTY/HUP shutdown does not need the writer mutex.
     /// 2. Poll `child_exited` briefly so a graceful exit short-circuits the
     ///    taskkill path entirely.
     /// 3. If the child is still alive, `taskkill /T /F` the whole tree. Safe
@@ -116,36 +149,13 @@ impl PtyHandle {
     ///    handle (keeping the PID reserved) until `child_exited` flips, and
     ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
-        if let Ok(mut guard) = self.writer.lock_or_err() {
-            let _ = guard.take();
-        }
-        if let Ok(mut guard) = self.master.lock_or_err() {
-            let _ = guard.take();
-        }
-
-        let mut elapsed = Duration::ZERO;
-        while elapsed < Self::GRACEFUL_SHUTDOWN_TOTAL {
-            if self.child_exited.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
-            elapsed += Self::GRACEFUL_SHUTDOWN_STEP;
-        }
+        self.control.close();
+        self.wait_for_child(Self::GRACEFUL_SHUTDOWN_TOTAL);
         if self.child_exited.load(Ordering::Acquire) {
             return Ok(());
         }
-
-        #[cfg(target_os = "windows")]
-        if let Some(pid) = self.child_pid {
-            let status = headless_command("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status()
-                .map_err(|e| format!("Failed to run taskkill for PTY child {pid}: {e}"))?;
-            if !status.success() {
-                tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");
-            }
-        }
-
+        self.kill_child_tree()?;
+        self.wait_for_child(Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS));
         Ok(())
     }
 
@@ -154,11 +164,43 @@ impl PtyHandle {
     /// Large payloads are split into [`PTY_WRITE_CHUNK_SIZE`]-byte chunks and
     /// flushed individually — see [`chunked_write_to`] for details.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
-        let mut guard = self.writer.lock_or_err()?;
-        let writer = guard
-            .as_mut()
-            .ok_or_else(|| "PTY writer already closed".to_string())?;
-        chunked_write_to(writer, data)
+        self.write_guarded(data, || true)
+    }
+
+    /// Human-controller write with owner revalidation before and after every
+    /// physical chunk. The caller must register an owner permit first.
+    pub fn write_guarded(
+        &self,
+        data: &[u8],
+        is_current_owner: impl FnMut() -> bool,
+    ) -> Result<(), String> {
+        self.write_guarded_until(
+            data,
+            Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS),
+            is_current_owner,
+        )
+    }
+
+    pub fn write_guarded_until(
+        &self,
+        data: &[u8],
+        deadline: Instant,
+        is_current_owner: impl FnMut() -> bool,
+    ) -> Result<(), String> {
+        let pending = self.enqueue_write(data, deadline)?;
+        self.await_enqueued_control_job(pending, deadline, is_current_owner)
+    }
+
+    /// Place a write on this terminal's FIFO without waiting for it. Human
+    /// controller callers use this narrow operation while holding their owner
+    /// gate, making FIFO submission atomic with an ownership transition.
+    pub(crate) fn enqueue_write(
+        &self,
+        data: &[u8],
+        deadline: Instant,
+    ) -> Result<PendingControlJob, String> {
+        self.ensure_input_healthy()?;
+        self.control.submit_write(data, deadline)
     }
 
     /// Get the child process ID.
@@ -168,18 +210,209 @@ impl PtyHandle {
 
     /// Resize the PTY.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        let guard = self.master.lock_or_err()?;
-        let master = guard
-            .as_ref()
-            .ok_or_else(|| "PTY master already closed".to_string())?;
-        master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| format!("Resize error: {e}"))
+        self.resize_guarded(cols, rows, || true)
+    }
+
+    pub fn resize_guarded(
+        &self,
+        cols: u16,
+        rows: u16,
+        is_current_owner: impl FnMut() -> bool,
+    ) -> Result<(), String> {
+        self.resize_guarded_until(
+            cols,
+            rows,
+            Instant::now() + Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS),
+            is_current_owner,
+        )
+    }
+
+    pub fn resize_guarded_until(
+        &self,
+        cols: u16,
+        rows: u16,
+        deadline: Instant,
+        is_current_owner: impl FnMut() -> bool,
+    ) -> Result<(), String> {
+        let pending = self.enqueue_resize(cols, rows, deadline)?;
+        self.await_enqueued_control_job(pending, deadline, is_current_owner)
+    }
+
+    /// Place a resize on this terminal's FIFO without waiting for it. See
+    /// [`Self::enqueue_write`] for the owner-transition synchronization rule.
+    pub(crate) fn enqueue_resize(
+        &self,
+        cols: u16,
+        rows: u16,
+        deadline: Instant,
+    ) -> Result<PendingControlJob, String> {
+        self.ensure_input_healthy()?;
+        self.control.submit_resize(cols, rows, deadline)
+    }
+
+    pub(crate) fn await_enqueued_control_job(
+        &self,
+        pending: PendingControlJob,
+        deadline: Instant,
+        mut is_current_owner: impl FnMut() -> bool,
+    ) -> Result<(), String> {
+        let poll = Duration::from_millis(PTY_CONTROL_WAIT_POLL_MS);
+        let cancel_grace = Duration::from_millis(PTY_CONTROL_CANCEL_GRACE_MS);
+        let mut cancelled_at: Option<Instant> = None;
+        let mut cancel_reason = "terminal control operation cancelled";
+
+        loop {
+            let now = Instant::now();
+            if cancelled_at.is_none() {
+                if !is_current_owner() {
+                    cancel_reason = "terminal controller ownership changed during operation";
+                    cancelled_at = Some(now);
+                } else if now >= deadline {
+                    cancel_reason = "terminal control operation deadline exceeded";
+                    cancelled_at = Some(now);
+                }
+                if cancelled_at.is_some() {
+                    pending.cancelled.store(true, Ordering::Release);
+                    self.control.cancel_job(pending.id);
+                }
+            }
+
+            match pending.result.recv_timeout(poll) {
+                Ok(result) => {
+                    if cancelled_at.is_some() {
+                        return Err(cancel_reason.into());
+                    }
+                    return result;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err("PTY control worker stopped unexpectedly".into());
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+
+            if cancelled_at.is_some_and(|started| started.elapsed() >= cancel_grace) {
+                self.force_input_fault()?;
+                return Err(format!(
+                    "{cancel_reason}; terminal input was faulted and terminated"
+                ));
+            }
+        }
+    }
+
+    fn ensure_input_healthy(&self) -> Result<(), String> {
+        if self.input_faulted.load(Ordering::Acquire) {
+            Err("terminal input is faulted".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Return a lifecycle acknowledgement when bounded cancellation had to
+    /// fault this terminal but the platform worker has not exited yet.
+    pub(crate) fn pending_control_completion(&self) -> Option<PtyControlCompletion> {
+        (self.input_faulted.load(Ordering::Acquire) && !self.control.exited())
+            .then(|| self.control.completion())
+    }
+
+    fn force_input_fault(&self) -> Result<(), String> {
+        if self.input_faulted.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        self.control.close();
+        self.close_master();
+        let kill_result = self.kill_child_tree();
+        let deadline = Instant::now() + Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS);
+        while Instant::now() < deadline && !self.control.exited() {
+            // Resize owns the master only for its platform call. If killing
+            // the child released that call, retry the independent lifecycle
+            // close instead of relying on the first best-effort try_lock.
+            self.close_master();
+            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
+        }
+        kill_result
+    }
+
+    fn close_master(&self) -> bool {
+        match self.master.try_lock() {
+            Ok(mut master) => {
+                master.take();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn wait_for_child(&self, total: Duration) {
+        wait_for_child_with_master_close_retry(
+            total,
+            Self::GRACEFUL_SHUTDOWN_STEP,
+            || self.child_exited.load(Ordering::Acquire),
+            || self.close_master(),
+        );
+    }
+
+    fn kill_child_tree(&self) -> Result<(), String> {
+        if self.child_exited.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        #[allow(unused_mut)]
+        let mut platform_error: Option<String> = None;
+        #[cfg(target_os = "windows")]
+        if let Some(pid) = self.child_pid {
+            match headless_command("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+            {
+                Ok(status) if status.success() => return Ok(()),
+                Ok(status) => {
+                    tracing::debug!(pid, status = ?status.code(), "taskkill returned non-zero during PTY cleanup");
+                    platform_error = Some(format!(
+                        "taskkill returned {:?} for PTY child {pid}",
+                        status.code()
+                    ));
+                }
+                Err(error) => {
+                    platform_error = Some(format!(
+                        "Failed to run taskkill for PTY child {pid}: {error}"
+                    ));
+                }
+            }
+        }
+
+        let mut killer = self.child_killer.lock_or_err()?;
+        let Some(killer) = killer.as_mut() else {
+            return Err(
+                platform_error.unwrap_or_else(|| "PTY child killer is unavailable".to_string())
+            );
+        };
+        if let Err(error) = killer.kill() {
+            let fallback_error = format!("Failed to terminate PTY child: {error}");
+            return Err(match platform_error {
+                Some(platform_error) => format!("{platform_error}; {fallback_error}"),
+                None => fallback_error,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn wait_for_child_with_master_close_retry(
+    total: Duration,
+    step: Duration,
+    mut child_exited: impl FnMut() -> bool,
+    mut close_master: impl FnMut() -> bool,
+) {
+    let deadline = Instant::now() + total;
+    let mut master_close_observed = close_master();
+    loop {
+        if child_exited() || Instant::now() >= deadline {
+            return;
+        }
+        thread::sleep(step.min(deadline.saturating_duration_since(Instant::now())));
+        if !master_close_observed {
+            master_close_observed = close_master();
+        }
     }
 }
 
@@ -262,6 +495,7 @@ where
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
     let child_pid = child.process_id();
+    let child_killer = child.clone_killer();
     let child_exited = Arc::new(AtomicBool::new(false));
     let exited_signal = Arc::clone(&child_exited);
 
@@ -294,11 +528,15 @@ where
         .try_clone_reader()
         .map_err(|e| format!("Failed to clone reader: {e}"))?;
 
+    let master = Arc::new(Mutex::new(Some(pair.master)));
+    let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
     let handle = PtyHandle {
-        writer: Arc::new(Mutex::new(Some(writer))),
-        master: Arc::new(Mutex::new(Some(pair.master))),
+        control,
+        master,
+        child_killer: Arc::new(Mutex::new(Some(child_killer))),
         child_pid,
         child_exited,
+        input_faulted: Arc::new(AtomicBool::new(false)),
     };
 
     // Spawn reader thread
@@ -323,7 +561,8 @@ where
 mod tests {
     use super::*;
     use crate::terminal::TerminalConfig;
-    use std::sync::mpsc;
+    use std::cell::Cell;
+    use std::sync::{mpsc, Condvar};
     use std::time::Duration;
 
     fn make_test_session(profile: &str) -> TerminalSession {
@@ -367,6 +606,31 @@ mod tests {
         fn _assert_resize(handle: &PtyHandle) -> Result<(), String> {
             handle.resize(120, 40)
         }
+    }
+
+    #[test]
+    fn graceful_wait_retries_master_close_after_a_busy_lock() {
+        let close_attempts = Cell::new(0usize);
+        let master_closed = Cell::new(false);
+
+        wait_for_child_with_master_close_retry(
+            Duration::from_millis(100),
+            Duration::from_millis(1),
+            || master_closed.get(),
+            || {
+                let next = close_attempts.get() + 1;
+                close_attempts.set(next);
+                if next >= 3 {
+                    master_closed.set(true);
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+
+        assert_eq!(close_attempts.get(), 3);
+        assert!(master_closed.get());
     }
 
     #[test]
@@ -707,6 +971,57 @@ mod tests {
         (writer, recorder)
     }
 
+    struct StuckWriter {
+        gate: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl Write for StuckWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let (released, wake) = &*self.gate;
+            let mut released = released.lock().unwrap();
+            while !*released {
+                released = wake.wait(released).unwrap();
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn unacknowledged_platform_cancel_exposes_a_completion_barrier() {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let handle = PtyHandle::from_test_writer(Box::new(StuckWriter {
+            gate: Arc::clone(&gate),
+        }));
+        let started = Instant::now();
+
+        let error = handle
+            .write_guarded_until(
+                b"blocked",
+                Instant::now() + Duration::from_millis(20),
+                || true,
+            )
+            .expect_err("deadline must fault a non-interruptible writer");
+        assert!(error.contains("faulted and terminated"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let completion = handle
+            .pending_control_completion()
+            .expect("worker acknowledgement must remain pending");
+        assert!(!completion.is_complete());
+
+        let (released, wake) = &*gate;
+        *released.lock().unwrap() = true;
+        wake.notify_all();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !completion.is_complete() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(completion.is_complete());
+    }
+
     #[test]
     fn chunked_write_to_empty_data() {
         let (mut writer, recorder) = make_recorder();
@@ -744,6 +1059,42 @@ mod tests {
         let rec = recorder.lock().unwrap();
         assert_eq!(rec.data, data);
         assert_eq!(rec.flush_count, 4); // 3 full chunks + 1 partial
+    }
+
+    #[test]
+    fn guarded_write_reports_owner_change_after_the_last_physical_chunk() {
+        let (mut writer, recorder) = make_recorder();
+        let mut checks = 0;
+
+        let result = chunked_write_to_guarded(&mut *writer, b"written-prefix", || {
+            checks += 1;
+            checks == 1
+        });
+
+        assert!(
+            result.is_err(),
+            "a stale final chunk must not be reported as success"
+        );
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data, b"written-prefix");
+        assert_eq!(rec.flush_count, 1);
+    }
+
+    #[test]
+    fn guarded_write_stops_before_the_next_chunk_after_owner_change() {
+        let (mut writer, recorder) = make_recorder();
+        let data = vec![0x44; PTY_WRITE_CHUNK_SIZE * 2];
+        let mut checks = 0;
+
+        let result = chunked_write_to_guarded(&mut *writer, &data, || {
+            checks += 1;
+            checks <= 2
+        });
+
+        assert!(result.is_err());
+        let rec = recorder.lock().unwrap();
+        assert_eq!(rec.data.len(), PTY_WRITE_CHUNK_SIZE);
+        assert_eq!(rec.flush_count, 1);
     }
 
     #[test]

@@ -529,6 +529,21 @@
   caret-color: transparent !important;
 }
 
+.terminal-composer-active .xterm-cursor-layer,
+.terminal-composer-active .xterm-cursor,
+.terminal-composer-active .terminal-overlay-caret,
+.terminal-composer-active .terminal-composition-preview {
+  opacity: 0 !important;
+}
+
+.terminal-composer-active .xterm-helper-textarea {
+  caret-color: transparent !important;
+}
+
+.terminal-input-composer-editor::placeholder {
+  color: var(--text-muted);
+}
+
 .terminal-ime-composition-active .xterm-helper-textarea {
   caret-color: transparent !important;
 }

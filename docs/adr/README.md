@@ -46,11 +46,12 @@ ADR 이 필요한 대표 기준:
 | [0026](0026-conpty-width-resize-repaint-filter.md) | ConPTY width resize repaint filter | Accepted |
 | [0027](0027-remote-connection-graceful-recovery.md) | Remote 연결 유예와 무표시 자동 복구 | Accepted |
 | [0028](0028-remote-soft-key-toolbar.md) | Remote 소프트 키 툴바 (클라이언트 전용, 커스터마이저블) | Accepted |
-| [0029](0029-detached-terminal-input-composer.md) | Terminal 분리 입력 컴포저 — PC와 Remote 공통 surface 모델 | Accepted |
+| [0029](0029-detached-terminal-input-composer.md) | Terminal 분리 입력 컴포저 — PC와 Remote 공통 surface 모델 | Superseded by [0034](0034-single-send-terminal-composer.md) |
 | [0030](0030-cloud-tunnel-follows-remote-control-gate.md) | 클라우드 터널 연결은 원격 제어 게이트를 따른다 (0024 정정) | Accepted |
 | [0031](0031-extension-viewer-profile-path-conversion.md) | Extension viewer 실행 프로필과 경로 변환 책임 | Accepted |
 | [0032](0032-llm-settings-introspection-and-safe-mutation.md) | LLM 설정 계약 — 자기설명·엄격 검증·민감값 보호 | Accepted |
 | [0033](0033-hidden-items-shelf-set-contract.md) | 숨긴 항목 보관함 — raw 숨김 상태와 결정론적 set 계약 | Accepted |
+| [0034](0034-single-send-terminal-composer.md) | Terminal composer는 Send 단일 action을 제공한다 | Accepted |
 
 ## 새 ADR 추가
 

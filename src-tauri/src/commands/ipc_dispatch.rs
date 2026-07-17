@@ -466,28 +466,36 @@ fn write_to_group_terminals(
     _source_id: &str,
     command: &str,
 ) -> Result<(), String> {
-    let ptys = state.pty_handles.lock_or_err()?;
+    let targets = {
+        let terminals = state.terminals.lock_or_err()?;
+        let ptys = state.pty_handles.lock_or_err()?;
+        target_ids
+            .iter()
+            .filter_map(|id| {
+                ptys.get(id).cloned().map(|handle| {
+                    let profile = terminals
+                        .get(id)
+                        .map(|terminal| terminal.config.profile.clone())
+                        .unwrap_or_else(|| "WSL".into());
+                    (handle, profile)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
 
-    let terminals = state.terminals.lock_or_err()?;
-
-    for id in target_ids {
-        if let Some(handle) = ptys.get(id) {
-            let profile = terminals
-                .get(id)
-                .map(|t| t.config.profile.as_str())
-                .unwrap_or("WSL");
-            // PowerShell on Windows ConPTY uses CR as Enter; ensure the command ends correctly
-            let cmd = if matches!(profile, "PowerShell" | "powershell") {
-                command.trim_end_matches('\n').to_string() + "\r"
-            } else {
-                command.to_string()
-            };
-            let propagated_cmd = match profile {
-                "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cmd}"),
-                _ => format!("LX_PROPAGATED=1 {command}"),
-            };
-            let _ = handle.write(propagated_cmd.as_bytes());
-        }
+    for (handle, profile) in targets {
+        let profile = profile.as_str();
+        // PowerShell on Windows ConPTY uses CR as Enter; ensure the command ends correctly
+        let cmd = if matches!(profile, "PowerShell" | "powershell") {
+            command.trim_end_matches('\n').to_string() + "\r"
+        } else {
+            command.to_string()
+        };
+        let propagated_cmd = match profile {
+            "PowerShell" | "powershell" => format!("$env:LX_PROPAGATED='1';{cmd}"),
+            _ => format!("LX_PROPAGATED=1 {command}"),
+        };
+        let _ = handle.write(propagated_cmd.as_bytes());
     }
 
     Ok(())
@@ -522,34 +530,42 @@ fn write_cd_to_group_terminals(
     // Extract WSL distro name for UNC path conversion (before locking terminals)
     let wsl_distro = path_utils::find_wsl_distro(state, source_id);
 
-    let ptys = state.pty_handles.lock_or_err()?;
-
-    let terminals = state.terminals.lock_or_err()?;
+    let targets = {
+        let terminals = state.terminals.lock_or_err()?;
+        let ptys = state.pty_handles.lock_or_err()?;
+        target_ids
+            .iter()
+            .filter_map(|id| {
+                ptys.get(id).cloned().map(|handle| {
+                    let profile = terminals
+                        .get(id)
+                        .map(|terminal| terminal.config.profile.clone())
+                        .unwrap_or_else(|| "WSL".into());
+                    (id.clone(), handle, profile)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
 
     let mut written = Vec::new();
-    for id in target_ids {
-        if let Some(handle) = ptys.get(id) {
-            let profile = terminals
-                .get(id)
-                .map(|t| t.config.profile.as_str())
-                .unwrap_or("WSL");
+    for (id, handle, profile) in targets {
+        let profile = profile.as_str();
 
-            // Convert path for the target profile; skip if not convertible
-            // (변환 불가 → 미주입 → 도착 집합 제외 → 재시도 가능).
-            let converted = match path_utils::convert_path_for_target_with_distro(
-                path,
-                profile,
-                wsl_distro.as_deref(),
-            ) {
-                Some(p) => p,
-                None => continue,
-            };
+        // Convert path for the target profile; skip if not convertible
+        // (변환 불가 → 미주입 → 도착 집합 제외 → 재시도 가능).
+        let converted = match path_utils::convert_path_for_target_with_distro(
+            path,
+            profile,
+            wsl_distro.as_deref(),
+        ) {
+            Some(p) => p,
+            None => continue,
+        };
 
-            let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(id));
-            // write 가 실패하면 실제 주입이 안 된 것이므로 도착 집합에 넣지 않는다.
-            if handle.write(cmd.as_bytes()).is_ok() {
-                written.push(id.clone());
-            }
+        let cmd = build_sync_cd_command(&converted, profile, claude_ids.contains(&id));
+        // write 가 실패하면 실제 주입이 안 된 것이므로 도착 집합에 넣지 않는다.
+        if handle.write(cmd.as_bytes()).is_ok() {
+            written.push(id);
         }
     }
 
