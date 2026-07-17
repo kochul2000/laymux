@@ -193,6 +193,7 @@ test.describe("remote mobile layout", () => {
     const writes: string[] = [];
     let outputSocket: WebSocketRoute | null = null;
     await page.addInitScript(() => {
+      localStorage.setItem("laymux.remote.inputMode", "direct");
       localStorage.setItem(
         "laymux.remote.keybar",
         JSON.stringify({ visible: true, sets: ["nav", "edit", "ctrl", "fn"], custom: [] }),
