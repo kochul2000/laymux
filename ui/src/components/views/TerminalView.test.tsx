@@ -6369,6 +6369,66 @@ describe("TerminalView desktop input composer", () => {
     );
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
   });
+
+  it("passes empty-draft nav keys and empty Enter through to the PTY", async () => {
+    const terminalId = "t-composer-passthrough";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalInput.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1b[A");
+
+    // Empty Enter confirms in the terminal (raw CR) — it must not "send" a draft.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\r");
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("keeps nav keys inside the draft once it has text", async () => {
+    const terminalId = "t-composer-nav-draft";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("forwards every key (and honors DECCKM) while a full-screen app owns the screen", async () => {
+    const terminalId = "t-composer-altscreen";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    const buffer = mockBufferActive as typeof mockBufferActive & { type?: string };
+    const modes = mockModes as typeof mockModes & { applicationCursorKeysMode?: boolean };
+    try {
+      buffer.type = "alternate";
+      modes.applicationCursorKeysMode = true;
+      mockWriteToTerminal.mockClear();
+
+      // A printable char is forwarded even with an empty draft in alt-screen.
+      fireEvent.keyDown(textarea, { key: "j" });
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "j");
+
+      // Application cursor mode emits SS3 instead of CSI.
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1bOA");
+    } finally {
+      delete buffer.type;
+      delete modes.applicationCursorKeysMode;
+    }
+  });
 });
 
 describe("shouldEnableTerminalWebgl", () => {

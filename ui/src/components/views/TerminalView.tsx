@@ -122,6 +122,7 @@ import {
   type ComposerDraftState,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
+import { encodeTerminalKey, isPassthroughNavKey } from "@/lib/terminal-key-encoding";
 import {
   normalizeTerminalOutputAttachment,
   normalizeTerminalOutputDelta,
@@ -605,6 +606,31 @@ export function TerminalView({
   };
   const localTerminalControlAllowed = () =>
     remoteControlStatusKnownRef.current && !remoteControlActiveRef.current;
+
+  /**
+   * Forward a Composer keystroke to the PTY instead of the draft when either the
+   * draft is empty and the key is a non-text nav key (so shell history / inline
+   * menus work), or a full-screen (alternate-screen) app is running (pass all
+   * keys, like Direct mode). Encoding defers to xterm's reported cursor-key mode.
+   */
+  const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
+    if (!localTerminalControlAllowed()) return false;
+    const term = terminalRef.current;
+    if (!term) return false;
+    const altScreen = term.buffer?.active?.type === "alternate";
+    if (!altScreen && !(ctx.empty && isPassthroughNavKey(event))) return false;
+    const applicationCursor = Boolean(
+      (term as unknown as { modes?: { applicationCursorKeysMode?: boolean } }).modes
+        ?.applicationCursorKeysMode,
+    );
+    const seq = encodeTerminalKey(event, { applicationCursor });
+    if (seq == null) return false;
+    dismissTerminalResponseNotification(instanceId);
+    writeToTerminal(instanceId, seq).catch((error) => {
+      console.warn("[TerminalView] composer key passthrough failed:", error);
+    });
+    return true;
+  };
 
   useEffect(() => {
     const nextMode = readRuntimeInputMode(instanceId);
@@ -3770,6 +3796,7 @@ export function TerminalView({
           storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
         }
         onSend={submitComposerDraft}
+        onKeyPassthrough={passthroughComposerKey}
       />
     </div>
   );

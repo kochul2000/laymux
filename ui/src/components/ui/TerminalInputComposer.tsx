@@ -2,7 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent,
   type Ref,
 } from "react";
@@ -30,6 +30,12 @@ export interface TerminalInputComposerProps {
   textareaRef?: Ref<HTMLTextAreaElement>;
   onTextChange: (text: string) => void;
   onSend: () => void;
+  /**
+   * Give the host a chance to forward a keystroke straight to the terminal
+   * (empty-draft nav keys, or any key while a full-screen app runs). Returning
+   * true means the host consumed it and the editor should ignore it.
+   */
+  onKeyPassthrough?: (event: KeyboardEvent, ctx: { empty: boolean }) => boolean;
   className?: string;
   testId?: string;
 }
@@ -62,6 +68,7 @@ export function TerminalInputComposer({
   textareaRef,
   onTextChange,
   onSend,
+  onKeyPassthrough,
   className,
   testId,
 }: TerminalInputComposerProps) {
@@ -107,15 +114,22 @@ export function TerminalInputComposer({
     if (mode !== "composer") compositionActiveRef.current = false;
   }, [mode]);
 
-  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    if (
+  const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // Composition keys always belong to the IME, never to passthrough or Send.
+    const composing =
       compositionActiveRef.current ||
       event.nativeEvent.isComposing ||
-      event.nativeEvent.keyCode === 229
-    ) {
+      event.nativeEvent.keyCode === 229;
+
+    // Let the host forward empty-draft nav keys / full-screen-app keys to the PTY.
+    if (!composing && onKeyPassthrough?.(event.nativeEvent, { empty: text.length === 0 })) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
+
+    if (event.key !== "Enter" || event.shiftKey) return;
+    if (composing) return;
 
     // Plain Enter is the Send gesture. While an action is already in flight,
     // consume repeats without turning them into accidental draft newlines.
