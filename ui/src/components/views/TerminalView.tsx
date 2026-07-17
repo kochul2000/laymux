@@ -591,7 +591,13 @@ export function TerminalView({
   };
 
   const writeStructuredPaste = (text: string) => {
-    if (!localControlAvailableRef.current || !outputProtocolReadyRef.current || !text) return;
+    if (
+      inputModeRef.current !== "direct" ||
+      !localControlAvailableRef.current ||
+      !outputProtocolReadyRef.current ||
+      !text
+    )
+      return;
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, text, false).catch((error) => {
       console.warn("[TerminalView] terminal paste failed:", error);

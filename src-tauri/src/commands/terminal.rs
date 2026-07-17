@@ -1599,6 +1599,84 @@ mod tests {
     }
 
     #[test]
+    fn structured_and_raw_writes_enqueue_in_permit_registration_order() {
+        let state = Arc::new(AppState::new());
+        let protocol_gate = terminal_output::new_protocol_gate();
+        state
+            .terminal_protocol_states
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), Arc::clone(&protocol_gate));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(SharedTestWriter(Arc::clone(&written)))),
+        );
+
+        // Keep the first structured operation between permit registration and
+        // PTY enqueue. A later raw key must not overtake it in the worker FIFO.
+        let protocol_guard = protocol_gate.lock_or_err().unwrap();
+        let structured_state = Arc::clone(&state);
+        let structured = thread::spawn(move || {
+            write_terminal_input_inner(
+                &structured_state,
+                "t1",
+                "structured",
+                false,
+                HumanControlOrigin::Local,
+            )
+        });
+
+        let registration_deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if state
+                .remote_control
+                .lock_or_err()
+                .unwrap()
+                .has_active_operations()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < registration_deadline,
+                "structured input did not register its permit"
+            );
+            thread::yield_now();
+        }
+
+        let (raw_started_tx, raw_started_rx) = mpsc::channel();
+        let (raw_result_tx, raw_result_rx) = mpsc::channel();
+        let raw_state = Arc::clone(&state);
+        let raw = thread::spawn(move || {
+            raw_started_tx.send(()).unwrap();
+            let result =
+                write_to_terminal_inner(&raw_state, "t1", b"raw", HumanControlOrigin::Local);
+            raw_result_tx.send(result).unwrap();
+        });
+        raw_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("raw writer thread should start");
+
+        assert!(
+            matches!(
+                raw_result_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "later raw input must wait for the earlier structured enqueue"
+        );
+        assert!(written.lock().unwrap().is_empty());
+
+        drop(protocol_guard);
+        structured.join().unwrap().unwrap();
+        raw_result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("raw input should finish after structured enqueue")
+            .unwrap();
+        raw.join().unwrap();
+        assert_eq!(&*written.lock().unwrap(), b"structuredraw");
+    }
+
+    #[test]
     fn structured_write_holds_no_app_state_table_lock_during_pty_io() {
         let state = Arc::new(AppState::new());
         let protocol_gate = terminal_output::new_protocol_gate();

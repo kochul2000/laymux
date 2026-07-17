@@ -306,11 +306,11 @@ terminal-output-v2 listener 등록
 
 `seqEnd <= snapshotSeq`인 delta는 중복으로 버리고 snapshot 끝을 가로지르는 delta는 suffix만 쓴다. 다음 expected sequence보다 큰 delta는 임의 보간하지 않고 새 attach를 시작한다. cache/snapshot/delta parser write가 끝날 때까지 geometry reflow도 `outputAttachParserBusy`로 보류한다. 지원하는 attach metadata와 snapshot parser 적용이 끝나기 전에는 composer commit과 Direct clipboard paste를 fail-closed한다.
 
-Composer와 clipboard paste는 Tauri `write_terminal_input(id, text, submit)` 또는 Remote `/remote/v1/terminals/{id}/input`으로 intent만 보낸다. Composer Send는 항상 `submit=true`, Direct clipboard paste는 `submit=false`다. Rust가 줄바꿈을 CR로 정규화하고 authoritative bracketed-paste 상태가 켜져 있으면 text 부분만 `CSI 200~`/`CSI 201~`로 감싼 뒤 선택적 submit CR을 붙인다. 키 입력·focus reply·Remote soft key는 기존 raw write 경로를 사용한다. Local/Remote raw write, structured write, resize는 모두 backend human-control owner permit을 등록한 뒤 PTY table lock을 놓고 실제 I/O를 수행하므로 frontend lease status는 UX 표시일 뿐 권한 경계가 아니다.
+Composer와 clipboard paste는 Tauri `write_terminal_input(id, text, submit)` 또는 Remote `/remote/v1/terminals/{id}/input`으로 intent만 보낸다. Composer Send는 항상 `submit=true`, Direct clipboard paste는 `submit=false`다. 비동기 smart-paste 결과를 PTY로 보내기 직전에도 현재 모드가 `direct`인지 다시 확인하므로, clipboard 조회 중 Composer로 전환된 입력은 draft 경계를 우회하지 않는다. Rust가 줄바꿈을 CR로 정규화하고 authoritative bracketed-paste 상태가 켜져 있으면 text 부분만 `CSI 200~`/`CSI 201~`로 감싼 뒤 선택적 submit CR을 붙인다. 키 입력·focus reply·Remote soft key는 기존 raw write 경로를 사용한다. Local/Remote raw write, structured write, resize는 모두 backend human-control owner permit을 등록한 뒤 PTY table lock을 놓고 실제 I/O를 수행하므로 frontend lease status는 UX 표시일 뿐 권한 경계가 아니다.
 
 terminal output의 생성·attach·retire는 id-only table 조합이 아니라 generation-scoped `TerminalOutputSession` 하나가 protocol state, sequenced ring, subscriber 목록, retirement를 함께 소유한다. Direct/Cloud output은 session lock에서 bounded subscriber 등록과 snapshot 캡처를 원자적으로 수행한 뒤 polling 없이 event를 수신한다. 큐 overflow는 `Gap`, terminal close/재생성은 `Retired`로 전달되며 consumer는 두 경우 모두 기존 stream을 닫고 새 generation snapshot에 attach한다. terminal create는 session generation을 먼저 reserve하고 PTY spawn·table install 후 commit하며, 생성 중 close가 들어오면 reservation을 취소해 뒤늦은 commit이 고아 PTY를 남기지 못하게 한다.
 
-human-control permit은 등록 시점의 owner epoch·absolute deadline·operation id와 pre-enqueue/enqueued phase를 가진다. Structured input이 protocol gate를 기다리는 동안 owner 전환이 시작되면 아직 물리 큐에 들어가지 않은 permit을 취소·분리해 transition barrier가 protocol lock 소유자를 기다리지 않는다. PTY enqueue는 owner gate에서 phase 전환과 함께 직렬화하여 transition이 pre-enqueue 취소와 queued cancellation 중 하나를 반드시 선택한다. 이미 queued/running인 작업은 terminal별 bounded FIFO worker가 owner token을 각 physical operation 전후에 확인하고, 취소가 grace를 넘기면 PTY를 input-fault 격리한 뒤 worker completion을 owner barrier에 quarantine한다. reclaim·release·access disable·sticky lease expiry는 epoch을 먼저 올리고 이 acknowledgement가 drain된 뒤에만 lease를 제거해 Local owner를 공개한다.
+human-control permit은 등록 시점의 owner epoch·absolute deadline·operation id와 pre-enqueue/enqueued phase를 가진다. 같은 terminal의 PTY enqueue는 permit 등록 순서를 따르므로, 먼저 등록된 structured input이 protocol mode를 캡처하는 동안 뒤의 raw Enter·Ctrl+C·soft key·resize가 FIFO를 앞지를 수 없다. Structured input이 protocol gate를 기다리는 동안 owner 전환이 시작되면 아직 물리 큐에 들어가지 않은 permit을 취소·분리해 transition barrier가 protocol lock 소유자를 기다리지 않는다. PTY enqueue는 owner gate에서 phase 전환과 함께 직렬화하여 transition이 pre-enqueue 취소와 queued cancellation 중 하나를 반드시 선택한다. 이미 queued/running인 작업은 terminal별 bounded FIFO worker가 owner token을 각 physical operation 전후에 확인하고, 취소가 grace를 넘기면 PTY를 input-fault 격리한 뒤 worker completion을 owner barrier에 quarantine한다. reclaim·release·access disable·sticky lease expiry는 epoch을 먼저 올리고 이 acknowledgement가 drain된 뒤에만 lease를 제거해 Local owner를 공개한다.
 
 ---
 
@@ -710,6 +710,7 @@ MCP/REST 쓰기
     → settings.applySnapshot bridge
     → saveAndApplySettingsSnapshot(settings, includeStructural=false)
     → save_settings 성공 후 settings store 적용
+      (Remote enabled 전이는 backend snapshot + owner gate + cloud tunnel에도 원자적으로 게시)
 ```
 
 일반 설정 patch는 workspace/layout/dock 구조를 바꾸지 않으며, 구조 변경은 전용 Automation/MCP 흐름을 사용한다. 저장이 실패하면 런타임 store도 바꾸지 않아 디스크와 현재 UI가 갈라지지 않는다. 자세한 도구·검증·민감값 계약은 [api-contracts.md §12.7](./api-contracts.md)과 [ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md)를 따른다.

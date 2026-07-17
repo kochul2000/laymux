@@ -471,6 +471,7 @@ impl RemoteControlState {
         &mut self,
         presented_token: Option<&str>,
         now: Instant,
+        busy_refresh_ttl: Duration,
     ) -> ClaimReservationAttempt {
         self.prune_expired_claim_reservation(now);
         let Some(reservation) = self.claim_reservation.as_ref() else {
@@ -497,7 +498,13 @@ impl RemoteControlState {
             };
         }
         if self.has_active_operations() {
-            return ClaimReservationAttempt::Busy { remaining };
+            let expires_at = now.checked_add(busy_refresh_ttl).unwrap_or(now);
+            if let Some(reservation) = self.claim_reservation.as_mut() {
+                reservation.expires_at = expires_at;
+            }
+            return ClaimReservationAttempt::Busy {
+                remaining: expires_at.saturating_duration_since(now),
+            };
         }
 
         self.claim_reservation = None;
@@ -579,6 +586,16 @@ impl RemoteControlState {
         (operation_id, owner_epoch)
     }
 
+    fn has_earlier_unenqueued_operation(&self, operation_id: u64, terminal_id: &str) -> bool {
+        self.active_operations
+            .iter()
+            .any(|(candidate_id, operation)| {
+                *candidate_id < operation_id
+                    && operation.terminal_id == terminal_id
+                    && !operation.pty_enqueued
+            })
+    }
+
     pub(crate) fn advance_owner_epoch(&mut self) {
         self.owner_epoch = self.owner_epoch.wrapping_add(1);
     }
@@ -626,18 +643,35 @@ impl HumanControlPermit<'_> {
         &self,
         enqueue: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut control = self.app_state.remote_control.lock_or_err()?;
-        if !self.is_current_in(&control) {
-            return Err("terminal controller ownership changed before PTY enqueue".into());
-        }
+        let poll = Duration::from_millis(PTY_CONTROL_WAIT_POLL_MS);
+        let mut enqueue = Some(enqueue);
+        loop {
+            let mut control = self.app_state.remote_control.lock_or_err()?;
+            if !self.is_current_in(&control) {
+                return Err("terminal controller ownership changed before PTY enqueue".into());
+            }
+            if Instant::now() >= self.deadline {
+                return Err(
+                    "terminal control operation deadline exceeded before PTY enqueue".into(),
+                );
+            }
+            if control.has_earlier_unenqueued_operation(self.operation_id, &self.terminal_id) {
+                drop(control);
+                thread::sleep(poll.min(self.deadline.saturating_duration_since(Instant::now())));
+                continue;
+            }
 
-        let pending = enqueue()?;
-        let operation = control
-            .active_operations
-            .get_mut(&self.operation_id)
-            .ok_or_else(|| "terminal control operation is no longer registered".to_string())?;
-        operation.pty_enqueued = true;
-        Ok(pending)
+            let enqueue = enqueue.take().ok_or_else(|| {
+                "terminal control enqueue closure was already consumed".to_string()
+            })?;
+            let pending = enqueue()?;
+            let operation = control
+                .active_operations
+                .get_mut(&self.operation_id)
+                .ok_or_else(|| "terminal control operation is no longer registered".to_string())?;
+            operation.pty_enqueued = true;
+            return Ok(pending);
+        }
     }
 
     /// Atomically validate successful completion and remove the operation from
@@ -1166,6 +1200,30 @@ mod tests {
 
     #[test]
     #[serial]
+    fn human_control_hot_path_uses_the_in_memory_remote_settings_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        save_remote_settings(true, "token");
+        let state = state_with_active_lease("lease-1");
+
+        // Direct file mutation is deliberately not observed by the input hot
+        // path. Runtime settings changes publish a new AppState snapshot via
+        // the save command after persistence succeeds.
+        save_remote_settings(false, "");
+
+        let permit = begin_human_control_operation(
+            &state,
+            HumanControlOrigin::Remote {
+                lease_id: "lease-1".into(),
+            },
+            "t1",
+        )
+        .expect("permit creation must not reload settings.json");
+        permit.finish().unwrap();
+    }
+
+    #[test]
+    #[serial]
     fn remote_permit_is_bound_to_the_lease_origin_and_blocks_local_until_drained() {
         let dir = tempfile::tempdir().unwrap();
         let _env_guard = isolate_settings_dir(dir.path());
@@ -1226,6 +1284,11 @@ mod tests {
             .pty_enqueued = true;
 
         save_remote_settings(false, "");
+        crate::remote_server::update_persistent_remote_settings_for_test(
+            &state,
+            Settings::default().remote,
+        )
+        .unwrap();
         let draining = get_remote_control_status(&state).unwrap();
 
         assert!(
@@ -1400,26 +1463,46 @@ mod tests {
         let token = control.create_claim_reservation(now, Duration::from_secs(2));
 
         assert!(matches!(
-            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(1)),
+            control.resume_claim_reservation(
+                Some(&token),
+                now + Duration::from_millis(1),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Busy { .. }
         ));
         assert!(matches!(
-            control.resume_claim_reservation(Some("wrong"), now + Duration::from_millis(1)),
+            control.resume_claim_reservation(
+                Some("wrong"),
+                now + Duration::from_millis(1),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Rejected { .. }
         ));
         assert!(matches!(
-            control.resume_claim_reservation(None, now + Duration::from_millis(1)),
+            control.resume_claim_reservation(
+                None,
+                now + Duration::from_millis(1),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Rejected { .. }
         ));
 
         control.active_operations.clear();
         assert!(matches!(
-            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(2)),
+            control.resume_claim_reservation(
+                Some(&token),
+                now + Duration::from_millis(2),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Consumed
         ));
         assert!(!control.has_claim_reservation());
         assert!(matches!(
-            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(3)),
+            control.resume_claim_reservation(
+                Some(&token),
+                now + Duration::from_millis(3),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Rejected { remaining: None }
         ));
     }
@@ -1432,11 +1515,40 @@ mod tests {
         assert!(control.has_claim_reservation());
 
         assert!(matches!(
-            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(50)),
+            control.resume_claim_reservation(
+                Some(&token),
+                now + Duration::from_millis(50),
+                Duration::from_millis(50),
+            ),
             ClaimReservationAttempt::Rejected { remaining: None }
         ));
         assert!(!control.has_claim_reservation());
         assert!(control.origin_is_current(&HumanControlOrigin::Local));
+    }
+
+    #[test]
+    fn matching_busy_claim_retries_renew_the_short_reservation() {
+        let now = Instant::now();
+        let mut control = RemoteControlState::default();
+        control.register_operation(HumanControlOrigin::Local, "t1".into());
+        let ttl = Duration::from_millis(50);
+        let token = control.create_claim_reservation(now, ttl);
+
+        assert!(matches!(
+            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(40), ttl,),
+            ClaimReservationAttempt::Busy { .. }
+        ));
+        assert!(matches!(
+            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(80), ttl,),
+            ClaimReservationAttempt::Busy { .. }
+        ));
+
+        control.active_operations.clear();
+        assert_eq!(
+            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(110), ttl,),
+            ClaimReservationAttempt::Consumed,
+            "matching retries must keep the reservation alive past its original expiry",
+        );
     }
 
     #[test]
@@ -1457,7 +1569,11 @@ mod tests {
 
         let mut control = state.remote_control.lock_or_err().unwrap();
         assert_eq!(
-            control.resume_claim_reservation(Some(&token), now + Duration::from_millis(1)),
+            control.resume_claim_reservation(
+                Some(&token),
+                now + Duration::from_millis(1),
+                Duration::from_secs(2),
+            ),
             ClaimReservationAttempt::Consumed
         );
         control.advance_owner_epoch();

@@ -6102,6 +6102,32 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  it("drops an async Direct smart paste that resolves after switching to Composer", async () => {
+    const terminalId = "t-composer-stale-paste";
+    let resolvePaste!: (value: { pasteType: string; content: string }) => void;
+    mockSmartPaste.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePaste = resolve;
+      }),
+    );
+    mockHasSelection.mockReturnValue(false);
+
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    const container = screen.getByTestId(`terminal-view-${terminalId}`);
+    container.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(mockSmartPaste).toHaveBeenCalledWith("", "PowerShell"));
+
+    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    await act(async () => {
+      resolvePaste({ pasteType: "text", content: "must stay in the draft boundary" });
+      await Promise.resolve();
+    });
+
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
   it("installs the Remote owner listener before requesting its initial snapshot", async () => {
     let resolveListener!: (cleanup: () => void) => void;
     mockOnRemoteControlChanged.mockReturnValueOnce(

@@ -3376,9 +3376,7 @@
                 throw new Error("Remote control claim reservation expired.");
               }
               const reportedExpiry = now + ttlMs;
-              reservationExpiresAt = reservationExpiresAt === null
-                ? reportedExpiry
-                : Math.min(reservationExpiresAt, reportedExpiry);
+              reservationExpiresAt = reportedExpiry;
               if (now + retryAfterMs >= reservationExpiresAt) {
                 throw new Error("Remote control claim reservation expired.");
               }

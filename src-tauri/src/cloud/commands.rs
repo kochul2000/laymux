@@ -55,8 +55,16 @@ fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
     settings.remote.cloud_instance_id = None;
     settings.remote.cloud_tunnel_url = None;
     settings.remote.cloud_server_base_url = None;
-    if let Err(error) = crate::settings::save_settings(&settings).map_err(AppError::Other) {
-        errors.push(format!("settings save failed: {error}"));
+    match crate::settings::save_settings(&settings).map_err(AppError::Other) {
+        Ok(()) => {
+            if let Err(error) = crate::remote_server::update_persistent_cloud_settings_snapshot(
+                state,
+                &settings.remote,
+            ) {
+                errors.push(format!("remote settings snapshot update failed: {error}"));
+            }
+        }
+        Err(error) => errors.push(format!("settings save failed: {error}")),
     }
 
     let mut next_status = disconnected_status(&errors);
@@ -178,6 +186,11 @@ mod tests {
         assert_eq!(loaded.remote.cloud_tunnel_url, None);
         assert_eq!(loaded.remote.cloud_server_base_url, None);
         assert_eq!(loaded.remote.relay_base_url, "https://relay.example.test");
+        let effective = crate::remote_server::effective_remote_settings(&state).unwrap();
+        assert!(!effective.cloud_enabled);
+        assert_eq!(effective.cloud_instance_id, None);
+        assert_eq!(effective.cloud_tunnel_url, None);
+        assert_eq!(effective.cloud_server_base_url, None);
         assert_eq!(*state.cloud.lock_or_err().unwrap(), CloudStatus::default());
     }
 

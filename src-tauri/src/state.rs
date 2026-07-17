@@ -91,7 +91,8 @@ pub struct AppState {
     pub notifications: Arc<Mutex<Vec<TerminalNotification>>>,
     /// Auto-incrementing counter for notification IDs.
     pub notification_counter: AtomicU64,
-    /// Runtime-only Direct Remote Mode access gate, separate from persisted settings.
+    /// Direct Remote runtime access gate plus an in-memory snapshot of the
+    /// persisted Remote settings used by latency-sensitive owner checks.
     pub remote_access: Mutex<crate::remote_server::RemoteAccessRuntimeState>,
     /// Current Direct Remote Mode controller lease plus local reclaim lockout state.
     pub remote_control: Mutex<crate::remote_server::RemoteControlState>,
@@ -138,7 +139,9 @@ impl AppState {
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
-            remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::default()),
+            remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::new(
+                crate::settings::load_settings().remote,
+            )),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),

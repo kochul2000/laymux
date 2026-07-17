@@ -150,7 +150,6 @@ impl PtyHandle {
     ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
         self.control.close();
-        self.close_master();
         self.wait_for_child(Self::GRACEFUL_SHUTDOWN_TOTAL);
         if self.child_exited.load(Ordering::Acquire) {
             return Ok(());
@@ -335,16 +334,21 @@ impl PtyHandle {
 
     fn close_master(&self) -> bool {
         match self.master.try_lock() {
-            Ok(mut master) => master.take().is_some(),
+            Ok(mut master) => {
+                master.take();
+                true
+            }
             Err(_) => false,
         }
     }
 
     fn wait_for_child(&self, total: Duration) {
-        let deadline = Instant::now() + total;
-        while Instant::now() < deadline && !self.child_exited.load(Ordering::Acquire) {
-            thread::sleep(Self::GRACEFUL_SHUTDOWN_STEP);
-        }
+        wait_for_child_with_master_close_retry(
+            total,
+            Self::GRACEFUL_SHUTDOWN_STEP,
+            || self.child_exited.load(Ordering::Acquire),
+            || self.close_master(),
+        );
     }
 
     fn kill_child_tree(&self) -> Result<(), String> {
@@ -390,6 +394,25 @@ impl PtyHandle {
             });
         }
         Ok(())
+    }
+}
+
+fn wait_for_child_with_master_close_retry(
+    total: Duration,
+    step: Duration,
+    mut child_exited: impl FnMut() -> bool,
+    mut close_master: impl FnMut() -> bool,
+) {
+    let deadline = Instant::now() + total;
+    let mut master_close_observed = close_master();
+    loop {
+        if child_exited() || Instant::now() >= deadline {
+            return;
+        }
+        thread::sleep(step.min(deadline.saturating_duration_since(Instant::now())));
+        if !master_close_observed {
+            master_close_observed = close_master();
+        }
     }
 }
 
@@ -538,6 +561,7 @@ where
 mod tests {
     use super::*;
     use crate::terminal::TerminalConfig;
+    use std::cell::Cell;
     use std::sync::{mpsc, Condvar};
     use std::time::Duration;
 
@@ -582,6 +606,31 @@ mod tests {
         fn _assert_resize(handle: &PtyHandle) -> Result<(), String> {
             handle.resize(120, 40)
         }
+    }
+
+    #[test]
+    fn graceful_wait_retries_master_close_after_a_busy_lock() {
+        let close_attempts = Cell::new(0usize);
+        let master_closed = Cell::new(false);
+
+        wait_for_child_with_master_close_retry(
+            Duration::from_millis(100),
+            Duration::from_millis(1),
+            || master_closed.get(),
+            || {
+                let next = close_attempts.get() + 1;
+                close_attempts.set(next);
+                if next >= 3 {
+                    master_closed.set(true);
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+
+        assert_eq!(close_attempts.get(), 3);
+        assert!(master_closed.get());
     }
 
     #[test]

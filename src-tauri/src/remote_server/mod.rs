@@ -13,7 +13,12 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-pub(crate) use access::effective_remote_settings;
+#[cfg(test)]
+pub(crate) use access::update_persistent_remote_settings_for_test;
+pub(crate) use access::{
+    effective_remote_settings, update_persistent_cloud_settings_snapshot,
+    update_persistent_remote_settings,
+};
 pub use access::{
     get_remote_access_status, set_remote_runtime_access, RemoteAccessRuntimeState,
     RemoteAccessStatus,

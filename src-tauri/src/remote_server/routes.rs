@@ -191,7 +191,11 @@ async fn remote_session_claim(
                     .into_response());
             }
 
-            match current.resume_claim_reservation(body.claim_reservation_id.as_deref(), now) {
+            match current.resume_claim_reservation(
+                body.claim_reservation_id.as_deref(),
+                now,
+                Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
+            ) {
                 ClaimReservationAttempt::Busy { remaining } => {
                     let Some(reservation_id) = body.claim_reservation_id.as_deref() else {
                         return Err(claim_reservation_rejected_response(Some(remaining)));

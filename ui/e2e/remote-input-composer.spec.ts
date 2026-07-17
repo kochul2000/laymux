@@ -350,6 +350,8 @@ async function installRemotePage(
     delayFirstTerminalWrite?: boolean;
     deferSocketCloseEvent?: boolean;
     claimBusyResponses?: number;
+    claimRetryAfterMs?: number;
+    claimReservationTtlMs?: number;
     width?: number;
   },
 ): Promise<RemoteState> {
@@ -376,8 +378,8 @@ async function installRemotePage(
             error: "terminal input is busy",
             code: "input_busy",
             claimReservationId: "reservation-1",
-            retryAfterMs: 10,
-            reservationTtlMs: 2_000,
+            retryAfterMs: options.claimRetryAfterMs ?? 10,
+            reservationTtlMs: options.claimReservationTtlMs ?? 2_000,
           },
         });
         return;
@@ -498,7 +500,9 @@ test("a busy Local input is claimed by retrying the one-shot reservation token",
 }) => {
   const state = await installRemotePage(page, {
     coarse: false,
-    claimBusyResponses: 2,
+    claimBusyResponses: 3,
+    claimRetryAfterMs: 80,
+    claimReservationTtlMs: 220,
     width: 1280,
   });
 
@@ -506,6 +510,7 @@ test("a busy Local input is claimed by retrying the one-shot reservation token",
 
   expect(state.claims).toEqual([
     { clientName: "browser" },
+    { clientName: "browser", claimReservationId: "reservation-1" },
     { clientName: "browser", claimReservationId: "reservation-1" },
     { clientName: "browser", claimReservationId: "reservation-1" },
   ]);

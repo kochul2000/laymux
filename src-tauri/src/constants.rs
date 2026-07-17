@@ -107,9 +107,10 @@ pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 /// already draining ahead of its claim reservation.
 pub const REMOTE_CLAIM_RETRY_AFTER_MS: u64 = 25;
 
-/// Absolute lifetime of the one-shot claim reservation returned with
-/// `input_busy`. The reservation survives completion of the operation it was
-/// created behind, preventing another Local key job from overtaking the retry.
+/// Short lease for a one-shot claim reservation returned with `input_busy`.
+/// Each authenticated retry with the matching token renews this lifetime while
+/// older Local input is still draining; an abandoned browser therefore blocks
+/// new Local input for at most this bounded interval.
 pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
 
 /// Desktop attach returns the retained output ring (currently capped at 1 MiB).
