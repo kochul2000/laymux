@@ -6403,6 +6403,26 @@ describe("TerminalView desktop input composer", () => {
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
+  it("never swallows Alt/Ctrl+Arrow so pane-navigation shortcuts still bubble", async () => {
+    const terminalId = "t-composer-panenav";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    mockWriteToTerminal.mockClear();
+
+    // Empty draft, but modifier combos are app keybindings — must not be forwarded
+    // (and the composer must not stopPropagation them).
+    const altLeft = new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, bubbles: true });
+    const stopSpy = vi.spyOn(altLeft, "stopPropagation");
+    textarea.dispatchEvent(altLeft);
+    fireEvent.keyDown(textarea, { key: "ArrowUp", ctrlKey: true, altKey: true });
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
   it("forwards every key (and honors DECCKM) while a full-screen app owns the screen", async () => {
     const terminalId = "t-composer-altscreen";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);

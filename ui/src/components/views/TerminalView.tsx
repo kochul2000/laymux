@@ -615,6 +615,10 @@ export function TerminalView({
    */
   const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
     if (!localTerminalControlAllowed()) return false;
+    // Alt/Ctrl/Meta combos belong to app keybindings (pane focus = Alt+Arrow,
+    // Ctrl+Alt+…). Never swallow them here — let them bubble to the document
+    // shortcut handler, otherwise pane navigation dies while the Composer is up.
+    if (event.altKey || event.ctrlKey || event.metaKey) return false;
     const term = terminalRef.current;
     if (!term) return false;
     const altScreen = term.buffer?.active?.type === "alternate";
