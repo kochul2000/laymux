@@ -211,6 +211,12 @@ mod tests {
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
+        // Pointer activation must not blur xterm's helper textarea and dismiss
+        // an already-open native keyboard. Click remains the accessible send path.
+        assert!(html.contains("function installSoftKey(button, id)"));
+        assert!(html.contains("button.addEventListener(\"pointerdown\", (event) => {"));
+        assert!(html.contains("event.preventDefault();"));
+        assert!(html.contains("button.addEventListener(\"click\", () => sendKey(id));"));
         // Cursor keys (arrows/Home/End) are DECCKM-aware: SS3 in app mode, else CSI.
         assert!(html.contains("up: { label: \"↑\", cursor: \"A\" }"));
         assert!(html.contains("home: { label: \"Home\", cursor: \"H\" }"));
@@ -229,6 +235,8 @@ mod tests {
         assert!(html.contains("data-flick-direction=\"left\""));
         // A representative fixed sequence: Tab, Delete, and F1 (SS3).
         assert!(html.contains("tab: { label: \"Tab\", seq: \"\\t\" }"));
+        assert!(html.contains("stab: { label: \"⇧Tab\", seq: \"\\x1b[Z\" }"));
+        assert!(html.contains("end: { label: \"End\", cursor: \"F\" }"));
         assert!(html.contains("del: { label: \"Del\", seq: \"\\x1b[3~\" }"));
         assert!(html.contains("f1: { label: \"F1\", seq: \"\\x1bOP\" }"));
         // Toggle visibility drives the hidden attribute + persistence.

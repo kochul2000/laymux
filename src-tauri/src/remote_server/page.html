@@ -3637,6 +3637,19 @@
           if (seq) enqueueInput(seq);
         }
 
+        function installSoftKey(button, id) {
+          // Keep xterm's helper textarea focused when the native keyboard is
+          // already open. Mobile browsers otherwise focus the button on
+          // pointerdown, which closes the keyboard before click sends the key.
+          button.addEventListener("pointerdown", (event) => {
+            if (!event.isPrimary || event.button !== 0) return;
+            event.preventDefault();
+          });
+          // Retain click handling so keyboard activation and assistive
+          // technologies use the same input path.
+          button.addEventListener("click", () => sendKey(id));
+        }
+
         function directionFromFlick(deltaX, deltaY) {
           if (Math.hypot(deltaX, deltaY) < KEY_FLICK_THRESHOLD_PX) return "";
           if (Math.abs(deltaX) > Math.abs(deltaY)) {
@@ -3749,7 +3762,7 @@
               btn.title = "Flick up, right, down, or left";
               installDirectionalFlick(btn);
             } else {
-              btn.addEventListener("click", () => sendKey(id));
+              installSoftKey(btn, id);
             }
             keyRowEl.append(btn);
           }

@@ -1,7 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type WebSocketRoute } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 const remotePagePath = new URL("../../src-tauri/src/remote_server/page.html", import.meta.url);
+const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
   const html = await readFile(remotePagePath, "utf8");
@@ -14,6 +16,8 @@ async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
 }
 
 test.describe("remote mobile layout", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.setContent(await loadRemotePageMarkup());
@@ -183,6 +187,224 @@ test.describe("remote mobile layout", () => {
       await page.mouse.up();
       await expect(flickHint).toBeHidden();
     }
+  });
+
+  test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {
+    const writes: string[] = [];
+    let outputSocket: WebSocketRoute | null = null;
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({ visible: true, sets: ["nav", "edit", "ctrl", "fn"], custom: [] }),
+      );
+    });
+    await page.route("http://remote.test/remote/", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}page.html`,
+        contentType: "text/html; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/addon-fit.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.css`,
+        contentType: "text/css; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [{ id: "term-1", title: "Shell", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/terminals/term-1/write") {
+        const body = route.request().postDataJSON() as { data: string };
+        writes.push(body.data);
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, (socket) => {
+      outputSocket = socket;
+    });
+
+    const cdp = await page.context().newCDPSession(page);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#focusTerminal")).toBeEnabled();
+    await page.locator("#focusTerminal").tap();
+
+    const helperTextarea = page.locator(".xterm-helper-textarea");
+    await expect(helperTextarea).toBeFocused();
+
+    const fixedCases = [
+      { id: "esc", sequence: "\x1b" },
+      { id: "tab", sequence: "\t" },
+      { id: "stab", sequence: "\x1b[Z" },
+      { id: "enter", sequence: "\r" },
+      { id: "bksp", sequence: "\x7f" },
+      { id: "ins", sequence: "\x1b[2~" },
+      { id: "del", sequence: "\x1b[3~" },
+      { id: "pgup", sequence: "\x1b[5~" },
+      { id: "pgdn", sequence: "\x1b[6~" },
+      { id: "c-a", sequence: "\x01" },
+      { id: "c-c", sequence: "\x03" },
+      { id: "c-d", sequence: "\x04" },
+      { id: "c-e", sequence: "\x05" },
+      { id: "c-k", sequence: "\x0b" },
+      { id: "c-l", sequence: "\x0c" },
+      { id: "c-r", sequence: "\x12" },
+      { id: "c-u", sequence: "\x15" },
+      { id: "c-w", sequence: "\x17" },
+      { id: "c-z", sequence: "\x1a" },
+      { id: "f1", sequence: "\x1bOP" },
+      { id: "f2", sequence: "\x1bOQ" },
+      { id: "f3", sequence: "\x1bOR" },
+      { id: "f4", sequence: "\x1bOS" },
+      { id: "f5", sequence: "\x1b[15~" },
+      { id: "f6", sequence: "\x1b[17~" },
+      { id: "f7", sequence: "\x1b[18~" },
+      { id: "f8", sequence: "\x1b[19~" },
+      { id: "f9", sequence: "\x1b[20~" },
+      { id: "f10", sequence: "\x1b[21~" },
+      { id: "f11", sequence: "\x1b[23~" },
+      { id: "f12", sequence: "\x1b[24~" },
+    ];
+    const cursorCases = [
+      { id: "up", final: "A" },
+      { id: "down", final: "B" },
+      { id: "left", final: "D" },
+      { id: "right", final: "C" },
+      { id: "home", final: "H" },
+      { id: "end", final: "F" },
+    ];
+    const renderedKeyIds = await page
+      .locator("#keyRow .key-btn")
+      .evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).dataset.key));
+    expect(renderedKeyIds).toEqual([
+      "esc",
+      "tab",
+      "stab",
+      "dpad",
+      "up",
+      "down",
+      "left",
+      "right",
+      "home",
+      "end",
+      "enter",
+      "bksp",
+      "ins",
+      "del",
+      "pgup",
+      "pgdn",
+      "c-a",
+      "c-c",
+      "c-d",
+      "c-e",
+      "c-k",
+      "c-l",
+      "c-r",
+      "c-u",
+      "c-w",
+      "c-z",
+      "f1",
+      "f2",
+      "f3",
+      "f4",
+      "f5",
+      "f6",
+      "f7",
+      "f8",
+      "f9",
+      "f10",
+      "f11",
+      "f12",
+    ]);
+
+    const pressKey = async (id: string, sequence: string) => {
+      const writeIndex = writes.length;
+      await page.locator(`[data-key="${id}"]`).tap();
+      await expect(helperTextarea).toBeFocused();
+      await expect.poll(() => writes.length).toBe(writeIndex + 1);
+      expect(writes[writeIndex]).toBe(sequence);
+    };
+
+    const flickKey = async (dx: number, dy: number, sequence: string) => {
+      const flickButton = page.locator('[data-key="dpad"]');
+      await flickButton.scrollIntoViewIfNeeded();
+      const box = await flickButton.boundingBox();
+      expect(box).not.toBeNull();
+      const writeIndex = writes.length;
+      const x = box!.x + box!.width / 2;
+      const y = box!.y + box!.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y, id: 1 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + dx, y: y + dy, id: 1 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await expect(helperTextarea).toBeFocused();
+      await expect.poll(() => writes.length).toBe(writeIndex + 1);
+      expect(writes[writeIndex]).toBe(sequence);
+    };
+
+    for (const key of fixedCases) {
+      await pressKey(key.id, key.sequence);
+    }
+    for (const key of cursorCases) {
+      await pressKey(key.id, `\x1b[${key.final}`);
+    }
+    await flickKey(0, -32, "\x1b[A");
+    await flickKey(32, 0, "\x1b[C");
+    await flickKey(0, 32, "\x1b[B");
+    await flickKey(-32, 0, "\x1b[D");
+
+    await expect.poll(() => outputSocket).not.toBeNull();
+    outputSocket!.send(Buffer.from("\x1b[?1hAPP-MODE"));
+    await expect(page.locator(".xterm-rows")).toContainText("APP-MODE");
+    for (const key of cursorCases) {
+      await pressKey(key.id, `\x1bO${key.final}`);
+    }
+    await flickKey(0, -32, "\x1bOA");
+    await flickKey(32, 0, "\x1bOC");
+    await flickKey(0, 32, "\x1bOB");
+    await flickKey(-32, 0, "\x1bOD");
   });
 
   test("copies a selection when mouseup lands outside the terminal", async ({ page }) => {

@@ -592,14 +592,21 @@ struct NavigateSettingsParam {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetHiddenItemsOpenParam {
+    /// Whether the WorkspaceSelector hidden-items shelf must be open.
+    open: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ToggleWorkspaceHiddenParam {
-    /// Workspace ID to toggle in hide mode.
+    /// Workspace ID to toggle in the selector list.
     workspace_id: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct TogglePaneHiddenParam {
-    /// Pane ID to toggle in hide mode.
+    /// Pane summary ID to toggle in the selector list.
     pane_id: String,
 }
 
@@ -615,7 +622,7 @@ const DEV_ONLY_TOOLS: &[&str] = &[
     "open_remote_access",
     "close_remote_access",
     "toggle_notification_panel",
-    "toggle_hide_mode",
+    "set_hidden_items_open",
     "toggle_pane_hidden",
     "toggle_workspace_hidden",
     "simulate_hover",
@@ -2751,14 +2758,22 @@ impl McpHandler {
             .await
     }
 
-    /// Dev-only: toggle workspace/pane hide mode.
+    /// Dev-only: deterministically open or close the hidden-items shelf.
     #[tool]
-    async fn toggle_hide_mode(&self) -> Result<CallToolResult, ErrorData> {
-        self.bridge("action", "ui", "toggleHideMode", json!({}))
-            .await
+    async fn set_hidden_items_open(
+        &self,
+        Parameters(p): Parameters<SetHiddenItemsOpenParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.bridge(
+            "action",
+            "ui",
+            "setHiddenItemsOpen",
+            json!({ "open": p.open }),
+        )
+        .await
     }
 
-    /// Dev-only: toggle whether a workspace is hidden in hide mode.
+    /// Dev-only: toggle whether a workspace is hidden from the selector list.
     #[tool]
     async fn toggle_workspace_hidden(
         &self,
@@ -2778,7 +2793,7 @@ impl McpHandler {
         .await
     }
 
-    /// Dev-only: toggle whether a pane is hidden in hide mode.
+    /// Dev-only: toggle whether a pane summary is hidden from the selector list.
     #[tool]
     async fn toggle_pane_hidden(
         &self,
@@ -4134,6 +4149,22 @@ mod tests {
                 "dev-only tool not registered: {name}"
             );
         }
+    }
+
+    #[test]
+    fn hidden_items_set_tool_replaces_hide_mode_toggle() {
+        let router = McpHandler::tool_router();
+        assert!(router.has_route("set_hidden_items_open"));
+        assert!(!router.has_route("toggle_hide_mode"));
+        assert!(DEV_ONLY_TOOLS.contains(&"set_hidden_items_open"));
+        assert!(!DEV_ONLY_TOOLS.contains(&"toggle_hide_mode"));
+
+        let open: SetHiddenItemsOpenParam = serde_json::from_str(r#"{"open":true}"#).unwrap();
+        assert!(open.open);
+        assert!(serde_json::from_str::<SetHiddenItemsOpenParam>("{}").is_err());
+        assert!(
+            serde_json::from_str::<SetHiddenItemsOpenParam>(r#"{"open":true,"extra":1}"#).is_err()
+        );
     }
 
     #[test]

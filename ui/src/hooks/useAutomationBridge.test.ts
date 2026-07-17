@@ -308,7 +308,7 @@ describe("handleAutomationRequest", () => {
     expect(result.data).toMatchObject({
       hiddenWorkspaceIds: ["ws-hidden"],
       hiddenPaneIds: ["pane-hidden"],
-      hideMode: false,
+      hiddenShelfOpen: false,
       focusedDock: "left",
       focusedDockPaneId,
       workspaceSelector: expect.objectContaining({ sortOrder: "notification" }),
@@ -575,6 +575,63 @@ describe("handleAutomationRequest", () => {
       params: {},
     });
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
+  });
+
+  it("sets the hidden-items shelf open state idempotently", () => {
+    for (const open of [true, true, false]) {
+      const result = handleAutomationRequest({
+        requestId: `hidden-items-${open}`,
+        category: "action",
+        target: "ui",
+        method: "setHiddenItemsOpen",
+        params: { open },
+      });
+      expect(result).toEqual({ success: true, data: { open } });
+      expect(useUiStore.getState().hiddenShelfOpen).toBe(open);
+    }
+  });
+
+  it("rejects a non-boolean hidden-items open value", () => {
+    const result = handleAutomationRequest({
+      requestId: "hidden-items-invalid",
+      category: "action",
+      target: "ui",
+      method: "setHiddenItemsOpen",
+      params: { open: "true" },
+    });
+    expect(result.success).toBe(false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+  });
+
+  it("preserves active context when Automation toggles the active workspace hidden", () => {
+    const initial = useWorkspaceStore.getState().workspaces[0];
+    useWorkspaceStore.getState().addWorkspace("Fallback", "default-layout");
+    const fallback = useWorkspaceStore.getState().workspaces[1];
+
+    const result = handleAutomationRequest({
+      requestId: "toggle-active-hidden",
+      category: "action",
+      target: "ui",
+      method: "toggleWorkspaceHidden",
+      params: { id: initial.id },
+    });
+
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(fallback.id);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has(initial.id)).toBe(true);
+  });
+
+  it("refuses an Automation toggle that would hide the last visible workspace", () => {
+    const activeId = useWorkspaceStore.getState().activeWorkspaceId;
+    const result = handleAutomationRequest({
+      requestId: "toggle-last-hidden",
+      category: "action",
+      target: "ui",
+      method: "toggleWorkspaceHidden",
+      params: { id: activeId },
+    });
+    expect(result.success).toBe(false);
+    expect(useUiStore.getState().hiddenWorkspaceIds.has(activeId)).toBe(false);
   });
 
   it("toggles Remote Access modal via automation API", () => {

@@ -227,16 +227,17 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Toggle the notification panel overlay open/closed."
             },
             {
-                "method": "POST", "path": "/api/v1/ui/hide-mode/toggle",
-                "description": "Toggle the WorkspaceSelectorView hide mode (reveals eye toggles on each workspace/pane)."
+                "method": "POST", "path": "/api/v1/ui/hidden-items",
+                "description": "Deterministically open or close the WorkspaceSelectorView hidden-items shelf.",
+                "body": { "open": "boolean (required)" }
             },
             {
                 "method": "POST", "path": "/api/v1/ui/hidden/workspace/{id}/toggle",
-                "description": "Toggle whether the given workspace is hidden (only has a visible effect while hide mode is on)."
+                "description": "Toggle whether the given workspace is hidden from the selector list. Active workspace fallback is enforced."
             },
             {
                 "method": "POST", "path": "/api/v1/ui/hidden/pane/{id}/toggle",
-                "description": "Toggle whether the given pane is hidden (only has a visible effect while hide mode is on)."
+                "description": "Toggle whether the given pane summary is hidden from the selector list."
             },
             {
                 "method": "POST", "path": "/api/v1/docks/{position}/split",

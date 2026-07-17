@@ -481,9 +481,30 @@
       "manualTitle": "Sort: Manual (drag to reorder)",
       "notificationTitle": "Sort: Notification (most recent first)"
     },
-    "hideMode": {
-      "enter": "Enter hide mode",
-      "apply": "Apply and exit hide mode"
+    "hiddenItems": {
+      "title": "Hidden items",
+      "titleCount": "Hidden items {{count}}",
+      "chip": "Hidden {{count}}",
+      "hideFromList": "Hide from list",
+      "hidePaneDescription": "Hide this pane summary from the workspace list",
+      "showAgain": "Show again",
+      "showOnly": "Show only",
+      "showAndOpen": "Show again and open",
+      "showAndFocus": "Show again and focus",
+      "restoreAll": "Show all",
+      "undo": "Undo",
+      "close": "Close hidden items",
+      "workspaces": "Workspaces",
+      "panes": "Panes",
+      "nestedPaneCount_one": "{{count}} individually hidden pane",
+      "nestedPaneCount_other": "{{count}} individually hidden panes",
+      "hiddenMessage": "{{name}} was hidden from the list",
+      "lastWorkspace": "The last workspace cannot be hidden",
+      "hideAndMove": "Hide and move to the next workspace",
+      "showAndOpenLabel": "Show {{name}} again and open it",
+      "showOnlyWorkspaceLabel": "Show {{name}} again without opening it",
+      "showAndFocusLabel": "Show {{workspace}} pane {{pane}} again and focus it",
+      "showOnlyPaneLabel": "Show {{workspace}} pane {{pane}} again without focusing it"
     },
     "layout": {
       "options": "Layout options",
@@ -502,8 +523,6 @@
       "renamePrompt": "Rename layout:"
     },
     "item": {
-      "showWorkspace": "Show workspace",
-      "hideWorkspace": "Hide workspace",
       "duplicateWorkspace": "Duplicate workspace (Ctrl+Alt+D)",
       "renameWorkspace": "Rename workspace (Ctrl+Alt+R)",
       "closeWorkspace": "Close workspace (Ctrl+Alt+W)"

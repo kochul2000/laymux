@@ -1,4 +1,4 @@
-# 0033. Terminal composer는 Send 단일 action을 제공한다
+# 0034. Terminal composer는 Send 단일 action을 제공한다
 
 - Status: Accepted
 - Date: 2026-07-16

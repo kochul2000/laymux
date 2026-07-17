@@ -62,6 +62,9 @@
   --pane-row-max-h: 28px;
   --workspace-count-badge-size: 14px;
   --workspace-count-badge-px: 3px;
+  --hidden-shelf-max-height: 44%;
+  --hidden-action-size: 24px;
+  --undo-snackbar-offset: 8px;
   --terminal-composition-underline-color: currentColor;
 }
 
@@ -145,13 +148,13 @@
     background: var(--red);
     color: var(--bg-base);
   }
-  /* Accent hover — used by primary-action toggles (e.g. hide mode) to make
+  /* Accent hover — used by primary-action toggles to make
      the currently active mode feel responsive and distinctly highlighted. */
   .hover-bg-accent:hover {
     background: var(--accent-20);
   }
 
-  /* Per-row eye buttons (workspace-eye, pane-eye) in hide mode. Needs its
+  /* Per-row eye buttons (workspace-eye, pane-eye). Needs its
      own hover affordance so the user can tell the tiny 11px icon is the
      click target. Padding + negative margin adds a hit area + hover
      background pill without shifting the row layout. */
@@ -163,6 +166,133 @@
   }
   .row-eye-btn:hover {
     background: var(--hover-bg-strong);
+  }
+
+  .hidden-item-action-btn {
+    display: inline-flex;
+    width: var(--hidden-action-size);
+    height: var(--hidden-action-size);
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  .hidden-item-action-btn:disabled {
+    cursor: not-allowed;
+  }
+  .workspace-quick-hide,
+  .pane-quick-hide {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-fast);
+  }
+  .workspace-item-animated:hover .workspace-quick-hide,
+  .workspace-item-animated:focus-within .workspace-quick-hide,
+  .workspace-pane-row:hover .pane-quick-hide,
+  .workspace-pane-row:focus-within .pane-quick-hide {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .workspace-item-animated:hover .workspace-quick-hide:disabled,
+  .workspace-item-animated:focus-within .workspace-quick-hide:disabled {
+    opacity: 0.3;
+  }
+  .hidden-item-action-btn:focus-visible,
+  .hidden-shelf-primary:focus-visible,
+  .hidden-shelf-icon-button:focus-visible,
+  .hidden-shelf-text-button:focus-visible,
+  .undo-snackbar-action:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .hidden-items-shelf {
+    max-height: var(--hidden-shelf-max-height);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
+  }
+  .hidden-shelf-section-label {
+    padding: 5px 5px 2px;
+    color: var(--text-secondary);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  .hidden-shelf-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 2px;
+  }
+  .hidden-shelf-primary {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    padding: 4px 5px;
+    text-align: left;
+    font-size: var(--fs-sm);
+  }
+  .hidden-shelf-icon-button {
+    display: inline-flex;
+    width: var(--hidden-action-size);
+    height: var(--hidden-action-size);
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  .hidden-shelf-text-button {
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--accent);
+    padding: 3px 5px;
+    font-size: var(--fs-2xs);
+  }
+
+  .undo-snackbar {
+    position: absolute;
+    right: var(--undo-snackbar-offset);
+    bottom: var(--undo-snackbar-offset);
+    left: var(--undo-snackbar-offset);
+    z-index: 40;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-overlay);
+    color: var(--text-primary);
+    padding: 6px 8px;
+    box-shadow: 0 4px 14px var(--backdrop-heavy);
+    font-size: var(--fs-xs);
+  }
+  .undo-snackbar-separator {
+    color: var(--text-secondary);
+  }
+  .undo-snackbar-action {
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--accent);
+    padding: 2px 4px;
+    font-weight: 600;
   }
 
   .workspace-item-animated {
@@ -542,6 +672,12 @@
 @media (prefers-reduced-motion: reduce) {
   .terminal-loading-spinner {
     animation: none;
+  }
+  .workspace-quick-hide,
+  .pane-quick-hide,
+  .workspace-item-animated,
+  .workspace-pane-row {
+    transition: none;
   }
 }
 

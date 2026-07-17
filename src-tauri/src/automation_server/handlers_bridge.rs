@@ -871,13 +871,16 @@ pub async fn ui_toggle_notification_panel(
     }
 }
 
-pub async fn ui_toggle_hide_mode(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+pub async fn ui_set_hidden_items_open(
+    AxumState(state): AxumState<ServerState>,
+    Json(body): Json<HiddenItemsOpenBody>,
+) -> impl IntoResponse {
     match bridge_request(
         &state,
         "action",
         "ui",
-        "toggleHideMode",
-        serde_json::json!({}),
+        "setHiddenItemsOpen",
+        serde_json::json!({ "open": body.open }),
     )
     .await
     {
