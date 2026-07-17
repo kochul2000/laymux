@@ -30,6 +30,40 @@ function joinClassNames(...parts: Array<string | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+function DirectIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ComposerIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" strokeLinejoin="round" />
+      <path d="M13.5 8.5l2.5 2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function TerminalInputComposer({
   mode,
   text,
@@ -48,6 +82,7 @@ export function TerminalInputComposer({
   const compositionActiveRef = useRef(false);
   const actionDisabled = disabled || commitDisabled || inFlight;
   const childTestId = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
+  const composerMode = mode === "composer";
 
   useEffect(() => {
     if (mode !== "composer") compositionActiveRef.current = false;
@@ -76,7 +111,10 @@ export function TerminalInputComposer({
       aria-busy={inFlight}
       aria-disabled={disabled || undefined}
       className={joinClassNames(
-        "terminal-input-composer flex min-w-0 flex-col gap-2 border-t p-2",
+        // Direct mode collapses to a slim right-aligned strip so it reclaims the
+        // terminal's vertical space; composer mode expands into the full editor.
+        "terminal-input-composer flex min-w-0 border-t",
+        composerMode ? "flex-col gap-2 p-2" : "justify-end px-2 py-1",
         className,
       )}
       style={{
@@ -88,7 +126,8 @@ export function TerminalInputComposer({
       <div
         role="group"
         aria-label={labels.inputMode}
-        className="terminal-input-composer-mode flex min-w-0 items-center gap-1"
+        className="terminal-input-composer-mode inline-flex min-w-0 items-center overflow-hidden rounded border"
+        style={{ borderColor: "var(--border)" }}
       >
         {(["direct", "composer"] as const).map((candidate) => {
           const selected = mode === candidate;
@@ -100,7 +139,7 @@ export function TerminalInputComposer({
               data-testid={childTestId(`mode-${candidate}`)}
               aria-pressed={selected}
               disabled={disabled}
-              className="hover-bg min-w-0 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              className="hover-bg flex min-w-0 items-center gap-1 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 background: selected ? "var(--accent-20)" : "transparent",
                 color: selected ? "var(--accent)" : "var(--text-secondary)",
@@ -109,13 +148,14 @@ export function TerminalInputComposer({
                 if (!selected) onModeChange(candidate);
               }}
             >
-              {label}
+              {candidate === "direct" ? <DirectIcon /> : <ComposerIcon />}
+              <span className="min-w-0 truncate">{label}</span>
             </button>
           );
         })}
       </div>
 
-      {mode === "composer" && (
+      {composerMode && (
         <>
           <textarea
             ref={textareaRef}

@@ -472,12 +472,13 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   await installRemotePage(page, { coarse: false, width: 1280 });
 
   const composer = page.locator("#terminalComposer");
-  const toggle = page.locator("#inputModeToggle");
+  const directSeg = page.locator("#inputModeDirect");
+  const composerSeg = page.locator("#inputModeComposer");
   await expect(composer).toBeHidden();
-  await expect(toggle).toHaveText("Direct");
-  await toggle.click();
+  await expect(directSeg).toHaveAttribute("aria-pressed", "true");
+  await composerSeg.click();
   await expect(composer).toBeVisible();
-  await expect(toggle).toHaveText("Composer");
+  await expect(composerSeg).toHaveAttribute("aria-pressed", "true");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.inputMode")))
     .toBe("composer");
@@ -492,7 +493,7 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   // Re-running the static entry simulates a reload: preference survives, drafts do not.
   await page.setContent(await remotePageMarkup());
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await expect(page.locator("#inputModeToggle")).toHaveText("Composer");
+  await expect(page.locator("#inputModeComposer")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a busy Local input is claimed by retrying the one-shot reservation token", async ({
@@ -520,9 +521,9 @@ test("a busy Local input is claimed by retrying the one-shot reservation token",
 test("coarse pointer defaults to Composer and a saved Direct preference wins", async ({ page }) => {
   await installRemotePage(page, { coarse: true, storedMode: "direct" });
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await expect(page.locator("#inputModeToggle")).toHaveText("Direct");
+  await expect(page.locator("#inputModeDirect")).toHaveAttribute("aria-pressed", "true");
 
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeComposer").click();
   await expect(page.locator("#terminalComposer")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 });
@@ -541,7 +542,7 @@ test("terminal switches preserve isolated mode and draft state without persisten
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
   await expect(editor).toHaveValue("");
   await editor.fill("draft two");
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeDirect").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
 
   await selectTerminal(page, "C:\\one");
@@ -550,7 +551,7 @@ test("terminal switches preserve isolated mode and draft state without persisten
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeComposer").click();
   await expect(editor).toHaveValue("draft two");
   expect(
     await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes("Draft"))),
@@ -605,7 +606,7 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeComposer").click();
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#composerSend")).toBeEnabled();
@@ -695,7 +696,7 @@ test("legacy unsequenced output remains visible but Composer and direct paste fa
 
   await page.locator("#composerInput").fill("preserved draft");
   await expect(page.locator("#composerSend")).toBeDisabled();
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeDirect").click();
   await dispatchTerminalPaste(page, "must not send");
   expect(remote.inputs).toHaveLength(0);
   await expect(page.locator("#status")).toHaveText("Terminal input is not ready. Reconnecting...");
@@ -843,7 +844,7 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
     "xterm-helper-textarea",
   );
 
-  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeDirect").click();
   expect(
     await page.evaluate(
       () =>

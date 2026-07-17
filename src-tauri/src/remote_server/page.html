@@ -147,6 +147,50 @@
       .status.error {
         color: var(--danger);
       }
+      .input-mode-toggle {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: stretch;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .input-mode-seg {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        border: 0;
+        border-radius: 0;
+        padding: 4px 8px;
+        background: transparent;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1;
+      }
+      .input-mode-seg + .input-mode-seg {
+        border-left: 1px solid var(--border);
+      }
+      .input-mode-seg:hover:not([aria-pressed="true"]) {
+        background: var(--hover-bg);
+      }
+      .input-mode-seg[aria-pressed="true"] {
+        background: var(--accent-20);
+        color: var(--accent);
+      }
+      .input-mode-seg svg {
+        flex: 0 0 auto;
+      }
+      /* Very narrow headers collapse the toggle to icons; the button title still
+         names each mode for assistive tech. */
+      @media (max-width: 360px) {
+        .input-mode-seg .seg-label {
+          display: none;
+        }
+        .input-mode-seg {
+          padding: 4px 7px;
+        }
+      }
       .terminal-shell {
         min-width: 0;
         min-height: 0;
@@ -1178,7 +1222,16 @@
           <span></span>
         </button>
         <div id="status" class="status">Enter the remote token, then connect.</div>
-        <button id="inputModeToggle" type="button" aria-pressed="false" title="Toggle Direct or Composer input">Direct</button>
+        <div id="inputModeToggle" class="input-mode-toggle" role="group" aria-label="Terminal input mode">
+          <button id="inputModeDirect" class="input-mode-seg" type="button" aria-pressed="true" title="Direct input — type straight into the terminal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" stroke-linecap="round"/></svg>
+            <span class="seg-label">Direct</span>
+          </button>
+          <button id="inputModeComposer" class="input-mode-seg" type="button" aria-pressed="false" title="Composer — draft text, then send to the terminal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>
+            <span class="seg-label">Composer</span>
+          </button>
+        </div>
         <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
       </header>
       <main>
@@ -1314,7 +1367,8 @@
         const clearNotificationsButton = $("clearNotifications");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
-        const inputModeToggleButton = $("inputModeToggle");
+        const inputModeDirectButton = $("inputModeDirect");
+        const inputModeComposerButton = $("inputModeComposer");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
@@ -1568,11 +1622,8 @@
           const composerMode = mode === "composer";
           const draft = composerDraft();
           terminalComposer.hidden = !composerMode;
-          inputModeToggleButton.textContent = composerMode ? "Composer" : "Direct";
-          inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
-          inputModeToggleButton.title = composerMode
-            ? "Switch to Direct terminal input"
-            : "Switch to detached Composer input";
+          inputModeDirectButton.setAttribute("aria-pressed", composerMode ? "false" : "true");
+          inputModeComposerButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
           focusTerminalButton.textContent = composerMode ? "Editor" : "Keyboard";
 
           const nextText = draft ? draft.text : "";
@@ -3998,10 +4049,8 @@
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => focusCurrentInputSurface());
-        inputModeToggleButton.addEventListener("click", () => {
-          const nextMode = currentInputMode() === "direct" ? "composer" : "direct";
-          setInputMode(nextMode);
-        });
+        inputModeDirectButton.addEventListener("click", () => setInputMode("direct"));
+        inputModeComposerButton.addEventListener("click", () => setInputMode("composer"));
         composerInput.addEventListener("input", () => {
           const draft = composerDraft();
           if (!draft || draft.text === composerInput.value) return;
