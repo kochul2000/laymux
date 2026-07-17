@@ -27,15 +27,28 @@ export interface TerminalInputComposerProps {
   disabled?: boolean;
   commitDisabled?: boolean;
   autoFocus?: boolean;
+  /**
+   * True at a shell command prompt (OSC 133 input phase). The Composer only owns
+   * keys while at the prompt; when a program is running it forwards every key to
+   * the PTY so menus / TUIs / their own history behave natively. Defaults to true
+   * so an unintegrated shell keeps a usable Composer.
+   */
+  atShellPrompt?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
   onTextChange: (text: string) => void;
   onSend: () => void;
   /**
-   * Give the host a chance to forward a keystroke straight to the terminal
-   * (empty-draft nav keys, or any key while a full-screen app runs). Returning
-   * true means the host consumed it and the editor should ignore it.
+   * Forward a keystroke straight to the terminal (used while a program is
+   * running, i.e. not at the prompt). Returning true means it was consumed.
    */
-  onKeyPassthrough?: (event: KeyboardEvent, ctx: { empty: boolean }) => boolean;
+  onKeyPassthrough?: (event: KeyboardEvent) => boolean;
+  /** Forward IME-composed text to the terminal while a program is running. */
+  onForwardText?: (text: string) => void;
+  /**
+   * Navigate the Composer's own sent-history at the prompt, recalling an entry
+   * into the draft. Returning true means an entry replaced the draft.
+   */
+  onHistory?: (direction: "prev" | "next") => boolean;
   className?: string;
   testId?: string;
 }
@@ -65,10 +78,13 @@ export function TerminalInputComposer({
   disabled = false,
   commitDisabled = false,
   autoFocus = false,
+  atShellPrompt = true,
   textareaRef,
   onTextChange,
   onSend,
   onKeyPassthrough,
+  onForwardText,
+  onHistory,
   className,
   testId,
 }: TerminalInputComposerProps) {
@@ -115,21 +131,45 @@ export function TerminalInputComposer({
   }, [mode]);
 
   const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    // Composition keys always belong to the IME, never to passthrough or Send.
+    // Composition keys always belong to the IME. At the prompt they build the
+    // draft; while a program runs the composed text is forwarded on commit.
     const composing =
       compositionActiveRef.current ||
       event.nativeEvent.isComposing ||
       event.nativeEvent.keyCode === 229;
+    if (composing) return;
 
-    // Let the host forward empty-draft nav keys / full-screen-app keys to the PTY.
-    if (!composing && onKeyPassthrough?.(event.nativeEvent, { empty: text.length === 0 })) {
-      event.preventDefault();
-      event.stopPropagation();
+    if (!atShellPrompt) {
+      // A program owns the screen — forward every key to it (menus, TUIs, and
+      // their own history all behave natively).
+      if (onKeyPassthrough?.(event.nativeEvent)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
       return;
     }
 
+    // At the prompt the Composer owns editing. ↑/↓ at the draft's edges recall
+    // the Composer's own history instead of the shell's (which would land on the
+    // terminal line, detached from this editor).
+    const ta = event.currentTarget;
+    if (event.key === "ArrowUp" && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+      if (onHistory?.("prev")) {
+        event.preventDefault();
+        return;
+      }
+    } else if (
+      event.key === "ArrowDown" &&
+      ta.selectionStart === ta.value.length &&
+      ta.selectionEnd === ta.value.length
+    ) {
+      if (onHistory?.("next")) {
+        event.preventDefault();
+        return;
+      }
+    }
+
     if (event.key !== "Enter" || event.shiftKey) return;
-    if (composing) return;
 
     // Plain Enter is the Send gesture. While an action is already in flight,
     // consume repeats without turning them into accidental draft newlines.
@@ -191,12 +231,25 @@ export function TerminalInputComposer({
           background: "var(--bg-base)",
           color: "var(--text-primary)",
         }}
-        onChange={(event) => onTextChange(event.currentTarget.value)}
+        onChange={(event) => {
+          // While a program runs the editor is a transparent conduit — never stage
+          // typed text into the draft. Printable keys are forwarded on keydown;
+          // IME-composed text is forwarded on compositionend (below).
+          if (!atShellPrompt) {
+            if (text !== "") onTextChange("");
+            return;
+          }
+          onTextChange(event.currentTarget.value);
+        }}
         onCompositionStart={() => {
           compositionActiveRef.current = true;
         }}
-        onCompositionEnd={() => {
+        onCompositionEnd={(event) => {
           compositionActiveRef.current = false;
+          if (!atShellPrompt && event.data) {
+            onForwardText?.(event.data);
+            if (text !== "") onTextChange("");
+          }
         }}
         onBlur={() => {
           compositionActiveRef.current = false;

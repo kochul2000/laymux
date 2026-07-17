@@ -9,7 +9,9 @@ import {
   clampComposerHeight,
   clearRuntimeComposerState,
   createComposerDraftState,
+  pushComposerHistory,
   readComposerHeight,
+  readComposerHistory,
   readDesktopInputModePreference,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
@@ -21,6 +23,31 @@ import {
   writeRuntimeComposerDraft,
   writeRuntimeInputMode,
 } from "./terminal-input-composer-state";
+
+describe("composer sent-history", () => {
+  beforeEach(() => {
+    clearRuntimeComposerState();
+  });
+
+  it("appends entries, skipping blanks and consecutive duplicates", () => {
+    pushComposerHistory("t1", "one");
+    pushComposerHistory("t1", "one"); // duplicate — ignored
+    pushComposerHistory("t1", ""); // blank — ignored
+    pushComposerHistory("t1", "two");
+    expect(readComposerHistory("t1")).toEqual(["one", "two"]);
+  });
+
+  it("keeps history isolated per terminal and clears with runtime state", () => {
+    pushComposerHistory("a", "cmd-a");
+    pushComposerHistory("b", "cmd-b");
+    expect(readComposerHistory("a")).toEqual(["cmd-a"]);
+    expect(readComposerHistory("b")).toEqual(["cmd-b"]);
+
+    clearRuntimeComposerState("a");
+    expect(readComposerHistory("a")).toEqual([]);
+    expect(readComposerHistory("b")).toEqual(["cmd-b"]);
+  });
+});
 
 describe("desktop composer height preference", () => {
   beforeEach(() => {

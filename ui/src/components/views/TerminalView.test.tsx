@@ -6069,6 +6069,14 @@ describe("TerminalView desktop input composer", () => {
     fireEvent.keyDown(host.parentElement!, { key: "m", ctrlKey: true, altKey: true });
   };
 
+  // Feed raw output so OSC 133 flips the prompt/program phase the Composer routes on.
+  const emitOutput = (terminalId: string, str: string) => {
+    const onOutput = mockOnTerminalOutput.mock.calls.find((call) => call[0] === terminalId)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    act(() => onOutput?.(new TextEncoder().encode(str)));
+  };
+
   it("toggles the desktop composer through the registered keybinding", async () => {
     render(<TerminalView instanceId="t-composer-toggle" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
@@ -6370,64 +6378,60 @@ describe("TerminalView desktop input composer", () => {
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
   });
 
-  it("passes empty-draft nav keys and empty Enter through to the PTY", async () => {
-    const terminalId = "t-composer-passthrough";
+  it("recalls Composer history into the draft at the shell prompt (not the shell's)", async () => {
+    const terminalId = "t-composer-history";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
     toggleInputMode(terminalId);
-    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
-    mockWriteToTerminal.mockClear();
-    mockWriteTerminalInput.mockClear();
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
 
-    fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1b[A");
-
-    // Empty Enter confirms in the terminal (raw CR) — it must not "send" a draft.
+    // Send one entry so the Composer has history, then confirm the draft cleared.
+    fireEvent.change(textarea, { target: { value: "echo hi" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\r");
-    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
-  });
+    await vi.waitFor(() => expect(textarea.value).toBe(""));
 
-  it("keeps nav keys inside the draft once it has text", async () => {
-    const terminalId = "t-composer-nav-draft";
-    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
-    await waitForTerminalInputReady();
-
-    toggleInputMode(terminalId);
-    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
-    fireEvent.change(textarea, { target: { value: "draft" } });
     mockWriteToTerminal.mockClear();
-
+    // Empty draft at the prompt: ↑ recalls into the editor, not the terminal line.
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    await vi.waitFor(() => expect(textarea.value).toBe("echo hi"));
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
-  it("forwards every key (and honors DECCKM) while a full-screen app owns the screen", async () => {
-    const terminalId = "t-composer-altscreen";
+  it("forwards every key (and honors DECCKM) while a program owns the screen", async () => {
+    const terminalId = "t-composer-program";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
     toggleInputMode(terminalId);
     const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
-    const buffer = mockBufferActive as typeof mockBufferActive & { type?: string };
+    // OSC 133;C = a command started running → Composer steps aside to passthrough.
+    emitOutput(terminalId, "\x1b]133;C\x07");
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1b[A");
+    fireEvent.keyDown(textarea, { key: "j" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "j");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\r");
+
     const modes = mockModes as typeof mockModes & { applicationCursorKeysMode?: boolean };
     try {
-      buffer.type = "alternate";
       modes.applicationCursorKeysMode = true;
-      mockWriteToTerminal.mockClear();
-
-      // A printable char is forwarded even with an empty draft in alt-screen.
-      fireEvent.keyDown(textarea, { key: "j" });
-      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "j");
-
-      // Application cursor mode emits SS3 instead of CSI.
       fireEvent.keyDown(textarea, { key: "ArrowUp" });
       expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1bOA");
     } finally {
-      delete buffer.type;
       delete modes.applicationCursorKeysMode;
     }
+
+    // Back at the prompt, keys belong to the Composer again.
+    emitOutput(terminalId, "\x1b]133;B\x07");
+    mockWriteToTerminal.mockClear();
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 });
 

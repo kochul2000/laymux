@@ -220,6 +220,46 @@ describe("TerminalInputComposer", () => {
     expect(localStorage.getItem("laymux.desktop.composerHeight")).toBe(String(before + 50));
   });
 
+  it("at the prompt, edge ↑/↓ recall Composer history instead of the shell's", () => {
+    const onHistory = vi.fn().mockReturnValue(true);
+    const onSend = vi.fn();
+    // Empty draft: caret is at both start and end.
+    renderComposer({ text: "", atShellPrompt: true, onHistory, onSend });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(onHistory).toHaveBeenCalledWith("prev");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(onHistory).toHaveBeenCalledWith("next");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("while a program runs, forwards every key and IME text to the terminal", () => {
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+    const onForwardText = vi.fn();
+    const onTextChange = vi.fn();
+    const onSend = vi.fn();
+    renderComposer({
+      text: "",
+      atShellPrompt: false,
+      onKeyPassthrough,
+      onForwardText,
+      onTextChange,
+      onSend,
+    });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    fireEvent.keyDown(textarea, { key: "j" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onKeyPassthrough).toHaveBeenCalledTimes(3);
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.compositionStart(textarea, { data: "ㅎ" });
+    fireEvent.compositionEnd(textarea, { data: "한" });
+    expect(onForwardText).toHaveBeenCalledWith("한");
+  });
+
   it("preserves the draft across mode switches without coupling them", async () => {
     const user = userEvent.setup();
 
