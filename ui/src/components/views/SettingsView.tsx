@@ -47,6 +47,11 @@ import {
   usesArrowWildcard,
 } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
+import {
+  readDesktopInputModePreference,
+  writeDesktopInputModePreference,
+  type InputMode,
+} from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
@@ -1474,10 +1479,35 @@ function TerminalSection() {
   const update = (partial: Partial<typeof terminal>) =>
     setDraftTerminal((prev) => ({ ...prev, ...partial }));
 
+  // Default input mode is a desktop-surface UI preference (localStorage), not part
+  // of the Rust-backed settings.json — so it stays outside the terminal draft.
+  const [defaultInputMode, setDefaultInputMode] = useState<InputMode>(() =>
+    readDesktopInputModePreference(),
+  );
+  const changeDefaultInputMode = (mode: InputMode) => {
+    if (!writeDesktopInputModePreference(mode)) return;
+    setDefaultInputMode(mode);
+  };
+
   return (
     <div>
       <SectionTitle>{t("terminal.title")}</SectionTitle>
       <div style={cardStyle} className="p-4">
+        <SettingRow
+          label={t("terminal.defaultInputMode")}
+          desc={t("terminal.defaultInputModeDesc")}
+        >
+          <FocusSelect
+            data-testid="default-input-mode-select"
+            className={inputCls}
+            value={defaultInputMode}
+            onChange={(e) => changeDefaultInputMode(e.target.value as InputMode)}
+          >
+            <option value="direct">{t("terminal.inputModeDirect")}</option>
+            <option value="composer">{t("terminal.inputModeComposer")}</option>
+          </FocusSelect>
+        </SettingRow>
+
         <ToggleRow
           label={t("terminal.copyOnSelect")}
           desc={t("terminal.copyOnSelectDesc")}

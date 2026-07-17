@@ -6061,6 +6061,14 @@ describe("TerminalView desktop input composer", () => {
     mockWriteTerminalInput.mockResolvedValue(undefined);
   });
 
+  // The input-mode toggle now lives in the pane control bar, which is not mounted
+  // when TerminalView is rendered in isolation. Drive mode switches through the
+  // registered keybinding (Ctrl+Alt+M) instead of clicking an in-composer button.
+  const toggleInputMode = (terminalId: string) => {
+    const host = screen.getByTestId(`terminal-input-composer-${terminalId}`);
+    fireEvent.keyDown(host.parentElement!, { key: "m", ctrlKey: true, altKey: true });
+  };
+
   it("toggles the desktop composer through the registered keybinding", async () => {
     render(<TerminalView instanceId="t-composer-toggle" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
@@ -6084,7 +6092,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
 
     const terminal = createdTerminals.at(-1)!;
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
 
     await vi.waitFor(() => {
       expect(terminal.options.cursorInactiveStyle).toBe("none");
@@ -6093,7 +6101,7 @@ describe("TerminalView desktop input composer", () => {
       );
     });
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-direct`));
+    toggleInputMode(terminalId);
     await vi.waitFor(() => {
       expect(terminal.options.cursorInactiveStyle).toBe("outline");
       expect(screen.getByTestId(`terminal-view-${terminalId}`)).not.toHaveClass(
@@ -6119,7 +6127,7 @@ describe("TerminalView desktop input composer", () => {
     container.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(mockSmartPaste).toHaveBeenCalledWith("", "PowerShell"));
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
     await act(async () => {
       resolvePaste({ pasteType: "text", content: "must stay in the draft boundary" });
       await Promise.resolve();
@@ -6203,7 +6211,7 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
     const send = screen.getByTestId(`terminal-input-composer-${terminalId}-send`);
     await vi.waitFor(() => expect(send).toBeEnabled());
 
@@ -6253,7 +6261,7 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId="t-composer-send" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-mode-composer"));
+    toggleInputMode("t-composer-send");
     const textarea = screen.getByTestId(
       "terminal-input-composer-t-composer-send-textarea",
     ) as HTMLTextAreaElement;
@@ -6280,7 +6288,7 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId="t-composer-flight" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-flight-mode-composer"));
+    toggleInputMode("t-composer-flight");
     const textarea = screen.getByTestId(
       "terminal-input-composer-t-composer-flight-textarea",
     ) as HTMLTextAreaElement;
@@ -6310,7 +6318,7 @@ describe("TerminalView desktop input composer", () => {
     );
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
     const firstTextarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
     fireEvent.change(firstTextarea, { target: { value: "pending across remount" } });
     fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-send`));

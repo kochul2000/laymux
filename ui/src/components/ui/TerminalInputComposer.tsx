@@ -2,9 +2,6 @@ import { useEffect, useRef, type KeyboardEvent, type Ref } from "react";
 import type { InputMode } from "@/lib/terminal-input-composer-state";
 
 export interface TerminalInputComposerLabels {
-  inputMode: string;
-  direct: string;
-  composer: string;
   editor: string;
   placeholder: string;
   send: string;
@@ -19,7 +16,6 @@ export interface TerminalInputComposerProps {
   commitDisabled?: boolean;
   autoFocus?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
-  onModeChange: (mode: InputMode) => void;
   onTextChange: (text: string) => void;
   onSend: () => void;
   className?: string;
@@ -30,40 +26,12 @@ function joinClassNames(...parts: Array<string | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function DirectIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden
-    >
-      <rect x="2.5" y="6" width="19" height="12" rx="2" />
-      <path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ComposerIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden
-    >
-      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" strokeLinejoin="round" />
-      <path d="M13.5 8.5l2.5 2.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
+/**
+ * Bottom editor surface for the detached "Composer" input mode. The mode toggle
+ * itself lives in the pane control bar (see PaneControlBar), so this component
+ * only renders when Composer is active and collapses to an inert, zero-footprint
+ * host in Direct mode — the terminal keeps all of its vertical space.
+ */
 export function TerminalInputComposer({
   mode,
   text,
@@ -73,7 +41,6 @@ export function TerminalInputComposer({
   commitDisabled = false,
   autoFocus = false,
   textareaRef,
-  onModeChange,
   onTextChange,
   onSend,
   className,
@@ -82,7 +49,6 @@ export function TerminalInputComposer({
   const compositionActiveRef = useRef(false);
   const actionDisabled = disabled || commitDisabled || inFlight;
   const childTestId = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
-  const composerMode = mode === "composer";
 
   useEffect(() => {
     if (mode !== "composer") compositionActiveRef.current = false;
@@ -104,6 +70,12 @@ export function TerminalInputComposer({
     if (!actionDisabled) onSend();
   };
 
+  // Direct mode keeps the testid/data-mode in the DOM (state probes, tests) but
+  // paints nothing.
+  if (mode !== "composer") {
+    return <div data-testid={testId} data-mode={mode} hidden />;
+  }
+
   return (
     <div
       data-testid={testId}
@@ -111,10 +83,7 @@ export function TerminalInputComposer({
       aria-busy={inFlight}
       aria-disabled={disabled || undefined}
       className={joinClassNames(
-        // Direct mode collapses to a slim right-aligned strip so it reclaims the
-        // terminal's vertical space; composer mode expands into the full editor.
-        "terminal-input-composer flex min-w-0 border-t",
-        composerMode ? "flex-col gap-2 p-2" : "justify-end px-2 py-1",
+        "terminal-input-composer flex min-w-0 flex-col gap-2 border-t p-2",
         className,
       )}
       style={{
@@ -123,89 +92,53 @@ export function TerminalInputComposer({
         color: "var(--text-primary)",
       }}
     >
-      <div
-        role="group"
-        aria-label={labels.inputMode}
-        className="terminal-input-composer-mode inline-flex min-w-0 items-center overflow-hidden rounded border"
-        style={{ borderColor: "var(--border)" }}
-      >
-        {(["direct", "composer"] as const).map((candidate) => {
-          const selected = mode === candidate;
-          const label = candidate === "direct" ? labels.direct : labels.composer;
-          return (
-            <button
-              key={candidate}
-              type="button"
-              data-testid={childTestId(`mode-${candidate}`)}
-              aria-pressed={selected}
-              disabled={disabled}
-              className="hover-bg flex min-w-0 items-center gap-1 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                background: selected ? "var(--accent-20)" : "transparent",
-                color: selected ? "var(--accent)" : "var(--text-secondary)",
-              }}
-              onClick={() => {
-                if (!selected) onModeChange(candidate);
-              }}
-            >
-              {candidate === "direct" ? <DirectIcon /> : <ComposerIcon />}
-              <span className="min-w-0 truncate">{label}</span>
-            </button>
-          );
-        })}
+      <textarea
+        ref={textareaRef}
+        data-testid={childTestId("textarea")}
+        aria-label={labels.editor}
+        value={text}
+        placeholder={labels.placeholder}
+        disabled={disabled}
+        autoFocus={autoFocus && !disabled}
+        rows={3}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        className="terminal-input-composer-editor min-h-16 w-full min-w-0 resize-y rounded border px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          borderColor: "var(--border)",
+          background: "var(--bg-base)",
+          color: "var(--text-primary)",
+        }}
+        onChange={(event) => onTextChange(event.currentTarget.value)}
+        onCompositionStart={() => {
+          compositionActiveRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          compositionActiveRef.current = false;
+        }}
+        onBlur={() => {
+          compositionActiveRef.current = false;
+        }}
+        onKeyDown={handleEditorKeyDown}
+      />
+
+      <div className="terminal-input-composer-actions flex min-w-0 justify-end gap-2">
+        <button
+          type="button"
+          data-testid={childTestId("send")}
+          disabled={actionDisabled}
+          className="hover-bg-accent rounded border px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            borderColor: "var(--accent)",
+            background: "var(--accent-20)",
+            color: "var(--accent)",
+          }}
+          onClick={onSend}
+        >
+          {labels.send}
+        </button>
       </div>
-
-      {composerMode && (
-        <>
-          <textarea
-            ref={textareaRef}
-            data-testid={childTestId("textarea")}
-            aria-label={labels.editor}
-            value={text}
-            placeholder={labels.placeholder}
-            disabled={disabled}
-            autoFocus={autoFocus && !disabled}
-            rows={3}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            className="terminal-input-composer-editor min-h-16 w-full min-w-0 resize-y rounded border px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            style={{
-              borderColor: "var(--border)",
-              background: "var(--bg-base)",
-              color: "var(--text-primary)",
-            }}
-            onChange={(event) => onTextChange(event.currentTarget.value)}
-            onCompositionStart={() => {
-              compositionActiveRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              compositionActiveRef.current = false;
-            }}
-            onBlur={() => {
-              compositionActiveRef.current = false;
-            }}
-            onKeyDown={handleEditorKeyDown}
-          />
-
-          <div className="terminal-input-composer-actions flex min-w-0 justify-end gap-2">
-            <button
-              type="button"
-              data-testid={childTestId("send")}
-              disabled={actionDisabled}
-              className="hover-bg-accent rounded border px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                borderColor: "var(--accent)",
-                background: "var(--accent-20)",
-                color: "var(--accent)",
-              }}
-              onClick={onSend}
-            >
-              {labels.send}
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

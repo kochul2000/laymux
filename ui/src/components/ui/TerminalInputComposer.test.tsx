@@ -6,9 +6,6 @@ import { TerminalInputComposer, type TerminalInputComposerLabels } from "./Termi
 import type { InputMode } from "@/lib/terminal-input-composer-state";
 
 const labels: TerminalInputComposerLabels = {
-  inputMode: "Input mode",
-  direct: "Direct",
-  composer: "Composer",
   editor: "Terminal input",
   placeholder: "Type before sending",
   send: "Send",
@@ -21,7 +18,6 @@ function renderComposer(
     mode: "composer",
     text: "draft",
     labels,
-    onModeChange: vi.fn(),
     onTextChange: vi.fn(),
     onSend: vi.fn(),
     testId: "composer",
@@ -32,24 +28,17 @@ function renderComposer(
 }
 
 describe("TerminalInputComposer", () => {
-  it("renders an accessible two-mode toggle and reports changes", async () => {
-    const user = userEvent.setup();
-    const onModeChange = vi.fn();
-    renderComposer({ mode: "direct", onModeChange });
+  it("renders nothing but an inert host in Direct mode", () => {
+    renderComposer({ mode: "direct" });
 
-    expect(screen.getByRole("group", { name: "Input mode" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Direct" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Composer" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    const host = screen.getByTestId("composer");
+    expect(host).toHaveAttribute("data-mode", "direct");
+    expect(host).toHaveAttribute("hidden");
     expect(screen.queryByRole("textbox", { name: "Terminal input" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Composer" }));
-    expect(onModeChange).toHaveBeenCalledWith("composer");
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
-  it("renders the controlled draft and exposes one Send action", async () => {
+  it("renders the controlled draft and exposes one Send action in Composer mode", async () => {
     const user = userEvent.setup();
     const onTextChange = vi.fn();
     const onSend = vi.fn();
@@ -124,17 +113,26 @@ describe("TerminalInputComposer", () => {
   it("recovers plain Enter after leaving Composer during IME composition", () => {
     const onSend = vi.fn();
 
+    // The mode toggle now lives outside the composer (pane control bar); the test
+    // drives it through a parent-controlled button just like the real toolbar.
     function Harness() {
       const [mode, setMode] = useState<InputMode>("composer");
       return (
-        <TerminalInputComposer
-          mode={mode}
-          text="draft"
-          labels={labels}
-          onModeChange={setMode}
-          onTextChange={vi.fn()}
-          onSend={onSend}
-        />
+        <>
+          <button
+            type="button"
+            onClick={() => setMode((m) => (m === "composer" ? "direct" : "composer"))}
+          >
+            toggle-mode
+          </button>
+          <TerminalInputComposer
+            mode={mode}
+            text="draft"
+            labels={labels}
+            onTextChange={vi.fn()}
+            onSend={onSend}
+          />
+        </>
       );
     }
 
@@ -144,9 +142,9 @@ describe("TerminalInputComposer", () => {
 
     // Removing a focused textarea does not guarantee compositionend/blur in
     // every WebView. Returning to Composer must not inherit that stale gate.
-    fireEvent.click(screen.getByRole("button", { name: "Direct" }));
+    fireEvent.click(screen.getByRole("button", { name: "toggle-mode" }));
     expect(screen.queryByRole("textbox", { name: "Terminal input" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Composer" }));
+    fireEvent.click(screen.getByRole("button", { name: "toggle-mode" }));
 
     const restoredEditor = screen.getByRole("textbox", { name: "Terminal input" });
     const enter = new KeyboardEvent("keydown", {
@@ -177,49 +175,53 @@ describe("TerminalInputComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("disables every interactive control when externally disabled", () => {
+  it("disables the editor and Send when externally disabled", () => {
     renderComposer({ disabled: true });
 
-    expect(screen.getByRole("button", { name: "Direct" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Composer" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
-  it("keeps mode and draft editing available while commit readiness is disabled", () => {
+  it("keeps draft editing available while commit readiness is disabled", () => {
     renderComposer({ commitDisabled: true });
 
-    expect(screen.getByRole("button", { name: "Direct" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Composer" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
-  it("supports controlled mode and draft state without coupling them", async () => {
+  it("preserves the draft across mode switches without coupling them", async () => {
     const user = userEvent.setup();
 
     function Harness() {
       const [mode, setMode] = useState<InputMode>("direct");
       const [text, setText] = useState("kept");
       return (
-        <TerminalInputComposer
-          mode={mode}
-          text={text}
-          labels={labels}
-          onModeChange={setMode}
-          onTextChange={setText}
-          onSend={vi.fn()}
-          testId="composer"
-        />
+        <>
+          <button
+            type="button"
+            onClick={() => setMode((m) => (m === "composer" ? "direct" : "composer"))}
+          >
+            toggle-mode
+          </button>
+          <TerminalInputComposer
+            mode={mode}
+            text={text}
+            labels={labels}
+            onTextChange={setText}
+            onSend={vi.fn()}
+            testId="composer"
+          />
+        </>
       );
     }
 
     render(<Harness />);
-    await user.click(screen.getByRole("button", { name: "Composer" }));
-    expect(screen.getByRole("textbox", { name: "Terminal input" })).toHaveValue("kept");
-    await user.click(screen.getByRole("button", { name: "Direct" }));
     expect(screen.queryByRole("textbox", { name: "Terminal input" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Composer" }));
+    await user.click(screen.getByRole("button", { name: "toggle-mode" }));
+    expect(screen.getByRole("textbox", { name: "Terminal input" })).toHaveValue("kept");
+    await user.click(screen.getByRole("button", { name: "toggle-mode" }));
+    expect(screen.queryByRole("textbox", { name: "Terminal input" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "toggle-mode" }));
     expect(screen.getByRole("textbox", { name: "Terminal input" })).toHaveValue("kept");
   });
 });

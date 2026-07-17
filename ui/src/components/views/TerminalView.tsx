@@ -683,6 +683,7 @@ export function TerminalView({
   // 별도의 헤더 바를 만들지 않고 이미 존재하는 pinned 바의 빈 좌측 공간을 재활용한다.
   const paneCtx = usePaneControl();
   const setLeftBarContent = paneCtx?.setLeftBarContent;
+  const setInputModeToggle = paneCtx?.setInputModeToggle;
   const controlBarMode = paneCtx?.mode;
   const rawTitle = useTerminalStore(
     (s) => s.instances.find((i) => i.id === instanceId)?.title?.trim() ?? "",
@@ -704,6 +705,18 @@ export function TerminalView({
     );
     return () => setLeftBarContent(null);
   }, [setLeftBarContent, controlBarMode, instanceId, rawTitle]);
+  // Publish the terminal's input-mode toggle into the pane control bar so mode
+  // switching lives as a single toolbar button (not a bottom bar). onToggle reads
+  // the live mode via ref, so the handler stays correct without re-subscribing.
+  useEffect(() => {
+    if (!setInputModeToggle) return;
+    setInputModeToggle({
+      mode: inputMode,
+      onToggle: () => changeInputMode(inputModeRef.current === "direct" ? "composer" : "direct"),
+    });
+    return () => setInputModeToggle(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setInputModeToggle, inputMode]);
   const syncOutputActiveRef = useRef(false);
   const compositionPreviewRef = useRef<CompositionPreviewState>({
     active: false,
@@ -3743,9 +3756,6 @@ export function TerminalView({
         mode={inputMode}
         text={composerDraft.text}
         labels={{
-          inputMode: t("terminal.inputMode"),
-          direct: t("terminal.directInput"),
-          composer: t("terminal.composerInput"),
           editor: t("terminal.composerEditor"),
           placeholder: t("terminal.composerPlaceholder"),
           send: t("terminal.composerSend"),
@@ -3756,7 +3766,6 @@ export function TerminalView({
         commitDisabled={!outputProtocolReady}
         autoFocus={isFocused}
         testId={`terminal-input-composer-${instanceId}`}
-        onModeChange={changeInputMode}
         onTextChange={(text) =>
           storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
         }
