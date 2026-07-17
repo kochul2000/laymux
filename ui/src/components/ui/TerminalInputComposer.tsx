@@ -27,6 +27,12 @@ export interface TerminalInputComposerProps {
   disabled?: boolean;
   commitDisabled?: boolean;
   autoFocus?: boolean;
+  /**
+   * True at a shell command prompt (OSC 133 input phase). Only then do edge ↑/↓
+   * recall Composer history; while a program runs they pass through so its own
+   * history / menu selection work. Defaults true.
+   */
+  atShellPrompt?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
   onTextChange: (text: string) => void;
   onSend: () => void;
@@ -36,6 +42,11 @@ export interface TerminalInputComposerProps {
    * true means the host consumed it and the editor should ignore it.
    */
   onKeyPassthrough?: (event: KeyboardEvent, ctx: { empty: boolean }) => boolean;
+  /**
+   * Recall the Composer's own sent-history into the draft at the prompt (edge
+   * ↑/↓). Returning true means the key was consumed.
+   */
+  onHistory?: (direction: "prev" | "next") => boolean;
   className?: string;
   testId?: string;
 }
@@ -65,10 +76,12 @@ export function TerminalInputComposer({
   disabled = false,
   commitDisabled = false,
   autoFocus = false,
+  atShellPrompt = true,
   textareaRef,
   onTextChange,
   onSend,
   onKeyPassthrough,
+  onHistory,
   className,
   testId,
 }: TerminalInputComposerProps) {
@@ -120,6 +133,30 @@ export function TerminalInputComposer({
       compositionActiveRef.current ||
       event.nativeEvent.isComposing ||
       event.nativeEvent.keyCode === 229;
+    // Modifier combos are app keybindings (pane focus = Alt+Arrow, …) — leave them
+    // to bubble; never treat them as history or passthrough here.
+    const plainKey = !event.altKey && !event.ctrlKey && !event.metaKey;
+
+    // At the shell prompt, edge ↑/↓ recall the Composer's own history into the
+    // editor (editable), instead of leaking ↑ to the shell where the recalled
+    // command would land on the terminal line, detached from this editor.
+    if (atShellPrompt && !composing && plainKey) {
+      const ta = event.currentTarget;
+      if (event.key === "ArrowUp" && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+        onHistory?.("prev");
+        event.preventDefault();
+        return;
+      }
+      if (
+        event.key === "ArrowDown" &&
+        ta.selectionStart === ta.value.length &&
+        ta.selectionEnd === ta.value.length
+      ) {
+        onHistory?.("next");
+        event.preventDefault();
+        return;
+      }
+    }
 
     // Let the host forward empty-draft nav keys / full-screen-app keys to the PTY.
     if (!composing && onKeyPassthrough?.(event.nativeEvent, { empty: text.length === 0 })) {

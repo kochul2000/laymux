@@ -111,6 +111,8 @@ import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
 import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
 import {
   beginComposerSubmission,
+  pushComposerHistory,
+  readComposerHistory,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
   settleComposerSubmission,
@@ -542,6 +544,16 @@ export function TerminalView({
     readRuntimeComposerDraft(instanceId),
   );
   const composerDraftRef = useRef(composerDraft);
+  // OSC 133 input phase mirrored into state: true at a shell prompt (↑/↓ recall
+  // Composer history), false while a program runs (↑/↓ pass through to it).
+  const [atShellPrompt, setAtShellPrompt] = useState(true);
+  const atShellPromptRef = useRef(true);
+  // Composer sent-history cursor (null = editing the live draft) + the draft
+  // stashed when history navigation began.
+  const historyNavRef = useRef<{ index: number | null; stash: string }>({
+    index: null,
+    stash: "",
+  });
   const currentInstanceIdRef = useRef(instanceId);
   currentInstanceIdRef.current = instanceId;
 
@@ -568,9 +580,11 @@ export function TerminalView({
     });
     if (!started) return;
     storeComposerDraft(started.draft);
+    historyNavRef.current = { index: null, stash: "" };
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
+        pushComposerHistory(started.submission.terminalId, started.submission.text);
         storeComposerDraft(
           settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
             token: started.submission.token,
@@ -636,10 +650,39 @@ export function TerminalView({
     return true;
   };
 
+  /**
+   * Recall the Composer's own sent-history into the draft (shell prompt only, via
+   * ↑/↓ at the draft edges). Keeping it in the editor — rather than passing ↑ to
+   * the shell — avoids the recalled command landing on the terminal line detached
+   * from the editor. Always returns true so the caller consumes the key.
+   */
+  const navigateComposerHistory = (direction: "prev" | "next"): boolean => {
+    const history = readComposerHistory(instanceId);
+    const nav = historyNavRef.current;
+    if (direction === "prev") {
+      if (history.length === 0) return true;
+      if (nav.index === null) {
+        nav.stash = composerDraftRef.current.text;
+        nav.index = history.length;
+      }
+      if (nav.index === 0) return true; // already at the oldest entry
+      nav.index -= 1;
+      storeComposerDraft(updateComposerDraftText(composerDraftRef.current, history[nav.index]));
+      return true;
+    }
+    if (nav.index === null) return true; // not navigating — nothing newer to show
+    nav.index += 1;
+    const recalled = nav.index >= history.length ? nav.stash : history[nav.index];
+    if (nav.index >= history.length) nav.index = null;
+    storeComposerDraft(updateComposerDraftText(composerDraftRef.current, recalled));
+    return true;
+  };
+
   useEffect(() => {
     const nextMode = readRuntimeInputMode(instanceId);
     const nextDraft = readRuntimeComposerDraft(instanceId);
     inputModeRef.current = nextMode;
+    historyNavRef.current = { index: null, stash: "" };
     composerDraftRef.current = nextDraft;
     outputProtocolReadyRef.current = false;
     setInputMode(nextMode);
@@ -1318,6 +1361,11 @@ export function TerminalView({
     const setInputPhase = (active: boolean) => {
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.isInputPhase = active;
+      // Mirror into the Composer's ↑/↓ routing signal (ref for handlers, state for render).
+      if (atShellPromptRef.current !== active) {
+        atShellPromptRef.current = active;
+        setAtShellPrompt(active);
+      }
       if (!active) {
         shadowCursor.isRepaintInProgress = false;
       } else {
@@ -3796,11 +3844,15 @@ export function TerminalView({
         commitDisabled={!outputProtocolReady}
         autoFocus={isFocused}
         testId={`terminal-input-composer-${instanceId}`}
-        onTextChange={(text) =>
-          storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
-        }
+        atShellPrompt={atShellPrompt}
+        onTextChange={(text) => {
+          // A user edit ends history navigation (recall goes through storeComposerDraft).
+          historyNavRef.current.index = null;
+          storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text));
+        }}
         onSend={submitComposerDraft}
         onKeyPassthrough={passthroughComposerKey}
+        onHistory={navigateComposerHistory}
       />
     </div>
   );

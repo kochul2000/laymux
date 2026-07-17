@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TerminalInputComposer, type TerminalInputComposerLabels } from "./TerminalInputComposer";
@@ -218,6 +218,35 @@ describe("TerminalInputComposer", () => {
 
     fireEvent.pointerUp(handle, { clientY: 150, pointerId: 1 });
     expect(localStorage.getItem("laymux.desktop.composerHeight")).toBe(String(before + 50));
+  });
+
+  it("at the prompt, edge ↑/↓ recall history; while a program runs they pass through", () => {
+    const onHistory = vi.fn().mockReturnValue(true);
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+
+    // Prompt + empty draft: caret is at both edges → ↑/↓ recall history, no passthrough.
+    const prompt = renderComposer({
+      text: "",
+      atShellPrompt: true,
+      onHistory,
+      onKeyPassthrough,
+    });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(onHistory).toHaveBeenNthCalledWith(1, "prev");
+    expect(onHistory).toHaveBeenNthCalledWith(2, "next");
+    expect(prompt.onKeyPassthrough).not.toHaveBeenCalled();
+
+    cleanup();
+    onHistory.mockClear();
+    onKeyPassthrough.mockClear();
+
+    // Program running: ↑ is not history — it passes through to the program.
+    renderComposer({ text: "", atShellPrompt: false, onHistory, onKeyPassthrough });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "ArrowUp" });
+    expect(onHistory).not.toHaveBeenCalled();
+    expect(onKeyPassthrough).toHaveBeenCalled();
   });
 
   it("preserves the draft across mode switches without coupling them", async () => {
