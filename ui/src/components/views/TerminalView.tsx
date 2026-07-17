@@ -111,8 +111,6 @@ import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
 import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
 import {
   beginComposerSubmission,
-  pushComposerHistory,
-  readComposerHistory,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
   settleComposerSubmission,
@@ -124,7 +122,7 @@ import {
   type ComposerDraftState,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
-import { encodeTerminalKey } from "@/lib/terminal-key-encoding";
+import { encodeTerminalKey, isPassthroughNavKey } from "@/lib/terminal-key-encoding";
 import {
   normalizeTerminalOutputAttachment,
   normalizeTerminalOutputDelta,
@@ -544,17 +542,6 @@ export function TerminalView({
     readRuntimeComposerDraft(instanceId),
   );
   const composerDraftRef = useRef(composerDraft);
-  // OSC 133 input phase, mirrored into React state so the Composer can flip
-  // between "own the keys" (prompt) and "forward to the program" (running).
-  // Defaults true so an unintegrated shell keeps a usable Composer.
-  const [atShellPrompt, setAtShellPrompt] = useState(true);
-  const atShellPromptRef = useRef(true);
-  // Composer sent-history cursor: index into the history list (null = editing the
-  // live draft), plus the draft stashed when history navigation began.
-  const historyNavRef = useRef<{ index: number | null; stash: string }>({
-    index: null,
-    stash: "",
-  });
   const currentInstanceIdRef = useRef(instanceId);
   currentInstanceIdRef.current = instanceId;
 
@@ -581,11 +568,9 @@ export function TerminalView({
     });
     if (!started) return;
     storeComposerDraft(started.draft);
-    historyNavRef.current = { index: null, stash: "" };
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
-        pushComposerHistory(started.submission.terminalId, started.submission.text);
         storeComposerDraft(
           settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
             token: started.submission.token,
@@ -622,62 +607,28 @@ export function TerminalView({
   const localTerminalControlAllowed = () =>
     remoteControlStatusKnownRef.current && !remoteControlActiveRef.current;
 
-  const forwardComposerBytes = (data: string) => {
-    if (!data || !localTerminalControlAllowed()) return;
-    dismissTerminalResponseNotification(instanceId);
-    writeToTerminal(instanceId, data).catch((error) => {
-      console.warn("[TerminalView] composer forward failed:", error);
-    });
-  };
-
   /**
-   * Forward a Composer keystroke straight to the running program (called only
-   * while NOT at the shell prompt). Encoding defers to xterm's reported cursor-key
-   * mode (DECCKM), so menus / TUIs and their own history behave natively.
+   * Forward a Composer keystroke to the PTY instead of the draft when either the
+   * draft is empty and the key is a non-text nav key (so shell history / inline
+   * menus work), or a full-screen (alternate-screen) app is running (pass all
+   * keys, like Direct mode). Encoding defers to xterm's reported cursor-key mode.
    */
-  const passthroughComposerKey = (event: KeyboardEvent): boolean => {
-    if (atShellPromptRef.current || !localTerminalControlAllowed()) return false;
+  const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
+    if (!localTerminalControlAllowed()) return false;
     const term = terminalRef.current;
     if (!term) return false;
+    const altScreen = term.buffer?.active?.type === "alternate";
+    if (!altScreen && !(ctx.empty && isPassthroughNavKey(event))) return false;
     const applicationCursor = Boolean(
       (term as unknown as { modes?: { applicationCursorKeysMode?: boolean } }).modes
         ?.applicationCursorKeysMode,
     );
     const seq = encodeTerminalKey(event, { applicationCursor });
     if (seq == null) return false;
-    forwardComposerBytes(seq);
-    return true;
-  };
-
-  /** Forward IME-composed text to the running program (not at the prompt). */
-  const forwardComposerText = (text: string) => {
-    if (atShellPromptRef.current) return;
-    forwardComposerBytes(text);
-  };
-
-  /**
-   * Recall the Composer's own sent-history into the draft (prompt only). Returns
-   * true when an entry (or the stashed live draft) replaced the current draft.
-   */
-  const navigateComposerHistory = (direction: "prev" | "next"): boolean => {
-    const history = readComposerHistory(instanceId);
-    const nav = historyNavRef.current;
-    if (direction === "prev") {
-      if (history.length === 0) return false;
-      if (nav.index === null) {
-        nav.stash = composerDraftRef.current.text;
-        nav.index = history.length;
-      }
-      if (nav.index === 0) return true; // already at the oldest entry
-      nav.index -= 1;
-      storeComposerDraft(updateComposerDraftText(composerDraftRef.current, history[nav.index]));
-      return true;
-    }
-    if (nav.index === null) return false; // not navigating — let ↓ move the caret
-    nav.index += 1;
-    const recalled = nav.index >= history.length ? nav.stash : history[nav.index];
-    if (nav.index >= history.length) nav.index = null;
-    storeComposerDraft(updateComposerDraftText(composerDraftRef.current, recalled));
+    dismissTerminalResponseNotification(instanceId);
+    writeToTerminal(instanceId, seq).catch((error) => {
+      console.warn("[TerminalView] composer key passthrough failed:", error);
+    });
     return true;
   };
 
@@ -686,7 +637,6 @@ export function TerminalView({
     const nextDraft = readRuntimeComposerDraft(instanceId);
     inputModeRef.current = nextMode;
     composerDraftRef.current = nextDraft;
-    historyNavRef.current = { index: null, stash: "" };
     outputProtocolReadyRef.current = false;
     setInputMode(nextMode);
     setComposerDraft(nextDraft);
@@ -1364,11 +1314,6 @@ export function TerminalView({
     const setInputPhase = (active: boolean) => {
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.isInputPhase = active;
-      // Mirror into the Composer routing signal (ref for handlers, state for render).
-      if (atShellPromptRef.current !== active) {
-        atShellPromptRef.current = active;
-        setAtShellPrompt(active);
-      }
       if (!active) {
         shadowCursor.isRepaintInProgress = false;
       } else {
@@ -3847,16 +3792,11 @@ export function TerminalView({
         commitDisabled={!outputProtocolReady}
         autoFocus={isFocused}
         testId={`terminal-input-composer-${instanceId}`}
-        atShellPrompt={atShellPrompt}
-        onTextChange={(text) => {
-          // A user edit ends history navigation; recall goes through storeComposerDraft.
-          historyNavRef.current.index = null;
-          storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text));
-        }}
+        onTextChange={(text) =>
+          storeComposerDraft(updateComposerDraftText(composerDraftRef.current, text))
+        }
         onSend={submitComposerDraft}
         onKeyPassthrough={passthroughComposerKey}
-        onForwardText={forwardComposerText}
-        onHistory={navigateComposerHistory}
       />
     </div>
   );

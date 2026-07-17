@@ -88,28 +88,6 @@ export function writeComposerHeight(px: number, storage?: InputModeStorage | nul
   }
 }
 
-const MAX_COMPOSER_HISTORY = 200;
-const runtimeHistory = new Map<string, string[]>();
-
-/** Runtime-only per-terminal history of texts sent from the Composer. */
-export function readComposerHistory(terminalId: string): string[] {
-  return runtimeHistory.get(terminalId) ?? [];
-}
-
-/**
- * Appends a sent draft to the terminal's Composer history. Blank entries and
- * consecutive duplicates are ignored; the list is capped so it cannot grow
- * without bound.
- */
-export function pushComposerHistory(terminalId: string, text: string): void {
-  if (!text) return;
-  const list = runtimeHistory.get(terminalId) ?? [];
-  if (list[list.length - 1] === text) return;
-  list.push(text);
-  if (list.length > MAX_COMPOSER_HISTORY) list.splice(0, list.length - MAX_COMPOSER_HISTORY);
-  runtimeHistory.set(terminalId, list);
-}
-
 export type ComposerSubmissionToken = string;
 
 export interface ComposerSubmissionSnapshot {
@@ -212,7 +190,6 @@ export function clearRuntimeComposerState(terminalId?: string): void {
     const subscribedTerminalIds = [...runtimeDraftListeners.keys()];
     runtimeDrafts.clear();
     runtimeModes.clear();
-    runtimeHistory.clear();
     for (const subscribedTerminalId of subscribedTerminalIds) {
       notifyRuntimeComposerDraft(subscribedTerminalId, createComposerDraftState());
     }
@@ -220,7 +197,6 @@ export function clearRuntimeComposerState(terminalId?: string): void {
   }
   runtimeDrafts.delete(terminalId);
   runtimeModes.delete(terminalId);
-  runtimeHistory.delete(terminalId);
   notifyRuntimeComposerDraft(terminalId, createComposerDraftState());
 }
 

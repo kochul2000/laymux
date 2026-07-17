@@ -14,6 +14,21 @@ export interface EncodeTerminalKeyOptions {
   applicationCursor?: boolean;
 }
 
+/** Keys that carry no character and are safe to forward at an empty prompt. */
+const PASSTHROUGH_NAV_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Escape",
+  "Tab",
+  "Enter",
+]);
+
 const MODIFIER_ONLY_KEYS = new Set([
   "Shift",
   "Control",
@@ -25,6 +40,15 @@ const MODIFIER_ONLY_KEYS = new Set([
   "Dead",
   "Unidentified",
 ]);
+
+/**
+ * True for non-character navigation/control keys the empty Composer forwards to
+ * the terminal (so shell history / inline menus work). Printable characters are
+ * excluded — those keep editing the draft.
+ */
+export function isPassthroughNavKey(event: Pick<KeyboardEvent, "key">): boolean {
+  return PASSTHROUGH_NAV_KEYS.has(event.key);
+}
 
 /** Returns the PTY byte sequence for the event, or null when it should not be forwarded. */
 export function encodeTerminalKey(

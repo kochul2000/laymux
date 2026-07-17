@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeTerminalKey } from "./terminal-key-encoding";
+import { encodeTerminalKey, isPassthroughNavKey } from "./terminal-key-encoding";
 
 type Key = Parameters<typeof encodeTerminalKey>[0];
 const ev = (over: Partial<Key> & Pick<Key, "key">): Key => ({
@@ -8,6 +8,20 @@ const ev = (over: Partial<Key> & Pick<Key, "key">): Key => ({
   metaKey: false,
   shiftKey: false,
   ...over,
+});
+
+describe("isPassthroughNavKey", () => {
+  it("flags non-character navigation keys", () => {
+    for (const key of ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "Escape", "Tab", "Enter"]) {
+      expect(isPassthroughNavKey({ key })).toBe(true);
+    }
+  });
+
+  it("excludes printable characters and modifiers", () => {
+    for (const key of ["a", " ", "1", "Shift", "Control"]) {
+      expect(isPassthroughNavKey({ key })).toBe(false);
+    }
+  });
 });
 
 describe("encodeTerminalKey", () => {
