@@ -6458,6 +6458,13 @@ describe("TerminalView desktop input composer", () => {
     } finally {
       delete modes.applicationCursorKeysMode;
     }
+
+    // OSC 133;D = command done → back at the prompt (this is the last OSC at a
+    // PowerShell prompt, where 133;B is never sent). ↑ must now recall, not pass through.
+    emitOutput(terminalId, "\x1b]133;D;0\x07");
+    mockWriteToTerminal.mockClear();
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 });
 

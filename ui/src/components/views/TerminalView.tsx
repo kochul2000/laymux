@@ -1358,14 +1358,20 @@ export function TerminalView({
         isAltBufferActive: shadowCursor.isAltBufferActive,
       });
     };
+    // Composer ↑/↓ routing signal. "At prompt" ≙ no command running, which the
+    // shell marks with OSC 133;D (see backend: last OSC D = prompt, C = running).
+    // NOT `isInputPhase` — that needs 133;B, which some shells (PowerShell) skip,
+    // so it stays false at the prompt and history recall would never fire.
+    const markShellPrompt = (atPrompt: boolean) => {
+      if (atShellPromptRef.current !== atPrompt) {
+        atShellPromptRef.current = atPrompt;
+        setAtShellPrompt(atPrompt);
+      }
+    };
+
     const setInputPhase = (active: boolean) => {
       const shadowCursor = shadowCursorRef.current;
       shadowCursor.isInputPhase = active;
-      // Mirror into the Composer's ↑/↓ routing signal (ref for handlers, state for render).
-      if (atShellPromptRef.current !== active) {
-        atShellPromptRef.current = active;
-        setAtShellPrompt(active);
-      }
       if (!active) {
         shadowCursor.isRepaintInProgress = false;
       } else {
@@ -2670,6 +2676,7 @@ export function TerminalView({
         shadowCursorRef.current.hasPromptBoundary = true;
         trace("chunk-prompt-boundary", { code: "A" });
         setInputPhase(false);
+        markShellPrompt(true);
       }
       if (text.includes("\x1b]133;B") || text.includes("\x1b]633;B")) {
         const shadowCursor = shadowCursorRef.current;
@@ -2679,16 +2686,21 @@ export function TerminalView({
         shadowCursor.commandStartX = shadowCursor.cursorX;
         shadowCursor.commandStartLine = shadowCursor.cursorAbsY;
         setInputPhase(true);
+        markShellPrompt(true);
       }
-      if (
-        text.includes("\x1b]133;C") ||
-        text.includes("\x1b]133;D") ||
-        text.includes("\x1b]633;C") ||
-        text.includes("\x1b]633;D")
-      ) {
+      // Split C (command started → running) from D (command done → back at prompt):
+      // isInputPhase collapses both to "not editing", but ↑/↓ routing needs them apart.
+      if (text.includes("\x1b]133;C") || text.includes("\x1b]633;C")) {
         shadowCursorRef.current.hasPromptBoundary = true;
-        trace("chunk-prompt-boundary", { code: "C/D" });
+        trace("chunk-prompt-boundary", { code: "C" });
         setInputPhase(false);
+        markShellPrompt(false);
+      }
+      if (text.includes("\x1b]133;D") || text.includes("\x1b]633;D")) {
+        shadowCursorRef.current.hasPromptBoundary = true;
+        trace("chunk-prompt-boundary", { code: "D" });
+        setInputPhase(false);
+        markShellPrompt(true);
       }
 
       // Detect alt screen buffer switch (vim, nano, htop, less, etc.)
