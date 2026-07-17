@@ -147,48 +147,37 @@
       .status.error {
         color: var(--danger);
       }
+      /* Single toggle button (mirrors the desktop pane-bar toggle): shows the
+         current mode and flips it on click. accent when Composer is active. */
       .input-mode-toggle {
         display: inline-flex;
         flex: 0 0 auto;
-        align-items: stretch;
-        padding: 0;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .input-mode-seg {
-        display: inline-flex;
         align-items: center;
         gap: 5px;
-        border: 0;
-        border-radius: 0;
         padding: 4px 8px;
-        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--panel-2);
         color: var(--muted);
         font-size: var(--fs-sm);
         line-height: 1;
       }
-      .input-mode-seg + .input-mode-seg {
-        border-left: 1px solid var(--border);
-      }
-      .input-mode-seg:hover:not([aria-pressed="true"]) {
+      .input-mode-toggle:hover:not([aria-pressed="true"]) {
         background: var(--hover-bg);
       }
-      .input-mode-seg[aria-pressed="true"] {
+      .input-mode-toggle[aria-pressed="true"] {
         background: var(--accent-20);
         color: var(--accent);
+        border-color: var(--accent-50);
       }
-      .input-mode-seg svg {
+      .input-mode-toggle svg {
         flex: 0 0 auto;
       }
-      /* Very narrow headers collapse the toggle to icons; the button title still
-         names each mode for assistive tech. */
+      /* Very narrow headers collapse the toggle to its icon; the button title
+         still names the mode for assistive tech. */
       @media (max-width: 360px) {
-        .input-mode-seg .seg-label {
+        .input-mode-toggle .seg-label {
           display: none;
-        }
-        .input-mode-seg {
-          padding: 4px 7px;
         }
       }
       .terminal-shell {
@@ -203,48 +192,34 @@
       }
       .terminal-composer {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(72px, auto);
         min-width: 0;
         max-height: 42vh;
-        gap: 6px;
-        padding: 6px 4px 2px;
+        padding: 0;
         border-top: 1px solid var(--border);
         background: var(--terminal-bg);
       }
+      /* Flush editor (mirrors desktop): no outer margin / parent padding, no
+         border or rounding — it fills the strip under the divider. */
       .composer-input {
         width: 100%;
         min-width: 0;
         min-height: 72px;
         max-height: 40vh;
         resize: vertical;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        border: 0;
+        border-radius: 0;
         padding: 7px 8px;
-        background: var(--bg-surface);
+        background: var(--bg-base);
         color: var(--text-primary);
         font-size: 16px;
         line-height: 1.4;
         outline: none;
         overflow: auto;
       }
-      .composer-input:focus {
-        border-color: var(--accent-50);
-        box-shadow: 0 0 0 1px var(--accent-20);
-      }
       .composer-input:disabled {
         opacity: 0.6;
-      }
-      .composer-actions {
-        display: flex;
-        flex-direction: column;
-        align-self: stretch;
-        justify-content: flex-end;
-        gap: 6px;
-      }
-      .composer-actions button {
-        flex: 0 0 auto;
-        min-width: 62px;
       }
       .remote-body {
         position: relative;
@@ -929,13 +904,10 @@
         }
         .terminal-composer {
           grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: minmax(64px, auto) auto;
+          grid-template-rows: minmax(64px, auto);
         }
         .composer-input {
           min-height: 64px;
-        }
-        .composer-actions {
-          flex-direction: row;
         }
       }
       @supports (height: 100dvh) {
@@ -1222,16 +1194,10 @@
           <span></span>
         </button>
         <div id="status" class="status">Enter the remote token, then connect.</div>
-        <div id="inputModeToggle" class="input-mode-toggle" role="group" aria-label="Terminal input mode">
-          <button id="inputModeDirect" class="input-mode-seg" type="button" aria-pressed="true" title="Direct input — type straight into the terminal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" stroke-linecap="round"/></svg>
-            <span class="seg-label">Direct</span>
-          </button>
-          <button id="inputModeComposer" class="input-mode-seg" type="button" aria-pressed="false" title="Composer — draft text, then send to the terminal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>
-            <span class="seg-label">Composer</span>
-          </button>
-        </div>
+        <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" title="Switch to Composer input">
+          <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
+          <span id="inputModeLabel" class="seg-label">Direct</span>
+        </button>
         <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
       </header>
       <main>
@@ -1296,11 +1262,8 @@
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
-                placeholder="Type here before sending to the terminal"
+                placeholder="Type, then Enter to send · Shift+Enter for a newline"
               ></textarea>
-              <div class="composer-actions" role="group" aria-label="Composer actions">
-                <button id="composerSend" class="primary" type="button">Send</button>
-              </div>
             </section>
           </div>
         </div>
@@ -1350,7 +1313,6 @@
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
         const composerInput = $("composerInput");
-        const composerSendButton = $("composerSend");
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
         const dockSection = $("dockSection");
@@ -1367,8 +1329,15 @@
         const clearNotificationsButton = $("clearNotifications");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
-        const inputModeDirectButton = $("inputModeDirect");
-        const inputModeComposerButton = $("inputModeComposer");
+        const inputModeToggleButton = $("inputModeToggle");
+        const inputModeIcon = $("inputModeIcon");
+        const inputModeLabel = $("inputModeLabel");
+        const INPUT_MODE_ICONS = {
+          direct:
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" stroke-linecap="round"/></svg>',
+          composer:
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>',
+        };
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
@@ -1603,9 +1572,11 @@
           const draft = composerDraft();
           const composerMode = currentInputMode() === "composer";
           const canEdit = Boolean(leaseId && activeTerminalId && composerMode);
+          // No Send button anymore; Enter submits. `data-can-send` exposes the same
+          // readiness the button's disabled state used to (for tests / a11y).
           const canCommit = Boolean(canEdit && composerReady && draft && !draft.inFlight);
           composerInput.disabled = !canEdit;
-          composerSendButton.disabled = !canCommit;
+          terminalComposer.dataset.canSend = canCommit ? "true" : "false";
         }
 
         function focusCurrentInputSurface() {
@@ -1622,8 +1593,12 @@
           const composerMode = mode === "composer";
           const draft = composerDraft();
           terminalComposer.hidden = !composerMode;
-          inputModeDirectButton.setAttribute("aria-pressed", composerMode ? "false" : "true");
-          inputModeComposerButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
+          inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
+          inputModeToggleButton.title = composerMode
+            ? "Switch to Direct input"
+            : "Switch to Composer input";
+          inputModeIcon.innerHTML = INPUT_MODE_ICONS[composerMode ? "composer" : "direct"];
+          inputModeLabel.textContent = composerMode ? "Composer" : "Direct";
           focusTerminalButton.textContent = composerMode ? "Editor" : "Keyboard";
 
           const nextText = draft ? draft.text : "";
@@ -4049,8 +4024,9 @@
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         focusTerminalButton.addEventListener("click", () => focusCurrentInputSurface());
-        inputModeDirectButton.addEventListener("click", () => setInputMode("direct"));
-        inputModeComposerButton.addEventListener("click", () => setInputMode("composer"));
+        inputModeToggleButton.addEventListener("click", () => {
+          setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
+        });
         composerInput.addEventListener("input", () => {
           const draft = composerDraft();
           if (!draft || draft.text === composerInput.value) return;
@@ -4067,12 +4043,12 @@
         composerInput.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
-          if (matchMedia("(pointer: coarse)").matches) return;
+          // Enter sends on every pointer type (mirrors desktop). There is no Send
+          // button anymore; Shift+Enter inserts a newline.
           if (event.shiftKey) return;
           event.preventDefault();
           commitComposer();
         });
-        composerSendButton.addEventListener("click", () => commitComposer());
         keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
         keyBarSettingsButton.addEventListener("click", (event) => {
           event.stopPropagation();
