@@ -8,7 +8,7 @@ import type { InputMode } from "@/lib/terminal-input-composer-state";
 const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
   placeholder: "Type before sending",
-  send: "Send",
+  resize: "Resize input area",
 };
 
 function renderComposer(
@@ -35,10 +35,9 @@ describe("TerminalInputComposer", () => {
     expect(host).toHaveAttribute("data-mode", "direct");
     expect(host).toHaveAttribute("hidden");
     expect(screen.queryByRole("textbox", { name: "Terminal input" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
-  it("renders the controlled draft and exposes one Send action in Composer mode", async () => {
+  it("renders the controlled draft and submits on plain Enter (no Send button)", async () => {
     const user = userEvent.setup();
     const onTextChange = vi.fn();
     const onSend = vi.fn();
@@ -47,11 +46,13 @@ describe("TerminalInputComposer", () => {
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toHaveValue("draft");
     expect(textarea).toHaveAttribute("placeholder", "Type before sending");
+    // The editor is the whole surface — no separate action button steals space.
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-can-send", "true");
 
     await user.type(textarea, "!");
     expect(onTextChange).toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Insert" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
@@ -158,7 +159,7 @@ describe("TerminalInputComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps textarea editing enabled but disables Send while in flight", async () => {
+  it("keeps editing enabled but refuses Enter submit while in flight", async () => {
     const user = userEvent.setup();
     const onTextChange = vi.fn();
     const onSend = vi.fn();
@@ -166,8 +167,9 @@ describe("TerminalInputComposer", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-    expect(screen.getByTestId("composer")).toHaveAttribute("aria-busy", "true");
+    const host = screen.getByTestId("composer");
+    expect(host).toHaveAttribute("aria-busy", "true");
+    expect(host).toHaveAttribute("data-can-send", "false");
 
     await user.type(textarea, " more");
     expect(onTextChange).toHaveBeenCalled();
@@ -175,18 +177,47 @@ describe("TerminalInputComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("disables the editor and Send when externally disabled", () => {
-    renderComposer({ disabled: true });
+  it("disables the editor and blocks Enter when externally disabled", () => {
+    const onSend = vi.fn();
+    renderComposer({ disabled: true, onSend });
 
-    expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+    expect(textarea).toBeDisabled();
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-can-send", "false");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("keeps draft editing available while commit readiness is disabled", () => {
-    renderComposer({ commitDisabled: true });
+  it("keeps draft editing available but blocks Enter while commit readiness is disabled", () => {
+    const onSend = vi.fn();
+    renderComposer({ commitDisabled: true, onSend });
 
-    expect(screen.getByRole("textbox", { name: "Terminal input" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+    expect(textarea).toBeEnabled();
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-can-send", "false");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("resizes by dragging the top edge upward and has no textarea corner grip", () => {
+    localStorage.clear();
+    renderComposer();
+
+    const host = screen.getByTestId("composer");
+    const handle = screen.getByTestId("composer-resize");
+    expect(handle).toHaveAttribute("role", "separator");
+    // No resize-y on the editor — the corner grip is gone.
+    expect(screen.getByRole("textbox", { name: "Terminal input" }).className).not.toMatch(
+      /resize-y/,
+    );
+
+    const before = parseInt(host.style.height, 10);
+    fireEvent.pointerDown(handle, { clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 150, pointerId: 1 }); // drag up 50px
+    expect(parseInt(host.style.height, 10)).toBe(before + 50);
+
+    fireEvent.pointerUp(handle, { clientY: 150, pointerId: 1 });
+    expect(localStorage.getItem("laymux.desktop.composerHeight")).toBe(String(before + 50));
   });
 
   it("preserves the draft across mode switches without coupling them", async () => {

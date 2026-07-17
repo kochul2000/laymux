@@ -1,10 +1,22 @@
-import { useEffect, useRef, type KeyboardEvent, type Ref } from "react";
-import type { InputMode } from "@/lib/terminal-input-composer-state";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type Ref,
+} from "react";
+import {
+  clampComposerHeight,
+  readComposerHeight,
+  writeComposerHeight,
+  type InputMode,
+} from "@/lib/terminal-input-composer-state";
 
 export interface TerminalInputComposerLabels {
   editor: string;
   placeholder: string;
-  send: string;
+  resize: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -31,6 +43,13 @@ function joinClassNames(...parts: Array<string | undefined>): string {
  * itself lives in the pane control bar (see PaneControlBar), so this component
  * only renders when Composer is active and collapses to an inert, zero-footprint
  * host in Direct mode — the terminal keeps all of its vertical space.
+ *
+ * There is no Send button: plain Enter submits, Shift+Enter inserts a newline.
+ * `data-can-send` reflects whether Enter would submit right now (used by tests
+ * and any external affordance in place of a disabled button).
+ *
+ * Height is resized by dragging the top edge upward (not a textarea corner grip),
+ * and the chosen height persists as a desktop UI preference.
  */
 export function TerminalInputComposer({
   mode,
@@ -49,6 +68,40 @@ export function TerminalInputComposer({
   const compositionActiveRef = useRef(false);
   const actionDisabled = disabled || commitDisabled || inFlight;
   const childTestId = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
+
+  const [height, setHeightState] = useState(() => readComposerHeight());
+  const heightRef = useRef(height);
+  const setHeight = (px: number) => {
+    const clamped = clampComposerHeight(px);
+    heightRef.current = clamped;
+    setHeightState(clamped);
+  };
+  // Drag the top edge: moving the pointer up (smaller clientY) grows the editor.
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const onHandlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragRef.current = { startY: event.clientY, startHeight: heightRef.current };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* pointer capture unsupported (e.g. jsdom) */
+    }
+  };
+  const onHandlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    setHeight(drag.startHeight + (drag.startY - event.clientY));
+  };
+  const endDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+    writeComposerHeight(heightRef.current);
+  };
 
   useEffect(() => {
     if (mode !== "composer") compositionActiveRef.current = false;
@@ -80,18 +133,34 @@ export function TerminalInputComposer({
     <div
       data-testid={testId}
       data-mode={mode}
+      data-can-send={actionDisabled ? "false" : "true"}
       aria-busy={inFlight}
       aria-disabled={disabled || undefined}
-      className={joinClassNames(
-        "terminal-input-composer flex min-w-0 flex-col gap-2 border-t p-2",
-        className,
-      )}
+      className={joinClassNames("terminal-input-composer flex min-w-0 flex-col", className)}
       style={{
-        borderColor: "var(--border)",
+        height: `${height}px`,
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
       }}
     >
+      <div
+        data-testid={childTestId("resize")}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label={labels.resize}
+        className="terminal-input-composer-resize group flex h-1.5 w-full shrink-0 cursor-row-resize items-center justify-center border-t"
+        style={{ borderColor: "var(--border)", touchAction: "none" }}
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <div
+          className="h-0.5 w-8 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
+          style={{ background: "var(--text-secondary)" }}
+        />
+      </div>
+
       <textarea
         ref={textareaRef}
         data-testid={childTestId("textarea")}
@@ -100,13 +169,11 @@ export function TerminalInputComposer({
         placeholder={labels.placeholder}
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
-        rows={3}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        className="terminal-input-composer-editor min-h-16 w-full min-w-0 resize-y rounded border px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        className="terminal-input-composer-editor min-h-0 w-full min-w-0 flex-1 resize-none border-0 px-2 py-1.5 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50"
         style={{
-          borderColor: "var(--border)",
           background: "var(--bg-base)",
           color: "var(--text-primary)",
         }}
@@ -122,23 +189,6 @@ export function TerminalInputComposer({
         }}
         onKeyDown={handleEditorKeyDown}
       />
-
-      <div className="terminal-input-composer-actions flex min-w-0 justify-end gap-2">
-        <button
-          type="button"
-          data-testid={childTestId("send")}
-          disabled={actionDisabled}
-          className="hover-bg-accent rounded border px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: "var(--accent)",
-            background: "var(--accent-20)",
-            color: "var(--accent)",
-          }}
-          onClick={onSend}
-        >
-          {labels.send}
-        </button>
-      </div>
     </div>
   );
 }

@@ -6212,8 +6212,8 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
 
     toggleInputMode(terminalId);
-    const send = screen.getByTestId(`terminal-input-composer-${terminalId}-send`);
-    await vi.waitFor(() => expect(send).toBeEnabled());
+    const composer = screen.getByTestId(`terminal-input-composer-${terminalId}`);
+    await vi.waitFor(() => expect(composer).toHaveAttribute("data-can-send", "true"));
 
     const registeredOutput = mockOnTerminalOutput.mock.calls.find(
       ([registeredTerminalId]) => registeredTerminalId === terminalId,
@@ -6232,7 +6232,7 @@ describe("TerminalView desktop input composer", () => {
       emitOutput?.({ seqStart: 0, seqEnd: 2, data: [0x61] });
     });
 
-    expect(send).toBeDisabled();
+    expect(composer).toHaveAttribute("data-can-send", "false");
     await vi.waitFor(() => {
       expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(
         attachCallsBeforeMalformedDelta,
@@ -6266,13 +6266,16 @@ describe("TerminalView desktop input composer", () => {
       "terminal-input-composer-t-composer-send-textarea",
     ) as HTMLTextAreaElement;
     await vi.waitFor(() =>
-      expect(screen.getByTestId("terminal-input-composer-t-composer-send-send")).toBeEnabled(),
+      expect(screen.getByTestId("terminal-input-composer-t-composer-send")).toHaveAttribute(
+        "data-can-send",
+        "true",
+      ),
     );
     fireEvent.change(textarea, { target: { value: "한글\nsecond" } });
     expect(
       screen.queryByTestId("terminal-input-composer-t-composer-send-insert"),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-send"));
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
@@ -6292,11 +6295,11 @@ describe("TerminalView desktop input composer", () => {
     const textarea = screen.getByTestId(
       "terminal-input-composer-t-composer-flight-textarea",
     ) as HTMLTextAreaElement;
-    const send = screen.getByTestId("terminal-input-composer-t-composer-flight-send");
-    await vi.waitFor(() => expect(send).toBeEnabled());
+    const composer = screen.getByTestId("terminal-input-composer-t-composer-flight");
+    await vi.waitFor(() => expect(composer).toHaveAttribute("data-can-send", "true"));
     fireEvent.change(textarea, { target: { value: "first" } });
-    fireEvent.click(send);
-    fireEvent.click(send);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(mockWriteTerminalInput).toHaveBeenCalledTimes(1);
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-flight", "first", true);
 
@@ -6321,7 +6324,7 @@ describe("TerminalView desktop input composer", () => {
     toggleInputMode(terminalId);
     const firstTextarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
     fireEvent.change(firstTextarea, { target: { value: "pending across remount" } });
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-send`));
+    fireEvent.keyDown(firstTextarea, { key: "Enter" });
     first.unmount();
 
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
@@ -6329,12 +6332,18 @@ describe("TerminalView desktop input composer", () => {
       `terminal-input-composer-${terminalId}-textarea`,
     );
     expect(replacementTextarea).toHaveValue("pending across remount");
-    expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeDisabled();
+    expect(screen.getByTestId(`terminal-input-composer-${terminalId}`)).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
 
     await act(async () => resolveInput());
     await vi.waitFor(() => {
       expect(replacementTextarea).toHaveValue("");
-      expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeEnabled();
+      expect(screen.getByTestId(`terminal-input-composer-${terminalId}`)).toHaveAttribute(
+        "data-can-send",
+        "true",
+      );
     });
   });
 
@@ -6354,7 +6363,10 @@ describe("TerminalView desktop input composer", () => {
         screen.getByTestId("terminal-input-composer-t-composer-remote-textarea"),
       ).toBeDisabled();
     });
-    expect(screen.getByTestId("terminal-input-composer-t-composer-remote-send")).toBeDisabled();
+    expect(screen.getByTestId("terminal-input-composer-t-composer-remote")).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
   });
 });

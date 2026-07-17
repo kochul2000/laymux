@@ -9,8 +9,8 @@
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
       "scrollToBottom": "Scroll to bottom",
       "composerEditor": "Terminal input draft",
-      "composerPlaceholder": "Type text to send",
-      "composerSend": "Send"
+      "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
+      "composerResize": "Resize input area (drag the top edge)"
     },
     "remoteControl": {
       "title": "Remote control active",

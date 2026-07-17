@@ -9,8 +9,8 @@
       "pasteConfirm": "붙여넣을 텍스트가 {{bytes}}바이트입니다. 계속하시겠습니까?",
       "scrollToBottom": "맨 아래로 이동",
       "composerEditor": "터미널 입력 초안",
-      "composerPlaceholder": "전송할 내용을 입력하세요",
-      "composerSend": "전송"
+      "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
+      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)"
     },
     "remoteControl": {
       "title": "원격 제어 중",

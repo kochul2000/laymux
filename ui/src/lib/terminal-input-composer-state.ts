@@ -51,6 +51,43 @@ export function writeDesktopInputModePreference(
   }
 }
 
+export const DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY = "laymux.desktop.composerHeight";
+export const DEFAULT_COMPOSER_HEIGHT = 96;
+export const MIN_COMPOSER_HEIGHT = 56;
+export const MAX_COMPOSER_HEIGHT = 480;
+
+/** Keeps a composer height within the draggable bounds; rounds to a whole pixel. */
+export function clampComposerHeight(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_COMPOSER_HEIGHT;
+  return Math.round(Math.min(MAX_COMPOSER_HEIGHT, Math.max(MIN_COMPOSER_HEIGHT, px)));
+}
+
+/**
+ * Reads the desktop composer editor height (px). Like the input-mode default it
+ * is a UI-only surface preference, so it lives in localStorage, not settings.json.
+ */
+export function readComposerHeight(storage?: InputModeStorage | null): number {
+  try {
+    const stored = resolveBrowserStorage(storage)?.getItem(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY);
+    const parsed = stored == null ? NaN : Number(stored);
+    return Number.isFinite(parsed) ? clampComposerHeight(parsed) : DEFAULT_COMPOSER_HEIGHT;
+  } catch {
+    return DEFAULT_COMPOSER_HEIGHT;
+  }
+}
+
+/** Returns false when browser storage is unavailable. Clamps before persisting. */
+export function writeComposerHeight(px: number, storage?: InputModeStorage | null): boolean {
+  try {
+    const target = resolveBrowserStorage(storage);
+    if (!target) return false;
+    target.setItem(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY, String(clampComposerHeight(px)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type ComposerSubmissionToken = string;
 
 export interface ComposerSubmissionSnapshot {

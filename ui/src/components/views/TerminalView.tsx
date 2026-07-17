@@ -3758,7 +3758,7 @@ export function TerminalView({
         labels={{
           editor: t("terminal.composerEditor"),
           placeholder: t("terminal.composerPlaceholder"),
-          send: t("terminal.composerSend"),
+          resize: t("terminal.composerResize"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
