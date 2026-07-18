@@ -285,17 +285,18 @@ mod tests {
         assert!(html.contains("draft.revision === submission.revision"));
         assert!(html.contains("draft.text === submission.text"));
 
-        // Enter follows the layout: the mobile layout (coarse pointer OR the PC
-        // app's embedded mobile view, localApp=1) inserts a newline and sends
-        // via the button, keeping the fragile soft-keyboard Enter off the send
-        // path; the desktop layout sends on Enter with Shift+Enter as newline.
-        // Ctrl/Cmd+Enter sends in both layouts, and IME confirmation
-        // (isComposing / keyCode 229) never sends.
+        // Enter follows the layout (ADR-0036): the mobile layout (coarse
+        // pointer OR the PC app's embedded mobile view, localApp=1) inserts a
+        // newline and sends via the button only, keeping the fragile
+        // soft-keyboard Enter off the send path; the desktop layout sends on
+        // Enter with Shift+Enter as newline. IME confirmation (isComposing /
+        // keyCode 229) never sends, and no keyboard shortcut is hardcoded
+        // outside the keybinding system (api-contracts §15.5).
         assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
         assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
         assert!(html.contains("const mobileLayout = coarsePointer || localAppMode"));
         assert!(html.contains("if (event.key !== \"Enter\" || event.shiftKey) return;"));
-        assert!(html.contains("if (event.ctrlKey || event.metaKey) {"));
+        assert!(!html.contains("event.ctrlKey || event.metaKey"));
         assert!(html.contains("if (mobileLayout) return;"));
         assert!(html.contains(
             "if (event.isComposing || composerIsComposing || event.keyCode === 229) return;"
