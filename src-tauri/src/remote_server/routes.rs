@@ -26,6 +26,7 @@ use super::lease::{
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
     require_active_lease, status_from_state, wait_for_remote_owner_transition_async,
     ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
+    RemoteControlStatus, RemoteOwnerTransition,
 };
 use super::navigation_routes::{
     remote_navigation, remote_notification_mark_read, remote_notifications_clear,
@@ -44,7 +45,18 @@ const LEASE_CHECK_MS: u64 = 500;
 struct ClaimRequest {
     client_name: Option<String>,
     claim_reservation_id: Option<String>,
-    previous_lease_id: Option<String>,
+    resume_token: Option<String>,
+}
+
+/// Successful claim payload: the shared status plus the secret resume
+/// capability. The token appears only here — status and conflict responses
+/// must never carry it.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaimResponse {
+    #[serde(flatten)]
+    status: RemoteControlStatus,
+    resume_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,112 +169,171 @@ async fn remote_session_status(State(server): State<ServerState>) -> Response {
     }
 }
 
+enum ClaimAttempt {
+    Granted(Box<ClaimResponse>),
+    AwaitHandoff(RemoteOwnerTransition),
+    Rejected(Response),
+}
+
+fn conflict_status_response(current: &RemoteControlState, timeout_seconds: u64) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(status_from_state(current, timeout_seconds)),
+    )
+        .into_response()
+}
+
+/// One claim attempt under the owner lock. `allow_handoff_wait` is true only
+/// on the first pass: a voluntary-release drain whose handoff capability
+/// matches yields `AwaitHandoff`, and the caller retries once after the drain.
+fn attempt_claim(
+    settings: &crate::settings::models::RemoteSettings,
+    current: &mut RemoteControlState,
+    body: &ClaimRequest,
+    remote_addr: &str,
+    allow_handoff_wait: bool,
+) -> ClaimAttempt {
+    if !settings.enabled {
+        return ClaimAttempt::Rejected(json_error(
+            StatusCode::FORBIDDEN,
+            "direct remote mode is disabled",
+        ));
+    }
+    let timeout_seconds = effective_heartbeat_timeout_seconds(settings);
+    let now = Instant::now();
+    let timeout = Duration::from_secs(timeout_seconds);
+    current.observe_lease_expiry(now, timeout);
+    current.prune_expired_claim_reservation(now);
+
+    if reclaim_lockout_active(current, now) {
+        return ClaimAttempt::Rejected(json_error(
+            StatusCode::CONFLICT,
+            "remote control was reclaimed locally",
+        ));
+    }
+
+    let resume_token = body.resume_token.as_deref();
+    if current.transitioning {
+        if allow_handoff_wait {
+            if let Some(transition) = current.current_owner_transition() {
+                if resume_token.is_some_and(|token| current.release_handoff_matches(token)) {
+                    return ClaimAttempt::AwaitHandoff(transition);
+                }
+            }
+        }
+        return ClaimAttempt::Rejected(conflict_status_response(current, timeout_seconds));
+    }
+
+    if current.lease.is_some()
+        && !resume_token.is_some_and(|token| current.remote_lease_takeover_allowed(token))
+    {
+        return ClaimAttempt::Rejected(conflict_status_response(current, timeout_seconds));
+    }
+
+    match current.resume_claim_reservation(
+        body.claim_reservation_id.as_deref(),
+        now,
+        Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
+    ) {
+        ClaimReservationAttempt::Busy { remaining } => {
+            let Some(reservation_id) = body.claim_reservation_id.as_deref() else {
+                return ClaimAttempt::Rejected(claim_reservation_rejected_response(Some(
+                    remaining,
+                )));
+            };
+            return ClaimAttempt::Rejected(claim_input_busy_response(reservation_id, remaining));
+        }
+        ClaimReservationAttempt::Rejected { remaining } => {
+            return ClaimAttempt::Rejected(claim_reservation_rejected_response(remaining));
+        }
+        ClaimReservationAttempt::NoReservation => {
+            // Install the one-shot reservation while the Local permit is
+            // still registered. It remains after that permit finishes, so
+            // a fresh Local key job cannot overtake the token retry.
+            if current.has_active_operations() {
+                let reservation_id = current.create_claim_reservation(
+                    now,
+                    Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
+                );
+                return ClaimAttempt::Rejected(claim_input_busy_response(
+                    &reservation_id,
+                    Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
+                ));
+            }
+        }
+        ClaimReservationAttempt::Consumed => {}
+    }
+
+    current.advance_owner_epoch();
+    let lease_id = Uuid::new_v4().to_string();
+    current.install_remote_lease(
+        RemoteControlLease {
+            lease_id: lease_id.clone(),
+            remote_addr: remote_addr.to_owned(),
+            client_name: body.client_name.clone(),
+            last_heartbeat: now,
+        },
+        timeout,
+    );
+    let resume_token = current.issue_resume_capability(&lease_id);
+    ClaimAttempt::Granted(Box::new(ClaimResponse {
+        status: status_from_state(current, timeout_seconds),
+        resume_token,
+    }))
+}
+
 async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
-    let claim_result = with_effective_remote_control_state(
-        &server.app_state,
-        |settings, current| -> Result<_, Response> {
-            if !settings.enabled {
-                return Err(json_error(
-                    StatusCode::FORBIDDEN,
-                    "direct remote mode is disabled",
-                ));
-            }
-            let timeout_seconds = effective_heartbeat_timeout_seconds(settings);
-            let now = Instant::now();
-            let timeout = Duration::from_secs(timeout_seconds);
-            current.observe_lease_expiry(now, timeout);
-            current.prune_expired_claim_reservation(now);
+    let remote_addr = addr.to_string();
+    let attempt =
+        match with_effective_remote_control_state(&server.app_state, |settings, current| {
+            attempt_claim(settings, current, &body, &remote_addr, true)
+        }) {
+            Ok(attempt) => attempt,
+            Err(err) => return internal_error(err),
+        };
 
-            if reclaim_lockout_active(current, now) {
-                return Err(json_error(
-                    StatusCode::CONFLICT,
-                    "remote control was reclaimed locally",
-                ));
+    let attempt = match attempt {
+        ClaimAttempt::AwaitHandoff(transition) => {
+            // A voluntary release is draining and the claimant proved the
+            // handoff capability: follow the drain, then claim the freed
+            // lease instead of bouncing the reconnect on a generic 409.
+            if let Err(err) =
+                wait_for_remote_owner_transition_async(&server.app_state, transition).await
+            {
+                return json_error(StatusCode::CONFLICT, &err);
             }
-
-            if existing_lease_blocks_claim(current, body.previous_lease_id.as_deref()) {
-                return Err((
-                    StatusCode::CONFLICT,
-                    Json(status_from_state(current, timeout_seconds)),
-                )
-                    .into_response());
+            match with_effective_remote_control_state(&server.app_state, |settings, current| {
+                current.finalize_owner_transition_if_drained(transition);
+                attempt_claim(settings, current, &body, &remote_addr, false)
+            }) {
+                Ok(attempt) => attempt,
+                Err(err) => return internal_error(err),
             }
-
-            match current.resume_claim_reservation(
-                body.claim_reservation_id.as_deref(),
-                now,
-                Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
-            ) {
-                ClaimReservationAttempt::Busy { remaining } => {
-                    let Some(reservation_id) = body.claim_reservation_id.as_deref() else {
-                        return Err(claim_reservation_rejected_response(Some(remaining)));
-                    };
-                    return Err(claim_input_busy_response(reservation_id, remaining));
-                }
-                ClaimReservationAttempt::Rejected { remaining } => {
-                    return Err(claim_reservation_rejected_response(remaining));
-                }
-                ClaimReservationAttempt::NoReservation => {
-                    // Install the one-shot reservation while the Local permit is
-                    // still registered. It remains after that permit finishes, so
-                    // a fresh Local key job cannot overtake the token retry.
-                    if current.has_active_operations() {
-                        let reservation_id = current.create_claim_reservation(
-                            now,
-                            Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
-                        );
-                        return Err(claim_input_busy_response(
-                            &reservation_id,
-                            Duration::from_millis(REMOTE_CLAIM_RESERVATION_TTL_MS),
-                        ));
-                    }
-                }
-                ClaimReservationAttempt::Consumed => {}
-            }
-
-            current.advance_owner_epoch();
-            current.install_remote_lease(
-                RemoteControlLease {
-                    lease_id: Uuid::new_v4().to_string(),
-                    remote_addr: addr.to_string(),
-                    client_name: body.client_name,
-                    last_heartbeat: now,
-                },
-                timeout,
-            );
-            Ok(status_from_state(current, timeout_seconds))
-        },
-    );
-    let status = match claim_result {
-        Ok(Ok(status)) => status,
-        Ok(Err(response)) => return response,
-        Err(err) => return internal_error(err),
+        }
+        other => other,
     };
 
-    emit_remote_control_status(&server.app_handle, &status);
-    Json(status).into_response()
+    match attempt {
+        ClaimAttempt::Granted(response) => {
+            emit_remote_control_status(&server.app_handle, &response.status);
+            Json(*response).into_response()
+        }
+        ClaimAttempt::Rejected(response) => response,
+        ClaimAttempt::AwaitHandoff(_) => json_error(
+            StatusCode::CONFLICT,
+            "remote controller lease is not active",
+        ),
+    }
 }
 
 fn duration_millis_ceil(duration: Duration) -> u64 {
     let nanos = duration.as_nanos();
     let millis = nanos.saturating_add(999_999) / 1_000_000;
     u64::try_from(millis).unwrap_or(u64::MAX)
-}
-
-/// An installed lease blocks a new claim unless the claimant proves it still
-/// owns that lease via `previousLeaseId`; then the claim replaces the lease in
-/// place (same-controller reconnect after navigation/reload).
-fn existing_lease_blocks_claim(
-    current: &RemoteControlState,
-    previous_lease_id: Option<&str>,
-) -> bool {
-    current.lease.is_some()
-        && !previous_lease_id
-            .is_some_and(|previous| current.remote_lease_takeover_allowed(previous))
 }
 
 fn claim_input_busy_response(reservation_id: &str, remaining: Duration) -> Response {
@@ -372,7 +443,9 @@ async fn remote_session_release(
 
         match current.lease.as_ref() {
             Some(lease) if lease.lease_id == body.lease_id => {
-                let transition = current.begin_remote_owner_transition(now);
+                // Voluntary release: the departing controller's resume
+                // capability survives this drain (handoff window).
+                let transition = current.begin_voluntary_release_transition(now);
                 let status = status_from_state(&current, timeout_seconds);
                 (transition, status)
             }
@@ -691,12 +764,49 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        claim_input_busy_response, existing_lease_blocks_claim, terminal_control_response,
-        terminal_size_is_positive, ClaimRequest, RemoteControlLease, RemoteControlState,
+        attempt_claim, claim_input_busy_response, terminal_control_response,
+        terminal_size_is_positive, ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlState,
     };
+    use crate::settings::models::RemoteSettings;
     use axum::body::to_bytes;
     use axum::http::StatusCode;
+    use axum::response::Response;
     use std::time::{Duration, Instant};
+
+    fn enabled_settings() -> RemoteSettings {
+        RemoteSettings {
+            enabled: true,
+            ..RemoteSettings::default()
+        }
+    }
+
+    fn claim_body(resume_token: Option<&str>) -> ClaimRequest {
+        ClaimRequest {
+            client_name: Some("phone".into()),
+            claim_reservation_id: None,
+            resume_token: resume_token.map(str::to_owned),
+        }
+    }
+
+    fn expect_granted(attempt: ClaimAttempt) -> Box<ClaimResponse> {
+        match attempt {
+            ClaimAttempt::Granted(response) => response,
+            ClaimAttempt::AwaitHandoff(_) => panic!("expected a granted claim, got AwaitHandoff"),
+            ClaimAttempt::Rejected(response) => {
+                panic!("expected a granted claim, got {}", response.status())
+            }
+        }
+    }
+
+    fn expect_rejected(attempt: ClaimAttempt) -> Response {
+        match attempt {
+            ClaimAttempt::Rejected(response) => response,
+            ClaimAttempt::Granted(_) => panic!("expected a rejected claim, got Granted"),
+            ClaimAttempt::AwaitHandoff(_) => {
+                panic!("expected a rejected claim, got AwaitHandoff")
+            }
+        }
+    }
 
     #[test]
     fn remote_resize_rejects_zero_dimensions() {
@@ -726,36 +836,175 @@ mod tests {
             request.claim_reservation_id.as_deref(),
             Some("reservation-1")
         );
-        assert_eq!(request.previous_lease_id, None);
+        assert_eq!(request.resume_token, None);
     }
 
     #[test]
-    fn claim_request_accepts_an_optional_previous_lease_id() {
+    fn claim_request_accepts_an_optional_resume_token() {
         let request: ClaimRequest = serde_json::from_value(serde_json::json!({
             "clientName": "phone",
-            "previousLeaseId": "lease-1",
+            "resumeToken": "resume-1",
         }))
         .unwrap();
-        assert_eq!(request.previous_lease_id.as_deref(), Some("lease-1"));
+        assert_eq!(request.resume_token.as_deref(), Some("resume-1"));
     }
 
     #[test]
-    fn existing_lease_blocks_claims_except_the_holder_takeover() {
+    fn claim_response_returns_the_resume_token_next_to_the_flattened_status() {
+        let settings = enabled_settings();
         let mut control = RemoteControlState::default();
-        assert!(!existing_lease_blocks_claim(&control, None));
+        let granted = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        let body = serde_json::to_value(&*granted).unwrap();
+        assert_eq!(body["active"], true);
+        assert_eq!(body["leaseId"], granted.status.lease_id.clone().unwrap());
+        assert_eq!(body["resumeToken"], granted.resume_token);
+    }
 
-        control.install_remote_lease(
-            RemoteControlLease {
-                lease_id: "lease-1".into(),
-                remote_addr: "127.0.0.1:1".into(),
-                client_name: None,
-                last_heartbeat: Instant::now(),
-            },
-            Duration::from_secs(45),
+    #[test]
+    fn takeover_needs_the_secret_capability_not_the_public_lease_id() {
+        let settings = enabled_settings();
+        let mut control = RemoteControlState::default();
+        let first = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        let first_lease_id = first.status.lease_id.clone().unwrap();
+
+        // The public lease id (status / conflict responses) proves nothing.
+        let rejected = expect_rejected(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&first_lease_id)),
+            "127.0.0.1:2",
+            true,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+
+        let rejected = expect_rejected(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:2",
+            true,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+
+        // The secret capability replaces the lease and rotates both secrets.
+        let second = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&first.resume_token)),
+            "127.0.0.1:1",
+            true,
+        ));
+        assert_ne!(second.status.lease_id, first.status.lease_id);
+        assert_ne!(second.resume_token, first.resume_token);
+
+        // The consumed capability is dead.
+        let rejected = expect_rejected(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&first.resume_token)),
+            "127.0.0.1:1",
+            true,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn claim_follows_a_voluntary_release_drain_only_with_the_handoff_capability() {
+        let settings = enabled_settings();
+        let mut control = RemoteControlState::default();
+        let granted = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        let lease_id = granted.status.lease_id.clone().unwrap();
+
+        // A PTY-enqueued Remote operation keeps the release drain pending, so
+        // the reconnect races the transition exactly like a pagehide beacon
+        // followed by an immediate reload claim.
+        control.register_enqueued_remote_operation_for_test(&lease_id, "t1");
+        let transition = control
+            .begin_voluntary_release_transition(Instant::now())
+            .expect("the active lease should begin the release transition");
+        assert!(!control.finalize_owner_transition_if_drained(transition));
+
+        // Without the handoff capability the drain stays a plain conflict.
+        let rejected = expect_rejected(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+
+        // With it, the claim is told to await the drain instead of bouncing.
+        let attempt = attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&granted.resume_token)),
+            "127.0.0.1:1",
+            true,
         );
-        assert!(existing_lease_blocks_claim(&control, None));
-        assert!(existing_lease_blocks_claim(&control, Some("lease-2")));
-        assert!(!existing_lease_blocks_claim(&control, Some("lease-1")));
+        assert!(matches!(attempt, ClaimAttempt::AwaitHandoff(_)));
+
+        // Once the worker acknowledges the drained operation, the retry pass
+        // (allow_handoff_wait = false) claims the freed lease.
+        control.clear_active_operations_for_test();
+        assert!(control.finalize_owner_transition_if_drained(transition));
+        let second = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&granted.resume_token)),
+            "127.0.0.1:1",
+            false,
+        ));
+        assert_ne!(second.status.lease_id.as_deref(), Some(lease_id.as_str()));
+        assert_ne!(second.resume_token, granted.resume_token);
+    }
+
+    #[test]
+    fn expiry_and_reclaim_drains_reject_the_old_capability() {
+        let settings = enabled_settings();
+        let mut control = RemoteControlState::default();
+        let granted = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        let lease_id = granted.status.lease_id.clone().unwrap();
+
+        control.register_enqueued_remote_operation_for_test(&lease_id, "t1");
+        control
+            .begin_remote_owner_transition(Instant::now())
+            .expect("the active lease should begin the transition");
+
+        // The capability was revoked when the non-voluntary transition began:
+        // no handoff wait, just the plain conflict (ADR-0027 confirmed loss).
+        let rejected = expect_rejected(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(Some(&granted.resume_token)),
+            "127.0.0.1:1",
+            true,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

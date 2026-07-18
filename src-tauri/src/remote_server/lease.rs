@@ -45,6 +45,17 @@ pub struct RemoteControlState {
     claim_reservation: Option<ClaimReservation>,
     claim_token_hasher: ClaimTokenHasher,
     transition_deadline: Option<Instant>,
+    resume_capability: Option<ResumeCapability>,
+}
+
+/// Secret proof that a claim may replace/resume the lease it was issued for.
+/// The token itself is returned once, in the successful claim response; the
+/// server keeps only a process-keyed digest, so nothing recoverable appears in
+/// status or conflict responses (unlike the public lease id).
+#[derive(Debug, Clone)]
+struct ResumeCapability {
+    lease_id: String,
+    token_hash: [u64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,13 +397,60 @@ impl RemoteControlState {
             .is_some_and(|lease| lease.lease_id == lease_id)
     }
 
-    /// True when a claim presenting `previous_lease_id` may replace the current
-    /// lease in place. Only the holder of the still-Active lease qualifies:
-    /// an Expiring lease or an in-flight owner transition is a confirmed loss
-    /// and stays unrecoverable (ADR-0027), and any other lease id is a
-    /// different controller that must keep receiving `409`.
-    pub(crate) fn remote_lease_takeover_allowed(&self, previous_lease_id: &str) -> bool {
-        !self.transitioning && self.active_lease_id_matches(previous_lease_id)
+    /// Issue the resume capability for a freshly installed lease. The returned
+    /// token is the secret half; only its process-keyed digest is retained.
+    pub(crate) fn issue_resume_capability(&mut self, lease_id: &str) -> String {
+        let token = Uuid::new_v4().to_string();
+        self.resume_capability = Some(ResumeCapability {
+            lease_id: lease_id.to_owned(),
+            token_hash: self.claim_token_hasher.hash(&token),
+        });
+        token
+    }
+
+    fn resume_capability_matches(&self, resume_token: &str) -> bool {
+        self.resume_capability.as_ref().is_some_and(|capability| {
+            token_hashes_equal(
+                capability.token_hash,
+                self.claim_token_hasher.hash(resume_token),
+            )
+        })
+    }
+
+    /// True when a claim presenting `resume_token` may replace the current
+    /// lease in place. Only the secret capability issued with the still-Active
+    /// lease qualifies: an Expiring lease or an in-flight owner transition is
+    /// a confirmed loss and stays unrecoverable (ADR-0027), and the public
+    /// lease id proves nothing.
+    pub(crate) fn remote_lease_takeover_allowed(&self, resume_token: &str) -> bool {
+        !self.transitioning
+            && self
+                .resume_capability
+                .as_ref()
+                .is_some_and(|capability| self.active_lease_id_matches(&capability.lease_id))
+            && self.resume_capability_matches(resume_token)
+    }
+
+    /// True when a claim presenting `resume_token` may follow a voluntary
+    /// release through its drain. Only `begin_voluntary_release_transition`
+    /// leaves the capability armed; expiry/reclaim/disable transitions revoke
+    /// it, so their drains stay unclaimable.
+    pub(crate) fn release_handoff_matches(&self, resume_token: &str) -> bool {
+        self.transitioning && self.resume_capability_matches(resume_token)
+    }
+
+    /// Begin the owner transition for a voluntary remote release. Unlike
+    /// expiry/reclaim/disable, the departing controller's resume capability
+    /// survives the drain so its successor document (reload, back navigation)
+    /// can claim through the handoff window instead of bouncing on `409`.
+    pub(crate) fn begin_voluntary_release_transition(
+        &mut self,
+        now: Instant,
+    ) -> Option<RemoteOwnerTransition> {
+        let capability = self.resume_capability.take();
+        let transition = self.begin_remote_owner_transition(now);
+        self.resume_capability = capability;
+        transition
     }
 
     pub(crate) fn begin_remote_owner_transition(
@@ -401,6 +459,10 @@ impl RemoteControlState {
     ) -> Option<RemoteOwnerTransition> {
         self.prune_completed_operations();
         self.cancel_claim_reservation();
+        // Fail closed: every transition cause (expiry, reclaim, disable)
+        // revokes the resume capability. Only the voluntary release wrapper
+        // re-arms it for the handoff drain.
+        self.resume_capability = None;
         // A registered Remote request can still be waiting on protocol
         // encoding or another non-PTY gate. Such an operation is safe to
         // detach: enqueue is performed under this same owner mutex, so either
@@ -607,6 +669,32 @@ impl RemoteControlState {
 
     pub(crate) fn advance_owner_epoch(&mut self) {
         self.owner_epoch = self.owner_epoch.wrapping_add(1);
+    }
+
+    /// Test-only: register a Remote operation already past the PTY-enqueue
+    /// barrier, so an owner transition cannot detach it and must drain.
+    #[cfg(test)]
+    pub(crate) fn register_enqueued_remote_operation_for_test(
+        &mut self,
+        lease_id: &str,
+        terminal_id: &str,
+    ) {
+        let (operation_id, _) = self.register_operation(
+            HumanControlOrigin::Remote {
+                lease_id: lease_id.to_owned(),
+            },
+            terminal_id.to_owned(),
+        );
+        if let Some(operation) = self.active_operations.get_mut(&operation_id) {
+            operation.pty_enqueued = true;
+        }
+    }
+
+    /// Test-only: acknowledge every active operation, as the PTY control
+    /// worker would after completing or cancelling the physical I/O.
+    #[cfg(test)]
+    pub(crate) fn clear_active_operations_for_test(&mut self) {
+        self.active_operations.clear();
     }
 }
 
@@ -1090,56 +1178,80 @@ mod tests {
         assert!(control.lease.is_none());
     }
 
-    #[test]
-    fn takeover_is_allowed_only_for_the_active_lease_holder() {
-        let mut control = RemoteControlState::default();
+    fn install_lease_with_capability(
+        control: &mut RemoteControlState,
+        lease_id: &str,
+        last_heartbeat: Instant,
+        timeout: Duration,
+    ) -> String {
         control.install_remote_lease(
             RemoteControlLease {
-                lease_id: "lease-1".into(),
+                lease_id: lease_id.into(),
                 remote_addr: "127.0.0.1:1".into(),
                 client_name: None,
-                last_heartbeat: Instant::now(),
+                last_heartbeat,
             },
-            Duration::from_secs(45),
+            timeout,
         );
-        assert!(control.remote_lease_takeover_allowed("lease-1"));
-        assert!(!control.remote_lease_takeover_allowed("lease-2"));
+        control.issue_resume_capability(lease_id)
     }
 
     #[test]
-    fn takeover_is_rejected_once_the_owner_transition_started() {
-        let now = Instant::now();
+    fn takeover_requires_the_secret_resume_capability() {
         let mut control = RemoteControlState::default();
-        control.install_remote_lease(
-            RemoteControlLease {
-                lease_id: "lease-1".into(),
-                remote_addr: "127.0.0.1:1".into(),
-                client_name: None,
-                last_heartbeat: now,
-            },
+        let resume_token = install_lease_with_capability(
+            &mut control,
+            "lease-1",
+            Instant::now(),
             Duration::from_secs(45),
         );
+        assert!(control.remote_lease_takeover_allowed(&resume_token));
+        // The public lease id must prove nothing: it is visible in status and
+        // conflict responses to any holder of the shared remote token.
+        assert!(!control.remote_lease_takeover_allowed("lease-1"));
+        assert!(!control.remote_lease_takeover_allowed("wrong-token"));
+    }
+
+    #[test]
+    fn voluntary_release_keeps_the_handoff_while_other_transitions_revoke_it() {
+        let now = Instant::now();
+        let mut control = RemoteControlState::default();
+        let resume_token =
+            install_lease_with_capability(&mut control, "lease-1", now, Duration::from_secs(45));
+        control.register_enqueued_remote_operation_for_test("lease-1", "t1");
+        control
+            .begin_voluntary_release_transition(now)
+            .expect("an active lease should begin a transition");
+        assert!(control.release_handoff_matches(&resume_token));
+        assert!(!control.release_handoff_matches("lease-1"));
+        // Even the surviving handoff never permits an in-place takeover.
+        assert!(!control.remote_lease_takeover_allowed(&resume_token));
+
+        // Expiry/reclaim/disable use the plain transition and revoke.
+        let mut control = RemoteControlState::default();
+        let resume_token =
+            install_lease_with_capability(&mut control, "lease-1", now, Duration::from_secs(45));
+        control.register_enqueued_remote_operation_for_test("lease-1", "t1");
         control
             .begin_remote_owner_transition(now)
             .expect("an active lease should begin a transition");
-        assert!(!control.remote_lease_takeover_allowed("lease-1"));
+        assert!(!control.release_handoff_matches(&resume_token));
+        assert!(!control.remote_lease_takeover_allowed(&resume_token));
     }
 
     #[test]
     fn takeover_is_rejected_after_expiry_is_observed() {
         let now = Instant::now();
         let mut control = RemoteControlState::default();
-        control.install_remote_lease(
-            RemoteControlLease {
-                lease_id: "lease-1".into(),
-                remote_addr: "127.0.0.1:1".into(),
-                client_name: None,
-                last_heartbeat: now - Duration::from_secs(60),
-            },
+        let resume_token = install_lease_with_capability(
+            &mut control,
+            "lease-1",
+            now - Duration::from_secs(60),
             Duration::from_secs(5),
         );
         assert!(control.observe_lease_expiry(now, Duration::from_secs(5)));
-        assert!(!control.remote_lease_takeover_allowed("lease-1"));
+        assert!(!control.remote_lease_takeover_allowed(&resume_token));
+        assert!(!control.release_handoff_matches(&resume_token));
     }
 
     #[test]
