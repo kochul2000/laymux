@@ -51,6 +51,65 @@ export function writeDesktopInputModePreference(
   }
 }
 
+export const DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY = "laymux.desktop.composerHeight";
+export const DEFAULT_COMPOSER_HEIGHT = 96;
+export const MIN_COMPOSER_HEIGHT = 56;
+export const MAX_COMPOSER_HEIGHT = 480;
+
+/** Keeps a composer height within the draggable bounds; rounds to a whole pixel. */
+export function clampComposerHeight(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_COMPOSER_HEIGHT;
+  return Math.round(Math.min(MAX_COMPOSER_HEIGHT, Math.max(MIN_COMPOSER_HEIGHT, px)));
+}
+
+/**
+ * Reads the desktop composer editor height (px). Like the input-mode default it
+ * is a UI-only surface preference, so it lives in localStorage, not settings.json.
+ */
+export function readComposerHeight(storage?: InputModeStorage | null): number {
+  try {
+    const stored = resolveBrowserStorage(storage)?.getItem(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY);
+    const parsed = stored == null ? NaN : Number(stored);
+    return Number.isFinite(parsed) ? clampComposerHeight(parsed) : DEFAULT_COMPOSER_HEIGHT;
+  } catch {
+    return DEFAULT_COMPOSER_HEIGHT;
+  }
+}
+
+/** Returns false when browser storage is unavailable. Clamps before persisting. */
+export function writeComposerHeight(px: number, storage?: InputModeStorage | null): boolean {
+  try {
+    const target = resolveBrowserStorage(storage);
+    if (!target) return false;
+    target.setItem(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY, String(clampComposerHeight(px)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const MAX_COMPOSER_HISTORY = 200;
+const runtimeHistory = new Map<string, string[]>();
+
+/** Runtime-only per-terminal history of texts sent from the Composer. */
+export function readComposerHistory(terminalId: string): string[] {
+  return runtimeHistory.get(terminalId) ?? [];
+}
+
+/**
+ * Appends a sent draft to the terminal's Composer history. Blank entries and
+ * consecutive duplicates are ignored; the list is capped so it cannot grow
+ * without bound.
+ */
+export function pushComposerHistory(terminalId: string, text: string): void {
+  if (!text) return;
+  const list = runtimeHistory.get(terminalId) ?? [];
+  if (list[list.length - 1] === text) return;
+  list.push(text);
+  if (list.length > MAX_COMPOSER_HISTORY) list.splice(0, list.length - MAX_COMPOSER_HISTORY);
+  runtimeHistory.set(terminalId, list);
+}
+
 export type ComposerSubmissionToken = string;
 
 export interface ComposerSubmissionSnapshot {
@@ -153,6 +212,7 @@ export function clearRuntimeComposerState(terminalId?: string): void {
     const subscribedTerminalIds = [...runtimeDraftListeners.keys()];
     runtimeDrafts.clear();
     runtimeModes.clear();
+    runtimeHistory.clear();
     for (const subscribedTerminalId of subscribedTerminalIds) {
       notifyRuntimeComposerDraft(subscribedTerminalId, createComposerDraftState());
     }
@@ -160,6 +220,7 @@ export function clearRuntimeComposerState(terminalId?: string): void {
   }
   runtimeDrafts.delete(terminalId);
   runtimeModes.delete(terminalId);
+  runtimeHistory.delete(terminalId);
   notifyRuntimeComposerDraft(terminalId, createComposerDraftState());
 }
 

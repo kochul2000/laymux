@@ -474,10 +474,10 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   const composer = page.locator("#terminalComposer");
   const toggle = page.locator("#inputModeToggle");
   await expect(composer).toBeHidden();
-  await expect(toggle).toHaveText("Direct");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await toggle.click();
   await expect(composer).toBeVisible();
-  await expect(toggle).toHaveText("Composer");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.inputMode")))
     .toBe("composer");
@@ -492,7 +492,7 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   // Re-running the static entry simulates a reload: preference survives, drafts do not.
   await page.setContent(await remotePageMarkup());
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await expect(page.locator("#inputModeToggle")).toHaveText("Composer");
+  await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a busy Local input is claimed by retrying the one-shot reservation token", async ({
@@ -520,7 +520,7 @@ test("a busy Local input is claimed by retrying the one-shot reservation token",
 test("coarse pointer defaults to Composer and a saved Direct preference wins", async ({ page }) => {
   await installRemotePage(page, { coarse: true, storedMode: "direct" });
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await expect(page.locator("#inputModeToggle")).toHaveText("Direct");
+  await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "false");
 
   await page.locator("#inputModeToggle").click();
   await expect(page.locator("#terminalComposer")).toBeVisible();
@@ -566,7 +566,7 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
     delayTerminal2Snapshot: true,
   });
   await connect(page);
-  await expect(page.locator("#composerSend")).toBeEnabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
@@ -585,10 +585,10 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
   expect(sockets[0].url).toContain("/terminals/terminal-1/output");
   expect(sockets[1]).toMatchObject({ closed: false });
   expect(sockets[1].url).toContain("/terminals/terminal-2/output");
-  await expect(page.locator("#composerSend")).toBeDisabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
 
   await remote.focuses[0].respond();
-  await expect(page.locator("#composerSend")).toBeDisabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
   await page.evaluate(() => {
     const sockets = (
       window as Window & {
@@ -597,7 +597,7 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
     ).__mockSockets;
     sockets[1].emitSnapshot();
   });
-  await expect(page.locator("#composerSend")).toBeEnabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
 });
 
 test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", async ({
@@ -608,8 +608,8 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
   await page.locator("#inputModeToggle").click();
 
   const editor = page.locator("#composerInput");
-  await expect(page.locator("#composerSend")).toBeEnabled();
-  await expect(page.locator("#composerInsert")).toHaveCount(0);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+  await expect(page.locator("#composerSend")).toHaveCount(0);
 
   await editor.fill("line");
   await editor.press("Shift+Enter");
@@ -627,15 +627,15 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
   await expect(editor).toHaveValue("");
 });
 
-test("coarse-pointer Composer keeps Enter as a newline and sends only from its button", async ({
-  page,
-}) => {
+test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ page }) => {
   const remote = await installRemotePage(page, { coarse: true });
   await connect(page);
 
   const editor = page.locator("#composerInput");
-  await expect(page.locator("#composerSend")).toBeEnabled();
-  await expect(page.locator("#composerInsert")).toHaveCount(0);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+  await expect(page.locator("#composerSend")).toHaveCount(0);
+
+  // Enter during IME composition never sends.
   await editor.fill("한글 조합");
   await editor.dispatchEvent("compositionstart");
   await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
@@ -643,13 +643,14 @@ test("coarse-pointer Composer keeps Enter as a newline and sends only from its b
   expect(remote.inputs).toHaveLength(0);
   await editor.dispatchEvent("compositionend");
 
+  // Shift+Enter inserts a newline; plain Enter sends (mirrors desktop).
   await editor.fill("line");
-  await editor.press("Enter");
+  await editor.press("Shift+Enter");
   await expect(editor).toHaveValue("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
-  await page.locator("#composerSend").click();
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body).toEqual({
     leaseId: "lease-1",
@@ -694,7 +695,7 @@ test("legacy unsequenced output remains visible but Composer and direct paste fa
   await connect(page);
 
   await page.locator("#composerInput").fill("preserved draft");
-  await expect(page.locator("#composerSend")).toBeDisabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
   await page.locator("#inputModeToggle").click();
   await dispatchTerminalPaste(page, "must not send");
   expect(remote.inputs).toHaveLength(0);
@@ -720,7 +721,7 @@ test("a malformed output frame stays fail-closed after a delayed snapshot write 
       ),
     )
     .toBe(1);
-  await expect(page.locator("#composerSend")).toBeDisabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
 
   await page.evaluate(() => {
     const socket = (
@@ -737,7 +738,7 @@ test("a malformed output frame stays fail-closed after a delayed snapshot write 
   });
   await page.waitForTimeout(20);
 
-  await expect(page.locator("#composerSend")).toBeDisabled();
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
   expect(
     await page.evaluate(() =>
       (
@@ -754,36 +755,35 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await connect(page);
 
   const editor = page.locator("#composerInput");
-  const send = page.locator("#composerSend");
+  const composer = page.locator("#terminalComposer");
   await editor.fill("before send");
-  await send.evaluate((button: HTMLButtonElement) => {
-    button.click();
-    button.click();
-  });
+  // Two quick Enters must not double-submit (the in-flight gate blocks the second).
+  await editor.press("Enter");
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(1);
-  await expect(send).toBeDisabled();
-  await expect(page.locator("#composerInsert")).toHaveCount(0);
+  await expect(composer).toHaveAttribute("data-can-send", "false");
+  await expect(page.locator("#composerSend")).toHaveCount(0);
   await expect(editor).toBeEnabled();
 
   await editor.fill("edited while pending");
   await remote.inputs[0].respond();
-  await expect(send).toBeEnabled();
+  await expect(composer).toHaveAttribute("data-can-send", "true");
   await expect(editor).toHaveValue("edited while pending");
 
-  await send.click();
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(2);
   await remote.inputs[1].respond();
   await expect(editor).toHaveValue("");
 
   await editor.fill("preserve on failure");
-  await send.click();
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(3);
   await remote.inputs[2].respond(500);
   await expect(editor).toHaveValue("preserve on failure");
-  await expect(send).toBeEnabled();
+  await expect(composer).toHaveAttribute("data-can-send", "true");
 
   await editor.fill("terminal one pending");
-  await send.click();
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(4);
   await selectTerminal(page, "C:\\two");
   await editor.fill("terminal two draft");
@@ -800,11 +800,11 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   await connect(page);
 
   const editor = page.locator("#composerInput");
-  const send = page.locator("#composerSend");
+  const composer = page.locator("#terminalComposer");
   await editor.fill("preserve across disconnect");
-  await send.click();
+  await editor.press("Enter");
   await expect.poll(() => remote.inputs.length).toBe(1);
-  await expect(send).toBeDisabled();
+  await expect(composer).toHaveAttribute("data-can-send", "false");
 
   // The mobile connected layout collapses this control outside the viewport;
   // invoke the same button action without coupling this state test to drawer UX.
@@ -815,7 +815,7 @@ test("disconnect releases an in-flight Composer action while preserving its draf
 
   await expect(editor).toHaveValue("preserve across disconnect");
   await expect(editor).toBeEnabled();
-  await expect(send).toBeEnabled();
+  await expect(composer).toHaveAttribute("data-can-send", "true");
 
   // Settle the mocked, already-aborted route so the test leaves no pending
   // Playwright handler behind. The stale response must not clear the draft.

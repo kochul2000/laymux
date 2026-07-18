@@ -4,7 +4,7 @@ import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
-import { PaneControlContext } from "./PaneControlContext";
+import { PaneControlContext, type PaneInputModeToggle } from "./PaneControlContext";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 
@@ -121,6 +121,60 @@ function Sep() {
   return <div className="ui-sep" />;
 }
 
+// ─── Terminal input-mode toggle (direct ↔ composer) ─────
+// 단일 버튼으로 현재 모드 아이콘을 보여주고 클릭 시 반대 모드로 전환한다.
+// composer 활성 시 accent 로 강조. 단축키(terminal.toggleInputMode)는 별도.
+function InputModeToggleBtn({ toggle }: { toggle: PaneInputModeToggle }) {
+  const composer = toggle.mode === "composer";
+  return (
+    <BarBtn
+      testId="pane-control-input-mode"
+      onClick={toggle.onToggle}
+      active={composer}
+      title={
+        composer
+          ? "Composer input — switch to Direct (Ctrl+Alt+M)"
+          : "Direct input — switch to Composer (Ctrl+Alt+M)"
+      }
+    >
+      {composer ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M13.5 8.5l2.5 2.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <rect
+            x="2.5"
+            y="6"
+            width="19"
+            height="12"
+            rx="2"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          />
+          <path
+            d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </BarBtn>
+  );
+}
+
 // ─── Propagate CWD once (issue #293 → #324) ─────────────
 // 우측 컨트롤 묶음이 아니라 좌측(pane 번호 배지 우측)에 정렬된다.
 // 단축키(pane.propagateCwdOnce, 기본 Ctrl+Alt+P)는 useKeyboardShortcuts 가 처리한다.
@@ -226,6 +280,7 @@ function BarContent({
   onSetMode,
   cwdSendOn,
   cwdReceiveOn,
+  inputModeToggle,
   expanded = true,
   wrapped = false,
   vertical = false,
@@ -238,6 +293,7 @@ function BarContent({
   onSetMode: (m: ControlBarMode) => void;
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
+  inputModeToggle?: PaneInputModeToggle | null;
   expanded?: boolean;
   wrapped?: boolean;
   vertical?: boolean;
@@ -257,6 +313,12 @@ function BarContent({
     >
       {expanded && (
         <>
+          {inputModeToggle && (
+            <>
+              <InputModeToggleBtn toggle={inputModeToggle} />
+              <Separator />
+            </>
+          )}
           {actions.onChangeView && (
             <ViewSelect
               currentView={currentView}
@@ -493,6 +555,7 @@ function NarrowControlMenu({
   onSetMode,
   cwdSendOn,
   cwdReceiveOn,
+  inputModeToggle,
   position,
   onRequestClose,
   triggerRef,
@@ -503,6 +566,7 @@ function NarrowControlMenu({
   onSetMode: (m: ControlBarMode) => void;
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
+  inputModeToggle?: PaneInputModeToggle | null;
   position: { top: number; right: number };
   onRequestClose: () => void;
   /** ⋯ 트리거 버튼. 트리거 클릭은 외부 클릭으로 보지 않는다(아래 toggle 이 닫기를 처리). */
@@ -554,6 +618,7 @@ function NarrowControlMenu({
         onSetMode={onSetMode}
         cwdSendOn={cwdSendOn}
         cwdReceiveOn={cwdReceiveOn}
+        inputModeToggle={inputModeToggle}
         vertical
         showMinimize={false}
       />
@@ -722,6 +787,7 @@ export function PaneControlBar({
   );
   const [hasViewHeader, setHasViewHeader] = useState(false);
   const [leftBarContent, setLeftBarContentState] = useState<ReactNode>(null);
+  const [inputModeToggle, setInputModeToggleState] = useState<PaneInputModeToggle | null>(null);
   const [narrowMenuOpen, setNarrowMenuOpen] = useState(false);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
@@ -826,6 +892,7 @@ export function PaneControlBar({
           onSetMode={setMode}
           cwdSendOn={cwdSendOn}
           cwdReceiveOn={cwdReceiveOn}
+          inputModeToggle={inputModeToggle}
         />
       ),
     [
@@ -838,6 +905,7 @@ export function PaneControlBar({
       toggleNarrowMenu,
       cwdSendOn,
       cwdReceiveOn,
+      inputModeToggle,
     ],
   );
 
@@ -845,6 +913,9 @@ export function PaneControlBar({
   const unregisterHeader = useCallback(() => setHasViewHeader(false), []);
   const setLeftBarContent = useCallback((node: ReactNode) => {
     setLeftBarContentState(node ?? null);
+  }, []);
+  const setInputModeToggle = useCallback((toggle: PaneInputModeToggle | null) => {
+    setInputModeToggleState(toggle);
   }, []);
 
   const ctxValue = useMemo(
@@ -863,6 +934,8 @@ export function PaneControlBar({
       unregisterHeader,
       leftBarContent,
       setLeftBarContent,
+      inputModeToggle,
+      setInputModeToggle,
       paneNumber,
       workspaceId,
       workspaceName,
@@ -880,6 +953,8 @@ export function PaneControlBar({
       unregisterHeader,
       leftBarContent,
       setLeftBarContent,
+      inputModeToggle,
+      setInputModeToggle,
       paneNumber,
       workspaceId,
       workspaceName,
@@ -932,6 +1007,7 @@ export function PaneControlBar({
                 onSetMode={setMode}
                 cwdSendOn={cwdSendOn}
                 cwdReceiveOn={cwdReceiveOn}
+                inputModeToggle={inputModeToggle}
               />
             )}
           </div>
@@ -985,6 +1061,7 @@ export function PaneControlBar({
                   onSetMode={setMode}
                   cwdSendOn={cwdSendOn}
                   cwdReceiveOn={cwdReceiveOn}
+                  inputModeToggle={inputModeToggle}
                 />
               )}
             </div>
@@ -1016,6 +1093,7 @@ export function PaneControlBar({
             onSetMode={setMode}
             cwdSendOn={cwdSendOn}
             cwdReceiveOn={cwdReceiveOn}
+            inputModeToggle={inputModeToggle}
             position={menuPosition}
             onRequestClose={closeNarrowMenu}
             triggerRef={menuBtnRef}

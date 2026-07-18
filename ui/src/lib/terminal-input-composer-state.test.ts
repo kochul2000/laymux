@@ -1,19 +1,73 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_COMPOSER_HEIGHT,
+  DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY,
   DESKTOP_INPUT_MODE_STORAGE_KEY,
+  MAX_COMPOSER_HEIGHT,
+  MIN_COMPOSER_HEIGHT,
   beginComposerSubmission,
+  clampComposerHeight,
   clearRuntimeComposerState,
   createComposerDraftState,
+  pushComposerHistory,
+  readComposerHeight,
+  readComposerHistory,
   readDesktopInputModePreference,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
   settleComposerSubmission,
   subscribeRuntimeComposerDraft,
   updateComposerDraftText,
+  writeComposerHeight,
   writeDesktopInputModePreference,
   writeRuntimeComposerDraft,
   writeRuntimeInputMode,
 } from "./terminal-input-composer-state";
+
+describe("composer sent-history", () => {
+  beforeEach(() => {
+    clearRuntimeComposerState();
+  });
+
+  it("appends entries, skipping blanks and consecutive duplicates", () => {
+    pushComposerHistory("t1", "one");
+    pushComposerHistory("t1", "one"); // duplicate — ignored
+    pushComposerHistory("t1", ""); // blank — ignored
+    pushComposerHistory("t1", "two");
+    expect(readComposerHistory("t1")).toEqual(["one", "two"]);
+  });
+
+  it("isolates history per terminal and clears it with runtime state", () => {
+    pushComposerHistory("a", "cmd-a");
+    pushComposerHistory("b", "cmd-b");
+    expect(readComposerHistory("a")).toEqual(["cmd-a"]);
+    clearRuntimeComposerState("a");
+    expect(readComposerHistory("a")).toEqual([]);
+    expect(readComposerHistory("b")).toEqual(["cmd-b"]);
+  });
+});
+
+describe("desktop composer height preference", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("defaults when unset and clamps to the draggable bounds", () => {
+    expect(readComposerHeight()).toBe(DEFAULT_COMPOSER_HEIGHT);
+    expect(clampComposerHeight(0)).toBe(MIN_COMPOSER_HEIGHT);
+    expect(clampComposerHeight(99999)).toBe(MAX_COMPOSER_HEIGHT);
+    expect(clampComposerHeight(Number.NaN)).toBe(DEFAULT_COMPOSER_HEIGHT);
+  });
+
+  it("round-trips a clamped height through storage", () => {
+    expect(writeComposerHeight(140)).toBe(true);
+    expect(localStorage.getItem(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY)).toBe("140");
+    expect(readComposerHeight()).toBe(140);
+
+    writeComposerHeight(10_000);
+    expect(readComposerHeight()).toBe(MAX_COMPOSER_HEIGHT);
+  });
+});
 
 describe("desktop terminal input-mode preference", () => {
   beforeEach(() => {

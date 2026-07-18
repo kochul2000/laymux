@@ -6061,6 +6061,22 @@ describe("TerminalView desktop input composer", () => {
     mockWriteTerminalInput.mockResolvedValue(undefined);
   });
 
+  // The input-mode toggle now lives in the pane control bar, which is not mounted
+  // when TerminalView is rendered in isolation. Drive mode switches through the
+  // registered keybinding (Ctrl+Alt+M) instead of clicking an in-composer button.
+  const toggleInputMode = (terminalId: string) => {
+    const host = screen.getByTestId(`terminal-input-composer-${terminalId}`);
+    fireEvent.keyDown(host.parentElement!, { key: "m", ctrlKey: true, altKey: true });
+  };
+
+  // Feed raw output so OSC 133 flips the prompt/program phase ↑/↓ routing depends on.
+  const emitOutput = (terminalId: string, str: string) => {
+    const onOutput = mockOnTerminalOutput.mock.calls.find((call) => call[0] === terminalId)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    act(() => onOutput?.(new TextEncoder().encode(str)));
+  };
+
   it("toggles the desktop composer through the registered keybinding", async () => {
     render(<TerminalView instanceId="t-composer-toggle" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
@@ -6084,7 +6100,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
 
     const terminal = createdTerminals.at(-1)!;
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
 
     await vi.waitFor(() => {
       expect(terminal.options.cursorInactiveStyle).toBe("none");
@@ -6093,7 +6109,7 @@ describe("TerminalView desktop input composer", () => {
       );
     });
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-direct`));
+    toggleInputMode(terminalId);
     await vi.waitFor(() => {
       expect(terminal.options.cursorInactiveStyle).toBe("outline");
       expect(screen.getByTestId(`terminal-view-${terminalId}`)).not.toHaveClass(
@@ -6119,7 +6135,7 @@ describe("TerminalView desktop input composer", () => {
     container.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(mockSmartPaste).toHaveBeenCalledWith("", "PowerShell"));
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
     await act(async () => {
       resolvePaste({ pasteType: "text", content: "must stay in the draft boundary" });
       await Promise.resolve();
@@ -6203,9 +6219,9 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
-    const send = screen.getByTestId(`terminal-input-composer-${terminalId}-send`);
-    await vi.waitFor(() => expect(send).toBeEnabled());
+    toggleInputMode(terminalId);
+    const composer = screen.getByTestId(`terminal-input-composer-${terminalId}`);
+    await vi.waitFor(() => expect(composer).toHaveAttribute("data-can-send", "true"));
 
     const registeredOutput = mockOnTerminalOutput.mock.calls.find(
       ([registeredTerminalId]) => registeredTerminalId === terminalId,
@@ -6224,7 +6240,7 @@ describe("TerminalView desktop input composer", () => {
       emitOutput?.({ seqStart: 0, seqEnd: 2, data: [0x61] });
     });
 
-    expect(send).toBeDisabled();
+    expect(composer).toHaveAttribute("data-can-send", "false");
     await vi.waitFor(() => {
       expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(
         attachCallsBeforeMalformedDelta,
@@ -6253,18 +6269,21 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId="t-composer-send" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-mode-composer"));
+    toggleInputMode("t-composer-send");
     const textarea = screen.getByTestId(
       "terminal-input-composer-t-composer-send-textarea",
     ) as HTMLTextAreaElement;
     await vi.waitFor(() =>
-      expect(screen.getByTestId("terminal-input-composer-t-composer-send-send")).toBeEnabled(),
+      expect(screen.getByTestId("terminal-input-composer-t-composer-send")).toHaveAttribute(
+        "data-can-send",
+        "true",
+      ),
     );
     fireEvent.change(textarea, { target: { value: "한글\nsecond" } });
     expect(
       screen.queryByTestId("terminal-input-composer-t-composer-send-insert"),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-send-send"));
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
@@ -6280,15 +6299,15 @@ describe("TerminalView desktop input composer", () => {
     render(<TerminalView instanceId="t-composer-flight" profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId("terminal-input-composer-t-composer-flight-mode-composer"));
+    toggleInputMode("t-composer-flight");
     const textarea = screen.getByTestId(
       "terminal-input-composer-t-composer-flight-textarea",
     ) as HTMLTextAreaElement;
-    const send = screen.getByTestId("terminal-input-composer-t-composer-flight-send");
-    await vi.waitFor(() => expect(send).toBeEnabled());
+    const composer = screen.getByTestId("terminal-input-composer-t-composer-flight");
+    await vi.waitFor(() => expect(composer).toHaveAttribute("data-can-send", "true"));
     fireEvent.change(textarea, { target: { value: "first" } });
-    fireEvent.click(send);
-    fireEvent.click(send);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(mockWriteTerminalInput).toHaveBeenCalledTimes(1);
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-flight", "first", true);
 
@@ -6310,10 +6329,10 @@ describe("TerminalView desktop input composer", () => {
     );
     await waitForTerminalInputReady();
 
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-mode-composer`));
+    toggleInputMode(terminalId);
     const firstTextarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
     fireEvent.change(firstTextarea, { target: { value: "pending across remount" } });
-    fireEvent.click(screen.getByTestId(`terminal-input-composer-${terminalId}-send`));
+    fireEvent.keyDown(firstTextarea, { key: "Enter" });
     first.unmount();
 
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
@@ -6321,12 +6340,18 @@ describe("TerminalView desktop input composer", () => {
       `terminal-input-composer-${terminalId}-textarea`,
     );
     expect(replacementTextarea).toHaveValue("pending across remount");
-    expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeDisabled();
+    expect(screen.getByTestId(`terminal-input-composer-${terminalId}`)).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
 
     await act(async () => resolveInput());
     await vi.waitFor(() => {
       expect(replacementTextarea).toHaveValue("");
-      expect(screen.getByTestId(`terminal-input-composer-${terminalId}-send`)).toBeEnabled();
+      expect(screen.getByTestId(`terminal-input-composer-${terminalId}`)).toHaveAttribute(
+        "data-can-send",
+        "true",
+      );
     });
   });
 
@@ -6346,8 +6371,129 @@ describe("TerminalView desktop input composer", () => {
         screen.getByTestId("terminal-input-composer-t-composer-remote-textarea"),
       ).toBeDisabled();
     });
-    expect(screen.getByTestId("terminal-input-composer-t-composer-remote-send")).toBeDisabled();
+    expect(screen.getByTestId("terminal-input-composer-t-composer-remote")).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("recalls Composer history into the draft at the shell prompt (not the shell's)", async () => {
+    const terminalId = "t-composer-history";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+
+    // Send one entry so the Composer has history, then confirm the draft cleared.
+    fireEvent.change(textarea, { target: { value: "echo hi" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await vi.waitFor(() => expect(textarea.value).toBe(""));
+
+    mockWriteToTerminal.mockClear();
+    // Empty draft at the prompt: ↑ recalls into the editor, not the terminal line.
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    await vi.waitFor(() => expect(textarea.value).toBe("echo hi"));
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("keeps nav keys inside the draft once it has text", async () => {
+    const terminalId = "t-composer-nav-draft";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("lets combos bound to laymux actions bubble instead of forwarding them", async () => {
+    const terminalId = "t-composer-panenav";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    mockWriteToTerminal.mockClear();
+
+    // Empty draft, but these combos match registry bindings (pane.focus =
+    // Alt+Arrow wildcard, workspace.prev = Ctrl+Alt+Up) — the registry check,
+    // not a hardcoded modifier rule, must keep them bubbling untouched.
+    const altLeft = new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, bubbles: true });
+    const stopSpy = vi.spyOn(altLeft, "stopPropagation");
+    textarea.dispatchEvent(altLeft);
+    fireEvent.keyDown(textarea, { key: "ArrowUp", ctrlKey: true, altKey: true });
+    // Ctrl+Alt+C = pane.copyIdentifier — bound, so it bubbles too.
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true, altKey: true });
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it("forwards activity-control chords from an empty draft but not paste or drafts", async () => {
+    const terminalId = "t-composer-ctrlc";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    mockWriteToTerminal.mockClear();
+
+    // Empty draft: Ctrl+C interrupts the running activity (SIGINT), Ctrl+D sends EOF.
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x03");
+    fireEvent.keyDown(textarea, { key: "d", ctrlKey: true });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x04");
+
+    // Ctrl+V must keep pasting into the draft — never forwarded.
+    mockWriteToTerminal.mockClear();
+    fireEvent.keyDown(textarea, { key: "v", ctrlKey: true });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+
+    // With text staged, Ctrl+C is the editor's copy again — not an interrupt.
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("passes empty-draft nav keys (and honors DECCKM) through while a program runs", async () => {
+    const terminalId = "t-composer-program";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    // OSC 133;C = a command started running → ↑/↓ pass through to it (menu/history).
+    emitOutput(terminalId, "\x1b]133;C\x07");
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1b[A");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\r");
+
+    const modes = mockModes as typeof mockModes & { applicationCursorKeysMode?: boolean };
+    try {
+      modes.applicationCursorKeysMode = true;
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x1bOA");
+    } finally {
+      delete modes.applicationCursorKeysMode;
+    }
+
+    // OSC 133;D = command done → back at the prompt (this is the last OSC at a
+    // PowerShell prompt, where 133;B is never sent). ↑ must now recall, not pass through.
+    emitOutput(terminalId, "\x1b]133;D;0\x07");
+    mockWriteToTerminal.mockClear();
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 });
 

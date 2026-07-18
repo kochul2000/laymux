@@ -8,12 +8,9 @@
     "terminal": {
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
       "scrollToBottom": "Scroll to bottom",
-      "inputMode": "Terminal input mode",
-      "directInput": "Direct",
-      "composerInput": "Composer",
       "composerEditor": "Terminal input draft",
-      "composerPlaceholder": "Type text to send",
-      "composerSend": "Send"
+      "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
+      "composerResize": "Resize input area (drag the top edge)"
     },
     "remoteControl": {
       "title": "Remote control active",
@@ -256,6 +253,10 @@
     },
     "terminal": {
       "title": "Terminal",
+      "defaultInputMode": "Default Input Mode",
+      "defaultInputModeDesc": "Input mode a new terminal starts in. Switch anytime with Ctrl+Alt+M or the pane toolbar button.",
+      "inputModeDirect": "Direct",
+      "inputModeComposer": "Composer",
       "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy to clipboard when selecting text in the terminal",
       "scrollbarStyle": "Scrollbar Style",

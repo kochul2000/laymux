@@ -8,12 +8,9 @@
     "terminal": {
       "pasteConfirm": "붙여넣을 텍스트가 {{bytes}}바이트입니다. 계속하시겠습니까?",
       "scrollToBottom": "맨 아래로 이동",
-      "inputMode": "터미널 입력 방식",
-      "directInput": "직접 입력",
-      "composerInput": "입력칸",
       "composerEditor": "터미널 입력 초안",
-      "composerPlaceholder": "전송할 내용을 입력하세요",
-      "composerSend": "전송"
+      "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
+      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)"
     },
     "remoteControl": {
       "title": "원격 제어 중",
@@ -256,6 +253,10 @@
     },
     "terminal": {
       "title": "터미널",
+      "defaultInputMode": "기본 입력 방식",
+      "defaultInputModeDesc": "새 터미널이 시작할 때의 입력 방식. Ctrl+Alt+M 또는 pane 툴바 버튼으로 언제든 전환.",
+      "inputModeDirect": "직접",
+      "inputModeComposer": "입력칸",
       "copyOnSelect": "선택 시 복사",
       "copyOnSelectDesc": "터미널에서 텍스트 선택 시 자동으로 클립보드에 복사",
       "scrollbarStyle": "스크롤바 방식",

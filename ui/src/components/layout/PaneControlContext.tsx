@@ -1,6 +1,16 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { ControlBarMode } from "./PaneControlBar";
 
+/**
+ * 터미널 입력 방식(direct/composer) 툴바 토글 상태. TerminalView 가 자신의 런타임
+ * 모드와 토글 핸들러를 주입하면 PaneControlBar 가 단일 버튼으로 렌더한다(좁은 pane 은
+ * ⋯ 메뉴로 자동 미러). 하단 컴포저 바에는 더 이상 모드 토글을 두지 않는다.
+ */
+export interface PaneInputModeToggle {
+  mode: "direct" | "composer";
+  onToggle: () => void;
+}
+
 export interface PaneControlContextValue {
   /** BarContent 렌더 결과 (split, delete, view selector 등) */
   paneControls: ReactNode;
@@ -33,6 +43,12 @@ export interface PaneControlContextValue {
   leftBarContent: ReactNode;
   /** 좌측 슬롯 콘텐츠 설정/해제. `null` 이면 기본 스페이서로 복귀. */
   setLeftBarContent: (node: ReactNode) => void;
+  /**
+   * 터미널 입력 방식 툴바 토글. TerminalView 가 주입하며 없으면 버튼을 렌더하지 않는다.
+   */
+  inputModeToggle: PaneInputModeToggle | null;
+  /** 입력 방식 토글 설정/해제. `null` 이면 버튼 제거. */
+  setInputModeToggle: (toggle: PaneInputModeToggle | null) => void;
   /**
    * 화면 읽기 순서 기반 pane 번호(issue #256). 컨트롤바 좌측에 배지로 표시한다.
    * 배열 인덱스(`paneIndex`)가 아니라 공간 위치 번호(`paneNumber`)이며, dock 등
