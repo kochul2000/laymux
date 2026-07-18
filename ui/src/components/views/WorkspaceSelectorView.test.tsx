@@ -1912,7 +1912,7 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.queryByTestId("hide-mode-toggle")).not.toBeInTheDocument();
     });
 
-    it("offers immediate workspace and pane hide actions in the normal list", () => {
+    it("offers immediate workspace hide actions but no per-row pane hide button", () => {
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-1"));
       expect(screen.getByTestId("workspace-hide-ws-1")).toHaveAttribute(
@@ -1926,11 +1926,10 @@ describe("WorkspaceSelectorView", () => {
         "Hide from list",
       );
 
+      // Pane hiding is controlled from each pane's control bar (ADR-0035),
+      // not from the selector rows.
       fireEvent.mouseEnter(screen.getByTestId("pane-row-pane-a"));
-      expect(screen.getByTestId("pane-hide-pane-a")).toHaveAttribute(
-        "aria-label",
-        "Hide from list",
-      );
+      expect(screen.queryByTestId("pane-hide-pane-a")).not.toBeInTheDocument();
     });
 
     it("renders only visible workspace and pane rows after hiding", () => {
@@ -1944,7 +1943,7 @@ describe("WorkspaceSelectorView", () => {
       expect(screen.getByTestId("pane-row-pane-b")).toBeInTheDocument();
     });
 
-    it("shows a valid hidden count chip with disclosure semantics and ignores stale IDs", () => {
+    it("counts only valid hidden workspaces in the chip and ignores panes and stale IDs", () => {
       useUiStore.setState({
         hiddenWorkspaceIds: new Set(["ws-2", "ws-stale"]),
         hiddenPaneIds: new Set(["pane-a", "pane-stale"]),
@@ -1952,12 +1951,18 @@ describe("WorkspaceSelectorView", () => {
       render(<WorkspaceSelectorView />);
 
       const chip = screen.getByTestId("hidden-items-chip");
-      expect(chip).toHaveTextContent("Hidden 2");
+      expect(chip).toHaveTextContent("Hidden 1");
       expect(chip).toHaveAttribute("aria-expanded", "false");
       expect(chip).toHaveAttribute("aria-controls", "hidden-items-shelf");
     });
 
-    it("groups hidden workspaces and panes without duplicating a child pane", () => {
+    it("hides the chip when only panes are hidden", () => {
+      useUiStore.getState().setPaneHidden("pane-a", true);
+      render(<WorkspaceSelectorView />);
+      expect(screen.queryByTestId("hidden-items-chip")).not.toBeInTheDocument();
+    });
+
+    it("lists hidden workspaces only — never hidden panes", () => {
       useUiStore.getState().setWorkspaceHidden("ws-2", true);
       useUiStore.getState().setPaneHidden("p2", true);
       useUiStore.getState().setPaneHidden("pane-a", true);
@@ -1965,12 +1970,26 @@ describe("WorkspaceSelectorView", () => {
       render(<WorkspaceSelectorView />);
 
       expect(screen.getByTestId("hidden-items-shelf")).toBeInTheDocument();
-      expect(screen.getByTestId("hidden-workspace-ws-2")).toHaveTextContent(
-        "1 individually hidden pane",
+      expect(screen.getByTestId("hidden-workspace-ws-2")).toBeInTheDocument();
+      expect(screen.getByTestId("hidden-workspace-ws-2")).not.toHaveTextContent(
+        "individually hidden",
       );
       expect(screen.queryByTestId("hidden-pane-p2")).not.toBeInTheDocument();
-      expect(screen.getByTestId("hidden-pane-pane-a")).toHaveTextContent("Project A");
-      expect(screen.getByTestId("hidden-items-chip")).toHaveTextContent("Hidden 3");
+      expect(screen.queryByTestId("hidden-pane-pane-a")).not.toBeInTheDocument();
+      expect(screen.getByTestId("hidden-items-chip")).toHaveTextContent("Hidden 1");
+    });
+
+    it("opens the shelf directly under the header chip, above the workspace list", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
+
+      const chip = screen.getByTestId("hidden-items-chip");
+      const shelf = screen.getByTestId("hidden-items-shelf");
+      const list = screen.getByTestId("workspace-list");
+      // chip < shelf < workspace list in document order.
+      expect(chip.compareDocumentPosition(shelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(shelf.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("restores a workspace without changing the active workspace via the eye button", () => {
@@ -1995,7 +2014,6 @@ describe("WorkspaceSelectorView", () => {
 
     it("provides distinct tooltips for primary and show-only restore actions", () => {
       useUiStore.getState().setWorkspaceHidden("ws-2", true);
-      useUiStore.getState().setPaneHidden("pane-a", true);
       useUiStore.getState().setHiddenShelfOpen(true);
       render(<WorkspaceSelectorView />);
 
@@ -2007,35 +2025,13 @@ describe("WorkspaceSelectorView", () => {
         "title",
         "Show only",
       );
-      expect(screen.getByTestId("hidden-pane-primary-pane-a")).toHaveAttribute(
-        "title",
-        "Show again and focus",
-      );
-      expect(screen.getByTestId("hidden-pane-show-only-pane-a")).toHaveAttribute(
-        "title",
-        "Show only",
-      );
     });
 
-    it("distinguishes show-only from show-and-focus for panes", () => {
+    it("does not open the shelf for hidden panes alone", () => {
       useUiStore.getState().setPaneHidden("p2", true);
       useUiStore.getState().setHiddenShelfOpen(true);
-      const { rerender } = render(<WorkspaceSelectorView />);
-
-      fireEvent.click(screen.getByTestId("hidden-pane-show-only-p2"));
-      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-1");
-      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
-
-      act(() => {
-        useUiStore.getState().setPaneHidden("p2", true);
-        useUiStore.getState().setHiddenShelfOpen(true);
-        useDockStore.getState().setFocusedDock("left");
-      });
-      rerender(<WorkspaceSelectorView />);
-      fireEvent.click(screen.getByTestId("hidden-pane-primary-p2"));
-      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
-      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
-      expect(useDockStore.getState().focusedDock).toBeNull();
+      render(<WorkspaceSelectorView />);
+      expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
     });
 
     it("moves to the next visible workspace before hiding the active one", () => {
@@ -2059,27 +2055,28 @@ describe("WorkspaceSelectorView", () => {
       expect(button).toHaveAttribute("title", "The last workspace cannot be hidden");
     });
 
-    it("shows an undo snackbar and restores with an idempotent set action", () => {
+    it("shows an undo snackbar for workspace hide and restores with a set action", () => {
       render(<WorkspaceSelectorView />);
-      fireEvent.mouseEnter(screen.getByTestId("pane-row-pane-a"));
-      fireEvent.click(screen.getByTestId("pane-hide-pane-a"));
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-2"));
+      fireEvent.click(screen.getByTestId("workspace-hide-ws-2"));
 
       expect(screen.getByRole("status")).toHaveTextContent("hidden from the list");
-      useUiStore.getState().setPaneHidden("pane-a", true);
       fireEvent.click(screen.getByTestId("undo-snackbar-action"));
-      expect(useUiStore.getState().hiddenPaneIds.has("pane-a")).toBe(false);
+      expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(false);
     });
 
-    it("restore all atomically clears state and closes the shelf", () => {
+    it("restore all clears hidden workspaces and their evictions, leaving hidden panes alone", () => {
       useUiStore.getState().setWorkspaceHidden("ws-2", true);
       useUiStore.getState().setPaneHidden("pane-a", true);
-      useUiStore.getState().setEvictedPaneIds(new Set(["pane-a"]));
+      useUiStore.getState().setEvictedPaneIds(new Set(["p2"]));
       useUiStore.getState().setHiddenShelfOpen(true);
       render(<WorkspaceSelectorView />);
 
       fireEvent.click(screen.getByTestId("hidden-items-restore-all"));
       expect(useUiStore.getState().hiddenWorkspaceIds.size).toBe(0);
-      expect(useUiStore.getState().hiddenPaneIds.size).toBe(0);
+      // Individually-hidden panes stay hidden — they are controlled per pane.
+      expect(useUiStore.getState().hiddenPaneIds.has("pane-a")).toBe(true);
+      // ws-2's evicted pane is cleared by the workspace restore.
       expect(useUiStore.getState().evictedPaneIds.size).toBe(0);
       expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
     });

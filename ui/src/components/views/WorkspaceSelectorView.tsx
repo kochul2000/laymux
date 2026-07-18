@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
-import { useDockStore } from "@/stores/dock-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { sortWorkspaces } from "@/lib/workspace-sort";
@@ -133,9 +132,7 @@ interface DragContext {
   onDragEnd: () => void;
 }
 
-type HiddenUndoItem =
-  | { kind: "workspace"; id: string; name: string; paneIds: string[]; nonce: number }
-  | { kind: "pane"; id: string; name: string; nonce: number };
+type HiddenUndoItem = { id: string; name: string; paneIds: string[]; nonce: number };
 
 /** Eye icon (visible state) — 11x11 */
 function EyeIcon({ size = 11 }: { size?: number }) {
@@ -172,7 +169,6 @@ function WorkspaceItem({
   onClose,
   onDuplicate,
   onRename,
-  onHidePane,
   onHideWorkspace,
 }: {
   ws: { id: string; name: string };
@@ -195,7 +191,6 @@ function WorkspaceItem({
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
-  onHidePane: (paneId: string) => void;
   onHideWorkspace: () => void;
 }) {
   const { t } = useTranslation("workspace");
@@ -614,19 +609,6 @@ function WorkspaceItem({
                             />
                           )}
                         </div>
-                        <button
-                          type="button"
-                          data-testid={`pane-hide-${pane.id}`}
-                          className="hidden-item-action-btn pane-quick-hide hover-bg cursor-pointer"
-                          aria-label={t("hiddenItems.hideFromList")}
-                          title={t("hiddenItems.hidePaneDescription")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onHidePane(pane.id);
-                          }}
-                        >
-                          <EyeIcon size={12} />
-                        </button>
                       </div>
                     );
                   }
@@ -671,19 +653,6 @@ function WorkspaceItem({
                           </span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        data-testid={`pane-hide-${pane.id}`}
-                        className="hidden-item-action-btn pane-quick-hide hover-bg cursor-pointer"
-                        aria-label={t("hiddenItems.hideFromList")}
-                        title={t("hiddenItems.hidePaneDescription")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onHidePane(pane.id);
-                        }}
-                      >
-                        <EyeIcon size={12} />
-                      </button>
                     </div>
                   );
                 });
@@ -1036,9 +1005,7 @@ export function WorkspaceSelectorView() {
   const hiddenWorkspaceIds = useUiStore((s) => s.hiddenWorkspaceIds);
   const hiddenShelfOpen = useUiStore((s) => s.hiddenShelfOpen);
   const setHiddenShelfOpen = useUiStore((s) => s.setHiddenShelfOpen);
-  const setPaneHidden = useUiStore((s) => s.setPaneHidden);
   const setWorkspaceHidden = useUiStore((s) => s.setWorkspaceHidden);
-  const restoreAllHidden = useUiStore((s) => s.restoreAllHidden);
 
   const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
@@ -1075,20 +1042,6 @@ export function WorkspaceSelectorView() {
         !hiddenItems.validHiddenWorkspaceIds.has(workspace.id),
     );
   }, [activeWorkspaceId, hiddenItems, sortedWorkspaces]);
-  const paneDetailsById = useMemo(() => {
-    const details = new Map<string, { label?: string; cwd?: string }>();
-    for (const workspace of workspaces) {
-      for (const pane of workspace.panes) {
-        const instance = terminalInstances.find((item) => item.id === `terminal-${pane.id}`);
-        details.set(pane.id, {
-          label: instance?.label ?? (pane.view.profile as string | undefined),
-          cwd: instance?.cwd ?? (pane.view.lastCwd as string | undefined),
-        });
-      }
-    }
-    return details;
-  }, [terminalInstances, workspaces]);
-
   // Drag and drop handlers (ID-based to avoid index mismatch with sorted lists)
   const dragIdRef = useRef<string | null>(null);
   const dropPositionRef = useRef<"top" | "bottom">("top");
@@ -1223,29 +1176,11 @@ export function WorkspaceSelectorView() {
     if (result.blocked) return;
     undoNonceRef.current += 1;
     setUndoItem({
-      kind: "workspace",
       id: workspace.id,
       name: workspace.name,
       paneIds: workspace.panes.map((pane) => pane.id),
       nonce: undoNonceRef.current,
     });
-  };
-
-  const handleHidePane = (paneId: string) => {
-    for (const workspace of workspaces) {
-      const pane = workspace.panes.find((candidate) => candidate.id === paneId);
-      if (!pane) continue;
-      const paneNumber = computePaneNumbers(workspace.panes).get(pane.id) ?? 1;
-      setPaneHidden(pane.id, true);
-      undoNonceRef.current += 1;
-      setUndoItem({
-        kind: "pane",
-        id: pane.id,
-        name: `${workspace.name} · #${paneNumber}`,
-        nonce: undoNonceRef.current,
-      });
-      return;
-    }
   };
 
   const handleCloseHiddenShelf = () => {
@@ -1289,7 +1224,7 @@ export function WorkspaceSelectorView() {
       >
         <SectionLabel>{t("workspaces")}</SectionLabel>
         <span className="flex items-center gap-1">
-          {hiddenItems.count > 0 && (
+          {hiddenItems.hiddenWorkspaces.length > 0 && (
             <button
               ref={hiddenChipRef}
               type="button"
@@ -1304,7 +1239,7 @@ export function WorkspaceSelectorView() {
                 border: "1px solid transparent",
               }}
             >
-              {t("hiddenItems.chip", { count: hiddenItems.count })}
+              {t("hiddenItems.chip", { count: hiddenItems.hiddenWorkspaces.length })}
             </button>
           )}
           <button
@@ -1345,6 +1280,36 @@ export function WorkspaceSelectorView() {
           </button>
         </span>
       </div>
+
+      {/* Hidden-workspace restore shelf — opens directly under the chip that
+          toggles it (top of the list), not at the bottom of the selector. */}
+      {hiddenShelfOpen && hiddenItems.hiddenWorkspaces.length > 0 && (
+        <HiddenItemsShelf
+          items={hiddenItems}
+          onClose={handleCloseHiddenShelf}
+          onFocusAfterEmpty={() => sortOrderToggleRef.current?.focus()}
+          onRestoreAll={() => {
+            // Workspace-only shelf: restore every hidden workspace, leave
+            // individually-hidden panes to their per-pane toggles.
+            for (const item of hiddenItems.hiddenWorkspaces) {
+              setWorkspaceHidden(
+                item.workspace.id,
+                false,
+                item.workspace.panes.map((pane) => pane.id),
+              );
+            }
+            setUndoItem(null);
+          }}
+          onRestoreWorkspace={(item, open) => {
+            setWorkspaceHidden(
+              item.workspace.id,
+              false,
+              item.workspace.panes.map((pane) => pane.id),
+            );
+            if (open) handleSelectWorkspace(item.workspace.id);
+          }}
+        />
+      )}
 
       {/* Workspace list */}
       <div
@@ -1443,7 +1408,6 @@ export function WorkspaceSelectorView() {
                 // prompt does not work on Windows/WebView2.
                 useRenameWorkspaceStore.getState().openRename(ws.id, ws.name);
               }}
-              onHidePane={handleHidePane}
               onHideWorkspace={() => handleHideWorkspace(ws.id)}
             />
           );
@@ -1483,35 +1447,6 @@ export function WorkspaceSelectorView() {
         )}
       </div>
 
-      {hiddenShelfOpen && hiddenItems.count > 0 && (
-        <HiddenItemsShelf
-          items={hiddenItems}
-          paneDetailsById={paneDetailsById}
-          onClose={handleCloseHiddenShelf}
-          onFocusAfterEmpty={() => sortOrderToggleRef.current?.focus()}
-          onRestoreAll={() => {
-            restoreAllHidden();
-            setUndoItem(null);
-          }}
-          onRestoreWorkspace={(item, open) => {
-            setWorkspaceHidden(
-              item.workspace.id,
-              false,
-              item.workspace.panes.map((pane) => pane.id),
-            );
-            if (open) handleSelectWorkspace(item.workspace.id);
-          }}
-          onRestorePane={(item, focus) => {
-            setPaneHidden(item.pane.id, false);
-            if (focus) {
-              handleSelectWorkspace(item.workspace.id);
-              useGridStore.getState().setFocusedPane(item.paneIndex);
-              useDockStore.getState().setFocusedDock(null);
-            }
-          }}
-        />
-      )}
-
       {/* #6: Notifications section header — matches Workspaces section style */}
       <div
         data-testid="toggle-notification-panel"
@@ -1540,11 +1475,7 @@ export function WorkspaceSelectorView() {
           actionLabel={t("hiddenItems.undo")}
           onDismiss={dismissUndo}
           onAction={() => {
-            if (undoItem.kind === "workspace") {
-              setWorkspaceHidden(undoItem.id, false, undoItem.paneIds);
-            } else {
-              setPaneHidden(undoItem.id, false);
-            }
+            setWorkspaceHidden(undoItem.id, false, undoItem.paneIds);
             setUndoItem(null);
           }}
         />

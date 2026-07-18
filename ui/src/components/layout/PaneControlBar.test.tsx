@@ -20,6 +20,7 @@ import { PaneControlBar } from "./PaneControlBar";
 import { PaneControlContext } from "./PaneControlContext";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { useUiStore } from "@/stores/ui-store";
 
 describe("PaneControlBar", () => {
   const defaultView = { type: "TerminalView" as const, profile: "PowerShell" };
@@ -1049,5 +1050,54 @@ describe("PaneControlBar", () => {
       </PaneControlBar>,
     );
     expect(screen.queryByTestId("pane-control-bar-left-solid")).not.toBeInTheDocument();
+  });
+
+  // -- workspace-list hide toggle (ADR-0035) --
+  // pane 숨김은 보관함이 아니라 각 pane 컨트롤바의 이 토글로만 제어한다.
+  describe("workspace-list hide toggle (ADR-0035)", () => {
+    beforeEach(() => {
+      useUiStore.setState(useUiStore.getInitialState());
+    });
+
+    it("toggles the pane's hidden raw state and reflects it on the button", async () => {
+      const user = userEvent.setup();
+      render(
+        <PaneControlBar
+          paneId="pane-x"
+          currentView={terminalView}
+          actions={defaultActions}
+          hovered={true}
+          showListHideToggle
+        >
+          <div>content</div>
+        </PaneControlBar>,
+      );
+      const button = screen.getByTestId("pane-control-hide");
+      expect(button).toHaveAttribute("title", "Hide from workspace list");
+
+      await user.click(button);
+      expect(useUiStore.getState().hiddenPaneIds.has("pane-x")).toBe(true);
+      expect(screen.getByTestId("pane-control-hide")).toHaveAttribute(
+        "title",
+        "Show in workspace list",
+      );
+
+      await user.click(screen.getByTestId("pane-control-hide"));
+      expect(useUiStore.getState().hiddenPaneIds.has("pane-x")).toBe(false);
+    });
+
+    it("does not render the toggle when showListHideToggle is off (e.g. dock panes)", () => {
+      render(
+        <PaneControlBar
+          paneId="pane-x"
+          currentView={terminalView}
+          actions={defaultActions}
+          hovered={true}
+        >
+          <div>content</div>
+        </PaneControlBar>,
+      );
+      expect(screen.queryByTestId("pane-control-hide")).not.toBeInTheDocument();
+    });
   });
 });

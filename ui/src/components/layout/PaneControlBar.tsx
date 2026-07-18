@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { useUiStore } from "@/stores/ui-store";
 import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext, type PaneInputModeToggle } from "./PaneControlContext";
 import { useContainerSize } from "@/hooks/useContainerSize";
@@ -67,6 +68,12 @@ interface PaneControlBarProps {
   onPaneDragStart?: (e: React.DragEvent) => void;
   /** 드래그 종료 핸들러. */
   onPaneDragEnd?: () => void;
+  /**
+   * workspace selector 목록 숨김 토글 노출 여부 (ADR-0035). pane 숨김은 보관함이
+   * 아니라 각 pane 의 이 토글로만 제어한다. dock pane 은 selector 에 나오지 않으므로
+   * PaneGrid 가 location === "workspace" 일 때만 켠다.
+   */
+  showListHideToggle?: boolean;
   children: React.ReactNode;
 }
 
@@ -281,6 +288,8 @@ function BarContent({
   cwdSendOn,
   cwdReceiveOn,
   inputModeToggle,
+  paneHidden,
+  onToggleHidden,
   expanded = true,
   wrapped = false,
   vertical = false,
@@ -294,6 +303,10 @@ function BarContent({
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
   inputModeToggle?: PaneInputModeToggle | null;
+  /** workspace selector 목록 숨김 여부(토글 표시 상태). */
+  paneHidden?: boolean;
+  /** 있으면 목록 숨김 토글 버튼을 렌더한다 (ADR-0035). */
+  onToggleHidden?: () => void;
   expanded?: boolean;
   wrapped?: boolean;
   vertical?: boolean;
@@ -458,6 +471,42 @@ function BarContent({
               </svg>
             </BarBtn>
           )}
+          {onToggleHidden && (
+            <BarBtn
+              testId="pane-control-hide"
+              onClick={onToggleHidden}
+              title={paneHidden ? "Show in workspace list" : "Hide from workspace list"}
+              active={paneHidden}
+            >
+              {paneHidden ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="7" cy="7" r="1.7" stroke="currentColor" strokeWidth="1.2" />
+                  <path
+                    d="M2.5 11.5l9-9"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="7" cy="7" r="1.7" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              )}
+            </BarBtn>
+          )}
           {actions.onClear && (
             <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -556,6 +605,8 @@ function NarrowControlMenu({
   cwdSendOn,
   cwdReceiveOn,
   inputModeToggle,
+  paneHidden,
+  onToggleHidden,
   position,
   onRequestClose,
   triggerRef,
@@ -567,6 +618,8 @@ function NarrowControlMenu({
   cwdSendOn?: boolean;
   cwdReceiveOn?: boolean;
   inputModeToggle?: PaneInputModeToggle | null;
+  paneHidden?: boolean;
+  onToggleHidden?: () => void;
   position: { top: number; right: number };
   onRequestClose: () => void;
   /** ⋯ 트리거 버튼. 트리거 클릭은 외부 클릭으로 보지 않는다(아래 toggle 이 닫기를 처리). */
@@ -619,6 +672,8 @@ function NarrowControlMenu({
         cwdSendOn={cwdSendOn}
         cwdReceiveOn={cwdReceiveOn}
         inputModeToggle={inputModeToggle}
+        paneHidden={paneHidden}
+        onToggleHidden={onToggleHidden}
         vertical
         showMinimize={false}
       />
@@ -765,9 +820,21 @@ export function PaneControlBar({
   dndEnabled,
   onPaneDragStart,
   onPaneDragEnd,
+  showListHideToggle,
   children,
 }: PaneControlBarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  // workspace selector 목록 숨김 상태(raw)를 구독해 토글 버튼 상태로 쓴다 (ADR-0035).
+  const paneHidden = useUiStore((s) =>
+    showListHideToggle && paneId ? s.hiddenPaneIds.has(paneId) : false,
+  );
+  const onToggleHidden = useMemo(
+    () =>
+      showListHideToggle && paneId
+        ? () => useUiStore.getState().togglePaneHidden(paneId)
+        : undefined,
+    [showListHideToggle, paneId],
+  );
   const { w: paneWidth } = useContainerSize(rootRef);
   const persistedMode = useOverridesStore((s) =>
     paneId ? s.paneOverrides[paneId]?.controlBarMode : undefined,
@@ -893,6 +960,8 @@ export function PaneControlBar({
           cwdSendOn={cwdSendOn}
           cwdReceiveOn={cwdReceiveOn}
           inputModeToggle={inputModeToggle}
+          paneHidden={paneHidden}
+          onToggleHidden={onToggleHidden}
         />
       ),
     [
@@ -906,6 +975,8 @@ export function PaneControlBar({
       cwdSendOn,
       cwdReceiveOn,
       inputModeToggle,
+      paneHidden,
+      onToggleHidden,
     ],
   );
 
@@ -1008,6 +1079,8 @@ export function PaneControlBar({
                 cwdSendOn={cwdSendOn}
                 cwdReceiveOn={cwdReceiveOn}
                 inputModeToggle={inputModeToggle}
+                paneHidden={paneHidden}
+                onToggleHidden={onToggleHidden}
               />
             )}
           </div>
@@ -1062,6 +1135,8 @@ export function PaneControlBar({
                   cwdSendOn={cwdSendOn}
                   cwdReceiveOn={cwdReceiveOn}
                   inputModeToggle={inputModeToggle}
+                  paneHidden={paneHidden}
+                  onToggleHidden={onToggleHidden}
                 />
               )}
             </div>
@@ -1094,6 +1169,8 @@ export function PaneControlBar({
             cwdSendOn={cwdSendOn}
             cwdReceiveOn={cwdReceiveOn}
             inputModeToggle={inputModeToggle}
+            paneHidden={paneHidden}
+            onToggleHidden={onToggleHidden}
             position={menuPosition}
             onRequestClose={closeNarrowMenu}
             triggerRef={menuBtnRef}

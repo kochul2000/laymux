@@ -483,29 +483,20 @@
       "notificationTitle": "Sort: Notification (most recent first)"
     },
     "hiddenItems": {
-      "title": "Hidden items",
-      "titleCount": "Hidden items {{count}}",
+      "title": "Hidden workspaces",
+      "titleCount": "Hidden workspaces {{count}}",
       "chip": "Hidden {{count}}",
       "hideFromList": "Hide from list",
-      "hidePaneDescription": "Hide this pane summary from the workspace list",
-      "showAgain": "Show again",
       "showOnly": "Show only",
       "showAndOpen": "Show again and open",
-      "showAndFocus": "Show again and focus",
       "restoreAll": "Show all",
       "undo": "Undo",
-      "close": "Close hidden items",
-      "workspaces": "Workspaces",
-      "panes": "Panes",
-      "nestedPaneCount_one": "{{count}} individually hidden pane",
-      "nestedPaneCount_other": "{{count}} individually hidden panes",
+      "close": "Close hidden workspaces",
       "hiddenMessage": "{{name}} was hidden from the list",
       "lastWorkspace": "The last workspace cannot be hidden",
       "hideAndMove": "Hide and move to the next workspace",
       "showAndOpenLabel": "Show {{name}} again and open it",
-      "showOnlyWorkspaceLabel": "Show {{name}} again without opening it",
-      "showAndFocusLabel": "Show {{workspace}} pane {{pane}} again and focus it",
-      "showOnlyPaneLabel": "Show {{workspace}} pane {{pane}} again without focusing it"
+      "showOnlyWorkspaceLabel": "Show {{name}} again without opening it"
     },
     "layout": {
       "options": "Layout options",
