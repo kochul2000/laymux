@@ -1262,6 +1262,7 @@
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
+                enterkeyhint="send"
                 placeholder="Type, then Enter to send · Shift+Enter for a newline"
               ></textarea>
             </section>
@@ -4040,14 +4041,36 @@
         composerInput.addEventListener("compositionend", () => {
           composerIsComposing = false;
         });
-        composerInput.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter") return;
-          if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
-          // Enter sends on every pointer type (mirrors desktop). There is no Send
-          // button anymore; Shift+Enter inserts a newline.
-          if (event.shiftKey) return;
+        // Enter sends. Mobile soft keyboards (Android GBoard, etc.) fire an
+        // unreliable Enter keydown — keyCode 229 or key "Unidentified" — so the
+        // send decision cannot rely on keydown alone. Two paths cover every
+        // keyboard:
+        //   1. keydown, when it reports a trustworthy Enter (desktop / hardware
+        //      keyboards): send immediately and preventDefault, which also
+        //      suppresses the follow-up beforeinput.
+        //   2. beforeinput "insertLineBreak": the reliable mobile path. Fires
+        //      after IME commit with a clean isComposing, so the soft return
+        //      key sends even when the keydown was masked by keyCode 229.
+        // Shift+Enter always stays a native newline; IME candidate confirmation
+        // (isComposing) never submits.
+        let composerShiftEnter = false;
+        function submitComposerFromEnter(event) {
+          if (event.isComposing || composerIsComposing) return;
+          if (composerShiftEnter) return;
           event.preventDefault();
           commitComposer();
+        }
+        composerInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          composerShiftEnter = event.shiftKey === true;
+          // keyCode 229 marks an IME-masked Enter on mobile — defer to
+          // beforeinput rather than trusting this keydown.
+          if (event.keyCode === 229) return;
+          submitComposerFromEnter(event);
+        });
+        composerInput.addEventListener("beforeinput", (event) => {
+          if (event.inputType !== "insertLineBreak" && event.inputType !== "insertParagraph") return;
+          submitComposerFromEnter(event);
         });
         keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
         keyBarSettingsButton.addEventListener("click", (event) => {

@@ -254,7 +254,8 @@ mod tests {
         assert!(html.contains("id=\"terminalComposer\""));
         assert!(html.contains("id=\"composerInput\""));
         assert!(!html.contains("id=\"composerInsert\""));
-        assert!(html.contains("id=\"composerSend\""));
+        // No standalone Send button — Enter is the only send gesture.
+        assert!(!html.contains("id=\"composerSend\""));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
 
@@ -275,14 +276,18 @@ mod tests {
         assert!(html.contains("draft.revision === submission.revision"));
         assert!(html.contains("draft.text === submission.text"));
 
-        // IME confirmation Enter never submits. Fine-pointer clients send on
-        // ordinary Enter, while Shift+Enter and coarse-pointer Enter remain
-        // native textarea newlines.
+        // Enter sends via two paths so mobile soft keyboards (keyCode 229 /
+        // "Unidentified" Enter) still submit: a trustworthy keydown Enter, or
+        // the beforeinput line-break that fires cleanly after IME commit.
+        // Shift+Enter stays a native newline; IME confirmation never submits.
         assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
         assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
-        assert!(html.contains("event.isComposing || composerIsComposing || event.keyCode === 229"));
+        assert!(html.contains("composerInput.addEventListener(\"beforeinput\""));
+        assert!(html.contains("event.inputType !== \"insertLineBreak\""));
+        assert!(html.contains("if (event.isComposing || composerIsComposing) return;"));
+        assert!(html.contains("composerShiftEnter = event.shiftKey === true"));
+        assert!(html.contains("if (event.keyCode === 229) return;"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\").matches"));
-        assert!(html.contains("if (event.shiftKey) return;"));
 
         // Composer actions stay closed until a valid V1 snapshot header/state +
         // binary frame pair has established the active output attachment.
