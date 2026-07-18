@@ -53,6 +53,7 @@ ADR 이 필요한 대표 기준:
 | [0033](0033-hidden-items-shelf-set-contract.md) | 숨긴 항목 보관함 — raw 숨김 상태와 결정론적 set 계약 | Accepted |
 | [0034](0034-single-send-terminal-composer.md) | Terminal composer는 Send 단일 action을 제공한다 | Accepted |
 | [0035](0035-workspace-only-shelf-per-pane-hide-toggle.md) | 숨김 보관함은 workspace 전용 상단 배치, Pane 숨김은 pane 자체 토글 (0033 정정) | Accepted |
+| [0036](0036-remote-composer-layout-rule.md) | Remote composer 전송 gesture는 pointer가 아니라 layout을 따른다 (0034 보완) | Accepted |
 
 ## 새 ADR 추가
 

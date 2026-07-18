@@ -1463,16 +1463,16 @@
         document.querySelector(".app").classList.toggle("local-app", localAppMode);
         desktopModeHeaderButton.hidden = !localAppMode;
         desktopModeDrawerButton.hidden = !localAppMode;
-        // Layout naming (canonical):
+        // Layout naming (canonical, ADR-0036):
         //   desktop layout — Enter sends, Shift+Enter newline, no Send button.
         //   mobile layout  — Enter is a newline, the Send button sends.
         // Rule: mobile layout when the pointer is coarse (touch device) OR when
         // the page is the PC app's embedded mobile view (localApp=1) — if it
-        // looks like mobile, it behaves like mobile. Ctrl/Cmd+Enter sends in
-        // BOTH layouts. A default; a settings override can come later.
+        // looks like mobile, it behaves like mobile. A default; a settings
+        // override can come later.
         const mobileLayout = coarsePointer || localAppMode;
         composerInput.placeholder = mobileLayout
-          ? "Enter for a newline · Send (or Ctrl+Enter) to submit"
+          ? "Enter for a newline · tap Send to submit"
           : "Enter to send · Shift+Enter for a newline";
 
         const defaultAppearance = Object.freeze({
@@ -4083,21 +4083,16 @@
         composerInput.addEventListener("compositionend", () => {
           composerIsComposing = false;
         });
-        // Enter behavior follows the layout (see `mobileLayout`):
+        // Enter behavior follows the layout (ADR-0036):
         //   - mobile layout: Enter inserts a newline. Sending is the dedicated
-        //     Send button, so the unreliable soft-keyboard Enter (keyCode 229,
-        //     IME/isComposing races) is never on the send path.
+        //     Send button only, so the unreliable soft-keyboard Enter (keyCode
+        //     229, IME/isComposing races) is never on the send path. No
+        //     hardcoded keyboard send gesture — shortcuts outside the
+        //     keybinding system are forbidden (api-contracts §15.5).
         //   - desktop layout: Enter sends, Shift+Enter is a newline. IME
         //     candidate confirmation (isComposing / keyCode 229) never submits.
-        //   - Ctrl/Cmd+Enter sends in BOTH layouts — the keyboard send gesture
-        //     for the PC app's mobile view, immune to IME masking.
         composerInput.addEventListener("keydown", (event) => {
           if (event.key !== "Enter" || event.shiftKey) return;
-          if (event.ctrlKey || event.metaKey) {
-            event.preventDefault();
-            commitComposer();
-            return;
-          }
           if (mobileLayout) return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
           event.preventDefault();
