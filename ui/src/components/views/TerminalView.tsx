@@ -124,7 +124,12 @@ import {
   type ComposerDraftState,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
-import { encodeTerminalKey, isPassthroughNavKey } from "@/lib/terminal-key-encoding";
+import {
+  encodeTerminalKey,
+  isPassthroughControlChord,
+  isPassthroughNavKey,
+} from "@/lib/terminal-key-encoding";
+import { matchesGlobalShortcut } from "@/hooks/useKeyboardShortcuts";
 import {
   normalizeTerminalOutputAttachment,
   normalizeTerminalOutputDelta,
@@ -629,14 +634,19 @@ export function TerminalView({
    */
   const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
     if (!localTerminalControlAllowed()) return false;
-    // Alt/Ctrl/Meta combos belong to app keybindings (pane focus = Alt+Arrow,
-    // Ctrl+Alt+…). Never swallow them here — let them bubble to the document
-    // shortcut handler, otherwise pane navigation dies while the Composer is up.
-    if (event.altKey || event.ctrlKey || event.metaKey) return false;
+    // laymux controls consume first (rebind-aware): any combo bound to a
+    // document-level action (pane focus = Alt+Arrow by default, workspace nav =
+    // Ctrl+Alt+…, or whatever the user rebound them to) is never forwarded — it
+    // bubbles to the document shortcut handler. No hardcoded modifier rules.
+    if (matchesGlobalShortcut(event)) return false;
     const term = terminalRef.current;
     if (!term) return false;
     const altScreen = term.buffer?.active?.type === "alternate";
-    if (!altScreen && !(ctx.empty && isPassthroughNavKey(event))) return false;
+    // Empty draft forwards nav keys (menus, shell history) and activity-control
+    // chords (Ctrl+C/D/Z/L) so a running command stays interruptible.
+    const emptyPassthrough =
+      ctx.empty && (isPassthroughNavKey(event) || isPassthroughControlChord(event));
+    if (!altScreen && !emptyPassthrough) return false;
     const applicationCursor = Boolean(
       (term as unknown as { modes?: { applicationCursorKeysMode?: boolean } }).modes
         ?.applicationCursorKeysMode,

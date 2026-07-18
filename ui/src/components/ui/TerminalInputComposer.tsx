@@ -133,9 +133,9 @@ export function TerminalInputComposer({
       compositionActiveRef.current ||
       event.nativeEvent.isComposing ||
       event.nativeEvent.keyCode === 229;
-    // Modifier combos are app keybindings (pane focus = Alt+Arrow, …) — leave them
-    // to bubble; never treat them as history or passthrough here.
-    const plainKey = !event.altKey && !event.ctrlKey && !event.metaKey;
+    // History recall only fires on an unmodified arrow: modifier combos are app
+    // keybindings (or selection gestures) — the host's registry check routes them.
+    const plainKey = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 
     // At the shell prompt, edge ↑/↓ recall the Composer's own history into the
     // editor (editable), instead of leaking ↑ to the shell where the recalled
@@ -158,8 +158,17 @@ export function TerminalInputComposer({
       }
     }
 
-    // Let the host forward empty-draft nav keys / full-screen-app keys to the PTY.
-    if (!composing && onKeyPassthrough?.(event.nativeEvent, { empty: text.length === 0 })) {
+    // Shift+Enter is always the newline gesture (even on an empty draft, to start
+    // a multiline one) — never offer it for passthrough.
+    const newlineGesture = event.key === "Enter" && event.shiftKey;
+
+    // Let the host forward empty-draft nav/control keys / full-screen-app keys
+    // to the PTY. The host checks laymux keybindings first (rebind-aware).
+    if (
+      !composing &&
+      !newlineGesture &&
+      onKeyPassthrough?.(event.nativeEvent, { empty: text.length === 0 })
+    ) {
       event.preventDefault();
       event.stopPropagation();
       return;

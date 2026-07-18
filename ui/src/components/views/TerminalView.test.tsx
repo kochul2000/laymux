@@ -6414,7 +6414,7 @@ describe("TerminalView desktop input composer", () => {
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
-  it("never swallows Alt/Ctrl+Arrow so pane-navigation shortcuts still bubble", async () => {
+  it("lets combos bound to laymux actions bubble instead of forwarding them", async () => {
     const terminalId = "t-composer-panenav";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
     await waitForTerminalInputReady();
@@ -6423,15 +6423,44 @@ describe("TerminalView desktop input composer", () => {
     const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
     mockWriteToTerminal.mockClear();
 
-    // Empty draft, but modifier combos are app keybindings — must not be forwarded
-    // (and the composer must not stopPropagation them).
+    // Empty draft, but these combos match registry bindings (pane.focus =
+    // Alt+Arrow wildcard, workspace.prev = Ctrl+Alt+Up) — the registry check,
+    // not a hardcoded modifier rule, must keep them bubbling untouched.
     const altLeft = new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, bubbles: true });
     const stopSpy = vi.spyOn(altLeft, "stopPropagation");
     textarea.dispatchEvent(altLeft);
     fireEvent.keyDown(textarea, { key: "ArrowUp", ctrlKey: true, altKey: true });
+    // Ctrl+Alt+C = pane.copyIdentifier — bound, so it bubbles too.
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true, altKey: true });
 
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
     expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it("forwards activity-control chords from an empty draft but not paste or drafts", async () => {
+    const terminalId = "t-composer-ctrlc";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(`terminal-input-composer-${terminalId}-textarea`);
+    mockWriteToTerminal.mockClear();
+
+    // Empty draft: Ctrl+C interrupts the running activity (SIGINT), Ctrl+D sends EOF.
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x03");
+    fireEvent.keyDown(textarea, { key: "d", ctrlKey: true });
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\x04");
+
+    // Ctrl+V must keep pasting into the draft — never forwarded.
+    mockWriteToTerminal.mockClear();
+    fireEvent.keyDown(textarea, { key: "v", ctrlKey: true });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+
+    // With text staged, Ctrl+C is the editor's copy again — not an interrupt.
+    fireEvent.change(textarea, { target: { value: "draft" } });
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
   it("passes empty-draft nav keys (and honors DECCKM) through while a program runs", async () => {

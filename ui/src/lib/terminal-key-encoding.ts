@@ -50,6 +50,28 @@ export function isPassthroughNavKey(event: Pick<KeyboardEvent, "key">): boolean 
   return PASSTHROUGH_NAV_KEYS.has(event.key);
 }
 
+/**
+ * Control chords an empty Composer forwards so a running activity stays
+ * controllable: Ctrl+C (SIGINT), Ctrl+D (EOF), Ctrl+Z (SIGTSTP), Ctrl+L
+ * (repaint). Deliberately NOT every Ctrl+letter — e.g. Ctrl+V must keep
+ * pasting into the draft. Callers must check laymux keybindings first
+ * (`matchesGlobalShortcut`), so a user who rebinds one of these to a laymux
+ * action keeps the laymux behavior.
+ */
+const PASSTHROUGH_CTRL_KEYS = new Set(["c", "d", "z", "l"]);
+
+export function isPassthroughControlChord(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey">,
+): boolean {
+  return (
+    event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    PASSTHROUGH_CTRL_KEYS.has(event.key.toLowerCase())
+  );
+}
+
 /** Returns the PTY byte sequence for the event, or null when it should not be forwarded. */
 export function encodeTerminalKey(
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey">,
@@ -58,30 +80,45 @@ export function encodeTerminalKey(
   const { key } = event;
   if (MODIFIER_ONLY_KEYS.has(key)) return null;
 
-  const cursor = (normal: string, application: string) =>
-    options.applicationCursor ? application : normal;
+  // xterm modifier parameter: 1 + Shift(1) + Alt(2) + Ctrl(4) + Meta(8).
+  // Modified navigation keys always use the CSI `1;<mod>` form regardless of
+  // DECCKM (per xterm); unmodified ones honor application-cursor mode.
+  const modifierCode =
+    1 +
+    (event.shiftKey ? 1 : 0) +
+    (event.altKey ? 2 : 0) +
+    (event.ctrlKey ? 4 : 0) +
+    (event.metaKey ? 8 : 0);
+  const cursor = (letter: string, normal: string, application: string) =>
+    modifierCode > 1
+      ? `\x1b[1;${modifierCode}${letter}`
+      : options.applicationCursor
+        ? application
+        : normal;
+  const tilde = (code: number) =>
+    modifierCode > 1 ? `\x1b[${code};${modifierCode}~` : `\x1b[${code}~`;
 
   switch (key) {
     case "ArrowUp":
-      return cursor("\x1b[A", "\x1bOA");
+      return cursor("A", "\x1b[A", "\x1bOA");
     case "ArrowDown":
-      return cursor("\x1b[B", "\x1bOB");
+      return cursor("B", "\x1b[B", "\x1bOB");
     case "ArrowRight":
-      return cursor("\x1b[C", "\x1bOC");
+      return cursor("C", "\x1b[C", "\x1bOC");
     case "ArrowLeft":
-      return cursor("\x1b[D", "\x1bOD");
+      return cursor("D", "\x1b[D", "\x1bOD");
     case "Home":
-      return cursor("\x1b[H", "\x1bOH");
+      return cursor("H", "\x1b[H", "\x1bOH");
     case "End":
-      return cursor("\x1b[F", "\x1bOF");
+      return cursor("F", "\x1b[F", "\x1bOF");
     case "PageUp":
-      return "\x1b[5~";
+      return tilde(5);
     case "PageDown":
-      return "\x1b[6~";
+      return tilde(6);
     case "Insert":
-      return "\x1b[2~";
+      return tilde(2);
     case "Delete":
-      return "\x1b[3~";
+      return tilde(3);
     case "Escape":
       return "\x1b";
     case "Tab":

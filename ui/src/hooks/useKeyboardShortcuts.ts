@@ -442,6 +442,18 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
 
 const SHORTCUT_ACTION_IDS = Object.keys(SHORTCUT_HANDLERS);
 
+/**
+ * True when the event's combo is bound (default or user-rebound) to any
+ * document-level laymux action this hook dispatches (pane/workspace navigation,
+ * notifications, UI toggles). Focused surfaces that forward raw keys to a PTY
+ * (e.g. the terminal Composer) must check this FIRST and let matching events
+ * bubble — laymux controls consume before passthrough, and rebinding moves
+ * this check together with the dispatcher automatically.
+ */
+export function matchesGlobalShortcut(e: KeyboardEvent): boolean {
+  return SHORTCUT_ACTION_IDS.some((actionId) => matchesKeybinding(e, actionId));
+}
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

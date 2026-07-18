@@ -220,6 +220,26 @@ describe("TerminalInputComposer", () => {
     expect(localStorage.getItem("laymux.desktop.composerHeight")).toBe(String(before + 50));
   });
 
+  it("keeps Shift+Enter as the newline gesture even on an empty draft", () => {
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+    const onSend = vi.fn();
+    renderComposer({ text: "", onKeyPassthrough, onSend });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    const shiftEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(shiftEnter);
+
+    // Starting a multiline draft must win over forwarding \r to the terminal.
+    expect(onKeyPassthrough).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(shiftEnter.defaultPrevented).toBe(false);
+  });
+
   it("at the prompt, edge ↑/↓ recall history; while a program runs they pass through", () => {
     const onHistory = vi.fn().mockReturnValue(true);
     const onKeyPassthrough = vi.fn().mockReturnValue(true);
