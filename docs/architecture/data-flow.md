@@ -322,6 +322,10 @@ human-control permit은 등록 시점의 owner epoch·absolute deadline·operati
 ┌───────────────────────────────┐
 │  + New Workspace              │
 ├───────────────────────────────┤
+│ WORKSPACES     [Hidden 2] [≡] │  ← 섹션 헤더: 유효 hidden workspace chip + 정렬 토글
+│  (chip 클릭 시 바로 아래에    │
+│   workspace 전용 보관함 전개) │
+├───────────────────────────────┤
 │ 🔵 프로젝트A              [2] │  ← 이름 + 읽지 않은 배지 + 알림 링
 │    feature/login · ~/dev/proj │  ← 브랜치(초록) · CWD(회색) 한 줄
 │    :3000  :8080               │  ← 리스닝 포트(시안, 활성 WS만)
@@ -329,20 +333,19 @@ human-control permit은 등록 시점의 owner epoch·absolute deadline·operati
 │    "빌드 완료"                │  ← 최신 알림(레벨별 색상)
 ├───────────────────────────────┤
 │    main · ~/dev/api           │  ← 비활성: 이름+브랜치+CWD만
-├───────────────────────────────┤
-│ Hidden 2                      │  ← 유효 숨김 개수 chip
-│  (열면 workspace/pane 보관함) │
 └───────────────────────────────┘
 ```
 
 ### 숨김 상태 파생과 복원
 
 - `uiStore.hiddenWorkspaceIds`와 `hiddenPaneIds`는 localStorage에 저장하는 독립 raw state다. UI는 이 set을 직접 세어 표시하지 않고 `lib/hidden-items.ts`의 `deriveHiddenItems`가 현재 workspace 구조와 함께 계산한 visible 목록, 유효 숨김 개수, stale ID, shelf grouping을 사용한다([ADR-0005](../adr/0005-display-state-raw-separation-compute.md), [ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md)).
-- 평상시 workspace/pane 행의 quick-hide 버튼은 항상 DOM에 존재하고 hover 또는 `:focus-within`에서 시각화된다. 숨김은 즉시 반영하며 최근 action은 5초 Undo snackbar로 되돌릴 수 있다.
-- hidden workspace 아래의 hidden pane은 해당 workspace 그룹 안에서만 표시하고 top-level pane 목록에는 중복하지 않는다. workspace만 복원하면 그 아래 pane의 raw hidden flag는 유지하며, “모두 표시”만 두 set을 함께 비운다.
-- 보관함의 기본 복원은 목록만 다시 표시한다. 별도 open/focus action은 workspace를 활성화하거나 pane의 원본 index를 포커스한다. pane 번호는 화면 정렬용이고 포커스에는 원본 `paneIndex`를 사용한다.
+- **보관함(shelf)은 hidden workspace 전용이며, 그것을 여는 count chip 바로 아래(목록 위)에 인라인으로 열린다**([ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)). chip 카운트도 유효 hidden workspace 수만 세고, hidden pane 은 chip·보관함 어디에도 나타나지 않는다.
+- workspace 행의 quick-hide 버튼은 항상 DOM에 존재하고 hover 또는 `:focus-within`에서 시각화된다. 숨김은 즉시 반영하며 최근 action은 5초 Undo snackbar로 되돌릴 수 있다.
+- **Pane 숨김은 workspace grid 의 각 pane 컨트롤바 eye 토글로만 제어한다**(숨김·복원 모두). selector 의 pane 요약 행에는 숨김 버튼이 없고, 숨겨진 pane 행은 목록에서 필터된다. dock pane 은 selector 에 나오지 않으므로 토글을 노출하지 않는다.
+- 보관함의 기본 복원(행 클릭)은 workspace 를 다시 표시하고 활성화하며, eye 버튼은 표시만 한다. "모두 표시"는 hidden workspace set 만 비우고 개별 숨김 pane flag 는 유지한다.
+- workspace 를 복원해도 그 아래 pane 의 raw hidden flag 는 유지된다(복원은 pane 토글 소관).
 - active workspace를 숨길 때는 현재 정렬 순서에서 다음 visible workspace를 먼저 활성화한다. 마지막 visible workspace는 숨길 수 없다. `useHiddenItemsCoordinator`는 Automation·세션 교체·구조 삭제처럼 selector 밖에서 raw state가 바뀌는 경우에도 이 불변식과 stale ID 정리를 즉시 적용한다.
-- 명시적 `setPaneHidden`/`setWorkspaceHidden` 복원은 같은 store 전환에서 관련 `evictedPaneIds`를 지운다. 마지막 숨김 항목이 사라지면 보관함도 닫힌다.
+- 명시적 `setPaneHidden`/`setWorkspaceHidden` 복원은 같은 store 전환에서 관련 `evictedPaneIds`를 지운다. 유효 hidden workspace 가 0 이 되면(hidden pane 존재 여부와 무관하게) 보관함도 닫힌다.
 
 ### Pane 위치 미니맵
 

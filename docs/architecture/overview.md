@@ -69,7 +69,7 @@ Pane 이 많은 워크스페이스를 활성화하면 모든 `TerminalView` 가 
 
 #### 숨김 터미널 자동 종료 (issue #269)
 
-WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스/Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 숨긴 항목은 selector 하단의 유효 개수 chip과 보관함에서 복원한다([ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md)).
+WorkspaceSelectorView의 평상시 목록에서 quick-hide한 워크스페이스, 또는 pane 컨트롤바 토글로 숨긴 Pane이 일정 시간 이상 계속 숨겨져 있으면 해당 터미널(PTY)을 자동 종료하여 메모리/CPU를 절약한다. 숨긴 workspace는 목록 헤더의 유효 개수 chip 아래 보관함에서, 숨긴 Pane은 해당 pane 컨트롤바 토글로 복원한다([ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md), [ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)).
 
 - **설정**: `workspaceSelector.hiddenAutoCloseSeconds`(초, `0` = 비활성화). Rust `WorkspaceSelectorSettings`와 프론트 settings-store 양쪽에 존재하며 `settings.json`에 영구 저장된다.
 - **판정/타이머**: `lib/hidden-auto-close.ts`의 순수 함수(`computeHiddenPaneIds`, `advanceHiddenTimers`)가 "현재 숨김인 Pane"과 "타임아웃 경과 여부"를 계산한다. **활성 워크스페이스의 Pane은 절대 종료 대상이 아니다.**

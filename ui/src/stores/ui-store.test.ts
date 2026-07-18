@@ -138,11 +138,13 @@ describe("ui-store", () => {
     expect(JSON.parse(localStorage.getItem("laymux-hidden-panes") ?? "null")).toEqual([]);
   });
 
-  it("closes the shelf when the last pane is restored", () => {
+  it("keeps the workspace-only shelf open across pane hidden transitions", () => {
+    // The shelf lists hidden workspaces only; pane hide/restore must not close it.
+    useUiStore.getState().setWorkspaceHidden("ws-1", true);
     useUiStore.getState().setPaneHidden("pane-1", true);
     useUiStore.getState().setHiddenShelfOpen(true);
     useUiStore.getState().setPaneHidden("pane-1", false);
-    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(true);
   });
 
   // -- hidden workspace ids --
@@ -193,6 +195,16 @@ describe("ui-store", () => {
     expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
   });
 
+  it("closes the shelf on last workspace restore even when panes stay hidden", () => {
+    // Hidden panes are not shown in the shelf, so they must not keep it open.
+    useUiStore.getState().setWorkspaceHidden("ws-1", true);
+    useUiStore.getState().setPaneHidden("pane-1", true);
+    useUiStore.getState().setHiddenShelfOpen(true);
+    useUiStore.getState().setWorkspaceHidden("ws-1", false);
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-1")).toBe(true);
+  });
+
   it("restoreAllHidden clears both hidden sets and evictions atomically", () => {
     useUiStore.getState().setWorkspaceHidden("ws-1", true);
     useUiStore.getState().setPaneHidden("pane-1", true);
@@ -224,6 +236,17 @@ describe("ui-store", () => {
     expect(JSON.parse(localStorage.getItem("laymux-hidden-panes") ?? "null")).toEqual([
       "pane-valid",
     ]);
+  });
+
+  it("pruneHiddenIds closes the shelf when no valid hidden workspace remains", () => {
+    useUiStore.getState().setWorkspaceHidden("ws-stale", true);
+    useUiStore.getState().setPaneHidden("pane-valid", true);
+    useUiStore.getState().setHiddenShelfOpen(true);
+
+    useUiStore.getState().pruneHiddenIds(new Set(["ws-valid"]), new Set(["pane-valid"]));
+
+    expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+    expect(useUiStore.getState().hiddenPaneIds.has("pane-valid")).toBe(true);
   });
 
   // -- evicted (auto-closed) pane ids (issue #269) --

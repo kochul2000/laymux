@@ -184,8 +184,7 @@
   .hidden-item-action-btn:disabled {
     cursor: not-allowed;
   }
-  .workspace-quick-hide,
-  .pane-quick-hide {
+  .workspace-quick-hide {
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--transition-fast);
@@ -198,9 +197,7 @@
     margin: -2px;
   }
   .workspace-item-animated:hover .workspace-quick-hide,
-  .workspace-item-animated:focus-within .workspace-quick-hide,
-  .workspace-pane-row:hover .pane-quick-hide,
-  .workspace-pane-row:focus-within .pane-quick-hide {
+  .workspace-item-animated:focus-within .workspace-quick-hide {
     opacity: 1;
     pointer-events: auto;
   }
@@ -221,15 +218,6 @@
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
     background: var(--bg-surface);
-  }
-  .hidden-shelf-section-label {
-    padding: 5px 5px 2px;
-    color: var(--text-secondary);
-    font-size: var(--fs-2xs);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    opacity: 0.7;
   }
   .hidden-shelf-row {
     display: flex;
@@ -682,7 +670,6 @@
     animation: none;
   }
   .workspace-quick-hide,
-  .pane-quick-hide,
   .workspace-item-animated,
   .workspace-pane-row {
     transition: none;

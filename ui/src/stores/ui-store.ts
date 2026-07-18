@@ -134,14 +134,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
     set((state) => {
       const currentlyHidden = state.hiddenPaneIds.has(paneId);
       const needsEvictionClear = !hidden && state.evictedPaneIds.has(paneId);
-      const remainingHiddenPaneCount =
-        currentlyHidden && !hidden ? state.hiddenPaneIds.size - 1 : state.hiddenPaneIds.size;
-      const shouldCloseShelf =
-        !hidden &&
-        remainingHiddenPaneCount === 0 &&
-        state.hiddenWorkspaceIds.size === 0 &&
-        state.hiddenShelfOpen;
-      if (currentlyHidden === hidden && !needsEvictionClear && !shouldCloseShelf) return state;
+      if (currentlyHidden === hidden && !needsEvictionClear) return state;
 
       let next = state.hiddenPaneIds;
       if (currentlyHidden !== hidden) {
@@ -158,7 +151,6 @@ export const useUiStore = create<UiState>()((set, get) => ({
         nextEvicted.delete(paneId);
         patch.evictedPaneIds = nextEvicted;
       }
-      if (shouldCloseShelf) patch.hiddenShelfOpen = false;
       return patch;
     }),
   setWorkspaceHidden: (workspaceId, hidden, paneIds = []) =>
@@ -171,11 +163,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
         currentlyHidden && !hidden
           ? state.hiddenWorkspaceIds.size - 1
           : state.hiddenWorkspaceIds.size;
+      // The shelf lists hidden workspaces only, so hidden panes never keep it open.
       const shouldCloseShelf =
-        !hidden &&
-        remainingHiddenWorkspaceCount === 0 &&
-        state.hiddenPaneIds.size === 0 &&
-        state.hiddenShelfOpen;
+        !hidden && remainingHiddenWorkspaceCount === 0 && state.hiddenShelfOpen;
       if (currentlyHidden === hidden && !needsEvictionClear && !shouldCloseShelf) return state;
 
       let next = state.hiddenWorkspaceIds;
@@ -225,7 +215,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
       const workspacesChanged = !setsEqual(state.hiddenWorkspaceIds, nextWorkspaces);
       const panesChanged = !setsEqual(state.hiddenPaneIds, nextPanes);
       const evictedChanged = !setsEqual(state.evictedPaneIds, nextEvicted);
-      const shouldCloseShelf = nextWorkspaces.size + nextPanes.size === 0 && state.hiddenShelfOpen;
+      // Workspace-only shelf: close as soon as no valid hidden workspace remains.
+      const shouldCloseShelf = nextWorkspaces.size === 0 && state.hiddenShelfOpen;
       if (!workspacesChanged && !panesChanged && !evictedChanged && !shouldCloseShelf) return state;
       if (workspacesChanged) saveHiddenIds(HIDDEN_WORKSPACES_KEY, nextWorkspaces);
       if (panesChanged) saveHiddenIds(HIDDEN_PANES_KEY, nextPanes);

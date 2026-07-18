@@ -245,6 +245,7 @@ export function PaneGrid({
               dndEnabled={dndEnabled}
               onPaneDragStart={(e) => handleDragStart(e, pane.id)}
               onPaneDragEnd={handleDragEnd}
+              showListHideToggle={location === "workspace"}
               actions={{
                 onChangeView: onSetPaneView
                   ? (config) => onSetPaneView(pane.id, config)
