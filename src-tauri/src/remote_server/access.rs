@@ -102,6 +102,16 @@ pub(crate) fn effective_remote_settings(app_state: &AppState) -> Result<RemoteSe
     Ok(settings)
 }
 
+/// Attach snapshot byte budget for remote clients. Clamps hand-edited
+/// settings.json values into the supported range instead of trusting them.
+pub(crate) fn effective_snapshot_max_bytes(settings: &RemoteSettings) -> usize {
+    settings.snapshot_max_kib.clamp(
+        crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
+        crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB,
+    ) as usize
+        * 1024
+}
+
 pub(crate) fn update_persistent_remote_settings(
     app_state: &AppState,
     app_handle: &AppHandle,

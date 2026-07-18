@@ -402,6 +402,7 @@ export interface RemoteSettings {
   authToken: string;
   heartbeatTimeoutSeconds: number;
   autoMobileModeMinWidth: number;
+  snapshotMaxKib: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;

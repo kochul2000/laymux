@@ -160,6 +160,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Restart,
     },
     MetadataEntry {
+        path: "/remote/snapshotMaxKib",
+        description: "원격 접속·터미널 전환 시 재생하는 최근 출력 스냅샷 상한(KiB, 1~1024)입니다. 다음 attach부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/remote/authToken",
         description: "Direct Remote browser가 사용하는 bearer token입니다. 응답에는 원문을 노출하지 않으며 ***REDACTED***를 다시 보내면 기존 값을 유지합니다.",
         sensitive: true,

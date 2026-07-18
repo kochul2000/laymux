@@ -309,6 +309,8 @@
       "resetLoopback": "Reset Local",
       "autoMobileMinWidth": "Auto Mobile Width",
       "autoMobileMinWidthDesc": "0 disables. At or below this app window width, Remote Access opens automatically.",
+      "snapshotMaxKib": "Initial Output Snapshot",
+      "snapshotMaxKibDesc": "Max recent output (KiB) replayed when a remote client attaches or switches terminals. Smaller opens faster with shorter scrollback.",
       "customHosts": "Custom Hosts",
       "customHostsDesc": "Host names or IPs to offer in the Remote Access copy URL selector.",
       "customHostPlaceholder": "devbox.tailnet.ts.net",

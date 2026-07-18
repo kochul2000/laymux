@@ -118,9 +118,20 @@ impl TerminalOutputBuffer {
     }
 
     /// Return an exact, sequenced tail snapshot.
+    ///
+    /// When `max_bytes` truncates retained history, the cut almost always lands
+    /// mid-line (or mid escape sequence). Dropping through the first `\n` keeps
+    /// the replayed tail starting on a clean line boundary; a tail with no
+    /// newline at all is kept as-is rather than returned empty.
     pub fn snapshot(&self, max_bytes: usize) -> TerminalOutputSlice {
         let inner = self.lock_inner();
-        let data = recent_bytes_from(&inner, max_bytes);
+        let truncated = max_bytes < inner.buffer.len();
+        let mut data = recent_bytes_from(&inner, max_bytes);
+        if truncated {
+            if let Some(newline) = data.iter().position(|&byte| byte == b'\n') {
+                data.drain(..=newline);
+            }
+        }
         let seq_end = inner.write_seq;
         TerminalOutputSlice {
             seq_start: seq_end.saturating_sub(data.len() as u64),
@@ -369,6 +380,40 @@ mod tests {
         assert_eq!(snapshot.seq_end, 8);
         assert_eq!(snapshot.data, b"fgh");
         assert_eq!(buf.start_seq(), 3);
+    }
+
+    #[test]
+    fn truncated_snapshot_drops_the_partial_first_line() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        buf.push(b"line1\nline2\nline3");
+
+        let snapshot = buf.snapshot(10); // cuts inside "line2"
+
+        assert_eq!(snapshot.data, b"line3");
+        assert_eq!(snapshot.seq_end, 17);
+        assert_eq!(snapshot.seq_start, 17 - 5);
+    }
+
+    #[test]
+    fn untruncated_snapshot_keeps_a_leading_partial_line() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        buf.push(b"line1\nline2");
+
+        let snapshot = buf.snapshot(1024);
+
+        assert_eq!(snapshot.data, b"line1\nline2");
+        assert_eq!(snapshot.seq_start, 0);
+    }
+
+    #[test]
+    fn truncated_snapshot_without_a_newline_is_kept_as_is() {
+        let mut buf = TerminalOutputBuffer::new(1024);
+        buf.push(b"one very long line without breaks");
+
+        let snapshot = buf.snapshot(10);
+
+        assert_eq!(snapshot.data, b"out breaks");
+        assert_eq!(snapshot.seq_start, snapshot.seq_end - 10);
     }
 
     #[test]

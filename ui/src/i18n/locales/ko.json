@@ -309,6 +309,8 @@
       "resetLoopback": "로컬로 초기화",
       "autoMobileMinWidth": "자동 모바일 폭",
       "autoMobileMinWidthDesc": "0이면 비활성화. 앱 창 폭이 이 값 이하가 되면 Remote Access가 자동으로 열립니다.",
+      "snapshotMaxKib": "초기 출력 스냅샷",
+      "snapshotMaxKibDesc": "원격 접속·터미널 전환 시 재생할 최근 출력 상한(KiB)입니다. 작을수록 빠르게 열리고 스크롤백이 짧아집니다.",
       "customHosts": "수동 호스트",
       "customHostsDesc": "Remote Access 복사 URL 선택기에 표시할 호스트 이름 또는 IP입니다.",
       "customHostPlaceholder": "devbox.tailnet.ts.net",

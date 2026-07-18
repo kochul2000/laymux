@@ -48,6 +48,17 @@ export function normalizeAutoMobileWidth(value: string | number): number {
   return Math.max(0, Math.floor(parsed));
 }
 
+/** Mirrors the Rust-side range for remote.snapshotMaxKib (1..=1024 KiB). */
+export const SNAPSHOT_MAX_KIB_MIN = 1;
+export const SNAPSHOT_MAX_KIB_MAX = 1024;
+export const SNAPSHOT_MAX_KIB_DEFAULT = 16;
+
+export function normalizeSnapshotMaxKib(value: string | number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return SNAPSHOT_MAX_KIB_DEFAULT;
+  return Math.min(SNAPSHOT_MAX_KIB_MAX, Math.max(SNAPSHOT_MAX_KIB_MIN, Math.floor(parsed)));
+}
+
 export function normalizeCustomHosts(hosts: string[]): string[] {
   const seen = new Set<string>();
   return hosts

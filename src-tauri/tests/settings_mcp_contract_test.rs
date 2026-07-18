@@ -217,6 +217,35 @@ fn changing_a_preexisting_invalid_value_to_another_invalid_value_is_rejected() {
 }
 
 #[test]
+fn remote_snapshot_max_kib_outside_range_is_rejected() {
+    let too_small = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "remote": { "snapshotMaxKib": 0 } }),
+    );
+    assert!(!too_small.valid);
+    assert!(too_small
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
+
+    let too_large = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "remote": { "snapshotMaxKib": 2048 } }),
+    );
+    assert!(!too_large.valid);
+    assert!(too_large
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
+
+    let in_range = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "remote": { "snapshotMaxKib": 64 } }),
+    );
+    assert!(in_range.valid, "errors: {:?}", in_range.errors);
+}
+
+#[test]
 fn duplicate_profiles_and_bad_extension_viewer_reference_are_rejected() {
     let duplicate = prepare_settings_update(
         &Settings::default(),

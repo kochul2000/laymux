@@ -116,6 +116,17 @@ pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
 /// Desktop attach returns the retained output ring (currently capped at 1 MiB).
 pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = 1024 * 1024;
 
+/// Default cap (KiB) for the recent-output snapshot replayed to a remote
+/// client on terminal attach. Small on purpose: a remote connect or workspace
+/// switch should open at the live tail instead of replaying long history.
+pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 16;
+
+/// Effective bounds for `remote.snapshotMaxKib`. The upper bound matches the
+/// retained output ring (1 MiB); the lower bound keeps at least one screen of
+/// context so a TUI attach is not visibly empty.
+pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
+pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
+
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal
 /// title sequences even when OSC 133 markers have scrolled out.
