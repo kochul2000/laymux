@@ -3378,6 +3378,9 @@
                 ) {
                   return;
                 }
+                // A replayed snapshot must land at the live tail, not wherever
+                // the fit/reflow race left the viewport.
+                term.scrollToBottom();
                 composerReady = true;
                 updateComposerControls();
                 focusCurrentInputSurface();

@@ -68,7 +68,6 @@ const SOCKET_PENDING_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const HTTP_REQUEST_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
-const OUTPUT_INITIAL_BYTES: usize = 64 * 1024;
 const LEASE_CHECK_MS: u64 = 500;
 const STREAM_DATA_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_BACKOFF_SECONDS: u64 = 30;
@@ -1507,10 +1506,11 @@ fn terminal_output_subscription(
     app_state: &AppState,
     terminal_id: &str,
 ) -> Result<TerminalOutputSubscribedAttachment, AppError> {
+    let settings = remote_server::effective_remote_settings(app_state).map_err(AppError::Other)?;
     terminal_output::attach_and_subscribe_terminal_output(
         &app_state.terminal_protocol_states,
         terminal_id,
-        OUTPUT_INITIAL_BYTES,
+        remote_server::effective_snapshot_max_bytes(&settings),
     )
     .map_err(|error| {
         if error == format!("Session '{terminal_id}' not found") {

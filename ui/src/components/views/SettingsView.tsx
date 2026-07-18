@@ -64,7 +64,10 @@ import {
   LOOPBACK_ALLOWED_IPS,
   normalizeAutoMobileWidth,
   normalizeCustomHosts,
+  normalizeSnapshotMaxKib,
   parseAllowedIps,
+  SNAPSHOT_MAX_KIB_MAX,
+  SNAPSHOT_MAX_KIB_MIN,
   TAILSCALE_ALLOWED_IPS,
 } from "@/lib/remote-hosts";
 import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
@@ -1712,6 +1715,7 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
     customHosts,
     allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
     autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
+    snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
   };
 }
 
@@ -1984,6 +1988,27 @@ function RemoteSection() {
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
               px
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.snapshotMaxKib")} desc={t("remote.snapshotMaxKibDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-snapshot-max-kib-input"
+              type="number"
+              min={SNAPSHOT_MAX_KIB_MIN}
+              max={SNAPSHOT_MAX_KIB_MAX}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.snapshotMaxKib}
+              onChange={(event) =>
+                update({ snapshotMaxKib: normalizeSnapshotMaxKib(event.target.value) })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              KiB
             </span>
           </div>
         </SettingRow>

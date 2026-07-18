@@ -322,6 +322,21 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             "heartbeatTimeoutSeconds는 30 이상이어야 합니다.".into(),
         );
     }
+    if !(crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB
+        ..=crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB)
+        .contains(&remote.snapshot_max_kib)
+    {
+        issue(
+            issues,
+            "out_of_range",
+            "/remote/snapshotMaxKib",
+            format!(
+                "snapshotMaxKib는 {}~{} 범위여야 합니다.",
+                crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
+                crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB
+            ),
+        );
+    }
     for (index, entry) in remote.allowed_ips.iter().enumerate() {
         if !is_valid_ip_or_cidr(entry) {
             issue(

@@ -37,7 +37,6 @@ use super::terminal_info::remote_terminal_infos;
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
-const OUTPUT_INITIAL_BYTES: usize = 64 * 1024;
 const LEASE_CHECK_MS: u64 = 500;
 
 #[derive(Debug, Deserialize)]
@@ -585,9 +584,17 @@ async fn remote_terminal_output_ws(
         Err(err) => return internal_error(err),
     };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
+    let snapshot_max_bytes = super::effective_snapshot_max_bytes(&settings);
 
     ws.on_upgrade(move |socket| {
-        stream_terminal_output(socket, server.app_state, id, lease_id, timeout_seconds)
+        stream_terminal_output(
+            socket,
+            server.app_state,
+            id,
+            lease_id,
+            timeout_seconds,
+            snapshot_max_bytes,
+        )
     })
 }
 
@@ -597,11 +604,12 @@ async fn stream_terminal_output(
     id: String,
     lease_id: String,
     timeout_seconds: u64,
+    snapshot_max_bytes: usize,
 ) {
     let subscribed = match terminal_output::attach_and_subscribe_terminal_output(
         &app_state.terminal_protocol_states,
         &id,
-        OUTPUT_INITIAL_BYTES,
+        snapshot_max_bytes,
     ) {
         Ok(subscribed) => subscribed,
         Err(err) => {

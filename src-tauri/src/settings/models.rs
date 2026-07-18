@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::constants::DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS;
+use crate::constants::{DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB};
 
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -1034,6 +1034,9 @@ pub struct RemoteSettings {
     /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
     #[serde(default = "default_remote_auto_mobile_mode_min_width")]
     pub auto_mobile_mode_min_width: u32,
+    /// Max KiB of recent output replayed to a remote client on terminal attach.
+    #[serde(default = "default_remote_snapshot_max_kib")]
+    pub snapshot_max_kib: u32,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1076,6 +1079,10 @@ fn default_remote_auto_mobile_mode_min_width() -> u32 {
     720
 }
 
+fn default_remote_snapshot_max_kib() -> u32 {
+    DEFAULT_REMOTE_SNAPSHOT_MAX_KIB
+}
+
 fn default_cloud_auto_reconnect() -> bool {
     true
 }
@@ -1113,6 +1120,7 @@ impl Default for RemoteSettings {
             auth_token: String::new(),
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
+            snapshot_max_kib: default_remote_snapshot_max_kib(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,
