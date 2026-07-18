@@ -1,6 +1,6 @@
 # 0037. Remote lease는 이탈 시 beacon으로 반납하고, 재접속은 비밀 resume capability로 이어받는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-18
 - Source: 사용자 피드백(뒤로가기·브라우저 잠깐 닫기 후 재접속 시 `409` 빈발) · PR #471 리뷰(공개 lease id 증명 불가·release drain 경합·탭 복제) · ADR-0013 · ADR-0027 · architecture/api-contracts.md §13.2
 
