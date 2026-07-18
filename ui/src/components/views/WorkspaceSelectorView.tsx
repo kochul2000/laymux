@@ -1347,7 +1347,10 @@ export function WorkspaceSelectorView() {
       </div>
 
       {/* Workspace list */}
-      <div data-testid="workspace-list" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div
+        data-testid="workspace-list"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-1"
+      >
         {selectorWorkspaces.map((ws, idx) => {
           const isActive = ws.id === activeWorkspaceId;
           // Compute summary from frontend stores (event-driven, no polling).
