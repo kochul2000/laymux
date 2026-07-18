@@ -1377,6 +1377,13 @@
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
+        // Secret resume capability issued by a successful claim. It lives in
+        // memory while the document is alive and touches sessionStorage only
+        // across the unload/load boundary (stash on pagehide, consume on
+        // load). A duplicated tab (window.open, Duplicate Tab) clones the
+        // storage of a LIVE original — which is empty — so no clone can
+        // present the capability and hijack the controller lease.
+        const resumeTokenKey = "laymux.remote.resumeToken";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
         const HEARTBEAT_INTERVAL_MAX_MS = 5000;
@@ -1384,6 +1391,7 @@
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
         let leaseId = null;
+        let resumeToken = null;
         let claimAttemptRevision = 0;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
@@ -1553,6 +1561,35 @@
         function token() {
           return tokenInput.value.trim();
         }
+
+        // Move the stashed resume capability out of sessionStorage into this
+        // document's memory. Consuming (get + remove) keeps the storage empty
+        // while the document is alive, which is what defeats tab duplication.
+        function consumeStashedResumeToken() {
+          try {
+            const value = sessionStorage.getItem(resumeTokenKey);
+            if (value) sessionStorage.removeItem(resumeTokenKey);
+            return value || null;
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function stashResumeTokenForUnload() {
+          if (!resumeToken) return;
+          try {
+            sessionStorage.setItem(resumeTokenKey, resumeToken);
+          } catch (_) {}
+        }
+
+        function discardResumeToken() {
+          resumeToken = null;
+          try {
+            sessionStorage.removeItem(resumeTokenKey);
+          } catch (_) {}
+        }
+
+        resumeToken = consumeStashedResumeToken();
 
         function authHeaders() {
           return {
@@ -3420,10 +3457,15 @@
           let reservationExpiresAt = null;
           while (attemptRevision === claimAttemptRevision) {
             try {
+              // Presenting the resume capability lets the server replace this
+              // tab's own zombie lease (or follow its release drain) after
+              // back/reload instead of rejecting the claim with 409 until the
+              // heartbeat timeout.
               return await remoteFetch("/remote/v1/session/claim", {
                 method: "POST",
                 body: JSON.stringify({
                   clientName: clientNameInput.value.trim() || "browser",
+                  ...(resumeToken ? { resumeToken } : {}),
                   ...(claimReservationId ? { claimReservationId } : {}),
                 }),
               });
@@ -3472,6 +3514,8 @@
               return;
             }
             leaseId = status.leaseId;
+            // Memory only — never in storage while the document is alive.
+            resumeToken = status.resumeToken || null;
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
@@ -3988,6 +4032,36 @@
             method: "POST",
             body: JSON.stringify({ leaseId: id }),
           });
+          if (id === leaseId || !leaseId) discardResumeToken();
+        }
+
+        // Best-effort release while the page is being torn down. Fired from
+        // pagehide, so only sendBeacon (or a keepalive fetch fallback) can
+        // outlive the document; auth rides the supported token query param
+        // because a beacon cannot carry headers. The resume capability is
+        // stashed for the successor document: if the beacon is lost the next
+        // claim still takes the zombie over, and if it arrives the claim
+        // follows the release drain through the server-side handoff.
+        function releaseLeaseOnPageHide() {
+          stashResumeTokenForUnload();
+          const currentLease = leaseId;
+          if (!currentLease) return;
+          const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
+          const payload = JSON.stringify({ leaseId: currentLease });
+          let sent = false;
+          if (typeof navigator.sendBeacon === "function") {
+            try {
+              sent = navigator.sendBeacon(path, new Blob([payload], { type: "application/json" }));
+            } catch (_) {}
+          }
+          if (!sent) {
+            fetch(path, {
+              method: "POST",
+              headers: authHeaders(),
+              body: payload,
+              keepalive: true,
+            }).catch(() => {});
+          }
         }
 
         async function requestDesktopMode() {
@@ -4020,6 +4094,9 @@
 
         function loseRemoteControl(message) {
           const lostLeaseId = leaseId;
+          // The server confirmed the loss; the capability must not seed a
+          // takeover on the next claim (ADR-0027: no auto reclaim after loss).
+          discardResumeToken();
           disconnect(false);
           terminalMetaEl.textContent = "Host has control.";
           setConnectionHint("Host has control. Connect again to request control.", true);
@@ -4121,6 +4198,16 @@
         if (autoConnectMode && token()) {
           setTimeout(() => connect().catch((err) => setStatus(err.message, true)), 0);
         }
+        // pagehide (not beforeunload) is the only teardown event mobile
+        // browsers fire reliably, and it also covers bfcache entry.
+        window.addEventListener("pagehide", releaseLeaseOnPageHide);
+        // A bfcache restore resumes this same document: reclaim the stashed
+        // capability so it is back in memory only, out of any clone's reach.
+        window.addEventListener("pageshow", (event) => {
+          if (!event.persisted) return;
+          const stashed = consumeStashedResumeToken();
+          if (stashed) resumeToken = stashed;
+        });
         window.addEventListener("beforeunload", () => {
           stopSocket();
           stopHeartbeat();
