@@ -189,6 +189,13 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--transition-fast);
+    /* Inline row buttons must not inflate the row: drop the 24px box that
+       .hidden-item-action-btn gives the shelf and fall back to the old
+       row-eye-btn feel (icon-sized + negative margin for a hover hit area). */
+    width: auto;
+    height: auto;
+    padding: 2px;
+    margin: -2px;
   }
   .workspace-item-animated:hover .workspace-quick-hide,
   .workspace-item-animated:focus-within .workspace-quick-hide,
