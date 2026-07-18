@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::extract::{ConnectInfo, Request, State};
+use axum::http::header;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::automation_server::ServerState;
@@ -53,7 +54,14 @@ pub(crate) async fn remote_page(
         return response;
     }
 
-    Html(remote_page_html()).into_response()
+    // The page is compiled in via include_str!, so there is no mtime/ETag for
+    // revalidation — without this, browsers heuristically cache it and users
+    // need a hard refresh after every update.
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(remote_page_html()),
+    )
+        .into_response()
 }
 
 fn remote_page_html() -> &'static str {
@@ -254,8 +262,9 @@ mod tests {
         assert!(html.contains("id=\"terminalComposer\""));
         assert!(html.contains("id=\"composerInput\""));
         assert!(!html.contains("id=\"composerInsert\""));
-        // No standalone Send button — Enter is the only send gesture.
-        assert!(!html.contains("id=\"composerSend\""));
+        // A dedicated Send button is the touch-device send affordance.
+        assert!(html.contains("id=\"composerSend\""));
+        assert!(html.contains("class=\"composer-send\""));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
 
@@ -276,17 +285,23 @@ mod tests {
         assert!(html.contains("draft.revision === submission.revision"));
         assert!(html.contains("draft.text === submission.text"));
 
-        // Enter sends via two paths so mobile soft keyboards (keyCode 229 /
-        // "Unidentified" Enter) still submit: a trustworthy keydown Enter, or
-        // the beforeinput line-break that fires cleanly after IME commit.
-        // Shift+Enter stays a native newline; IME confirmation never submits.
+        // Enter follows the layout: the mobile layout (coarse pointer OR the PC
+        // app's embedded mobile view, localApp=1) inserts a newline and sends
+        // via the button, keeping the fragile soft-keyboard Enter off the send
+        // path; the desktop layout sends on Enter with Shift+Enter as newline.
+        // Ctrl/Cmd+Enter sends in both layouts, and IME confirmation
+        // (isComposing / keyCode 229) never sends.
         assert!(html.contains("composerInput.addEventListener(\"compositionstart\""));
         assert!(html.contains("composerInput.addEventListener(\"compositionend\""));
-        assert!(html.contains("composerInput.addEventListener(\"beforeinput\""));
-        assert!(html.contains("event.inputType !== \"insertLineBreak\""));
-        assert!(html.contains("if (event.isComposing || composerIsComposing) return;"));
-        assert!(html.contains("composerShiftEnter = event.shiftKey === true"));
-        assert!(html.contains("if (event.keyCode === 229) return;"));
+        assert!(html.contains("const mobileLayout = coarsePointer || localAppMode"));
+        assert!(html.contains("if (event.key !== \"Enter\" || event.shiftKey) return;"));
+        assert!(html.contains("if (event.ctrlKey || event.metaKey) {"));
+        assert!(html.contains("if (mobileLayout) return;"));
+        assert!(html.contains(
+            "if (event.isComposing || composerIsComposing || event.keyCode === 229) return;"
+        ));
+        assert!(html.contains("composerSendButton.addEventListener(\"click\""));
+        assert!(html.contains("composerSendButton.hidden = !(mobileLayout && composerMode)"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\").matches"));
 
         // Composer actions stay closed until a valid V1 snapshot header/state +
