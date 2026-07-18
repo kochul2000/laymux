@@ -650,11 +650,13 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/session/status` | GET | 현재 lease 상태 조회 |
-| `/remote/v1/session/claim` | POST | remote controller lease 획득. active lease·reclaim lockout·input reservation 충돌은 `409` |
+| `/remote/v1/session/claim` | POST | remote controller lease 획득. active lease·reclaim lockout·input reservation 충돌은 `409`. optional `previousLeaseId`가 현재 Active lease와 일치하면 같은 컨트롤러의 takeover로 통과 |
 | `/remote/v1/session/heartbeat` | POST | lease heartbeat 갱신 |
-| `/remote/v1/session/release` | POST | remote가 lease 반납 |
+| `/remote/v1/session/release` | POST | remote가 lease 반납. pagehide beacon 경로는 `token` query parameter 인증 사용 |
 
 `claim` 성공 응답의 `leaseId`가 이후 제어 요청의 권한이다. 기존 Local input permit이 아직 남아 있으면 server는 `409 { code:"input_busy", claimReservationId, retryAfterMs, reservationTtlMs }`를 반환하고 one-shot reservation을 설치한다. 예약은 짧은 bounded TTL을 가지며, active Local 작업이 남은 동안 인증된 client가 같은 `claimReservationId`로 재시도할 때만 TTL을 다시 시작한다. 따라서 긴 PTY 작업은 연속 재시도로 기다릴 수 있지만 탭 종료·네트워크 단절로 claimant가 사라지면 새 Local 입력 차단은 마지막 재시도 뒤 한 TTL 이내에 끝난다. reservation이 살아 있는 동안 새 Local permit과 다른 claim은 앞지르지 못한다. Remote page는 이 `input_busy` 응답만 동일 token으로 자동 재시도하고 서버가 갱신해 준 만료 시각을 사용하며, 다른 `409`는 자동 재 claim하지 않는다.
+
+claim body의 optional `previousLeaseId`는 같은 컨트롤러의 재접속 경로다([ADR-0037](../adr/0037-remote-lease-takeover-and-pagehide-release.md)). 기존 lease가 있어도 `previousLeaseId`가 현재 **Active** lease id와 일치하고 owner transition이 진행 중이 아니면 claim이 통과하며, 이후 reclaim lockout·input-busy reservation·owner epoch 전진을 기존 경로 그대로 거쳐 lease를 그 자리에서 교체하고 새 `leaseId`를 발급한다. Expiring lease·transition 중·다른 lease id는 기존대로 `409`이고, reclaim lockout은 takeover보다 우선한다. Remote page는 발급받은 lease id를 탭 단위 `sessionStorage`(`laymux.remote.leaseId`)에 보존해 뒤로가기/새로고침 후 claim에 동봉하고, 서버가 lease 상실을 확정하면(`401`/`403`/`409`) 저장값을 지운다. 또한 `pagehide`에서 `navigator.sendBeacon`(불가 시 keepalive fetch)으로 `/remote/v1/session/release`를 호출해 lease를 즉시 반납한다. beacon은 헤더를 실을 수 없으므로 WebSocket과 동일한 `token` query parameter 인증을 사용한다.
 
 PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay를 표시하고, `reclaim_remote_control` Tauri command로 언제든 lease 종료를 요청할 수 있다. reclaim·Remote release·access disable·heartbeat expiry는 owner epoch을 먼저 전환해 새 양쪽 permit을 막고, 기존 Remote I/O의 bounded cancellation acknowledgement 후에만 Local owner를 공개한다. 이 동안 status는 `active=true, transitioning=true`로 fail-closed한다. PC reclaim 완료 후에는 `heartbeatTimeoutSeconds` 동안 새 remote claim을 `409`로 거절한다. Lease timeout 기본값은 45초이고 30초 미만의 설정도 런타임에서는 30초로 clamp한다. 성공한 claim/heartbeat 시점에 현재 timeout으로 absolute monotonic deadline을 고정하며, 만료가 한 번 관측된 lease는 timeout 증가나 늦은 heartbeat로 부활하지 않는다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md), [ADR-0029](../adr/0029-detached-terminal-input-composer.md)).
 

@@ -1377,6 +1377,9 @@
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
+        // Tab-scoped so back/forward or a reload can take over its own lease,
+        // while another tab can never present this id (sessionStorage).
+        const leaseKey = "laymux.remote.leaseId";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
         const HEARTBEAT_INTERVAL_MAX_MS = 5000;
@@ -1552,6 +1555,21 @@
 
         function token() {
           return tokenInput.value.trim();
+        }
+
+        function loadStoredLeaseId() {
+          try {
+            return sessionStorage.getItem(leaseKey) || null;
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function storeLeaseId(id) {
+          try {
+            if (id) sessionStorage.setItem(leaseKey, id);
+            else sessionStorage.removeItem(leaseKey);
+          } catch (_) {}
         }
 
         function authHeaders() {
@@ -3418,12 +3436,17 @@
         async function claimRemoteControl(attemptRevision) {
           let claimReservationId = null;
           let reservationExpiresAt = null;
+          // Presenting the tab's previous lease lets the server replace this
+          // tab's own zombie lease in place after back/reload instead of
+          // rejecting the claim with 409 until the heartbeat timeout.
+          const previousLeaseId = loadStoredLeaseId();
           while (attemptRevision === claimAttemptRevision) {
             try {
               return await remoteFetch("/remote/v1/session/claim", {
                 method: "POST",
                 body: JSON.stringify({
                   clientName: clientNameInput.value.trim() || "browser",
+                  ...(previousLeaseId ? { previousLeaseId } : {}),
                   ...(claimReservationId ? { claimReservationId } : {}),
                 }),
               });
@@ -3472,6 +3495,7 @@
               return;
             }
             leaseId = status.leaseId;
+            storeLeaseId(leaseId);
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
@@ -3988,6 +4012,33 @@
             method: "POST",
             body: JSON.stringify({ leaseId: id }),
           });
+          if (loadStoredLeaseId() === id) storeLeaseId(null);
+        }
+
+        // Best-effort release while the page is being torn down. Fired from
+        // pagehide, so only sendBeacon (or a keepalive fetch fallback) can
+        // outlive the document; auth rides the supported token query param
+        // because a beacon cannot carry headers. The stored lease id is kept:
+        // if the beacon is lost the next claim still takes the zombie over.
+        function releaseLeaseOnPageHide() {
+          const currentLease = leaseId;
+          if (!currentLease) return;
+          const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
+          const payload = JSON.stringify({ leaseId: currentLease });
+          let sent = false;
+          if (typeof navigator.sendBeacon === "function") {
+            try {
+              sent = navigator.sendBeacon(path, new Blob([payload], { type: "application/json" }));
+            } catch (_) {}
+          }
+          if (!sent) {
+            fetch(path, {
+              method: "POST",
+              headers: authHeaders(),
+              body: payload,
+              keepalive: true,
+            }).catch(() => {});
+          }
         }
 
         async function requestDesktopMode() {
@@ -4020,6 +4071,9 @@
 
         function loseRemoteControl(message) {
           const lostLeaseId = leaseId;
+          // The server confirmed the loss; the stored id must not seed a
+          // takeover on the next claim (ADR-0027: no auto reclaim after loss).
+          storeLeaseId(null);
           disconnect(false);
           terminalMetaEl.textContent = "Host has control.";
           setConnectionHint("Host has control. Connect again to request control.", true);
@@ -4121,6 +4175,9 @@
         if (autoConnectMode && token()) {
           setTimeout(() => connect().catch((err) => setStatus(err.message, true)), 0);
         }
+        // pagehide (not beforeunload) is the only teardown event mobile
+        // browsers fire reliably, and it also covers bfcache entry.
+        window.addEventListener("pagehide", releaseLeaseOnPageHide);
         window.addEventListener("beforeunload", () => {
           stopSocket();
           stopHeartbeat();

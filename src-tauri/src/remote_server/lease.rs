@@ -386,6 +386,15 @@ impl RemoteControlState {
             .is_some_and(|lease| lease.lease_id == lease_id)
     }
 
+    /// True when a claim presenting `previous_lease_id` may replace the current
+    /// lease in place. Only the holder of the still-Active lease qualifies:
+    /// an Expiring lease or an in-flight owner transition is a confirmed loss
+    /// and stays unrecoverable (ADR-0027), and any other lease id is a
+    /// different controller that must keep receiving `409`.
+    pub(crate) fn remote_lease_takeover_allowed(&self, previous_lease_id: &str) -> bool {
+        !self.transitioning && self.active_lease_id_matches(previous_lease_id)
+    }
+
     pub(crate) fn begin_remote_owner_transition(
         &mut self,
         now: Instant,
@@ -1079,6 +1088,58 @@ mod tests {
         );
         assert!(control.observe_lease_expiry(now, Duration::from_secs(60)));
         assert!(control.lease.is_none());
+    }
+
+    #[test]
+    fn takeover_is_allowed_only_for_the_active_lease_holder() {
+        let mut control = RemoteControlState::default();
+        control.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: Instant::now(),
+            },
+            Duration::from_secs(45),
+        );
+        assert!(control.remote_lease_takeover_allowed("lease-1"));
+        assert!(!control.remote_lease_takeover_allowed("lease-2"));
+    }
+
+    #[test]
+    fn takeover_is_rejected_once_the_owner_transition_started() {
+        let now = Instant::now();
+        let mut control = RemoteControlState::default();
+        control.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: now,
+            },
+            Duration::from_secs(45),
+        );
+        control
+            .begin_remote_owner_transition(now)
+            .expect("an active lease should begin a transition");
+        assert!(!control.remote_lease_takeover_allowed("lease-1"));
+    }
+
+    #[test]
+    fn takeover_is_rejected_after_expiry_is_observed() {
+        let now = Instant::now();
+        let mut control = RemoteControlState::default();
+        control.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: now - Duration::from_secs(60),
+            },
+            Duration::from_secs(5),
+        );
+        assert!(control.observe_lease_expiry(now, Duration::from_secs(5)));
+        assert!(!control.remote_lease_takeover_allowed("lease-1"));
     }
 
     #[test]

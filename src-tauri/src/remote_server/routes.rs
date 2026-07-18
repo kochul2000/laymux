@@ -25,7 +25,7 @@ use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
     require_active_lease, status_from_state, wait_for_remote_owner_transition_async,
-    ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease,
+    ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
 };
 use super::navigation_routes::{
     remote_navigation, remote_notification_mark_read, remote_notifications_clear,
@@ -44,6 +44,7 @@ const LEASE_CHECK_MS: u64 = 500;
 struct ClaimRequest {
     client_name: Option<String>,
     claim_reservation_id: Option<String>,
+    previous_lease_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,7 +184,7 @@ async fn remote_session_claim(
                 ));
             }
 
-            if current.lease.is_some() {
+            if existing_lease_blocks_claim(current, body.previous_lease_id.as_deref()) {
                 return Err((
                     StatusCode::CONFLICT,
                     Json(status_from_state(current, timeout_seconds)),
@@ -250,6 +251,18 @@ fn duration_millis_ceil(duration: Duration) -> u64 {
     let nanos = duration.as_nanos();
     let millis = nanos.saturating_add(999_999) / 1_000_000;
     u64::try_from(millis).unwrap_or(u64::MAX)
+}
+
+/// An installed lease blocks a new claim unless the claimant proves it still
+/// owns that lease via `previousLeaseId`; then the claim replaces the lease in
+/// place (same-controller reconnect after navigation/reload).
+fn existing_lease_blocks_claim(
+    current: &RemoteControlState,
+    previous_lease_id: Option<&str>,
+) -> bool {
+    current.lease.is_some()
+        && !previous_lease_id
+            .is_some_and(|previous| current.remote_lease_takeover_allowed(previous))
 }
 
 fn claim_input_busy_response(reservation_id: &str, remaining: Duration) -> Response {
@@ -678,12 +691,12 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        claim_input_busy_response, terminal_control_response, terminal_size_is_positive,
-        ClaimRequest,
+        claim_input_busy_response, existing_lease_blocks_claim, terminal_control_response,
+        terminal_size_is_positive, ClaimRequest, RemoteControlLease, RemoteControlState,
     };
     use axum::body::to_bytes;
     use axum::http::StatusCode;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn remote_resize_rejects_zero_dimensions() {
@@ -713,6 +726,36 @@ mod tests {
             request.claim_reservation_id.as_deref(),
             Some("reservation-1")
         );
+        assert_eq!(request.previous_lease_id, None);
+    }
+
+    #[test]
+    fn claim_request_accepts_an_optional_previous_lease_id() {
+        let request: ClaimRequest = serde_json::from_value(serde_json::json!({
+            "clientName": "phone",
+            "previousLeaseId": "lease-1",
+        }))
+        .unwrap();
+        assert_eq!(request.previous_lease_id.as_deref(), Some("lease-1"));
+    }
+
+    #[test]
+    fn existing_lease_blocks_claims_except_the_holder_takeover() {
+        let mut control = RemoteControlState::default();
+        assert!(!existing_lease_blocks_claim(&control, None));
+
+        control.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: None,
+                last_heartbeat: Instant::now(),
+            },
+            Duration::from_secs(45),
+        );
+        assert!(existing_lease_blocks_claim(&control, None));
+        assert!(existing_lease_blocks_claim(&control, Some("lease-2")));
+        assert!(!existing_lease_blocks_claim(&control, Some("lease-1")));
     }
 
     #[tokio::test]
