@@ -82,6 +82,8 @@ const navigation = {
       title: "Shell",
       profile: "PowerShell",
       cwd: "C:\\work",
+      workspaceId: "ws-1",
+      paneNumber: 1,
       appearance: {},
     },
   ],
@@ -216,7 +218,7 @@ test("a short output drop reconnects without status noise or an early terminal r
   await instrumentRemotePage(page);
 
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => resetCount(page)).toBe(1);
 
   await remote.sockets[0].close();
@@ -224,7 +226,7 @@ test("a short output drop reconnects without status noise or an early terminal r
   await page.waitForTimeout(150);
 
   expect(await resetCount(page)).toBe(1);
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => resetCount(page)).toBe(2);
   expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting...");
 });
@@ -237,9 +239,9 @@ test("one failed heartbeat is retried before the delayed interruption notice", a
   await instrumentRemotePage(page);
 
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => remote.heartbeatRequests, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
 
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting...");
 });

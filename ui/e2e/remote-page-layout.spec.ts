@@ -142,6 +142,51 @@ test.describe("remote mobile layout", () => {
     expect(emptyMessageHeight).toBe(populatedHeight);
   });
 
+  test("nav step bar fits four touch targets between key bar and footer", async ({ page }) => {
+    const bar = page.locator("#navStepBar");
+    // The bar is lease-gated at runtime; unhide it to test the connected layout.
+    await bar.evaluate((el) => {
+      el.hidden = false;
+    });
+    await expect(bar).toBeVisible();
+
+    const layout = await bar.evaluate((el) => {
+      const buttons = Array.from(el.querySelectorAll("button"), (button) =>
+        button.getBoundingClientRect(),
+      );
+      const footer = document.querySelector("footer")!.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      return {
+        buttonCount: buttons.length,
+        minButtonWidth: Math.min(...buttons.map((r) => r.width)),
+        minButtonHeight: Math.min(...buttons.map((r) => r.height)),
+        barBottom: rect.bottom,
+        footerTop: footer.top,
+        groupCount: el.querySelectorAll(".nav-step-group").length,
+        scrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+
+    expect(layout.buttonCount).toBe(4);
+    expect(layout.groupCount).toBe(2);
+    // Roomy touch targets at a 390px phone width — the reason the buttons get
+    // a dedicated row instead of joining the already-full footer.
+    expect(layout.minButtonWidth).toBeGreaterThanOrEqual(44);
+    expect(layout.minButtonHeight).toBeGreaterThanOrEqual(32);
+    // Sits directly above the footer without horizontal overflow.
+    expect(layout.barBottom).toBeLessThanOrEqual(layout.footerTop + 0.5);
+    expect(layout.scrollWidth).toBe(390);
+
+    // The unread badge overlays the notification group without growing the bar.
+    const heightBefore = (await bar.boundingBox())?.height;
+    await bar.evaluate((el) => {
+      const badge = el.querySelector<HTMLElement>("#navNotifBadge")!;
+      badge.hidden = false;
+      badge.textContent = "3";
+    });
+    expect((await bar.boundingBox())?.height).toBe(heightBefore);
+  });
+
   test("offers a four-way flick direction key", async ({ page }) => {
     await page.route("http://remote.test/", (route) =>
       route.fulfill({

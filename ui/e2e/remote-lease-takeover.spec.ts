@@ -56,6 +56,8 @@ const navigation = {
       title: "Shell",
       profile: "PowerShell",
       cwd: "C:\\work",
+      workspaceId: "ws-1",
+      paneNumber: 1,
       appearance: {},
     },
   ],
@@ -177,7 +179,7 @@ async function installLeaseMocks(page: Page, state: LeaseMockState) {
 
 async function connectRemote(page: Page) {
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 }
 
 async function stashedResumeToken(page: Page) {
@@ -245,7 +247,7 @@ test("a duplicated tab cannot present the capability and the original keeps cont
   expect(remote.claimRequests).toHaveLength(2);
   expect(remote.claimRequests[1].body.resumeToken).toBeUndefined();
   expect(remote.activeLeaseId).toBe("lease-1");
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await duplicate.close();
 });
 
