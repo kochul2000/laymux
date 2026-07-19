@@ -931,3 +931,76 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
     "xterm-helper-textarea",
   );
 });
+
+test("Keyboard button collapses and restores the Composer editor with the soft keyboard", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  const composer = page.locator("#terminalComposer");
+  const editor = page.locator("#composerInput");
+  const keyboardButton = page.locator("#focusTerminal");
+
+  // Connect focuses the composer editor; the first toggle dismisses the
+  // keyboard and collapses the editor pane with it.
+  await expect(editor).toBeFocused();
+  await expect(composer).toBeVisible();
+  await editor.fill("draft survives collapse");
+
+  await keyboardButton.click();
+  await expect(composer).toBeHidden();
+  await expect(editor).not.toBeFocused();
+  // The hidden draft must not be sendable; the button stays (footer layout
+  // is stable) but disabled.
+  await expect(page.locator("#composerSend")).toBeVisible();
+  await expect(page.locator("#composerSend")).toBeDisabled();
+
+  // The second toggle restores the editor pane and raises the keyboard.
+  await keyboardButton.click();
+  await expect(composer).toBeVisible();
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue("draft survives collapse");
+  await expect(page.locator("#composerSend")).toBeEnabled();
+});
+
+test("reconnect keeps a collapsed Composer editor collapsed and unfocused", async ({ page }) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+
+  // The mobile connected layout collapses this control outside the viewport;
+  // invoke the same button action without coupling this state test to drawer UX.
+  await page.locator("#release").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator("#connect")).toBeEnabled();
+  await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+
+  // Attach-ready auto-focus must not resurrect the editor or raise the
+  // keyboard behind the user's back — only the Keyboard button does.
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+  await expect(page.locator("#composerInput")).not.toBeFocused();
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
+test("explicit mode switches reset a collapsed Composer editor", async ({ page }) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+
+  // Direct and back to Composer: the mode switch must reveal the editor
+  // instead of leaving composer mode with no visible input surface.
+  await page.locator("#inputModeToggle").click();
+  await page.locator("#inputModeToggle").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
