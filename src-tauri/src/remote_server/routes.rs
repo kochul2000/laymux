@@ -32,6 +32,9 @@ use super::navigation_routes::{
     remote_navigation, remote_notification_mark_read, remote_notifications_clear,
     remote_notifications_mark_all_read, remote_terminal_focus, remote_workspace_switch_active,
 };
+use super::navigation_step_routes::{
+    remote_navigation_notification_step, remote_navigation_spatial_step,
+};
 use super::page::{remote_page, remote_page_redirect};
 use super::terminal_info::remote_terminal_infos;
 use super::{internal_error, json_error};
@@ -104,6 +107,14 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
+        .route(
+            "/remote/v1/navigation/spatial",
+            post(remote_navigation_spatial_step),
+        )
+        .route(
+            "/remote/v1/navigation/notification",
+            post(remote_navigation_notification_step),
+        )
         .route(
             "/remote/v1/notifications/{id}/read",
             post(remote_notification_mark_read),

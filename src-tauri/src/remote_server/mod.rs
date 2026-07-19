@@ -5,6 +5,7 @@ mod auth;
 mod lease;
 mod navigation;
 mod navigation_routes;
+mod navigation_step_routes;
 mod page;
 mod routes;
 mod terminal_info;

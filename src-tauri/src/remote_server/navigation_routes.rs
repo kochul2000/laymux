@@ -359,7 +359,7 @@ pub(super) async fn remote_notifications_clear(
     }
 }
 
-async fn frontend_bridge_json(
+pub(super) async fn frontend_bridge_json(
     server: &ServerState,
     category: &str,
     target: &str,
@@ -381,7 +381,7 @@ async fn frontend_bridge_json(
     }
 }
 
-fn emit_workspace_state_changed(server: &ServerState, source: &str, detail: Value) {
+pub(super) fn emit_workspace_state_changed(server: &ServerState, source: &str, detail: Value) {
     let payload = serde_json::json!({ "source": source, "detail": detail });
     if let Err(error) = server
         .app_handle
@@ -395,7 +395,7 @@ fn emit_workspace_state_changed(server: &ServerState, source: &str, detail: Valu
     }
 }
 
-fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
+pub(super) fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(REMOTE_LEASE_HEADER)
         .and_then(|value| value.to_str().ok())
