@@ -55,6 +55,7 @@ ADR 이 필요한 대표 기준:
 | [0035](0035-workspace-only-shelf-per-pane-hide-toggle.md) | 숨김 보관함은 workspace 전용 상단 배치, Pane 숨김은 pane 자체 토글 (0033 정정) | Accepted |
 | [0036](0036-remote-composer-layout-rule.md) | Remote composer 전송 gesture는 pointer가 아니라 layout을 따른다 (0034 보완) | Accepted |
 | [0037](0037-remote-lease-takeover-and-pagehide-release.md) | Remote lease는 이탈 시 beacon으로 반납하고, 재접속은 비밀 resume capability로 이어받는다 (0027 보완) | Accepted |
+| [0038](0038-remote-height-shrink-surface-crop.md) | Remote 높이 축소는 surface-local crop — normal buffer rows 축소를 PTY에 전파하지 않음 (0015 확장) | Accepted |
 
 ## 새 ADR 추가
 
