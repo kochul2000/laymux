@@ -1020,3 +1020,50 @@ test("explicit mode switches reset a collapsed Composer editor", async ({ page }
   await expect(page.locator("#terminalComposer")).toBeVisible();
   await expect(page.locator("#composerInput")).toBeFocused();
 });
+
+test("special keys cancel the mousedown focus-theft default so the soft keyboard stays up (#482)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  // Composer mode connects with the editor focused (mobile keyboard raised).
+  const editor = page.locator("#composerInput");
+  await expect(editor).toBeFocused();
+  await page.locator("#keyBarToggle").click();
+
+  // A native tap fires mousedown before the browser moves focus. WebKit/iOS
+  // only honors mousedown.preventDefault() to keep the focused textarea (and
+  // its open keyboard) — pointerdown preventDefault is ignored there (#482).
+  // Every key that emits input — a soft key, the flick pad, and footer Ctrl+C —
+  // must cancel that default so focus never leaves the editor.
+  const mousedownKeys = ['[data-key="esc"]', '[data-key="dpad"]', "#ctrlC"];
+  for (const selector of mousedownKeys) {
+    const prevented = await page
+      .locator(selector)
+      .first()
+      .evaluate((el) => {
+        const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 });
+        el.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+    expect(prevented, `${selector} must preventDefault on mousedown`).toBe(true);
+  }
+
+  // The original pointerdown guard stays in place for Chromium/Firefox/pen.
+  const pointerPrevented = await page.locator('[data-key="esc"]').evaluate((el) => {
+    const event = new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      isPrimary: true,
+    });
+    el.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(pointerPrevented).toBe(true);
+
+  // A full trusted tap still sends the key without stealing focus.
+  await page.locator('[data-key="esc"]').click();
+  await expect(editor).toBeFocused();
+});

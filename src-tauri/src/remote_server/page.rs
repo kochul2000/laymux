@@ -220,11 +220,16 @@ mod tests {
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
-        // Pointer activation must not blur xterm's helper textarea and dismiss
-        // an already-open native keyboard. Click remains the accessible send path.
+        // Pointer/mouse activation must not blur the focused input surface and
+        // dismiss an already-open native keyboard (#482). WebKit/iOS only honors
+        // mousedown.preventDefault() for this, so both events are guarded via the
+        // shared helper. Click remains the accessible send path.
+        assert!(html.contains("function preventFocusSteal(event)"));
+        assert!(html.contains("function keepInputSurfaceFocus(button)"));
+        assert!(html.contains("button.addEventListener(\"mousedown\", preventFocusSteal);"));
+        assert!(html.contains("button.addEventListener(\"pointerdown\", preventFocusSteal);"));
         assert!(html.contains("function installSoftKey(button, id)"));
-        assert!(html.contains("button.addEventListener(\"pointerdown\", (event) => {"));
-        assert!(html.contains("event.preventDefault();"));
+        assert!(html.contains("keepInputSurfaceFocus(button);"));
         assert!(html.contains("button.addEventListener(\"click\", () => sendKey(id, button));"));
         // Cursor keys (arrows/Home/End) are DECCKM-aware: SS3 in app mode, else CSI.
         assert!(html.contains("up: { label: \"↑\", cursor: \"A\" }"));
