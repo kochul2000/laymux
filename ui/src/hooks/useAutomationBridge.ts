@@ -23,6 +23,7 @@ import type {
   WorkspacePane,
 } from "@/stores/types";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
+import * as navigationActions from "@/lib/navigation-actions";
 
 interface HandlerResult {
   success: boolean;
@@ -435,6 +436,25 @@ const handlers: HandlerMap = {
       const idx = p.index != null ? (p.index as number) : null;
       useGridStore.getState().setAutomationHover(idx);
       return ok({ automationHoverIndex: idx });
+    },
+  },
+
+  // Remote step navigation (issue #474, ADR-0039): shared orchestration with
+  // the desktop keyboard shortcuts via navigation-actions.
+  navigation: {
+    spatialStep: (p) => {
+      const direction = p.direction;
+      if (direction !== "prev" && direction !== "next") {
+        return err(`Invalid direction '${String(direction)}': expected "prev" or "next"`);
+      }
+      return ok(navigationActions.spatialStep(direction));
+    },
+    notificationStep: (p) => {
+      const direction = p.direction;
+      if (direction !== "recent" && direction !== "oldest") {
+        return err(`Invalid direction '${String(direction)}': expected "recent" or "oldest"`);
+      }
+      return ok(navigationActions.notificationStep(direction));
     },
   },
 
@@ -1099,6 +1119,25 @@ export async function handleAsyncAutomationRequest(
       return err(`Terminal '${terminalId}' did not become ready before timeout`);
     }
     useTerminalStore.getState().setTerminalFocus(terminalId);
+    return result;
+  }
+  if (
+    request.target === "navigation" &&
+    (request.method === "spatialStep" || request.method === "notificationStep")
+  ) {
+    const result = handleAutomationRequest(request);
+    if (!result.success) return result;
+    const data = result.data as navigationActions.NavigationStepResult;
+    if (data.moved) {
+      // The landing terminal may have just been activated (workspace switch
+      // spawns its session) — wait for readiness so the remote can attach
+      // to the reported target immediately (mirrors terminals.setFocus).
+      const terminalId = data.target.terminalId;
+      if (!(await waitForTerminalSessionReady(terminalId))) {
+        return err(`Terminal '${terminalId}' did not become ready before timeout`);
+      }
+      useTerminalStore.getState().setTerminalFocus(terminalId);
+    }
     return result;
   }
   if (request.target === "screenshot" && request.method === "capture") {

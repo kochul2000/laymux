@@ -56,6 +56,8 @@ const navigation = {
       title: "Shell",
       profile: "PowerShell",
       cwd: "C:\\work",
+      workspaceId: "ws-1",
+      paneNumber: 1,
       appearance: {},
     },
   ],
@@ -159,7 +161,7 @@ test("a v1 snapshot replay lands the viewport at the live tail", async ({ page }
   });
 
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
   // 300 lines must overflow the viewport into scrollback, and the viewport
   // must end pinned to the live tail, not mid-history.

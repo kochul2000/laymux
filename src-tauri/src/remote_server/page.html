@@ -284,7 +284,8 @@
       }
       .menu-button,
       .drawer-close,
-      .desktop-mode-button {
+      .desktop-mode-button,
+      .copy-pane-button {
         width: 28px;
         height: 24px;
         display: inline-flex;
@@ -297,8 +298,12 @@
       }
       .menu-button:hover,
       .drawer-close:hover,
-      .desktop-mode-button:hover {
+      .desktop-mode-button:hover,
+      .copy-pane-button:hover {
         background: var(--hover-bg);
+      }
+      .copy-pane-button {
+        color: var(--text-secondary);
       }
       .desktop-mode-button {
         width: auto;
@@ -993,8 +998,10 @@
       }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via
-         the existing write path. Purely remote-client UI state (localStorage);
-         no host bridge or Remote API contract change. */
+         the existing write path (ADR-0028). Toolbar config is remote-client UI
+         state (localStorage). Since issue #474 the toolbar also hosts step
+         NAVIGATION keys (pane/alert movement) that call the lease-gated
+         /remote/v1/navigation endpoints instead of writing bytes. */
       .key-bar {
         position: relative;
         display: flex;
@@ -1042,6 +1049,7 @@
         display: none;
       }
       .key-btn {
+        position: relative;
         flex: 0 0 auto;
         min-width: 34px;
         height: var(--key-bar-control-height);
@@ -1052,6 +1060,15 @@
         font-weight: 600;
         white-space: nowrap;
         touch-action: manipulation;
+      }
+      .key-btn.busy {
+        opacity: 0.55;
+      }
+      .key-nav-badge {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        pointer-events: none;
       }
       .key-btn:hover:not(:disabled) {
         background: var(--hover-bg);
@@ -1241,6 +1258,9 @@
           <span></span>
           <span></span>
         </button>
+        <button id="copyPaneId" class="copy-pane-button" type="button" hidden aria-label="Copy pane identifier" title="Copy pane identifier (lx:pane:...)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke-linecap="round"/></svg>
+        </button>
         <div id="status" class="status">Enter the remote token, then connect.</div>
         <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" title="Switch to Composer input">
           <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
@@ -1393,6 +1413,7 @@
           composer:
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>',
         };
+        const copyPaneIdButton = $("copyPaneId");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
@@ -2642,6 +2663,49 @@
           clearNotificationsButton.disabled = !leaseId || !hasNotifications;
         }
 
+        // Context of the terminal the viewport is attached to, resolved from
+        // the last navigation payload (terminals[] carries workspaceId and
+        // paneNumber; dock terminals have no workspace entry).
+        function activeTerminalContext() {
+          if (!activeTerminalId || !navigationState) return null;
+          const info = terminalInfoById.get(activeTerminalId);
+          if (!info) return null;
+          const workspace = (navigationState.workspaces || []).find((ws) => ws.id === info.workspaceId) || null;
+          const paneNumber = Number(info.paneNumber);
+          return {
+            info,
+            workspace,
+            paneNumber: Number.isFinite(paneNumber) && paneNumber > 0 ? paneNumber : null,
+          };
+        }
+
+        // "Workspace · Pane N" header title — the friendly replacement for the
+        // raw "Connected to terminal-…" id, doubling as the landing indicator
+        // after a navigation step.
+        function activeTerminalTitle() {
+          const ctx = activeTerminalContext();
+          if (!ctx) return "";
+          if (!ctx.workspace) return ctx.info.title || activeTerminalId || "";
+          return ctx.paneNumber
+            ? `${ctx.workspace.name} · Pane ${ctx.paneNumber}`
+            : ctx.workspace.name;
+        }
+
+        // lx:pane:<workspaceName>:<paneNumber> — the same LLM-facing locator the
+        // desktop pane badge copies. Workspace names are stored whitespace-free;
+        // guard anyway so a malformed name never produces a broken locator.
+        function activePaneIdentifier() {
+          const ctx = activeTerminalContext();
+          if (!ctx || !ctx.workspace || !ctx.paneNumber) return null;
+          const name = String(ctx.workspace.name || "");
+          if (!name || /\s/.test(name)) return null;
+          return `lx:pane:${name}:${ctx.paneNumber}`;
+        }
+
+        function updateHeaderPaneIdentity() {
+          copyPaneIdButton.hidden = !activePaneIdentifier();
+        }
+
         function setNotificationPanelOpen(open) {
           notificationPanelOpen = Boolean(open);
           notificationPanel.hidden = !notificationPanelOpen;
@@ -2768,6 +2832,9 @@
           renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
           renderDockList(data.docks || []);
+          // Nav step keys gate on unread count — refresh their state and badge.
+          updateKeyBarControls();
+          updateHeaderPaneIdentity();
         }
 
         function renderDockList(docks) {
@@ -3159,6 +3226,64 @@
           setNavigationOpen(false);
         }
 
+        // --- Step navigation (issue #474, ADR-0039) ---
+        const NAV_STEP_ENDPOINTS = {
+          spatial: "/remote/v1/navigation/spatial",
+          notification: "/remote/v1/navigation/notification",
+        };
+        const NAV_STEP_REASON_MESSAGES = {
+          no_terminal_panes: "No terminal panes to navigate.",
+          no_other_target: "No other pane to move to.",
+          no_unread_notifications: "No unread notifications.",
+        };
+        let navStepChain = Promise.resolve();
+        let navStepPending = 0;
+
+        async function performNavStep(kind, direction) {
+          if (!leaseId) return;
+          const data = await remoteFetch(NAV_STEP_ENDPOINTS[kind], {
+            method: "POST",
+            body: JSON.stringify({ leaseId, direction }),
+          });
+          if (!data || data.moved !== true || !data.target) {
+            const reason = data && data.reason;
+            setStatus(NAV_STEP_REASON_MESSAGES[reason] || "Nowhere to navigate.");
+            return;
+          }
+          // Follow the landing: refresh navigation state and attach the
+          // viewport to the reported target terminal.
+          await loadNavigation(data.target.terminalId || null);
+          // Landing indicator — socket reattach also sets this, but a step that
+          // lands on the already-attached terminal never reopens the socket.
+          const landingTitle = activeTerminalTitle();
+          if (landingTitle) setStatus(landingTitle);
+        }
+
+        // Taps mutate host state sequentially, so they must not interleave:
+        // serialize on a promise chain and cap the queue at one pending step
+        // (rapid double-tap advances twice; anything faster is dropped).
+        function enqueueNavStep(button, kind, direction) {
+          if (!leaseId || navStepPending >= 2) return;
+          navStepPending += 1;
+          if (button) {
+            // Per-button counter: a queued double-tap must not lose its busy
+            // dim when the first step's finally fires.
+            button.dataset.busyCount = String((Number(button.dataset.busyCount) || 0) + 1);
+            button.classList.add("busy");
+          }
+          navStepChain = navStepChain
+            .then(() => performNavStep(kind, direction))
+            .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
+            .finally(() => {
+              navStepPending -= 1;
+              if (button) {
+                const remaining = (Number(button.dataset.busyCount) || 1) - 1;
+                button.dataset.busyCount = String(remaining);
+                if (remaining <= 0) button.classList.remove("busy");
+              }
+            });
+        }
+
         async function markNotificationRead(notification) {
           if (!leaseId || !notification || !notification.id) return;
           await remoteFetch(`/remote/v1/notifications/${encodeURIComponent(notification.id)}/read`, {
@@ -3475,8 +3600,13 @@
           outputSocket.onopen = () => {
             if (socket === outputSocket && leaseId === outputLeaseId && activeTerminalId === terminalId) {
               outputReconnectAttempt = 0;
-              clearTransientConnectionNotice("output", `Connected to ${terminalId}`);
-              if (!reconnecting) setStatus(`Connected to ${terminalId}`);
+              // Prefer the friendly "Workspace · Pane N" context title over the
+              // raw terminal id (issue #474 header identity).
+              const attachTitle =
+                (terminalId === activeTerminalId && activeTerminalTitle()) ||
+                `Connected to ${terminalId}`;
+              clearTransientConnectionNotice("output", attachTitle);
+              if (!reconnecting) setStatus(attachTitle);
               scheduleTerminalFit(true);
               focusCurrentInputSurface();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
@@ -3725,6 +3855,15 @@
         // enqueueInput -> /remote/v1/terminals/{id}/write path as Ctrl+C. No new
         // Remote API surface. Cursor keys (arrows/Home/End) are DECCKM-aware.
         const KEY_DEFS = {
+          // Step-navigation keys (issue #474, ADR-0039): controller actions on
+          // the lease-gated /remote/v1/navigation endpoints, not byte writes.
+          // `nav: [kind, direction]` feeds enqueueNavStep; navPad is a 4-way
+          // flick (up/down = pane spatial step, left/right = alert step).
+          navPad: { label: "P↕N↔", navFlick: true, navBadge: true },
+          navPrev: { label: "P↑", nav: ["spatial", "prev"], hint: "Previous pane (spatial order)" },
+          navNext: { label: "P↓", nav: ["spatial", "next"], hint: "Next pane (spatial order)" },
+          notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: "Most recent unread alert" },
+          notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: "Oldest unread alert" },
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
@@ -3766,18 +3905,29 @@
         };
         // Stable render order for both the toolbar and the custom-key palette.
         const KEY_ORDER = [
+          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
           "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_SETS = [
+          { id: "step", name: "Pane/Alert nav", desc: "Flick pad · P↑P↓ pane · N←N→ alerts", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
           { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
-        const DEFAULT_KEYBAR = { visible: false, sets: ["nav"], custom: [] };
+        const DEFAULT_KEYBAR = { visible: false, sets: ["step", "nav"], custom: [] };
+        // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
+        // spatial pane step (Ctrl+Alt+Up/Down territory), horizontal = alert
+        // step (Ctrl+Alt+Left/Right).
+        const NAV_FLICK_TARGETS = {
+          up: ["spatial", "prev"],
+          down: ["spatial", "next"],
+          left: ["notification", "recent"],
+          right: ["notification", "oldest"],
+        };
         const KEY_FLICK_THRESHOLD_PX = 18;
         let keyPopoverOpen = false;
 
@@ -3823,9 +3973,14 @@
 
         // Send only; do NOT focus the terminal — focusing raises the native soft
         // keyboard, which defeats the purpose of these no-keyboard helper keys.
-        function sendKey(id) {
+        // Nav keys dispatch a step-navigation action instead of writing bytes.
+        function sendKey(id, button = null) {
           const def = KEY_DEFS[id];
           if (!def) return;
+          if (def.nav) {
+            enqueueNavStep(button, def.nav[0], def.nav[1]);
+            return;
+          }
           const seq = keySequence(def);
           if (seq) enqueueInput(seq);
         }
@@ -3840,7 +3995,7 @@
           });
           // Retain click handling so keyboard activation and assistive
           // technologies use the same input path.
-          button.addEventListener("click", () => sendKey(id));
+          button.addEventListener("click", () => sendKey(id, button));
         }
 
         function directionFromFlick(deltaX, deltaY) {
@@ -3880,7 +4035,7 @@
           }
         }
 
-        function installDirectionalFlick(button) {
+        function installDirectionalFlick(button, onDirection = (direction) => sendKey(direction)) {
           let gesture = null;
 
           button.addEventListener("pointerdown", (event) => {
@@ -3912,7 +4067,7 @@
             gesture = null;
             button.classList.remove("flicking");
             hideKeyFlickHint();
-            if (shouldSend && direction) sendKey(direction);
+            if (shouldSend && direction) onDirection(direction);
           };
 
           button.addEventListener("pointerup", (event) => finishFlick(event, true));
@@ -3922,9 +4077,42 @@
 
         function updateKeyBarControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
+          const connected = Boolean(leaseId);
+          const unread = unreadNotificationCount();
           if (!keyRowEl) return;
           for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
-            btn.disabled = !canControl;
+            const def = KEY_DEFS[btn.dataset.key] || {};
+            if (def.nav || def.navFlick) {
+              // Nav step keys need only a lease (they can navigate away from a
+              // terminal-less workspace); alert keys idle at zero unread.
+              const isAlertKey = def.nav && def.nav[0] === "notification";
+              btn.disabled = !connected || (isAlertKey && unread <= 0);
+            } else {
+              btn.disabled = !canControl;
+            }
+          }
+          updateNavKeyBadge(unread);
+        }
+
+        // Unread badge rides on the FIRST rendered badge-capable nav key
+        // (flick pad or an alert key) so the count shows once, not per key.
+        function updateNavKeyBadge(unread) {
+          let assigned = false;
+          for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
+            const def = KEY_DEFS[btn.dataset.key] || {};
+            let badge = btn.querySelector(".key-nav-badge");
+            if (!def.navBadge) continue;
+            const show = !assigned && unread > 0;
+            if (show && !badge) {
+              badge = document.createElement("span");
+              badge.className = "workspace-count-badge key-nav-badge";
+              btn.append(badge);
+            }
+            if (badge) {
+              badge.hidden = !show;
+              if (show) fillCountBadge(badge, unread);
+            }
+            if (show) assigned = true;
           }
         }
 
@@ -3949,11 +4137,23 @@
             btn.dataset.key = id;
             btn.textContent = def.label;
             btn.title = def.label;
+            if (def.hint) btn.title = def.hint;
             if (def.flick) {
               btn.classList.add("key-flick-btn");
               btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
               btn.title = "Flick up, right, down, or left";
               installDirectionalFlick(btn);
+            } else if (def.navFlick) {
+              btn.classList.add("key-flick-btn");
+              btn.setAttribute(
+                "aria-label",
+                "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert"
+              );
+              btn.title = "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert";
+              installDirectionalFlick(btn, (direction) => {
+                const target = NAV_FLICK_TARGETS[direction];
+                if (target) enqueueNavStep(btn, target[0], target[1]);
+              });
             } else {
               installSoftKey(btn, id);
             }
@@ -4287,6 +4487,17 @@
           event.preventDefault();
         });
         focusTerminalButton.addEventListener("click", () => toggleInputSurfaceFocus());
+        copyPaneIdButton.addEventListener("pointerdown", (event) => {
+          if (!event.isPrimary || event.button !== 0) return;
+          event.preventDefault();
+        });
+        copyPaneIdButton.addEventListener("click", () => {
+          const identifier = activePaneIdentifier();
+          if (!identifier) return;
+          writeClipboardText(identifier)
+            .then(() => setStatus(`Copied ${identifier}`))
+            .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+        });
         inputModeToggleButton.addEventListener("click", () => {
           setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
         });

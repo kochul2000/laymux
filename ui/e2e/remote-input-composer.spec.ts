@@ -78,8 +78,24 @@ const navigation = {
   ],
   docks: [],
   terminals: [
-    { id: "terminal-1", title: "Shell 1", profile: "PowerShell", cwd: "C:\\one", appearance: {} },
-    { id: "terminal-2", title: "Shell 2", profile: "PowerShell", cwd: "C:\\two", appearance: {} },
+    {
+      id: "terminal-1",
+      title: "Shell 1",
+      profile: "PowerShell",
+      cwd: "C:\\one",
+      workspaceId: "ws-1",
+      paneNumber: 1,
+      appearance: {},
+    },
+    {
+      id: "terminal-2",
+      title: "Shell 2",
+      profile: "PowerShell",
+      cwd: "C:\\two",
+      workspaceId: "ws-1",
+      paneNumber: 2,
+      appearance: {},
+    },
   ],
   workspaceSelector: { display: { path: true, environment: true }, pathEllipsis: "end" },
   notifications: [],
@@ -455,7 +471,7 @@ async function installRemotePage(
 async function connect(page: Page) {
   await page.locator("#token").fill("test-token");
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 }
 
 async function selectTerminal(page: Page, cwd: string) {
@@ -523,7 +539,7 @@ test("a busy Local input is claimed by retrying the one-shot reservation token",
     { clientName: "browser", claimReservationId: "reservation-1" },
     { clientName: "browser", claimReservationId: "reservation-1" },
   ]);
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 });
 
 test("coarse pointer defaults to Composer and a saved Direct preference wins", async ({ page }) => {
@@ -877,7 +893,7 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   await page.locator("#release").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#connect")).toBeEnabled();
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
   await expect(editor).toHaveValue("preserve across disconnect");
   await expect(editor).toBeEnabled();

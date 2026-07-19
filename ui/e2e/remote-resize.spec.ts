@@ -56,6 +56,8 @@ const navigation = {
       title: "Shell",
       profile: "PowerShell",
       cwd: "C:\\work",
+      workspaceId: "ws-1",
+      paneNumber: 1,
       appearance: {},
     },
   ],
@@ -188,7 +190,7 @@ async function connectRemote(page: Page) {
     };
   });
   await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 }
 
 async function terminalGeometry(page: Page) {

@@ -142,6 +142,43 @@ test.describe("remote mobile layout", () => {
     expect(emptyMessageHeight).toBe(populatedHeight);
   });
 
+  test("step navigation keys render inside the soft-key toolbar", async ({ page }) => {
+    await page.route("http://remote.test/", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>remote test</title>",
+      }),
+    );
+    await page.goto("http://remote.test/");
+    await page.setContent(await loadRemotePageMarkup(true));
+    await page.locator("#keyBarToggle").click();
+
+    // No dedicated bar row — the keys live in the toggleable key bar.
+    await expect(page.locator("#navStepBar")).toHaveCount(0);
+
+    // Default "step" set: 4-way nav flick pad + four step keys, rendered
+    // ahead of the escape-sequence keys.
+    const navPad = page.locator('[data-key="navPad"]');
+    await expect(navPad).toHaveCount(1);
+    await expect(navPad).toHaveAttribute(
+      "aria-label",
+      "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert",
+    );
+    await expect(page.locator('[data-key="navPrev"]')).toHaveText("P↑");
+    await expect(page.locator('[data-key="navNext"]')).toHaveText("P↓");
+    await expect(page.locator('[data-key="notifRecent"]')).toHaveText("N←");
+    await expect(page.locator('[data-key="notifOldest"]')).toHaveText("N→");
+
+    // Disconnected: nav keys are disabled like the rest of the toolbar.
+    await expect(page.locator('[data-key="navPrev"]')).toBeDisabled();
+
+    // The toolbar stays a single compact row — the reason the dedicated bar
+    // was dropped (it was too thick).
+    const barHeight = (await page.locator("#keyBar").boundingBox())?.height;
+    expect(barHeight).toBeLessThan(50);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  });
+
   test("offers a four-way flick direction key", async ({ page }) => {
     await page.route("http://remote.test/", (route) =>
       route.fulfill({
@@ -171,6 +208,8 @@ test.describe("remote mobile layout", () => {
       { name: "left", dx: -32, dy: 0 },
     ] as const;
     for (const { name, dx, dy } of directions) {
+      // The default "step" set renders ahead of dpad — keep it in the viewport.
+      await flickButton.scrollIntoViewIfNeeded();
       const box = await flickButton.boundingBox();
       expect(box).not.toBeNull();
       const x = box!.x + box!.width / 2;
@@ -564,7 +603,8 @@ test.describe("remote mobile layout", () => {
     await page.setContent(await loadRemotePageMarkup(true));
     const app = page.locator(".app");
 
-    await expect(page.locator("#keyRow .key-btn")).toHaveCount(10);
+    // Default sets: "step" (5 nav keys) + "nav" (10 escape keys).
+    await expect(page.locator("#keyRow .key-btn")).toHaveCount(15);
     await expect(page.locator("#keyBar")).toBeHidden();
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();
