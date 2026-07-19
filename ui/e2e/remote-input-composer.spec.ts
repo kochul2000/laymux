@@ -824,6 +824,57 @@ test("a malformed output frame stays fail-closed after a delayed snapshot write 
   ).toEqual([]);
 });
 
+test("snapshot replay swallows xterm protocol replies but resumes real keystrokes (#480)", async ({
+  page,
+}) => {
+  // The remote xterm is a display mirror; the desktop pane answers protocol
+  // queries. Replaying captured output makes xterm auto-answer any queries in
+  // that output via onData. On reconnect the whole snapshot is replayed, so
+  // every reply would otherwise flood the PTY as stray input (a phantom Enter).
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    delayFirstTerminalWrite: true,
+    deferSocketCloseEvent: true,
+  });
+  await connect(page);
+
+  // Hold the snapshot write mid-flight so the replay guard stays active.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __mockTerminal: { written: unknown[] } }).__mockTerminal.written
+            .length,
+      ),
+    )
+    .toBe(1);
+
+  // xterm's reply to a query embedded in the replayed snapshot (here a DSR
+  // "ESC[0n") must never reach the PTY while the replay is in flight.
+  await page.evaluate(() =>
+    (
+      window as Window & { __mockTerminal: { emitData: (data: string) => void } }
+    ).__mockTerminal.emitData("\x1b[0n"),
+  );
+  await page.waitForTimeout(20);
+  expect(remote.writes).toHaveLength(0);
+
+  // Once the replay completes the mirror forwards genuine keystrokes again.
+  await page.evaluate(() =>
+    (
+      window as Window & { __mockTerminal: { releaseDelayedWrite: () => void } }
+    ).__mockTerminal.releaseDelayedWrite(),
+  );
+  await page.waitForTimeout(20);
+  await page.evaluate(() =>
+    (
+      window as Window & { __mockTerminal: { emitData: (data: string) => void } }
+    ).__mockTerminal.emitData("ls"),
+  );
+  await expect.poll(() => remote.writes.length).toBe(1);
+  expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "ls" });
+});
+
 test("an in-flight snapshot is sent once and only clears the unchanged revision", async ({
   page,
 }) => {

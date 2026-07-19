@@ -1510,6 +1510,13 @@
         let terminalSelectionRevision = 0;
         let terminalOutputWriteChain = Promise.resolve();
         let terminalOutputGeneration = 0;
+        // The remote xterm is a display mirror; the desktop pane is the
+        // authoritative terminal that answers protocol queries. While we replay
+        // captured output into xterm its parser auto-answers any query
+        // sequences (DSR/DA/DECRQM, ...) embedded in that output via onData.
+        // This counter is raised around such replay writes so those replies are
+        // swallowed instead of forwarded to the PTY (issue #480).
+        let terminalReplayDepth = 0;
         const inputModeByTerminalId = new Map();
         const composerDraftByTerminalId = new Map();
         let preferredInputMode = loadPreferredInputMode();
@@ -2478,7 +2485,14 @@
           terminalHost.addEventListener("paste", handleDirectTerminalPaste, true);
           installSelectionHandles(terminal);
           installTouchSelectionBridge(terminal);
-          terminal.onData((data) => enqueueInput(data));
+          terminal.onData((data) => {
+            // Swallow xterm's own protocol replies emitted while replaying
+            // captured output (issue #480); forward only genuine user input.
+            // A running program's queries are answered by the desktop pane, so
+            // the mirror must never echo replies back into the PTY.
+            if (terminalReplayDepth > 0) return;
+            enqueueInput(data);
+          });
           terminal.onResize(({ cols, rows }) => queueResize(cols, rows));
           terminal.onSelectionChange(() => {
             updateTerminalControls();
@@ -3495,7 +3509,11 @@
             outputSocket.close();
           };
 
-          const queueTerminalWrite = (payload) => {
+          // `guardInput` marks replay writes (snapshot + synthetic mode) whose
+          // onData replies must be swallowed rather than forwarded to the PTY.
+          // Live deltas stay unguarded so real keystrokes typed during heavy
+          // output are never dropped by a lingering replay window (issue #480).
+          const queueTerminalWrite = (payload, guardInput = false) => {
             terminalOutputWriteChain = terminalOutputWriteChain.then(
               () =>
                 new Promise((resolve) => {
@@ -3507,7 +3525,9 @@
                     resolve();
                     return;
                   }
+                  if (guardInput) terminalReplayDepth += 1;
                   term.write(payload, () => {
+                    if (guardInput) terminalReplayDepth -= 1;
                     scheduleTerminalRefresh();
                     resolve();
                   });
@@ -3523,7 +3543,14 @@
                 outputGeneration === terminalOutputGeneration &&
                 socket === outputSocket
               ) {
-                term.reset();
+                // reset() only runs at attach/reconnect, never mid-stream, so
+                // guarding it can't drop live keystrokes.
+                terminalReplayDepth += 1;
+                try {
+                  term.reset();
+                } finally {
+                  terminalReplayDepth -= 1;
+                }
                 scheduleTerminalRefresh();
               }
             });
@@ -3621,8 +3648,8 @@
               const syntheticMode = header.state.modes.bracketedPaste
                 ? "\x1b[?2004h"
                 : "\x1b[?2004l";
-              queueTerminalWrite(payload);
-              queueTerminalWrite(syntheticMode).then(() => {
+              queueTerminalWrite(payload, true);
+              queueTerminalWrite(syntheticMode, true).then(() => {
                 if (
                   outputProtocolFailed ||
                   outputGeneration !== terminalOutputGeneration ||
