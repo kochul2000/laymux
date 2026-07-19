@@ -97,7 +97,8 @@ test.describe("View Switcher", () => {
   test("changing view type in dropdown switches the view", async ({ appPage: page }) => {
     await hoverPane(page, 0);
     await page.getByTestId("pane-control-view-select").selectOption("MemoView");
-    await expect(page.getByTestId("view-memo")).toBeVisible();
+    // The right dock also hosts a MemoView, so scope the assertion to the pane.
+    await expect(page.getByTestId("workspace-pane-0").getByTestId("view-memo")).toBeVisible();
   });
 });
 
