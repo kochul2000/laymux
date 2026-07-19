@@ -231,6 +231,7 @@ async function installBrowserMocks(
           this.textarea?.blur();
         }
         scrollLines(_amount: number) {}
+        scrollToBottom() {}
         emitData(data: string) {
           this.dataListener?.(data);
         }
@@ -609,7 +610,8 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  // Desktop layout has no visible Send button — Enter is the send gesture.
+  await expect(page.locator("#composerSend")).toBeHidden();
 
   await editor.fill("line");
   await editor.press("Shift+Enter");
@@ -627,15 +629,18 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
   await expect(editor).toHaveValue("");
 });
 
-test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ page }) => {
+test("mobile-layout Composer keeps Enter as a newline and submits with the Send button", async ({
+  page,
+}) => {
   const remote = await installRemotePage(page, { coarse: true });
   await connect(page);
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  // Mobile layout submits with the dedicated Send button only (ADR-0036).
+  await expect(page.locator("#composerSend")).toBeVisible();
 
-  // Enter during IME composition never sends.
+  // Enter — composing or not — never sends on the mobile layout.
   await editor.fill("한글 조합");
   await editor.dispatchEvent("compositionstart");
   await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
@@ -643,14 +648,13 @@ test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ pa
   expect(remote.inputs).toHaveLength(0);
   await editor.dispatchEvent("compositionend");
 
-  // Shift+Enter inserts a newline; plain Enter sends (mirrors desktop).
   await editor.fill("line");
-  await editor.press("Shift+Enter");
+  await editor.press("Enter");
   await expect(editor).toHaveValue("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
-  await editor.press("Enter");
+  await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body).toEqual({
     leaseId: "lease-1",
@@ -756,13 +760,15 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
 
   const editor = page.locator("#composerInput");
   const composer = page.locator("#terminalComposer");
+  const send = page.locator("#composerSend");
   await editor.fill("before send");
-  // Two quick Enters must not double-submit (the in-flight gate blocks the second).
-  await editor.press("Enter");
-  await editor.press("Enter");
+  // Two quick sends must not double-submit: the first flips the in-flight
+  // gate, which disables Send, and a forced second click is still gated.
+  await send.click();
+  await send.click({ force: true }).catch(() => {});
   await expect.poll(() => remote.inputs.length).toBe(1);
   await expect(composer).toHaveAttribute("data-can-send", "false");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  await expect(send).toBeDisabled();
   await expect(editor).toBeEnabled();
 
   await editor.fill("edited while pending");
@@ -770,20 +776,20 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await expect(composer).toHaveAttribute("data-can-send", "true");
   await expect(editor).toHaveValue("edited while pending");
 
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(2);
   await remote.inputs[1].respond();
   await expect(editor).toHaveValue("");
 
   await editor.fill("preserve on failure");
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(3);
   await remote.inputs[2].respond(500);
   await expect(editor).toHaveValue("preserve on failure");
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   await editor.fill("terminal one pending");
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(4);
   await selectTerminal(page, "C:\\two");
   await editor.fill("terminal two draft");
@@ -802,7 +808,7 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   const editor = page.locator("#composerInput");
   const composer = page.locator("#terminalComposer");
   await editor.fill("preserve across disconnect");
-  await editor.press("Enter");
+  await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   await expect(composer).toHaveAttribute("data-can-send", "false");
 
