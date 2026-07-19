@@ -231,6 +231,7 @@ async function installBrowserMocks(
           this.textarea?.blur();
         }
         scrollLines(_amount: number) {}
+        scrollToBottom() {}
         emitData(data: string) {
           this.dataListener?.(data);
         }
@@ -342,6 +343,7 @@ async function installRemotePage(
   page: Page,
   options: {
     coarse: boolean;
+    localApp?: boolean;
     storedMode?: "direct" | "composer";
     holdInputs?: boolean;
     holdTerminalFocus?: boolean;
@@ -359,8 +361,13 @@ async function installRemotePage(
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
   await installBrowserMocks(page, options);
-  await page.route("http://remote.test/", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<!doctype html><title>remote test</title>" }),
+  await page.route(
+    (url) => url.origin === "http://remote.test" && url.pathname === "/",
+    (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>remote test</title>",
+      }),
   );
   await page.route("**/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -438,7 +445,9 @@ async function installRemotePage(
     await route.fulfill({ json: { ok: true } });
   });
 
-  await page.goto("http://remote.test/");
+  // setContent keeps the URL, so the page script still reads localApp=1
+  // from location.search at init (ADR-0036 layout classification).
+  await page.goto(options.localApp ? "http://remote.test/?localApp=1" : "http://remote.test/");
   await page.setContent(await remotePageMarkup());
   return state;
 }
@@ -609,7 +618,24 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  // Desktop layout has no visible Send button — Enter is the send gesture.
+  await expect(page.locator("#composerSend")).toBeHidden();
+
+  // The desktop keydown guards: Enter mid-composition (isComposing) and the
+  // soft-keyboard keyCode 229 variant never submit.
+  await editor.fill("한글 조합");
+  await editor.dispatchEvent("compositionstart");
+  await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
+  await page.waitForTimeout(20);
+  expect(remote.inputs).toHaveLength(0);
+  await editor.dispatchEvent("compositionend");
+  await editor.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    Object.defineProperty(event, "keyCode", { get: () => 229 });
+    element.dispatchEvent(event);
+  });
+  await page.waitForTimeout(20);
+  expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("line");
   await editor.press("Shift+Enter");
@@ -627,15 +653,18 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
   await expect(editor).toHaveValue("");
 });
 
-test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ page }) => {
+test("mobile-layout Composer keeps Enter as a newline and submits with the Send button", async ({
+  page,
+}) => {
   const remote = await installRemotePage(page, { coarse: true });
   await connect(page);
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  // Mobile layout submits with the dedicated Send button only (ADR-0036).
+  await expect(page.locator("#composerSend")).toBeVisible();
 
-  // Enter during IME composition never sends.
+  // Enter — composing or not — never sends on the mobile layout.
   await editor.fill("한글 조합");
   await editor.dispatchEvent("compositionstart");
   await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
@@ -643,14 +672,13 @@ test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ pa
   expect(remote.inputs).toHaveLength(0);
   await editor.dispatchEvent("compositionend");
 
-  // Shift+Enter inserts a newline; plain Enter sends (mirrors desktop).
   await editor.fill("line");
-  await editor.press("Shift+Enter");
+  await editor.press("Enter");
   await expect(editor).toHaveValue("line\n");
   expect(remote.inputs).toHaveLength(0);
 
   await editor.fill("send me");
-  await editor.press("Enter");
+  await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   expect(remote.inputs[0].body).toEqual({
     leaseId: "lease-1",
@@ -670,6 +698,38 @@ test("coarse-pointer Composer also sends on Enter (no Send button)", async ({ pa
   await expect.poll(() => remote.writes.length).toBe(2);
   expect(remote.writes[1].data).toBe("\x1b");
   await expect(editor).toHaveValue("untouched draft");
+});
+
+test("PC-app embedded mobile view (localApp=1) keeps the mobile send gesture on a fine pointer", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, {
+    coarse: false,
+    localApp: true,
+    storedMode: "composer",
+  });
+  await connect(page);
+
+  const editor = page.locator("#composerInput");
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+  // mobileLayout = coarse pointer || localApp=1 (ADR-0036): the embedded
+  // mobile view behaves mobile even though it is driven by a mouse/keyboard.
+  await expect(page.locator("#composerSend")).toBeVisible();
+
+  await editor.fill("line");
+  await editor.press("Enter");
+  await expect(editor).toHaveValue("line\n");
+  expect(remote.inputs).toHaveLength(0);
+
+  await editor.fill("send me");
+  await page.locator("#composerSend").click();
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  expect(remote.inputs[0].body).toEqual({
+    leaseId: "lease-1",
+    text: "send me",
+    submit: true,
+  });
+  await expect(editor).toHaveValue("");
 });
 
 test("Direct paste uses structured input only after a V1 snapshot establishes readiness", async ({
@@ -756,13 +816,19 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
 
   const editor = page.locator("#composerInput");
   const composer = page.locator("#terminalComposer");
+  const send = page.locator("#composerSend");
   await editor.fill("before send");
-  // Two quick Enters must not double-submit (the in-flight gate blocks the second).
-  await editor.press("Enter");
-  await editor.press("Enter");
+  // Two quick sends must not double-submit. A disabled button swallows real
+  // clicks, so drive the second submit through a synthetic click that still
+  // reaches the handler — only the draft.inFlight gate can block it.
+  await send.click();
+  await send.evaluate((button) =>
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })),
+  );
+  await page.waitForTimeout(20);
   await expect.poll(() => remote.inputs.length).toBe(1);
   await expect(composer).toHaveAttribute("data-can-send", "false");
-  await expect(page.locator("#composerSend")).toHaveCount(0);
+  await expect(send).toBeDisabled();
   await expect(editor).toBeEnabled();
 
   await editor.fill("edited while pending");
@@ -770,20 +836,20 @@ test("an in-flight snapshot is sent once and only clears the unchanged revision"
   await expect(composer).toHaveAttribute("data-can-send", "true");
   await expect(editor).toHaveValue("edited while pending");
 
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(2);
   await remote.inputs[1].respond();
   await expect(editor).toHaveValue("");
 
   await editor.fill("preserve on failure");
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(3);
   await remote.inputs[2].respond(500);
   await expect(editor).toHaveValue("preserve on failure");
   await expect(composer).toHaveAttribute("data-can-send", "true");
 
   await editor.fill("terminal one pending");
-  await editor.press("Enter");
+  await send.click();
   await expect.poll(() => remote.inputs.length).toBe(4);
   await selectTerminal(page, "C:\\two");
   await editor.fill("terminal two draft");
@@ -802,7 +868,7 @@ test("disconnect releases an in-flight Composer action while preserving its draf
   const editor = page.locator("#composerInput");
   const composer = page.locator("#terminalComposer");
   await editor.fill("preserve across disconnect");
-  await editor.press("Enter");
+  await page.locator("#composerSend").click();
   await expect.poll(() => remote.inputs.length).toBe(1);
   await expect(composer).toHaveAttribute("data-can-send", "false");
 
