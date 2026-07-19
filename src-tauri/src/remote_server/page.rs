@@ -197,6 +197,20 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_jump_to_bottom_button() {
+        let html = remote_page_html();
+
+        assert!(html.contains(
+            "id=\"scrollToBottom\" class=\"terminal-scroll-to-bottom\" type=\"button\" hidden"
+        ));
+        assert!(html.contains("aria-label=\"Scroll to bottom\""));
+        assert!(html.contains("function isTerminalScrolledUp(term)"));
+        assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
+        assert!(html.contains("scrollToBottomButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("terminal.scrollToBottom();"));
+    }
+
+    #[test]
     fn remote_page_html_contains_soft_key_toolbar() {
         let html = remote_page_html();
         // Markup: toolbar row, footer toggle, and the settings popover.

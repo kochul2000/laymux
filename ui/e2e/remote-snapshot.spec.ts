@@ -145,6 +145,7 @@ type TermWindow = typeof window & {
   Terminal: { prototype: { reset: () => void } };
   __remoteTerm?: {
     buffer: { active: { viewportY: number; baseY: number } };
+    scrollLines: (amount: number) => void;
   };
 };
 
@@ -176,4 +177,46 @@ test("a v1 snapshot replay lands the viewport at the live tail", async ({ page }
       }),
     )
     .toBe("at-bottom");
+});
+
+test("the remote jump-to-bottom button follows the scrollback viewport", async ({ page }) => {
+  await installRemoteMocks(page, 300);
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.evaluate(() => {
+    const target = window as TermWindow;
+    const originalReset = target.Terminal.prototype.reset;
+    target.Terminal.prototype.reset = function resetCapturingInstance() {
+      (window as TermWindow).__remoteTerm = this as never;
+      return originalReset.call(this);
+    };
+  });
+
+  await page.locator("#connect").click();
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const term = (window as TermWindow).__remoteTerm;
+        return term?.buffer.active.baseY ?? 0;
+      }),
+    )
+    .toBeGreaterThan(0);
+
+  const scrollToBottom = page.getByRole("button", { name: "Scroll to bottom" });
+  await expect(scrollToBottom).toBeHidden();
+
+  await page.evaluate(() => (window as TermWindow).__remoteTerm?.scrollLines(-10));
+  await expect(scrollToBottom).toBeVisible();
+
+  await scrollToBottom.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const term = (window as TermWindow).__remoteTerm;
+        if (!term) return false;
+        return term.buffer.active.viewportY === term.buffer.active.baseY;
+      }),
+    )
+    .toBe(true);
+  await expect(scrollToBottom).toBeHidden();
 });
