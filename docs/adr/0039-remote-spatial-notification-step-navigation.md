@@ -1,6 +1,6 @@
 # 0039. Remote 공간순서·알림순서 스텝 내비게이션은 데스크톱 프론트엔드가 계산한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-19
 - Source: issue #474, [ADR-0013](0013-direct-remote-mode.md), [ADR-0018](0018-remote-navigation-ui-state.md), [ADR-0019](0019-remote-notification-interactions.md), [ADR-0020](0020-remote-dock-terminal-navigation.md), [ADR-0028](0028-remote-soft-key-toolbar.md) 확장
 

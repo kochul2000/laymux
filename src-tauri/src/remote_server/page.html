@@ -3241,13 +3241,22 @@
         function enqueueNavStep(button, kind, direction) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
-          if (button) button.classList.add("busy");
+          if (button) {
+            // Per-button counter: a queued double-tap must not lose its busy
+            // dim when the first step's finally fires.
+            button.dataset.busyCount = String((Number(button.dataset.busyCount) || 0) + 1);
+            button.classList.add("busy");
+          }
           navStepChain = navStepChain
             .then(() => performNavStep(kind, direction))
             .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
-              if (button) button.classList.remove("busy");
+              if (button) {
+                const remaining = (Number(button.dataset.busyCount) || 1) - 1;
+                button.dataset.busyCount = String(remaining);
+                if (remaining <= 0) button.classList.remove("busy");
+              }
             });
         }
 

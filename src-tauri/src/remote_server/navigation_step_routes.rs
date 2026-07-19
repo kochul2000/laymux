@@ -86,11 +86,15 @@ pub(super) async fn remote_navigation_spatial_step(
                     );
                 }
             }
-            emit_workspace_state_changed(
-                &server,
-                "remote.navigation.spatialStep",
-                serde_json::json!({ "direction": body.direction }),
-            );
+            // moved:false is a valid no-op — nothing changed, so don't wake
+            // resource subscribers with a state-changed event.
+            if step_moved(&data) {
+                emit_workspace_state_changed(
+                    &server,
+                    "remote.navigation.spatialStep",
+                    serde_json::json!({ "direction": body.direction }),
+                );
+            }
             Json(data).into_response()
         }
         Err(response) => response,
@@ -132,21 +136,29 @@ pub(super) async fn remote_navigation_notification_step(
     .await
     {
         Ok(data) => {
-            emit_workspace_state_changed(
-                &server,
-                "remote.navigation.notificationStep",
-                serde_json::json!({ "direction": body.direction }),
-            );
+            if step_moved(&data) {
+                emit_workspace_state_changed(
+                    &server,
+                    "remote.navigation.notificationStep",
+                    serde_json::json!({ "direction": body.direction }),
+                );
+            }
             Json(data).into_response()
         }
         Err(response) => response,
     }
 }
 
+/// A step result actually navigated somewhere (`{moved:true}`), as opposed to
+/// a valid no-op like `no_other_target`/`no_unread_notifications`.
+fn step_moved(data: &Value) -> bool {
+    data.get("moved").and_then(Value::as_bool) == Some(true)
+}
+
 /// Extract the landing terminal id from a successful `{moved:true, target:{…}}`
 /// bridge result. Returns None for `moved:false` no-ops.
 fn landed_terminal_id(data: &Value) -> Option<&str> {
-    if data.get("moved").and_then(Value::as_bool) != Some(true) {
+    if !step_moved(data) {
         return None;
     }
     data.get("target")
@@ -196,6 +208,17 @@ mod tests {
         assert!(NOTIFICATION_DIRECTIONS.contains(&"recent"));
         assert!(NOTIFICATION_DIRECTIONS.contains(&"oldest"));
         assert!(!NOTIFICATION_DIRECTIONS.contains(&"next"));
+    }
+
+    #[test]
+    fn step_moved_distinguishes_noop_results() {
+        assert!(step_moved(
+            &serde_json::json!({ "moved": true, "target": {} })
+        ));
+        assert!(!step_moved(
+            &serde_json::json!({ "moved": false, "reason": "no_other_target" })
+        ));
+        assert!(!step_moved(&serde_json::json!({})));
     }
 
     #[test]

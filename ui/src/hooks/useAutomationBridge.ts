@@ -1121,7 +1121,10 @@ export async function handleAsyncAutomationRequest(
     useTerminalStore.getState().setTerminalFocus(terminalId);
     return result;
   }
-  if (request.target === "navigation" && request.method === "spatialStep") {
+  if (
+    request.target === "navigation" &&
+    (request.method === "spatialStep" || request.method === "notificationStep")
+  ) {
     const result = handleAutomationRequest(request);
     if (!result.success) return result;
     const data = result.data as navigationActions.NavigationStepResult;

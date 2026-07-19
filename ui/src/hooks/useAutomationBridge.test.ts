@@ -2388,6 +2388,28 @@ describe("navigation step actions (issue #474)", () => {
     expect(stored?.readAt).not.toBeNull();
   });
 
+  it("notificationStep waits for the landing terminal and takes terminal focus", async () => {
+    seedTwoWorkspaces();
+    useNotificationStore.getState().addNotification({
+      terminalId: "terminal-b1",
+      workspaceId: "ws-b",
+      message: "done",
+    });
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-4a",
+      category: "action",
+      target: "navigation",
+      method: "notificationStep",
+      params: { direction: "recent" },
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as Record<string, unknown>).moved).toBe(true);
+    const landed = useTerminalStore.getState().instances.find((i) => i.id === "terminal-b1");
+    expect(landed?.isFocused).toBe(true);
+  });
+
   it("notificationStep reports no_unread_notifications when nothing is unread", () => {
     seedTwoWorkspaces();
     const result = handleAutomationRequest({
