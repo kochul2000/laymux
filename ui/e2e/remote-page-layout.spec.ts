@@ -30,7 +30,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#keyBar")).toBeHidden();
     await expect(terminalMeta).toBeHidden();
     expect((await footer.boundingBox())?.height).toBeLessThan(50);
-    const footerButtons = await footer.locator("button").evaluateAll((buttons) =>
+    const footerButtons = await footer.locator("button:not([hidden])").evaluateAll((buttons) =>
       buttons.map((button) => ({
         width: button.getBoundingClientRect().width,
         minWidth: getComputedStyle(button).minWidth,
@@ -47,7 +47,7 @@ test.describe("remote mobile layout", () => {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       buttonWidths: Array.from(
-        element.querySelectorAll("button"),
+        element.querySelectorAll("button:not([hidden])"),
         (button) => button.getBoundingClientRect().width,
       ),
     }));
@@ -265,8 +265,9 @@ test.describe("remote mobile layout", () => {
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await expect(page.locator("#focusTerminal")).toBeEnabled();
-    await page.locator("#focusTerminal").tap();
 
+    // Connecting focuses the direct input surface on its own; the Keyboard
+    // button is a focus toggle now, so tapping it here would dismiss it.
     const helperTextarea = page.locator(".xterm-helper-textarea");
     await expect(helperTextarea).toBeFocused();
 
