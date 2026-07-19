@@ -856,6 +856,20 @@
         user-select: none;
         -webkit-user-select: none;
         overscroll-behavior: contain;
+        /* Height-only shrinks keep the fitted xterm and crop it here. */
+        overflow: hidden;
+      }
+      /* xterm mounts inside the sizer, not the host. The sizer normally tracks
+         the host (height: 100%); when the visual viewport shrinks without a
+         width change (soft keyboard, composer drag) fitTerminal pins it to the
+         last fitted pixel height so PTY rows stay stable, and the bottom
+         anchor keeps the live tail — where TUIs draw their prompt — visible. */
+      #terminalSizer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 100%;
       }
       .xterm {
         height: 100%;
@@ -1281,7 +1295,7 @@
             </section>
           </aside>
           <div class="terminal-shell">
-            <div id="terminal" aria-label="Terminal output"></div>
+            <div id="terminal" aria-label="Terminal output"><div id="terminalSizer"></div></div>
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
               <textarea
                 id="composerInput"
@@ -1340,6 +1354,7 @@
         const connectionHint = document.querySelector(".connection-hint");
         const statusEl = $("status");
         const terminalHost = $("terminal");
+        const terminalSizer = $("terminalSizer");
         const terminalShell = document.querySelector(".terminal-shell");
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
@@ -1417,6 +1432,10 @@
         let terminal = null;
         let fitAddon = null;
         let resizeObserver = null;
+        // Last host geometry adopted by fitTerminal. Height-only shrinks below
+        // fittedHostHeight crop the surface instead of refitting (ADR-0038).
+        let fittedHostWidth = 0;
+        let fittedHostHeight = 0;
         let resizeListenerAttached = false;
         let resizeTimer = null;
         let terminalRefreshFrame = null;
@@ -2341,7 +2360,7 @@
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
-          terminal.open(terminalHost);
+          terminal.open(terminalSizer);
           terminalHost.addEventListener(
             "focusin",
             (event) => {
@@ -2366,6 +2385,9 @@
             if (!terminal.hasSelection()) lastCopiedSelection = "";
           });
           terminal.onScroll?.(() => updateSelectionHandles(terminal));
+          // Entering the alternate buffer while a height-shrink crop is active
+          // must re-fit so full-screen apps get the real surface rows.
+          terminal.buffer?.onBufferChange?.(() => scheduleTerminalFit(Boolean(activeTerminalId)));
           if ("ResizeObserver" in window) {
             resizeObserver = new ResizeObserver(() => fitTerminal());
             resizeObserver.observe(terminalHost);
@@ -3988,6 +4010,25 @@
           if (!terminal || !fitAddon) return;
           const rect = terminalHost.getBoundingClientRect();
           if (rect.width < 20 || rect.height < 20) return;
+          // PTY rows/cols are global state (ADR-0015) and Codex-class TUIs
+          // reflow their entire scrollback on SIGWINCH, so every rows change
+          // floods the output stream. Height-only shrinks (soft keyboard,
+          // composer drag, URL bar) therefore stay surface-local: keep the
+          // fitted geometry and crop the sizer bottom-anchored. Width changes
+          // and height growth adopt the host geometry as before. Alternate
+          // buffer has no scrollback to flood and full-screen apps need their
+          // top rows, so it always adopts (ADR-0038).
+          const widthChanged = Math.abs(rect.width - fittedHostWidth) >= 1;
+          const normalBuffer = terminal.buffer?.active?.type !== "alternate";
+          if (!widthChanged && normalBuffer && rect.height < fittedHostHeight - 0.5) {
+            terminalSizer.style.height = `${Math.round(fittedHostHeight)}px`;
+            updateSelectionHandles(terminal);
+            scheduleTerminalRefresh();
+            return;
+          }
+          fittedHostWidth = rect.width;
+          fittedHostHeight = rect.height;
+          terminalSizer.style.height = "100%";
           try {
             fitAddon.fit();
           } catch (err) {
