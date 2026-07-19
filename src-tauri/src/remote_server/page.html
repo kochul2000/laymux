@@ -47,6 +47,7 @@
         --fs-sm: 11px;
         --fs-md: 13px;
         --key-bar-control-height: 26px;
+        --terminal-scroll-btn-right: 26px;
       }
       * { box-sizing: border-box; }
       html, body {
@@ -862,6 +863,33 @@
         -webkit-user-select: none;
         overscroll-behavior: contain;
       }
+      /* Match the desktop terminal's floating jump-to-bottom affordance while
+         keeping the remote scroll position entirely surface-local. */
+      .terminal-scroll-to-bottom {
+        position: absolute;
+        right: var(--terminal-scroll-btn-right);
+        bottom: 16px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--bg-base);
+        opacity: 0.4;
+        box-shadow: 0 2px 8px var(--backdrop-light);
+        transition:
+          opacity 120ms ease,
+          transform 120ms ease;
+      }
+      .terminal-scroll-to-bottom:hover {
+        opacity: 1;
+        transform: translateY(-1px);
+      }
       /* Clips the cropped xterm without clipping the selection handles, which
          are appended to the host itself and may overhang the bottom row. */
       #terminalViewport {
@@ -1321,7 +1349,14 @@
             </section>
           </aside>
           <div class="terminal-shell">
-            <div id="terminal" aria-label="Terminal output"><div id="terminalViewport"><div id="terminalSizer"></div></div></div>
+            <div id="terminal" aria-label="Terminal output">
+              <div id="terminalViewport"><div id="terminalSizer"></div></div>
+              <button id="scrollToBottom" class="terminal-scroll-to-bottom" type="button" hidden aria-label="Scroll to bottom" title="Scroll to bottom">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="butt" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m5 8.5 7 7 7-7" />
+                </svg>
+              </button>
+            </div>
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
               <textarea
                 id="composerInput"
@@ -1381,6 +1416,7 @@
         const statusEl = $("status");
         const terminalHost = $("terminal");
         const terminalSizer = $("terminalSizer");
+        const scrollToBottomButton = $("scrollToBottom");
         const terminalShell = document.querySelector(".terminal-shell");
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
@@ -1811,6 +1847,7 @@
             stopSocket();
             stopInputFlush();
             stopResizeFlush();
+            scrollToBottomButton.hidden = true;
           }
           activeTerminalId = nextId;
           composerIsComposing = false;
@@ -1904,6 +1941,18 @@
           focusTerminalButton.disabled = !canControl;
           updateComposerControls();
           updateKeyBarControls();
+        }
+
+        function isTerminalScrolledUp(term) {
+          const activeBuffer = term?.buffer?.active;
+          if (!activeBuffer) return false;
+          const baseY = activeBuffer.baseY ?? 0;
+          const viewportY = activeBuffer.viewportY ?? baseY;
+          return viewportY < baseY;
+        }
+
+        function updateScrollToBottomButton(term = terminal) {
+          scrollToBottomButton.hidden = !term || !isTerminalScrolledUp(term);
         }
 
         function fallbackCopyText(text) {
@@ -2436,7 +2485,10 @@
             updateSelectionHandles(terminal);
             if (!terminal.hasSelection()) lastCopiedSelection = "";
           });
-          terminal.onScroll?.(() => updateSelectionHandles(terminal));
+          terminal.onScroll?.(() => {
+            updateSelectionHandles(terminal);
+            updateScrollToBottomButton(terminal);
+          });
           terminal.onCursorMove?.(() => updateCropTransform());
           // Entering the alternate buffer while a height-shrink crop is active
           // must re-fit so full-screen apps get the real surface rows.
@@ -3583,6 +3635,7 @@
                 // A replayed snapshot must land at the live tail, not wherever
                 // the fit/reflow race left the viewport.
                 term.scrollToBottom();
+                updateScrollToBottomButton(term);
                 composerReady = true;
                 updateComposerControls();
                 focusCurrentInputSurface();
@@ -4491,6 +4544,12 @@
         // Listen at the same boundary so releasing an outside-terminal drag still
         // schedules the copy after every listener for this event has run.
         document.addEventListener("mouseup", copySelectionAfterInteraction);
+        keepInputSurfaceFocus(scrollToBottomButton);
+        scrollToBottomButton.addEventListener("click", () => {
+          if (!terminal) return;
+          terminal.scrollToBottom();
+          updateScrollToBottomButton();
+        });
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         // Ctrl+C sends like a soft key; keep it from blurring the input surface
