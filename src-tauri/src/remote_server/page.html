@@ -3985,16 +3985,26 @@
           if (seq) enqueueInput(seq);
         }
 
+        // A toolbar/key button must never pull focus off the active input
+        // surface: blurring the composer or xterm helper textarea dismisses the
+        // mobile soft keyboard (#482) and defeats these helper keys (ADR-0028).
+        // WebKit/iOS only cancels the focus-moving default on `mousedown`
+        // (`pointerdown` preventDefault is ignored there), so guard both. A
+        // secondary button or non-primary pointer keeps native behavior, and
+        // `click` still fires for pointer, keyboard, and assistive activation.
+        function preventFocusSteal(event) {
+          if (event.button !== 0 || event.isPrimary === false) return;
+          event.preventDefault();
+        }
+        function keepInputSurfaceFocus(button) {
+          button.addEventListener("mousedown", preventFocusSteal);
+          button.addEventListener("pointerdown", preventFocusSteal);
+        }
+
         function installSoftKey(button, id) {
-          // Keep xterm's helper textarea focused when the native keyboard is
-          // already open. Mobile browsers otherwise focus the button on
-          // pointerdown, which closes the keyboard before click sends the key.
-          button.addEventListener("pointerdown", (event) => {
-            if (!event.isPrimary || event.button !== 0) return;
-            event.preventDefault();
-          });
-          // Retain click handling so keyboard activation and assistive
-          // technologies use the same input path.
+          // Keep the focused input surface (and its open keyboard) while the key
+          // is sent. Click remains the accessible activation path.
+          keepInputSurfaceFocus(button);
           button.addEventListener("click", () => sendKey(id, button));
         }
 
@@ -4037,6 +4047,11 @@
 
         function installDirectionalFlick(button, onDirection = (direction) => sendKey(direction)) {
           let gesture = null;
+
+          // The gesture handler below cancels the pointerdown default; pair it
+          // with the mousedown guard so WebKit/iOS also keeps the input surface
+          // focused (#482) instead of dropping the keyboard on a flick key.
+          button.addEventListener("mousedown", preventFocusSteal);
 
           button.addEventListener("pointerdown", (event) => {
             if (button.disabled || !event.isPrimary || event.button !== 0) return;
@@ -4478,19 +4493,16 @@
         document.addEventListener("mouseup", copySelectionAfterInteraction);
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
+        // Ctrl+C sends like a soft key; keep it from blurring the input surface
+        // and dismissing the keyboard (#482).
+        keepInputSurfaceFocus(ctrlCButton);
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
-        // Same trick as installSoftKey: without this, mobile browsers move
-        // focus to the button on pointerdown, closing the keyboard before the
-        // click handler can read the surface's real focus state.
-        focusTerminalButton.addEventListener("pointerdown", (event) => {
-          if (!event.isPrimary || event.button !== 0) return;
-          event.preventDefault();
-        });
+        // Same contract as the soft keys: the toggle must read the surface's
+        // real focus state on click, so the button must not steal focus first
+        // (#482). keepInputSurfaceFocus guards mousedown + pointerdown.
+        keepInputSurfaceFocus(focusTerminalButton);
         focusTerminalButton.addEventListener("click", () => toggleInputSurfaceFocus());
-        copyPaneIdButton.addEventListener("pointerdown", (event) => {
-          if (!event.isPrimary || event.button !== 0) return;
-          event.preventDefault();
-        });
+        keepInputSurfaceFocus(copyPaneIdButton);
         copyPaneIdButton.addEventListener("click", () => {
           const identifier = activePaneIdentifier();
           if (!identifier) return;
@@ -4533,6 +4545,9 @@
           commitComposer();
           focusCurrentInputSurface();
         });
+        // Revealing the special-key toolbar must not blur the input surface and
+        // drop the keyboard (#482) — showing keys should keep the keyboard up.
+        keepInputSurfaceFocus(keyBarToggleButton);
         keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
         keyBarSettingsButton.addEventListener("click", (event) => {
           event.stopPropagation();
