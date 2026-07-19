@@ -1458,6 +1458,9 @@
         let preferredInputMode = loadPreferredInputMode();
         let composerIsComposing = false;
         let composerReady = false;
+        // Keyboard-button collapse state: in composer mode the editor pane
+        // hides and restores together with the soft keyboard.
+        let composerCollapsed = false;
         let notificationPanelOpen = false;
         let dockPanelOpen = false;
         let touchGesture = null;
@@ -1707,12 +1710,23 @@
         }
 
         // The Keyboard button toggles the soft keyboard: blur the focused
-        // input surface to dismiss it, focus it to raise it.
+        // input surface to dismiss it, focus it to raise it. In composer mode
+        // the editor pane collapses with the keyboard so the terminal gets the
+        // space back, and restores when the keyboard is raised again.
         function toggleInputSurfaceFocus() {
           if (!leaseId || !activeTerminalId) return;
-          if (inputSurfaceFocused()) {
-            if (currentInputMode() === "direct") terminal?.blur?.();
-            else composerInput.blur();
+          if (currentInputMode() === "direct") {
+            if (inputSurfaceFocused()) terminal?.blur?.();
+            else focusCurrentInputSurface();
+            return;
+          }
+          if (composerCollapsed) {
+            composerCollapsed = false;
+            renderInputSurface({ focus: true });
+          } else if (inputSurfaceFocused()) {
+            composerCollapsed = true;
+            composerInput.blur();
+            renderInputSurface();
           } else {
             focusCurrentInputSurface();
           }
@@ -1722,7 +1736,7 @@
           const mode = currentInputMode();
           const composerMode = mode === "composer";
           const draft = composerDraft();
-          terminalComposer.hidden = !composerMode;
+          terminalComposer.hidden = !composerMode || composerCollapsed;
           inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
           inputModeToggleButton.title = composerMode
             ? "Switch to Direct input"
@@ -1752,6 +1766,9 @@
         function setInputMode(mode, options = {}) {
           if (mode !== "direct" && mode !== "composer") return;
           preferredInputMode = mode;
+          // An explicit mode switch always reveals its input surface; a stale
+          // collapse would leave composer mode with no visible editor.
+          composerCollapsed = false;
           if (activeTerminalId) inputModeByTerminalId.set(activeTerminalId, mode);
           if (options.persist !== false) savePreferredInputMode(mode);
           renderInputSurface({ focus: options.focus !== false });
