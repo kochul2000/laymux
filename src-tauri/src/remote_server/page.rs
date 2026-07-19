@@ -253,6 +253,58 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_step_navigation_bar() {
+        let html = remote_page_html();
+        // Markup: a dedicated always-on (while connected) row above the footer
+        // with two spatial and two notification step buttons (issue #474,
+        // ADR-0039). Buttons start disabled until a lease is held.
+        assert!(html.contains("id=\"navStepBar\""));
+        assert!(html.contains("id=\"navSpatialPrev\""));
+        assert!(html.contains("id=\"navSpatialNext\""));
+        assert!(html.contains("id=\"navNotifRecent\""));
+        assert!(html.contains("id=\"navNotifOldest\""));
+        assert!(html.contains("id=\"navNotifBadge\""));
+        // Controller actions hit the new lease-gated endpoints.
+        assert!(html.contains("spatial: \"/remote/v1/navigation/spatial\""));
+        assert!(html.contains("notification: \"/remote/v1/navigation/notification\""));
+        assert!(html.contains("body: JSON.stringify({ leaseId, direction })"));
+        // Taps serialize on a promise chain with a single pending step cap.
+        assert!(html.contains("let navStepChain = Promise.resolve();"));
+        assert!(html.contains("if (!leaseId || navStepPending >= 2) return;"));
+        // Same pointerdown contract as soft keys: don't steal input focus.
+        assert!(html.contains("function installNavStepButton(button, kind, direction)"));
+        // The viewport follows the landing target; no-ops surface a status hint.
+        assert!(html.contains("await loadNavigation(data.target.terminalId || null);"));
+        assert!(html.contains("no_unread_notifications: \"No unread notifications.\""));
+        // Visibility is lease-bound and refits the terminal like the key bar.
+        assert!(html.contains("function updateNavStepActions()"));
+        assert!(html.contains("navStepBar.hidden = !connected;"));
+        assert!(html.contains("if (wasHidden !== navStepBar.hidden) scheduleTerminalFit();"));
+        // Notification buttons disable at zero unread and carry a count badge.
+        assert!(html.contains("navNotifRecentButton.disabled = !connected || unread <= 0;"));
+        assert!(html.contains("if (unread > 0) fillCountBadge(navNotifBadge, unread);"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_header_pane_identity() {
+        let html = remote_page_html();
+        // The header shows a friendly "Workspace · Pane N" context title
+        // instead of the raw terminal id, and doubles as the landing indicator
+        // after a navigation step (issue #474).
+        assert!(html.contains("function activeTerminalTitle()"));
+        assert!(html.contains("`${ctx.workspace.name} · Pane ${ctx.paneNumber}`"));
+        assert!(html.contains("(terminalId === activeTerminalId && activeTerminalTitle())"));
+        // Header copy button yields the same lx:pane locator as the desktop
+        // pane badge; hidden when no workspace pane is attached.
+        assert!(html.contains("id=\"copyPaneId\""));
+        assert!(html.contains("function activePaneIdentifier()"));
+        assert!(html.contains("`lx:pane:${name}:${ctx.paneNumber}`"));
+        assert!(html.contains("copyPaneIdButton.hidden = !activePaneIdentifier();"));
+        // Copy reuses the secure-context clipboard helper with its fallback.
+        assert!(html.contains("writeClipboardText(identifier)"));
+    }
+
+    #[test]
     fn remote_page_html_contains_detached_input_composer() {
         let html = remote_page_html();
 
