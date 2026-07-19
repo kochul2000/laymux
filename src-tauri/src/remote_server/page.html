@@ -67,7 +67,7 @@
       }
       .app {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
         width: 100%;
         min-width: 0;
         max-width: 100%;
@@ -996,59 +996,12 @@
         touch-action: none;
         transform: translate(-50%, -50%);
       }
-      /* --- Step navigation bar (issue #474, ADR-0039) ---
-         Four controller-action buttons above the footer: spatial prev/next
-         (pane traversal across workspace boundaries) and notification
-         recent/oldest. Visible only while a lease is held. */
-      .nav-step-bar {
-        display: flex;
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-        gap: 8px;
-        padding: 5px 8px;
-        border-top: 1px solid var(--border);
-        background: var(--panel);
-      }
-      .nav-step-group {
-        position: relative;
-        display: flex;
-        flex: 1 1 0;
-        min-width: 0;
-        gap: 6px;
-        align-items: center;
-      }
-      .nav-step-group + .nav-step-group {
-        padding-left: 8px;
-        border-left: 1px solid var(--border);
-      }
-      .nav-step-group-icon {
-        display: inline-flex;
-        flex: 0 0 auto;
-        color: var(--muted);
-      }
-      .nav-step-btn {
-        flex: 1 1 0;
-        min-width: 0;
-        height: 34px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-      }
-      .nav-step-btn.busy {
-        opacity: 0.55;
-      }
-      .nav-step-badge {
-        position: absolute;
-        top: -2px;
-        right: 0;
-        pointer-events: none;
-      }
       /* --- Special key toolbar (soft keys) ---
          A client-side row of buttons that send terminal escape sequences via
-         the existing write path. Purely remote-client UI state (localStorage);
-         no host bridge or Remote API contract change. */
+         the existing write path (ADR-0028). Toolbar config is remote-client UI
+         state (localStorage). Since issue #474 the toolbar also hosts step
+         NAVIGATION keys (pane/alert movement) that call the lease-gated
+         /remote/v1/navigation endpoints instead of writing bytes. */
       .key-bar {
         position: relative;
         display: flex;
@@ -1096,6 +1049,7 @@
         display: none;
       }
       .key-btn {
+        position: relative;
         flex: 0 0 auto;
         min-width: 34px;
         height: var(--key-bar-control-height);
@@ -1106,6 +1060,15 @@
         font-weight: 600;
         white-space: nowrap;
         touch-action: manipulation;
+      }
+      .key-btn.busy {
+        opacity: 0.55;
+      }
+      .key-nav-badge {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        pointer-events: none;
       }
       .key-btn:hover:not(:disabled) {
         background: var(--hover-bg);
@@ -1388,31 +1351,6 @@
           <div id="keyPopoverBody" class="key-popover-scroll"></div>
         </div>
       </nav>
-      <nav id="navStepBar" class="nav-step-bar" aria-label="Step navigation" hidden>
-        <div class="nav-step-group" role="group" aria-label="Spatial pane navigation">
-          <span class="nav-step-group-icon" aria-hidden="true">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M12 4v16M3.5 12H12"/></svg>
-          </span>
-          <button id="navSpatialPrev" class="nav-step-btn" type="button" disabled aria-label="Previous pane in spatial order" title="Previous pane (spatial order)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 15 6-6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <button id="navSpatialNext" class="nav-step-btn" type="button" disabled aria-label="Next pane in spatial order" title="Next pane (spatial order)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-        </div>
-        <div class="nav-step-group" role="group" aria-label="Notification navigation">
-          <span class="nav-step-group-icon" aria-hidden="true">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" stroke-linejoin="round"/><path d="M10.3 19a2 2 0 0 0 3.4 0" stroke-linecap="round"/></svg>
-          </span>
-          <button id="navNotifRecent" class="nav-step-btn" type="button" disabled aria-label="Most recent unread notification" title="Most recent unread notification">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m15 6-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <button id="navNotifOldest" class="nav-step-btn" type="button" disabled aria-label="Oldest unread notification" title="Oldest unread notification">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 18 6-6-6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <span id="navNotifBadge" class="workspace-count-badge nav-step-badge" hidden>0</span>
-        </div>
-      </nav>
       <footer>
         <button id="ctrlC" disabled>Ctrl+C</button>
         <button id="focusTerminal" disabled>Keyboard</button>
@@ -1476,12 +1414,6 @@
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>',
         };
         const copyPaneIdButton = $("copyPaneId");
-        const navStepBar = $("navStepBar");
-        const navSpatialPrevButton = $("navSpatialPrev");
-        const navSpatialNextButton = $("navSpatialNext");
-        const navNotifRecentButton = $("navNotifRecent");
-        const navNotifOldestButton = $("navNotifOldest");
-        const navNotifBadge = $("navNotifBadge");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
@@ -1879,7 +1811,6 @@
           updateTerminalControls();
           renderInputSurface();
           updateNotificationActions();
-          updateNavStepActions();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -2708,23 +2639,6 @@
           clearNotificationsButton.disabled = !leaseId || !hasNotifications;
         }
 
-        // --- Step navigation bar (issue #474, ADR-0039) ---
-        function updateNavStepActions() {
-          const connected = Boolean(leaseId);
-          const wasHidden = navStepBar.hidden;
-          navStepBar.hidden = !connected;
-          // The bar shares vertical space with the terminal viewport (same
-          // contract as the key bar toggle): refit whenever it appears/leaves.
-          if (wasHidden !== navStepBar.hidden) scheduleTerminalFit();
-          const unread = unreadNotificationCount();
-          navSpatialPrevButton.disabled = !connected;
-          navSpatialNextButton.disabled = !connected;
-          navNotifRecentButton.disabled = !connected || unread <= 0;
-          navNotifOldestButton.disabled = !connected || unread <= 0;
-          navNotifBadge.hidden = unread <= 0;
-          if (unread > 0) fillCountBadge(navNotifBadge, unread);
-        }
-
         // Context of the terminal the viewport is attached to, resolved from
         // the last navigation payload (terminals[] carries workspaceId and
         // paneNumber; dock terminals have no workspace entry).
@@ -2894,7 +2808,8 @@
           renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
           renderDockList(data.docks || []);
-          updateNavStepActions();
+          // Nav step keys gate on unread count — refresh their state and badge.
+          updateKeyBarControls();
           updateHeaderPaneIdentity();
         }
 
@@ -3326,24 +3241,14 @@
         function enqueueNavStep(button, kind, direction) {
           if (!leaseId || navStepPending >= 2) return;
           navStepPending += 1;
-          button.classList.add("busy");
+          if (button) button.classList.add("busy");
           navStepChain = navStepChain
             .then(() => performNavStep(kind, direction))
             .catch((err) => setStatus(`Navigation failed: ${err.message || err}`, true))
             .finally(() => {
               navStepPending -= 1;
-              button.classList.remove("busy");
+              if (button) button.classList.remove("busy");
             });
-        }
-
-        // Same pointerdown contract as installSoftKey: keep the currently
-        // focused input surface (native keyboard) alive across the tap.
-        function installNavStepButton(button, kind, direction) {
-          button.addEventListener("pointerdown", (event) => {
-            if (!event.isPrimary || event.button !== 0) return;
-            event.preventDefault();
-          });
-          button.addEventListener("click", () => enqueueNavStep(button, kind, direction));
         }
 
         async function markNotificationRead(notification) {
@@ -3917,6 +3822,15 @@
         // enqueueInput -> /remote/v1/terminals/{id}/write path as Ctrl+C. No new
         // Remote API surface. Cursor keys (arrows/Home/End) are DECCKM-aware.
         const KEY_DEFS = {
+          // Step-navigation keys (issue #474, ADR-0039): controller actions on
+          // the lease-gated /remote/v1/navigation endpoints, not byte writes.
+          // `nav: [kind, direction]` feeds enqueueNavStep; navPad is a 4-way
+          // flick (up/down = pane spatial step, left/right = alert step).
+          navPad: { label: "P↕N↔", navFlick: true, navBadge: true },
+          navPrev: { label: "P↑", nav: ["spatial", "prev"], hint: "Previous pane (spatial order)" },
+          navNext: { label: "P↓", nav: ["spatial", "next"], hint: "Next pane (spatial order)" },
+          notifRecent: { label: "N←", nav: ["notification", "recent"], navBadge: true, hint: "Most recent unread alert" },
+          notifOldest: { label: "N→", nav: ["notification", "oldest"], navBadge: true, hint: "Oldest unread alert" },
           esc: { label: "Esc", seq: "\x1b" },
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
@@ -3958,18 +3872,29 @@
         };
         // Stable render order for both the toolbar and the custom-key palette.
         const KEY_ORDER = [
+          "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
           "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_SETS = [
+          { id: "step", name: "Pane/Alert nav", desc: "Flick pad · P↑P↓ pane · N←N→ alerts", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
           { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
-        const DEFAULT_KEYBAR = { visible: false, sets: ["nav"], custom: [] };
+        const DEFAULT_KEYBAR = { visible: false, sets: ["step", "nav"], custom: [] };
+        // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
+        // spatial pane step (Ctrl+Alt+Up/Down territory), horizontal = alert
+        // step (Ctrl+Alt+Left/Right).
+        const NAV_FLICK_TARGETS = {
+          up: ["spatial", "prev"],
+          down: ["spatial", "next"],
+          left: ["notification", "recent"],
+          right: ["notification", "oldest"],
+        };
         const KEY_FLICK_THRESHOLD_PX = 18;
         let keyPopoverOpen = false;
 
@@ -4015,9 +3940,14 @@
 
         // Send only; do NOT focus the terminal — focusing raises the native soft
         // keyboard, which defeats the purpose of these no-keyboard helper keys.
-        function sendKey(id) {
+        // Nav keys dispatch a step-navigation action instead of writing bytes.
+        function sendKey(id, button = null) {
           const def = KEY_DEFS[id];
           if (!def) return;
+          if (def.nav) {
+            enqueueNavStep(button, def.nav[0], def.nav[1]);
+            return;
+          }
           const seq = keySequence(def);
           if (seq) enqueueInput(seq);
         }
@@ -4032,7 +3962,7 @@
           });
           // Retain click handling so keyboard activation and assistive
           // technologies use the same input path.
-          button.addEventListener("click", () => sendKey(id));
+          button.addEventListener("click", () => sendKey(id, button));
         }
 
         function directionFromFlick(deltaX, deltaY) {
@@ -4072,7 +4002,7 @@
           }
         }
 
-        function installDirectionalFlick(button) {
+        function installDirectionalFlick(button, onDirection = (direction) => sendKey(direction)) {
           let gesture = null;
 
           button.addEventListener("pointerdown", (event) => {
@@ -4104,7 +4034,7 @@
             gesture = null;
             button.classList.remove("flicking");
             hideKeyFlickHint();
-            if (shouldSend && direction) sendKey(direction);
+            if (shouldSend && direction) onDirection(direction);
           };
 
           button.addEventListener("pointerup", (event) => finishFlick(event, true));
@@ -4114,9 +4044,42 @@
 
         function updateKeyBarControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
+          const connected = Boolean(leaseId);
+          const unread = unreadNotificationCount();
           if (!keyRowEl) return;
           for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
-            btn.disabled = !canControl;
+            const def = KEY_DEFS[btn.dataset.key] || {};
+            if (def.nav || def.navFlick) {
+              // Nav step keys need only a lease (they can navigate away from a
+              // terminal-less workspace); alert keys idle at zero unread.
+              const isAlertKey = def.nav && def.nav[0] === "notification";
+              btn.disabled = !connected || (isAlertKey && unread <= 0);
+            } else {
+              btn.disabled = !canControl;
+            }
+          }
+          updateNavKeyBadge(unread);
+        }
+
+        // Unread badge rides on the FIRST rendered badge-capable nav key
+        // (flick pad or an alert key) so the count shows once, not per key.
+        function updateNavKeyBadge(unread) {
+          let assigned = false;
+          for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
+            const def = KEY_DEFS[btn.dataset.key] || {};
+            let badge = btn.querySelector(".key-nav-badge");
+            if (!def.navBadge) continue;
+            const show = !assigned && unread > 0;
+            if (show && !badge) {
+              badge = document.createElement("span");
+              badge.className = "workspace-count-badge key-nav-badge";
+              btn.append(badge);
+            }
+            if (badge) {
+              badge.hidden = !show;
+              if (show) fillCountBadge(badge, unread);
+            }
+            if (show) assigned = true;
           }
         }
 
@@ -4141,11 +4104,23 @@
             btn.dataset.key = id;
             btn.textContent = def.label;
             btn.title = def.label;
+            if (def.hint) btn.title = def.hint;
             if (def.flick) {
               btn.classList.add("key-flick-btn");
               btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
               btn.title = "Flick up, right, down, or left";
               installDirectionalFlick(btn);
+            } else if (def.navFlick) {
+              btn.classList.add("key-flick-btn");
+              btn.setAttribute(
+                "aria-label",
+                "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert"
+              );
+              btn.title = "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert";
+              installDirectionalFlick(btn, (direction) => {
+                const target = NAV_FLICK_TARGETS[direction];
+                if (target) enqueueNavStep(btn, target[0], target[1]);
+              });
             } else {
               installSoftKey(btn, id);
             }
@@ -4479,10 +4454,6 @@
           event.preventDefault();
         });
         focusTerminalButton.addEventListener("click", () => toggleInputSurfaceFocus());
-        installNavStepButton(navSpatialPrevButton, "spatial", "prev");
-        installNavStepButton(navSpatialNextButton, "spatial", "next");
-        installNavStepButton(navNotifRecentButton, "notification", "recent");
-        installNavStepButton(navNotifOldestButton, "notification", "oldest");
         copyPaneIdButton.addEventListener("pointerdown", (event) => {
           if (!event.isPrimary || event.button !== 0) return;
           event.preventDefault();

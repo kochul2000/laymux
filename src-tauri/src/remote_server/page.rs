@@ -208,8 +208,9 @@ mod tests {
         assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
         // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
-        assert!(html
-            .contains("const DEFAULT_KEYBAR = { visible: false, sets: [\"nav\"], custom: [] };"));
+        assert!(html.contains(
+            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
+        ));
         // Predefined sets are selectable and a custom palette exists.
         assert!(html.contains("id: \"nav\", name: \"Navigation\""));
         assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
@@ -217,14 +218,14 @@ mod tests {
         assert!(html.contains("function resolveKeyIds()"));
         assert!(html.contains("function renderKeyPopover()"));
         // Keys reuse the existing write path via enqueueInput, no new API.
-        assert!(html.contains("function sendKey(id)"));
+        assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
         // Pointer activation must not blur xterm's helper textarea and dismiss
         // an already-open native keyboard. Click remains the accessible send path.
         assert!(html.contains("function installSoftKey(button, id)"));
         assert!(html.contains("button.addEventListener(\"pointerdown\", (event) => {"));
         assert!(html.contains("event.preventDefault();"));
-        assert!(html.contains("button.addEventListener(\"click\", () => sendKey(id));"));
+        assert!(html.contains("button.addEventListener(\"click\", () => sendKey(id, button));"));
         // Cursor keys (arrows/Home/End) are DECCKM-aware: SS3 in app mode, else CSI.
         assert!(html.contains("up: { label: \"↑\", cursor: \"A\" }"));
         assert!(html.contains("home: { label: \"Home\", cursor: \"H\" }"));
@@ -235,7 +236,10 @@ mod tests {
         assert!(html.contains("dpad: { label: \"↕↔\", flick: true }"));
         assert!(html.contains("const KEY_FLICK_THRESHOLD_PX = 18;"));
         assert!(html.contains("function directionFromFlick(deltaX, deltaY)"));
-        assert!(html.contains("sendKey(direction);"));
+        assert!(html.contains(
+            "installDirectionalFlick(button, onDirection = (direction) => sendKey(direction))"
+        ));
+        assert!(html.contains("onDirection(direction);"));
         assert!(html.contains("id=\"keyFlickHint\""));
         assert!(html.contains("data-flick-direction=\"up\""));
         assert!(html.contains("data-flick-direction=\"right\""));
@@ -253,36 +257,42 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_contains_step_navigation_bar() {
+    fn remote_page_html_contains_step_navigation_keys() {
         let html = remote_page_html();
-        // Markup: a dedicated always-on (while connected) row above the footer
-        // with two spatial and two notification step buttons (issue #474,
-        // ADR-0039). Buttons start disabled until a lease is held.
-        assert!(html.contains("id=\"navStepBar\""));
-        assert!(html.contains("id=\"navSpatialPrev\""));
-        assert!(html.contains("id=\"navSpatialNext\""));
-        assert!(html.contains("id=\"navNotifRecent\""));
-        assert!(html.contains("id=\"navNotifOldest\""));
-        assert!(html.contains("id=\"navNotifBadge\""));
-        // Controller actions hit the new lease-gated endpoints.
+        // Step navigation lives INSIDE the soft-key toolbar as a configurable
+        // key set (issue #474): no dedicated bar row exists.
+        assert!(!html.contains("id=\"navStepBar\""));
+        // Nav action keys carry `nav: [kind, direction]` instead of a byte seq.
+        assert!(html.contains("navPad: { label: \"P↕N↔\", navFlick: true, navBadge: true }"));
+        assert!(html.contains("navPrev: { label: \"P↑\", nav: [\"spatial\", \"prev\"]"));
+        assert!(html.contains("navNext: { label: \"P↓\", nav: [\"spatial\", \"next\"]"));
+        assert!(html.contains("notifRecent: { label: \"N←\", nav: [\"notification\", \"recent\"]"));
+        assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
+        // Selectable via the key-set popover and enabled by default.
+        assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
+        assert!(html.contains(
+            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
+        ));
+        // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
+        assert!(html.contains("const NAV_FLICK_TARGETS = {"));
+        assert!(html.contains("up: [\"spatial\", \"prev\"]"));
+        assert!(html.contains("down: [\"spatial\", \"next\"]"));
+        assert!(html.contains("left: [\"notification\", \"recent\"]"));
+        assert!(html.contains("right: [\"notification\", \"oldest\"]"));
+        // Controller actions hit the lease-gated endpoints, taps serialize on
+        // a promise chain, and the viewport follows the landing target.
         assert!(html.contains("spatial: \"/remote/v1/navigation/spatial\""));
         assert!(html.contains("notification: \"/remote/v1/navigation/notification\""));
         assert!(html.contains("body: JSON.stringify({ leaseId, direction })"));
-        // Taps serialize on a promise chain with a single pending step cap.
         assert!(html.contains("let navStepChain = Promise.resolve();"));
         assert!(html.contains("if (!leaseId || navStepPending >= 2) return;"));
-        // Same pointerdown contract as soft keys: don't steal input focus.
-        assert!(html.contains("function installNavStepButton(button, kind, direction)"));
-        // The viewport follows the landing target; no-ops surface a status hint.
         assert!(html.contains("await loadNavigation(data.target.terminalId || null);"));
         assert!(html.contains("no_unread_notifications: \"No unread notifications.\""));
-        // Visibility is lease-bound and refits the terminal like the key bar.
-        assert!(html.contains("function updateNavStepActions()"));
-        assert!(html.contains("navStepBar.hidden = !connected;"));
-        assert!(html.contains("if (wasHidden !== navStepBar.hidden) scheduleTerminalFit();"));
-        // Notification buttons disable at zero unread and carry a count badge.
-        assert!(html.contains("navNotifRecentButton.disabled = !connected || unread <= 0;"));
-        assert!(html.contains("if (unread > 0) fillCountBadge(navNotifBadge, unread);"));
+        // Nav keys gate on the lease only (escape-seq keys need a terminal
+        // too); alert keys idle at zero unread and carry one count badge.
+        assert!(html.contains("const isAlertKey = def.nav && def.nav[0] === \"notification\";"));
+        assert!(html.contains("btn.disabled = !connected || (isAlertKey && unread <= 0);"));
+        assert!(html.contains("function updateNavKeyBadge(unread)"));
     }
 
     #[test]
