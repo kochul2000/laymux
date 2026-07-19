@@ -856,14 +856,20 @@
         user-select: none;
         -webkit-user-select: none;
         overscroll-behavior: contain;
-        /* Height-only shrinks keep the fitted xterm and crop it here. */
+      }
+      /* Clips the cropped xterm without clipping the selection handles, which
+         are appended to the host itself and may overhang the bottom row. */
+      #terminalViewport {
+        position: absolute;
+        inset: 0;
         overflow: hidden;
       }
       /* xterm mounts inside the sizer, not the host. The sizer normally tracks
-         the host (height: 100%); when the visual viewport shrinks without a
-         width change (soft keyboard, composer drag) fitTerminal pins it to the
-         last fitted pixel height so PTY rows stay stable, and the bottom
-         anchor keeps the live tail — where TUIs draw their prompt — visible. */
+         the viewport (height: 100%); when the visual viewport shrinks without
+         a width change (soft keyboard, composer drag) fitTerminal pins it to
+         the last fitted pixel height so PTY rows stay stable. The bottom
+         anchor keeps the live tail visible, and updateCropTransform shifts it
+         down when the cursor row would otherwise be clipped. */
       #terminalSizer {
         position: absolute;
         left: 0;
@@ -1295,7 +1301,7 @@
             </section>
           </aside>
           <div class="terminal-shell">
-            <div id="terminal" aria-label="Terminal output"><div id="terminalSizer"></div></div>
+            <div id="terminal" aria-label="Terminal output"><div id="terminalViewport"><div id="terminalSizer"></div></div></div>
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
               <textarea
                 id="composerInput"
@@ -1436,6 +1442,7 @@
         // fittedHostHeight crop the surface instead of refitting (ADR-0038).
         let fittedHostWidth = 0;
         let fittedHostHeight = 0;
+        let cropActive = false;
         let resizeListenerAttached = false;
         let resizeTimer = null;
         let terminalRefreshFrame = null;
@@ -2385,6 +2392,7 @@
             if (!terminal.hasSelection()) lastCopiedSelection = "";
           });
           terminal.onScroll?.(() => updateSelectionHandles(terminal));
+          terminal.onCursorMove?.(() => updateCropTransform());
           // Entering the alternate buffer while a height-shrink crop is active
           // must re-fit so full-screen apps get the real surface rows.
           terminal.buffer?.onBufferChange?.(() => scheduleTerminalFit(Boolean(activeTerminalId)));
@@ -4006,6 +4014,33 @@
           scheduleTerminalFit();
         }
 
+        // While a crop is active the bottom-anchored window can hide the
+        // cursor row (right after `clear` the prompt sits on the top row),
+        // which would also strand the IME/helper textarea off-screen. Shift
+        // the sizer down just enough to keep the cursor row visible; without
+        // a crop the transform resets to identity (ADR-0038).
+        function updateCropTransform() {
+          if (!terminal || !terminalSizer) return;
+          if (!cropActive) {
+            if (terminalSizer.style.transform) terminalSizer.style.transform = "";
+            return;
+          }
+          const hidden = terminalSizer.offsetHeight - terminalHost.clientHeight;
+          if (hidden <= 1) {
+            terminalSizer.style.transform = "";
+            return;
+          }
+          const metrics = terminalMetrics(terminal);
+          if (!metrics) return;
+          // Both rects carry the current translate, so their difference is the
+          // transform-independent layout offset of the screen inside the sizer.
+          const screenTop = metrics.rect.top - terminalSizer.getBoundingClientRect().top;
+          const cursorRow = terminal.buffer?.active?.cursorY ?? terminal.rows - 1;
+          const cursorTop = screenTop + cursorRow * metrics.cellHeight;
+          const shift = Math.round(Math.min(hidden, Math.max(0, hidden - cursorTop)));
+          terminalSizer.style.transform = shift > 0 ? `translateY(${shift}px)` : "";
+        }
+
         function fitTerminal(sendResize = true) {
           if (!terminal || !fitAddon) return;
           const rect = terminalHost.getBoundingClientRect();
@@ -4021,14 +4056,24 @@
           const widthChanged = Math.abs(rect.width - fittedHostWidth) >= 1;
           const normalBuffer = terminal.buffer?.active?.type !== "alternate";
           if (!widthChanged && normalBuffer && rect.height < fittedHostHeight - 0.5) {
+            cropActive = true;
             terminalSizer.style.height = `${Math.round(fittedHostHeight)}px`;
+            // Attach resets lastResizeKey, so even though fit is skipped the
+            // preserved geometry must still reach the (possibly different or
+            // externally resized) PTY of a fresh attach or terminal switch.
+            if (sendResize && terminal.cols > 0 && terminal.rows > 0) {
+              queueResize(terminal.cols, terminal.rows);
+            }
+            updateCropTransform();
             updateSelectionHandles(terminal);
             scheduleTerminalRefresh();
             return;
           }
+          cropActive = false;
           fittedHostWidth = rect.width;
           fittedHostHeight = rect.height;
           terminalSizer.style.height = "100%";
+          updateCropTransform();
           try {
             fitAddon.fit();
           } catch (err) {

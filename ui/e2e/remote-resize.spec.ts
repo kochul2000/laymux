@@ -94,10 +94,13 @@ function outputFrames(text: string, seqStart: number, phase: "snapshot" | "delta
   return { header, payload, seqEnd };
 }
 
-async function installRemoteMocks(
-  page: Page,
-  options: { resizeCalls: ResizeCall[]; altBuffer?: boolean },
-) {
+interface RemoteHarness {
+  resizeCalls: ResizeCall[];
+  lineCount?: number;
+  sendDelta?: (text: string) => void;
+}
+
+async function installRemoteMocks(page: Page, options: RemoteHarness) {
   await page.route("http://remote.test/remote/", (route) =>
     route.fulfill({
       path: `${remoteRoot}page.html`,
@@ -149,17 +152,19 @@ async function installRemoteMocks(
 
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
     const lines = Array.from(
-      { length: 30 },
+      { length: options.lineCount ?? 30 },
       (_, index) => `line-${String(index + 1).padStart(4, "0")}\r\n`,
     ).join("");
     const snapshot = outputFrames(lines, 0, "snapshot");
     socket.send(snapshot.header);
     socket.send(snapshot.payload);
-    if (options.altBuffer) {
-      const delta = outputFrames("\x1b[?1049h", snapshot.seqEnd, "delta");
+    let seq = snapshot.seqEnd;
+    options.sendDelta = (text) => {
+      const delta = outputFrames(text, seq, "delta");
+      seq = delta.seqEnd;
       socket.send(delta.header);
       socket.send(delta.payload);
-    }
+    };
   });
 }
 
@@ -233,21 +238,63 @@ test("a height-only shrink keeps PTY geometry and crops the surface", async ({ p
   expect(refitted.rows).toBeLessThan(baseline!.rows);
 });
 
-test("the alternate buffer refits on a height-only shrink", async ({ page }) => {
-  const resizeCalls: ResizeCall[] = [];
-  await installRemoteMocks(page, { resizeCalls, altBuffer: true });
+test("entering the alternate buffer during a crop refits immediately", async ({ page }) => {
+  const harness: RemoteHarness = { resizeCalls: [] };
+  await installRemoteMocks(page, harness);
   await page.setViewportSize({ width: 800, height: 900 });
   await connectRemote(page);
 
-  await expect.poll(() => resizeCalls.length).toBeGreaterThanOrEqual(1);
-  await expect.poll(async () => (await terminalGeometry(page))?.bufferType).toBe("alternate");
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(1);
   await page.waitForTimeout(RESIZE_SETTLE_MS);
-  const baselineCalls = resizeCalls.length;
+  const baselineCalls = harness.resizeCalls.length;
   const baseline = await terminalGeometry(page);
 
+  // Crop first: the height-only shrink must not resize the normal buffer.
   await page.setViewportSize({ width: 800, height: 500 });
-  await expect.poll(() => resizeCalls.length).toBe(baselineCalls + 1);
-  const refitted = resizeCalls[resizeCalls.length - 1];
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  expect(harness.resizeCalls.length).toBe(baselineCalls);
+
+  // A full-screen app enters the alternate buffer: the crop must yield and
+  // the real (shrunken) surface geometry must reach the PTY right away.
+  harness.sendDelta!("\x1b[?1049h");
+  await expect.poll(async () => (await terminalGeometry(page))?.bufferType).toBe("alternate");
+  await expect.poll(() => harness.resizeCalls.length).toBe(baselineCalls + 1);
+  const refitted = harness.resizeCalls[harness.resizeCalls.length - 1];
   expect(refitted.cols).toBe(baseline!.cols);
   expect(refitted.rows).toBeLessThan(baseline!.rows);
+
+  // Leaving the alternate buffer at the same host size needs no further
+  // resize: the adopted geometry already matches.
+  harness.sendDelta!("\x1b[?1049l");
+  await expect.poll(async () => (await terminalGeometry(page))?.bufferType).toBe("normal");
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  expect(harness.resizeCalls.length).toBe(baselineCalls + 1);
+});
+
+test("a crop shifts the sizer down to keep a top-row cursor visible", async ({ page }) => {
+  const harness: RemoteHarness = { resizeCalls: [], lineCount: 3 };
+  await installRemoteMocks(page, harness);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await connectRemote(page);
+
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+
+  // With only 3 lines the cursor sits near the top row; a bottom-anchored
+  // crop alone would hide it together with the IME helper textarea.
+  await page.setViewportSize({ width: 800, height: 400 });
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+
+  const transform = await page.evaluate(
+    () => document.getElementById("terminalSizer")?.style.transform ?? "",
+  );
+  expect(transform).toMatch(/translateY\(\d+px\)/);
+
+  // Growing back to the fitted height clears both the crop and the shift.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  const cleared = await page.evaluate(
+    () => document.getElementById("terminalSizer")?.style.transform ?? "",
+  );
+  expect(cleared).toBe("");
 });
