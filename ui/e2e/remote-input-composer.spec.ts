@@ -851,8 +851,17 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
           .options.cursorInactiveStyle,
     ),
   ).toBe("outline");
+  // The mode switch itself focuses the direct surface; the Keyboard button
+  // toggles that focus (dismiss when focused, raise when blurred).
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.className ?? ""))
+    .toContain("xterm-helper-textarea");
   await page.locator("#focusTerminal").click();
-  expect(await page.evaluate(() => document.activeElement?.className)).toContain(
+  expect(await page.evaluate(() => document.activeElement?.className ?? "")).not.toContain(
+    "xterm-helper-textarea",
+  );
+  await page.locator("#focusTerminal").click();
+  expect(await page.evaluate(() => document.activeElement?.className ?? "")).toContain(
     "xterm-helper-textarea",
   );
 });

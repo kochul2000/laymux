@@ -923,6 +923,11 @@
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        /* Send joins the equal split — its base flex: 0 0 auto outranks the
+           rule above and would collapse against width: 0, clipping the icon. */
+        footer .composer-send {
+          flex: 1 1 0;
+        }
         .terminal-composer {
           grid-template-columns: minmax(0, 1fr);
           grid-template-rows: minmax(64px, auto);
@@ -1668,6 +1673,25 @@
           }
         }
 
+        function inputSurfaceFocused() {
+          if (currentInputMode() === "direct") {
+            return Boolean(terminal?.textarea) && document.activeElement === terminal.textarea;
+          }
+          return document.activeElement === composerInput;
+        }
+
+        // The Keyboard button toggles the soft keyboard: blur the focused
+        // input surface to dismiss it, focus it to raise it.
+        function toggleInputSurfaceFocus() {
+          if (!leaseId || !activeTerminalId) return;
+          if (inputSurfaceFocused()) {
+            if (currentInputMode() === "direct") terminal?.blur?.();
+            else composerInput.blur();
+          } else {
+            focusCurrentInputSurface();
+          }
+        }
+
         function renderInputSurface(options = {}) {
           const mode = currentInputMode();
           const composerMode = mode === "composer";
@@ -1679,7 +1703,6 @@
             : "Switch to Composer input";
           inputModeIcon.innerHTML = INPUT_MODE_ICONS[composerMode ? "composer" : "direct"];
           inputModeLabel.textContent = composerMode ? "Composer" : "Direct";
-          focusTerminalButton.textContent = composerMode ? "Editor" : "Keyboard";
 
           const nextText = draft ? draft.text : "";
           if (composerInput.value !== nextText) composerInput.value = nextText;
@@ -4146,7 +4169,14 @@
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
-        focusTerminalButton.addEventListener("click", () => focusCurrentInputSurface());
+        // Same trick as installSoftKey: without this, mobile browsers move
+        // focus to the button on pointerdown, closing the keyboard before the
+        // click handler can read the surface's real focus state.
+        focusTerminalButton.addEventListener("pointerdown", (event) => {
+          if (!event.isPrimary || event.button !== 0) return;
+          event.preventDefault();
+        });
+        focusTerminalButton.addEventListener("click", () => toggleInputSurfaceFocus());
         inputModeToggleButton.addEventListener("click", () => {
           setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
         });
