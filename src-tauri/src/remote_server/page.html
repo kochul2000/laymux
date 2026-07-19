@@ -1510,12 +1510,11 @@
         let terminalSelectionRevision = 0;
         let terminalOutputWriteChain = Promise.resolve();
         let terminalOutputGeneration = 0;
-        // The remote xterm is a display mirror; the desktop pane is the
-        // authoritative terminal that answers protocol queries. While we replay
-        // captured output into xterm its parser auto-answers any query
-        // sequences (DSR/DA/DECRQM, ...) embedded in that output via onData.
-        // This counter is raised around such replay writes so those replies are
-        // swallowed instead of forwarded to the PTY (issue #480).
+        // Raised around replay writes (snapshot / reset / synthetic mode) so
+        // any onData xterm emits while parsing them is swallowed rather than
+        // forwarded to the PTY. Known query replies are already suppressed at
+        // the parser (suppressMirrorQueryReplies); this is the catch-all that
+        // covers the reconnect flood for sequences we did not enumerate (#480).
         let terminalReplayDepth = 0;
         const inputModeByTerminalId = new Map();
         const composerDraftByTerminalId = new Map();
@@ -2458,6 +2457,37 @@
           element.addEventListener("pointercancel", finishTouchSelection, pointerOptions);
         }
 
+        // CSI query sequences whose only effect is to make the terminal emit a
+        // reply. The remote xterm is a display mirror; the desktop pane is the
+        // authoritative responder, so the mirror must answer none of these
+        // (issue #480). Keyed the way xterm's parser matches — prefix (private
+        // marker), intermediates, final byte. Pure queries carry no display
+        // side effect, so a handler that returns true only drops the reply.
+        // DECSCUSR (CSI SP q) is intentionally left alone; only XTVERSION
+        // (CSI > q) is suppressed.
+        const MIRROR_SUPPRESSED_CSI = [
+          { final: "n" }, // DSR / cursor position report (ANSI)
+          { prefix: "?", final: "n" }, // DSR (DEC private)
+          { final: "c" }, // Primary Device Attributes
+          { prefix: ">", final: "c" }, // Secondary Device Attributes
+          { prefix: "=", final: "c" }, // Tertiary Device Attributes
+          { intermediates: "$", final: "p" }, // DECRQM (ANSI)
+          { prefix: "?", intermediates: "$", final: "p" }, // DECRQM (DEC private)
+          { prefix: ">", final: "q" }, // XTVERSION
+        ];
+
+        // A running program's queries are answered once, by the desktop pane.
+        // Without this the mirror answers them a second time — every prompt
+        // render emits DSR, and reconnect replays the whole scrollback at once —
+        // and those replies land on the shell prompt as stray input (issue #480).
+        function suppressMirrorQueryReplies(term) {
+          const parser = term.parser;
+          if (!parser || typeof parser.registerCsiHandler !== "function") return;
+          for (const id of MIRROR_SUPPRESSED_CSI) {
+            parser.registerCsiHandler(id, () => true);
+          }
+        }
+
         function ensureTerminal(appearance = {}) {
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
@@ -2469,6 +2499,7 @@
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           terminal.open(terminalSizer);
+          suppressMirrorQueryReplies(terminal);
           terminalHost.addEventListener(
             "focusin",
             (event) => {
@@ -2486,10 +2517,12 @@
           installSelectionHandles(terminal);
           installTouchSelectionBridge(terminal);
           terminal.onData((data) => {
-            // Swallow xterm's own protocol replies emitted while replaying
-            // captured output (issue #480); forward only genuine user input.
-            // A running program's queries are answered by the desktop pane, so
-            // the mirror must never echo replies back into the PTY.
+            // Known query replies are already suppressed at the parser
+            // (suppressMirrorQueryReplies). This is the catch-all for the
+            // reconnect flood (issue #480): a whole-scrollback replay can make
+            // xterm emit replies to any sequence we did not enumerate, so drop
+            // all onData while a replay write is in flight and forward only
+            // genuine user input.
             if (terminalReplayDepth > 0) return;
             enqueueInput(data);
           });
@@ -3526,11 +3559,18 @@
                     return;
                   }
                   if (guardInput) terminalReplayDepth += 1;
-                  term.write(payload, () => {
+                  try {
+                    term.write(payload, () => {
+                      if (guardInput) terminalReplayDepth -= 1;
+                      scheduleTerminalRefresh();
+                      resolve();
+                    });
+                  } catch (_err) {
+                    // A synchronous throw means the callback never fires; undo
+                    // the guard and unblock the chain so input is not wedged.
                     if (guardInput) terminalReplayDepth -= 1;
-                    scheduleTerminalRefresh();
                     resolve();
-                  });
+                  }
                 })
             );
             return terminalOutputWriteChain;

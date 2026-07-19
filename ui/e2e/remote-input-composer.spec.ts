@@ -167,6 +167,16 @@ async function installBrowserMocks(
         };
         selection = "";
         written: Array<string | Uint8Array> = [];
+        parser = {
+          csiHandlers: [] as Array<{ prefix?: string; intermediates?: string; final: string }>,
+          registerCsiHandler(
+            id: { prefix?: string; intermediates?: string; final: string },
+            _handler: () => boolean,
+          ) {
+            this.csiHandlers.push(id);
+            return { dispose() {} };
+          },
+        };
         private dataListener: ((data: string) => void) | null = null;
         private resizeListener: ((size: { cols: number; rows: number }) => void) | null = null;
         private delayNextWrite = Boolean(delayFirstTerminalWrite);
@@ -250,6 +260,21 @@ async function installBrowserMocks(
         scrollToBottom() {}
         emitData(data: string) {
           this.dataListener?.(data);
+        }
+        // Simulate xterm parsing a CSI query out of streamed output: it emits
+        // the reply via onData unless a registered handler claims the sequence.
+        emitCsiQueryReply(
+          id: { prefix?: string; intermediates?: string; final: string },
+          reply: string,
+        ) {
+          const suppressed = this.parser.csiHandlers.some(
+            (handler) =>
+              (handler.prefix ?? "") === (id.prefix ?? "") &&
+              (handler.intermediates ?? "") === (id.intermediates ?? "") &&
+              handler.final === id.final,
+          );
+          if (suppressed) return;
+          this.dataListener?.(reply);
         }
         emitResize() {
           this.resizeListener?.({ cols: this.cols, rows: this.rows });
@@ -873,6 +898,43 @@ test("snapshot replay swallows xterm protocol replies but resumes real keystroke
   );
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "ls" });
+});
+
+test("the mirror never answers terminal protocol queries, even in steady state (#480)", async ({
+  page,
+}) => {
+  // The desktop pane already answers protocol queries; the mirror must answer
+  // none of them. Prompt frameworks emit DSR on every render, arriving as live
+  // deltas long after any replay window — so parser-level suppression, not just
+  // the replay guard, has to swallow the reply.
+  const remote = await installRemotePage(page, { coarse: false });
+  await connect(page);
+
+  // Steady state: no replay is in flight, yet a DSR the running program emits
+  // must still produce no cursor-position reply back to the PTY.
+  await page.evaluate(() =>
+    (
+      window as Window & {
+        __mockTerminal: {
+          emitCsiQueryReply: (
+            id: { prefix?: string; intermediates?: string; final: string },
+            reply: string,
+          ) => void;
+        };
+      }
+    ).__mockTerminal.emitCsiQueryReply({ final: "n" }, "\x1b[24;1R"),
+  );
+  await page.waitForTimeout(20);
+  expect(remote.writes).toHaveLength(0);
+
+  // Genuine keystrokes are untouched by the suppression.
+  await page.evaluate(() =>
+    (
+      window as Window & { __mockTerminal: { emitData: (data: string) => void } }
+    ).__mockTerminal.emitData("echo hi"),
+  );
+  await expect.poll(() => remote.writes.length).toBe(1);
+  expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "echo hi" });
 });
 
 test("an in-flight snapshot is sent once and only clears the unchanged revision", async ({
