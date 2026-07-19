@@ -11,9 +11,8 @@ import { resolveViewer } from "@/lib/file-viewer";
 import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
-import { sortWorkspaces, filterVisibleWorkspaces } from "@/lib/workspace-sort";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
-import { findNotificationNavTarget } from "@/lib/notification-navigation";
+import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
 
@@ -62,22 +61,6 @@ function switchWorkspace(id: string) {
   }
 }
 
-/** Sorted (display-order) workspaces + the visible subset, derived from current store state. */
-function getSortedWorkspaces() {
-  const { workspaces: rawWorkspaces, workspaceDisplayOrder } = useWorkspaceStore.getState();
-  const workspaceSortOrder = useSettingsStore.getState().workspaceSelector.sortOrder;
-  const { notifications } = useNotificationStore.getState();
-  const workspaces = sortWorkspaces(
-    rawWorkspaces,
-    workspaceSortOrder,
-    workspaceDisplayOrder,
-    notifications,
-  );
-  const { hiddenWorkspaceIds } = useUiStore.getState();
-  const visibleWorkspaces = filterVisibleWorkspaces(workspaces, hiddenWorkspaceIds);
-  return { workspaces, visibleWorkspaces };
-}
-
 /** Switch to the nth visible workspace (0-based display order). */
 function switchToWorkspaceIndex(idx: number) {
   const { visibleWorkspaces } = getSortedWorkspaces();
@@ -111,30 +94,6 @@ function cycleVisibleWorkspace(step: 1 | -1) {
       visibleWorkspaces[visibleWorkspaces.length - 1];
     switchWorkspace(prev.id);
   }
-}
-
-/** Navigate to a pane by notification direction, consuming matched notifications. */
-function navigateByNotification(direction: "recent" | "oldest") {
-  const { notifications, markNotificationsAsRead } = useNotificationStore.getState();
-  const target = findNotificationNavTarget(notifications, direction);
-  if (!target) return;
-
-  // Switch workspace if needed
-  useWorkspaceStore.getState().setActiveWorkspace(target.workspaceId);
-  useDockStore.getState().setFocusedDock(null);
-
-  // Find the pane index from terminalId (terminal-{paneId} pattern)
-  const paneId = target.terminalId.replace(/^terminal-/, "");
-  const ws = useWorkspaceStore.getState().getActiveWorkspace();
-  if (ws) {
-    const paneIndex = ws.panes.findIndex((p) => p.id === paneId);
-    useGridStore.getState().setFocusedPane(paneIndex >= 0 ? paneIndex : 0);
-  }
-
-  // Mark target notifications as read so next navigation advances.
-  // In workspace/paneFocus dismiss modes, auto-dismiss also fires (harmless overlap).
-  // In manual mode, this is the only dismissal path.
-  markNotificationsAsRead(target.notificationIds);
 }
 
 function copyFocusedPaneIdentifier(): boolean {
@@ -393,11 +352,11 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   // notifications.recent / notifications.oldest: jump to notification pane (consume)
   "notifications.recent": (e) => {
     e.preventDefault();
-    navigateByNotification("recent");
+    notificationStep("recent");
   },
   "notifications.oldest": (e) => {
     e.preventDefault();
-    navigateByNotification("oldest");
+    notificationStep("oldest");
   },
 
   // sidebar.toggle: toggle left dock sidebar
