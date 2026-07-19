@@ -2248,3 +2248,168 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(result.error).toMatch(/not a terminal/);
   });
 });
+
+describe("navigation step actions (issue #474)", () => {
+  // ws-a [a1(1), a2(2)], ws-b [b1(1)] — global spatial order: a1, a2, b1
+  function seedTwoWorkspaces() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-a",
+          name: "Alpha",
+          panes: [
+            { id: "a1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "a2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+        {
+          id: "ws-b",
+          name: "Beta",
+          panes: [{ id: "b1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+      activeWorkspaceId: "ws-a",
+      workspaceDisplayOrder: [],
+    });
+    for (const paneId of ["a1", "a2", "b1"]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${paneId}`,
+        profile: "WSL",
+        syncGroup: "Default",
+        workspaceId: paneId.startsWith("a") ? "ws-a" : "ws-b",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+    }
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useNotificationStore.setState(useNotificationStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("spatialStep crosses the workspace boundary and reports the landing target", async () => {
+    seedTwoWorkspaces();
+    useGridStore.getState().setFocusedPane(1); // a2 — last entry of ws-a
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-1",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next" },
+    });
+
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.moved).toBe(true);
+    expect(data.target).toMatchObject({
+      workspaceId: "ws-b",
+      workspaceName: "Beta",
+      terminalId: "terminal-b1",
+      paneIndex: 0,
+      paneNumber: 1,
+      switchedWorkspace: true,
+    });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    // Mirrors terminals.setFocus: the landing terminal takes terminal-store focus.
+    const landed = useTerminalStore.getState().instances.find((i) => i.id === "terminal-b1");
+    expect(landed?.isFocused).toBe(true);
+  });
+
+  it("spatialStep no-op returns moved:false without waiting for a terminal", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-solo",
+          name: "Solo",
+          panes: [{ id: "s1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+      activeWorkspaceId: "ws-solo",
+      workspaceDisplayOrder: [],
+    });
+    useGridStore.getState().setFocusedPane(0);
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-2",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ moved: false, reason: "no_other_target" });
+  });
+
+  it("spatialStep rejects an invalid direction", () => {
+    seedTwoWorkspaces();
+    const result = handleAutomationRequest({
+      requestId: "nav-3",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "sideways" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Invalid direction/);
+  });
+
+  it("notificationStep navigates to the unread notification pane and consumes it", () => {
+    seedTwoWorkspaces();
+    const n = useNotificationStore.getState().addNotification({
+      terminalId: "terminal-b1",
+      workspaceId: "ws-b",
+      message: "done",
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "nav-4",
+      category: "action",
+      target: "navigation",
+      method: "notificationStep",
+      params: { direction: "recent" },
+    });
+
+    expect(result.success).toBe(true);
+    const data = result.data as Record<string, unknown>;
+    expect(data.moved).toBe(true);
+    expect(data.target).toMatchObject({ workspaceId: "ws-b", terminalId: "terminal-b1" });
+    expect(data.consumedNotificationIds).toEqual([n.id]);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
+    const stored = useNotificationStore.getState().notifications.find((x) => x.id === n.id);
+    expect(stored?.readAt).not.toBeNull();
+  });
+
+  it("notificationStep reports no_unread_notifications when nothing is unread", () => {
+    seedTwoWorkspaces();
+    const result = handleAutomationRequest({
+      requestId: "nav-5",
+      category: "action",
+      target: "navigation",
+      method: "notificationStep",
+      params: { direction: "oldest" },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ moved: false, reason: "no_unread_notifications" });
+  });
+
+  it("notificationStep rejects an invalid direction", () => {
+    const result = handleAutomationRequest({
+      requestId: "nav-6",
+      category: "action",
+      target: "navigation",
+      method: "notificationStep",
+      params: { direction: "next" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Invalid direction/);
+  });
+});
