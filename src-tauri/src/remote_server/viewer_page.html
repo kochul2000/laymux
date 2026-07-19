@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>Laymux File Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #11111b;
+        --surface: #181825;
+        --border: #313244;
+        --text: #cdd6f4;
+        --muted: #a6adc8;
+        --accent: #89b4fa;
+        --danger: #f38ba8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--text);
+      }
+      body {
+        font:
+          13px/1.5 Consolas,
+          "Fira Code",
+          monospace;
+      }
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .brand {
+        flex: 0 0 auto;
+        color: var(--accent);
+        font-weight: 700;
+      }
+      #path {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--muted);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      main {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+      }
+      #status {
+        padding: 18px;
+        color: var(--muted);
+      }
+      #status.error {
+        color: var(--danger);
+      }
+      #text {
+        margin: 0;
+        padding: 16px;
+        min-width: min-content;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #image {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      #preview {
+        display: block;
+        width: 100%;
+        min-height: calc(100vh - 44px);
+        border: 0;
+        background: var(--surface);
+      }
+      #binary {
+        padding: 18px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+    <script src="/remote/viewer/viewer.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand">Laymux File Viewer</div>
+        <div id="path" title=""></div>
+      </header>
+      <main>
+        <div id="status">Waiting for the Remote session…</div>
+        <pre id="text" hidden></pre>
+        <img id="image" alt="Remote file preview" hidden />
+        <iframe
+          id="preview"
+          title="Safe file preview"
+          sandbox=""
+          hidden
+        ></iframe>
+        <div id="binary" hidden></div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -13,7 +13,11 @@ use super::internal_error;
 /// Gate the page/asset routes, which sit outside the `remote_guard` middleware.
 /// Cloud tunnel requests (WSS-authorized) only need the enable gate; direct
 /// requests go through the full token/IP/Origin base-access check.
-fn remote_page_gate(server: &ServerState, addr: SocketAddr, req: &Request) -> Option<Response> {
+pub(super) fn remote_page_gate(
+    server: &ServerState,
+    addr: SocketAddr,
+    req: &Request,
+) -> Option<Response> {
     let settings = match effective_remote_settings(&server.app_state) {
         Ok(settings) => settings,
         Err(err) => return Some(internal_error(err)),
@@ -113,7 +117,7 @@ mod tests {
         assert!(html.contains("function handleTouchTap(term, element, point)"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
-        assert!(!html.contains("event.isPrimary === false"));
+        assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
         assert!(html.contains("touchGesture.mode = \"scrolling\""));
         assert!(html.contains("touchGesture.mode = \"selecting\""));
         assert!(html.contains("mode: \"twoFingerScrolling\""));
@@ -194,6 +198,17 @@ mod tests {
         assert!(html.contains("function isDockTerminalId(terminalId)"));
         assert!(html.contains("options.focusDockHost === true || !isDockTerminalId(terminalId)"));
         assert!(html.contains("function isMainOutputTerminal(data, terminalId)"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_file_viewer_new_tab_handshake() {
+        let html = remote_page_html();
+        assert!(html.contains("id=\"fileViewerSection\""));
+        assert!(html.contains("/remote/viewer/"));
+        assert!(html.contains("laymux:file-viewer-ready"));
+        assert!(html.contains("laymux:file-viewer-session"));
+        assert!(html.contains("event.origin !== window.location.origin"));
+        assert!(!html.contains("/remote/viewer/?token="));
     }
 
     #[test]

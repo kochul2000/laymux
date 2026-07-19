@@ -37,6 +37,8 @@ use super::navigation_step_routes::{
 };
 use super::page::{remote_page, remote_page_redirect};
 use super::terminal_info::remote_terminal_infos;
+use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
+use super::viewer_routes::{remote_file_viewer_render, remote_file_viewer_status};
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -152,6 +154,14 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/terminals/{id}/output",
             get(remote_terminal_output_ws),
         )
+        .route(
+            "/remote/v1/file-viewer/status",
+            get(remote_file_viewer_status),
+        )
+        .route(
+            "/remote/v1/file-viewer/render",
+            post(remote_file_viewer_render),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
         .layer(CorsLayer::permissive());
 
@@ -161,6 +171,8 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route("/remote/vendor/xterm.js", get(remote_xterm_js))
         .route("/remote/vendor/xterm.css", get(remote_xterm_css))
         .route("/remote/vendor/addon-fit.js", get(remote_addon_fit_js))
+        .route("/remote/viewer/", get(remote_viewer_page))
+        .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)
 }
 
