@@ -2,7 +2,12 @@ export interface CloseHandlerDeps {
   destroy: () => Promise<void>;
   close: () => Promise<void>;
   saveBeforeClose: () => Promise<void>;
-  timeoutMs: number;
+  /**
+   * Max time to wait for `saveBeforeClose` before forcing the window closed.
+   * A function is evaluated at close time so it can reflect current settings
+   * (e.g. a longer kill-on-exit settle delay). See issue #451.
+   */
+  timeoutMs: number | (() => number);
 }
 
 /**
@@ -26,10 +31,12 @@ export function createCloseHandler(deps: CloseHandlerDeps) {
 
     event.preventDefault();
 
+    const timeoutMs = typeof deps.timeoutMs === "function" ? deps.timeoutMs() : deps.timeoutMs;
+
     try {
       await Promise.race([
         deps.saveBeforeClose().then(() => "saved" as const),
-        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), deps.timeoutMs)),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
       ]);
     } catch {
       // Save failure is non-fatal — proceed to close

@@ -60,6 +60,7 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     validate_profile_defaults(settings, &mut issues);
     validate_profiles(settings, &mut issues);
     validate_terminal(settings, &mut issues);
+    validate_exit(settings, &mut issues);
     validate_remote(settings, &mut issues);
     validate_view_settings(settings, &mut issues);
     validate_extension_viewers(settings, &mut issues);
@@ -302,6 +303,17 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         100,
         u64::MAX,
     );
+}
+
+fn validate_exit(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    range_u64(
+        issues,
+        "/exit/interruptRounds",
+        u64::from(settings.exit.interrupt_rounds),
+        1,
+        10,
+    );
+    range_u64(issues, "/exit/settleMs", settings.exit.settle_ms, 0, 10_000);
 }
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {

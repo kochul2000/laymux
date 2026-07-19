@@ -304,6 +304,16 @@ export interface CodexSettings {
   statusMessageDelimiter: string;
 }
 
+/** App-exit behavior (issue #451). */
+export interface ExitSettings {
+  /** Send Ctrl+C to all terminals on app exit. Default: false (opt-in). */
+  interruptTerminals: boolean;
+  /** How many Ctrl+C presses to send per terminal. Clamped 1..=10. Default: 3. */
+  interruptRounds: number;
+  /** Delay (ms) after the last Ctrl+C so agents can print their session id. Clamped 0..=10000. Default: 700. */
+  settleMs: number;
+}
+
 export interface IssueReporterSettings {
   shell: string;
   paddingTop: number;
@@ -436,6 +446,7 @@ export interface Settings {
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
+  exit?: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;

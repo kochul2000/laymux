@@ -246,6 +246,60 @@ fn remote_snapshot_max_kib_outside_range_is_rejected() {
 }
 
 #[test]
+fn exit_interrupt_defaults_are_off_and_conservative() {
+    let defaults = Settings::default();
+    assert!(
+        !defaults.exit.interrupt_terminals,
+        "kill-on-exit must be opt-in (default off)"
+    );
+    assert_eq!(defaults.exit.interrupt_rounds, 3);
+    assert_eq!(defaults.exit.settle_ms, 700);
+}
+
+#[test]
+fn exit_section_round_trips_through_patch() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "exit": { "interruptTerminals": true, "interruptRounds": 5, "settleMs": 1200 } }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    assert!(candidate.exit.interrupt_terminals);
+    assert_eq!(candidate.exit.interrupt_rounds, 5);
+    assert_eq!(candidate.exit.settle_ms, 1200);
+}
+
+#[test]
+fn exit_out_of_range_values_are_rejected() {
+    let too_many_rounds = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "exit": { "interruptRounds": 0 } }),
+    );
+    assert!(!too_many_rounds.valid);
+    assert!(too_many_rounds
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/exit/interruptRounds"));
+
+    let settle_too_large = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "exit": { "settleMs": 999999 } }),
+    );
+    assert!(!settle_too_large.valid);
+    assert!(settle_too_large
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/exit/settleMs"));
+}
+
+#[test]
+fn exit_metadata_is_live_applied() {
+    let description = describe_settings(&["/exit".into()]).expect("known path");
+    assert_eq!(description["metadata"]["/exit"]["applyMode"], json!("live"));
+    assert_eq!(description["metadata"]["/exit"]["writable"], json!(true));
+}
+
+#[test]
 fn duplicate_profiles_and_bad_extension_viewer_reference_are_rejected() {
     let duplicate = prepare_settings_update(
         &Settings::default(),

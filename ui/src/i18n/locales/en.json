@@ -269,7 +269,14 @@
       "pathLinkMaxLength": "Max Path Length",
       "pathLinkMaxLengthDesc": "Selections longer than this (characters) are not treated as a path.",
       "scrollToBottomButton": "Jump-to-bottom Button",
-      "scrollToBottomButtonDesc": "Show the floating button that jumps to the bottom when scrolled up into the scrollback."
+      "scrollToBottomButtonDesc": "Show the floating button that jumps to the bottom when scrolled up into the scrollback.",
+      "exitGroup": "On Exit",
+      "interruptOnExit": "Interrupt running work on exit",
+      "interruptOnExitDesc": "When quitting the app, send Ctrl+C to every terminal to wind down running work (cron, etc.) and nudge Claude Code / Codex to print their resume session id into the scrollback.",
+      "interruptRounds": "Ctrl+C presses",
+      "interruptRoundsDesc": "How many times to send Ctrl+C to each terminal (1–10). Claude / Codex usually need at least 2.",
+      "interruptSettle": "Settle delay (ms)",
+      "interruptSettleDesc": "How long to wait after the last Ctrl+C before closing the window, so the session id can print into the scrollback (0–10000)."
     },
     "interface": {
       "title": "Interface",

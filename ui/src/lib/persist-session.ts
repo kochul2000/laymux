@@ -4,6 +4,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { collectSettingsSnapshot } from "@/lib/settings-snapshot";
+import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 
 /** Default maximum serialized terminal output size to cache (256KB). Overridden by profileDefaults.maxOutputCacheKB. */
 const DEFAULT_MAX_CACHE_CHARS = 256 * 1024;
@@ -70,6 +71,12 @@ export async function persistSession(): Promise<void> {
  */
 export async function saveBeforeClose(): Promise<void> {
   closingDown = true;
+
+  // Kill-on-exit (issue #451): before serializing scrollback, send Ctrl+C to
+  // running terminals so cron/agents wind down and Claude/Codex print their
+  // resume session id. This must run before the serialize loop below so the
+  // printed id lands in the cached scrollback. Opt-in; no-op when disabled.
+  await interruptTerminalsOnExit();
 
   // When settings had a parse error, don't overwrite the user's original file with defaults.
   // Terminal output caching is still safe — only settings.json persistence is blocked.

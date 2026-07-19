@@ -494,6 +494,46 @@ fn default_codex_status_message_delimiter() -> String {
     " · ".to_string()
 }
 
+/// App-exit behavior settings.
+///
+/// Controls the "interrupt running terminal work on quit" feature (issue #451):
+/// when enabled, laymux sends Ctrl+C (ETX, 0x03) to every terminal a few times
+/// as the window closes. This (A) tears down long-running/cron work and (B)
+/// nudges Claude Code / Codex to print their resume session id into the
+/// scrollback (which is cached and restored on the next launch).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExitSettings {
+    /// Send Ctrl+C to all terminals on app exit. Default: off (destructive, opt-in).
+    #[serde(default)]
+    pub interrupt_terminals: bool,
+    /// How many Ctrl+C presses to send per terminal. Clamped to 1..=10 at use.
+    #[serde(default = "default_interrupt_rounds")]
+    pub interrupt_rounds: u32,
+    /// Delay (ms) after the last Ctrl+C so agents can print their session id
+    /// before the window closes. Clamped to 0..=10000 at use.
+    #[serde(default = "default_exit_settle_ms")]
+    pub settle_ms: u64,
+}
+
+impl Default for ExitSettings {
+    fn default() -> Self {
+        Self {
+            interrupt_terminals: false,
+            interrupt_rounds: default_interrupt_rounds(),
+            settle_ms: default_exit_settle_ms(),
+        }
+    }
+}
+
+fn default_interrupt_rounds() -> u32 {
+    3
+}
+
+fn default_exit_settle_ms() -> u64 {
+    700
+}
+
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1228,6 +1268,8 @@ pub struct Settings {
     #[serde(default)]
     pub codex: CodexSettings,
     #[serde(default)]
+    pub exit: ExitSettings,
+    #[serde(default)]
     pub memo: MemoSettings,
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
@@ -1321,6 +1363,7 @@ impl Default for Settings {
             workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),
+            exit: ExitSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),
