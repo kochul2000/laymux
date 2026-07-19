@@ -1684,7 +1684,12 @@
           const composerMode = currentInputMode() === "composer";
           const canEdit = Boolean(leaseId && activeTerminalId && composerMode);
           // `data-can-send` mirrors the Send button's readiness for tests / a11y.
-          const canCommit = Boolean(canEdit && composerReady && draft && !draft.inFlight);
+          // A collapsed editor never commits: its draft is invisible, so Send
+          // stays disabled (not hidden — the footer buttons must not shift
+          // under the finger that just tapped Keyboard).
+          const canCommit = Boolean(
+            canEdit && composerReady && draft && !draft.inFlight && !composerCollapsed,
+          );
           composerInput.disabled = !canEdit;
           terminalComposer.dataset.canSend = canCommit ? "true" : "false";
           // Send button belongs to the mobile layout in composer mode; the
@@ -1697,7 +1702,9 @@
           if (!leaseId || !activeTerminalId) return;
           if (currentInputMode() === "direct") {
             terminal?.focus?.();
-          } else if (!composerInput.disabled) {
+          } else if (!composerCollapsed && !composerInput.disabled) {
+            // A collapsed editor must not regain focus behind the user's back
+            // (reconnect, attach-ready) — only the Keyboard button restores it.
             composerInput.focus({ preventScroll: true });
           }
         }
