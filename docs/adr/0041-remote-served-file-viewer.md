@@ -1,4 +1,4 @@
-# 0040. Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공한다
+# 0041. Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공한다
 
 - Status: Accepted
 - Date: 2026-07-19

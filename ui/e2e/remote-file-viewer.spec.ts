@@ -133,6 +133,7 @@ test("opens a lease-gated host file in a credential-free new tab", async ({ cont
   await expect(popup.frameLocator("#preview").locator("h1")).toHaveText(
     "served from the Laymux host",
   );
+  await expect(popup).toHaveTitle("Laymux File Viewer");
   expect(await popup.locator("body").getAttribute("data-hacked")).toBeNull();
   expect(popup.url()).toBe("http://remote.test/remote/viewer/");
   expect(popup.url()).not.toContain("remote-secret");
@@ -189,6 +190,7 @@ test("keeps the file viewer drawer usable at mobile width", async ({ context, pa
   await page
     .locator("#fileViewerPath")
     .fill("/tmp/a very long file name that must stay inside.txt");
+  await expect(page.locator("#fileViewerPath")).toHaveAttribute("autocapitalize", "off");
 
   const panel = await page.locator("#fileViewerSection").evaluate((element) => ({
     clientWidth: element.clientWidth,

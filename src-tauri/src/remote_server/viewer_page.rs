@@ -84,6 +84,11 @@ mod tests {
     }
 
     #[test]
+    fn viewer_script_never_copies_a_host_path_into_the_document_title() {
+        assert!(!REMOTE_VIEWER_JS.contains("document.title ="));
+    }
+
+    #[test]
     fn sandboxed_preview_reports_when_its_source_was_truncated() {
         let branch_start = REMOTE_VIEWER_JS
             .find("if (payload.kind === \"text\" && payload.previewDocument)")

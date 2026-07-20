@@ -42,9 +42,6 @@
     statusElement.hidden = true;
     pathElement.textContent = payload.path || "";
     pathElement.title = payload.path || "";
-    document.title = payload.path
-      ? `${payload.path} — Laymux`
-      : "Laymux File Viewer";
 
     if (payload.kind === "text" && payload.previewDocument) {
       previewElement.setAttribute("sandbox", "");

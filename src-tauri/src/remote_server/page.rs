@@ -204,6 +204,9 @@ mod tests {
     fn remote_page_html_contains_file_viewer_new_tab_handshake() {
         let html = remote_page_html();
         assert!(html.contains("id=\"fileViewerSection\""));
+        assert!(html.contains(
+            "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
+        ));
         assert!(html.contains("/remote/viewer/"));
         assert!(html.contains("laymux:file-viewer-ready"));
         assert!(html.contains("laymux:file-viewer-session"));
