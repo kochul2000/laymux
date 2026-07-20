@@ -13,6 +13,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 
@@ -327,6 +328,7 @@ async function waitForTerminalInputReady(): Promise<void> {
 describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useNotificationStore.setState({ notifications: [] });
@@ -1316,6 +1318,101 @@ describe("TerminalView", () => {
         undefined,
       );
     });
+  });
+
+  it("holds the global startup slot until both PTY creation and first render complete", async () => {
+    let resolveSession!: (value: Awaited<ReturnType<typeof mockCreateTerminalSession>>) => void;
+    mockCreateTerminalSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSession = resolve;
+        }),
+    );
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["pane-first", "pane-second"],
+      eligiblePaneIds: ["pane-first", "pane-second"],
+    });
+
+    render(
+      <TerminalView
+        instanceId="terminal-pane-first"
+        paneId="pane-first"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+    await vi.waitFor(() => expect(mockCreateTerminalSession).toHaveBeenCalled());
+
+    const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => renderHandler?.());
+    expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-first");
+
+    await act(async () => {
+      resolveSession({
+        id: "terminal-pane-first",
+        title: "Terminal",
+        config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
+      });
+      await Promise.resolve();
+    });
+
+    expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
+    expect([...useTerminalStartupStore.getState().revealedPaneIds].sort()).toEqual([
+      "pane-first",
+      "pane-second",
+    ]);
+  });
+
+  it("keeps the startup slot when PTY is ready before the first render", async () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["pane-first", "pane-second"],
+      eligiblePaneIds: ["pane-first", "pane-second"],
+    });
+
+    render(
+      <TerminalView
+        instanceId="terminal-pane-first"
+        paneId="pane-first"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore
+          .getState()
+          .instances.find((instance) => instance.id === "terminal-pane-first")?.sessionReady,
+      ).toBe(true);
+    });
+    expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-first");
+
+    const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+    act(() => renderHandler?.());
+
+    expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
+  });
+
+  it("releases the global startup slot when PTY creation fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCreateTerminalSession.mockRejectedValueOnce(new Error("spawn failed"));
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["pane-failed", "pane-next"],
+      eligiblePaneIds: ["pane-failed", "pane-next"],
+    });
+
+    render(
+      <TerminalView
+        instanceId="terminal-pane-failed"
+        paneId="pane-failed"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-next");
+    });
+    consoleError.mockRestore();
   });
 
   it("detects Codex from banner output without command-status", async () => {

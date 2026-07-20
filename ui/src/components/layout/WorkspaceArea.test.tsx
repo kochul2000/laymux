@@ -16,6 +16,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useNotificationStore } from "@/stores/notification-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 describe("WorkspaceArea", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -33,6 +34,7 @@ describe("WorkspaceArea", () => {
     useUiStore.setState(useUiStore.getInitialState());
     useNotificationStore.setState(useNotificationStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -289,6 +291,20 @@ describe("WorkspaceArea", () => {
     // Back to WS1 so WS2 is in the background.
     act(() => useWorkspaceStore.getState().setActiveWorkspace(ws1Id));
 
+    // WorkspaceArea is intentionally tested without AppLayout, which normally
+    // owns the startup coordinator. Adopt both fixtures as already ready so
+    // this test isolates background eviction rather than startup ordering.
+    const terminalPaneIds = useWorkspaceStore
+      .getState()
+      .workspaces.flatMap((workspace) =>
+        workspace.panes.filter((pane) => pane.view.type === "TerminalView").map((pane) => pane.id),
+      );
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: terminalPaneIds,
+      eligiblePaneIds: [],
+      readyPaneIds: terminalPaneIds,
+    });
+
     render(<WorkspaceArea />);
 
     // WS1 is mounted; visiting WS2 mounts it too, then switch back.
@@ -308,6 +324,11 @@ describe("WorkspaceArea", () => {
   it("never unmounts active-workspace panes even if listed as evicted", () => {
     act(() => useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" }));
     const activePane = useWorkspaceStore.getState().workspaces[0].panes[0].id;
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: [activePane],
+      eligiblePaneIds: [],
+      readyPaneIds: [activePane],
+    });
     render(<WorkspaceArea />);
     act(() => useUiStore.getState().setEvictedPaneIds(new Set([activePane])));
     // Active workspace pane must still render (defensive: hook never evicts it,

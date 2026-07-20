@@ -10,6 +10,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
@@ -36,7 +37,7 @@ type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
-const TERMINAL_SESSION_READY_TIMEOUT_MS = 4000;
+const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };

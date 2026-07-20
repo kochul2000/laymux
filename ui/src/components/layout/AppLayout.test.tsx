@@ -28,7 +28,11 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 vi.mock("@/components/views/TerminalView", () => ({
-  TerminalView: () => <div data-testid="mock-terminal">Terminal Mock</div>,
+  TerminalView: ({ instanceId }: { instanceId: string }) => (
+    <div data-testid="mock-terminal" data-terminal-id={instanceId}>
+      Terminal Mock
+    </div>
+  ),
 }));
 
 import { AppLayout } from "./AppLayout";
@@ -39,6 +43,9 @@ import { useNotificationStore } from "@/stores/notification-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { viewerInstanceId } from "@/lib/file-viewer";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -48,6 +55,8 @@ describe("AppLayout", () => {
     useUiStore.setState(useUiStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useGridStore.setState(useGridStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
+    useFileViewerStore.setState(useFileViewerStore.getInitialState());
   });
 
   it("renders left dock and workspace area by default", () => {
@@ -68,6 +77,49 @@ describe("AppLayout", () => {
     useDockStore.getState().setDockActiveView("right", "SettingsView");
     render(<AppLayout />);
     expect(screen.getByTestId("dock-right")).toBeInTheDocument();
+  });
+
+  it("serializes terminal startup across the workspace and visible docks", () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useDockStore.getState().setDockActiveView("right", "TerminalView");
+    const workspacePaneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    const dockPaneId = useDockStore.getState().getDock("right")!.panes[0].id;
+
+    render(<AppLayout />);
+
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(1);
+    expect(useTerminalStartupStore.getState().activePaneId).toBe(workspacePaneId);
+
+    act(() => useTerminalStartupStore.getState().settleStartup(workspacePaneId));
+
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(2);
+    expect(useTerminalStartupStore.getState().activePaneId).toBe(dockPaneId);
+  });
+
+  it("serializes a terminal-backed file viewer with workspace startup", () => {
+    const path = "/home/user/review.txt";
+    const fileViewerTerminalId = viewerInstanceId(path);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".txt"], command: "vi", profile: "WSL" }],
+      },
+    });
+    useFileViewerStore.getState().openFileViewer(path);
+
+    render(<AppLayout />);
+
+    expect(useTerminalStartupStore.getState().activePaneId).toBe(fileViewerTerminalId);
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(1);
+    expect(screen.getByTestId("mock-terminal")).toHaveAttribute(
+      "data-terminal-id",
+      fileViewerTerminalId,
+    );
+
+    act(() => useTerminalStartupStore.getState().settleStartup(fileViewerTerminalId));
+
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(2);
   });
 
   it("keeps dock in DOM when toggled invisible with dockPersistState on", () => {

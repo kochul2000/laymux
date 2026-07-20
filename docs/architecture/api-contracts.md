@@ -532,14 +532,16 @@ impl McpHandler {
 ```
 
 **`write_to_terminal` / `write_to_neighbor` 리턴 계약** (#426):
-- 대상 `terminalId`가 workspace layout에는 할당됐지만 다중-pane reveal queue 뒤에 있어
+- 대상 `terminalId`가 workspace layout에는 할당됐지만 전역 terminal startup queue 뒤에 있어
   PTY가 아직 없으면 404로 실패하지 않는다. 프론트엔드 내부
-  `terminals.prepareForAutomation` 브리지가 해당 pane을 즉시 reveal하고, 필요하면 대상
+  `terminals.prepareForAutomation` 브리지가 해당 pane을 다음 순서로 우선하고, 필요하면 대상
   workspace를 PTY 생성 동안만 활성화한 뒤 원래 workspace로 복원한다. REST
-  `POST /terminals/{id}/write`와 MCP `write_to_terminal` 모두 세션 준비를 기다린 뒤 쓴다.
+  `POST /terminals/{id}/write`와 MCP `write_to_terminal` 모두 세션 준비를 최대 20초 기다린 뒤 쓴다.
+  이미 시작 중인 terminal은 선점하지 않으며 Automation 요청도 전역 동시 시작 수를 늘리지
+  않는다([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)).
 - `focus_terminal`은 terminal store 등록 전에도 deterministic terminal id를 workspace
   layout에서 해석해 workspace 전환 + pane focus를 먼저 적용하고, PTY 준비 완료 후
-  응답한다. 따라서 5개 이상 pane을 순차 reveal하는 중이거나 reveal 완료 전에 다른
+  응답한다. 따라서 여러 pane을 순차 시작하는 중이거나 시작 완료 전에 다른
   workspace로 전환한 경우에도 focus/write 계약이 유지된다.
 - `activity`: 쓰기 **직전** 대상 pane 상태. `{"type":"shell"}` | `{"type":"running"}` |
   `{"type":"interactiveApp","name":"Codex"}`. codex/claude 인 줄 알고 보냈는데 shell 로

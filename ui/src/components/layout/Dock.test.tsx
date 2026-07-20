@@ -34,12 +34,14 @@ import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 describe("Dock", () => {
   beforeEach(() => {
     useDockStore.setState(useDockStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -138,6 +140,11 @@ describe("Dock", () => {
   });
 
   it("passes stable paneId to ViewRenderer based on dock pane id", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["dp-term"],
+      eligiblePaneIds: [],
+      readyPaneIds: ["dp-term"],
+    });
     render(
       <Dock
         position="bottom"
@@ -149,7 +156,54 @@ describe("Dock", () => {
     expect(screen.getByTestId("view-terminal")).toBeInTheDocument();
   });
 
+  it("keeps a single-pane dock terminal queued behind the occupied global slot", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["busy", "dp-queued"],
+      eligiblePaneIds: ["busy", "dp-queued"],
+    });
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[{ id: "dp-queued", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
+      />,
+    );
+
+    expect(screen.getByTestId("dock-pane-loading-dp-queued")).toBeInTheDocument();
+    expect(screen.queryByTestId("view-terminal")).not.toBeInTheDocument();
+
+    act(() => useTerminalStartupStore.getState().settleStartup("busy"));
+
+    expect(screen.getByTestId("view-terminal")).toBeInTheDocument();
+  });
+
+  it("uses the pane view type consistently when single-dock metadata disagrees", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["busy", "dp-queued"],
+      eligiblePaneIds: ["busy", "dp-queued"],
+    });
+
+    render(
+      <Dock
+        position="bottom"
+        activeView="MemoView"
+        views={[]}
+        panes={[{ id: "dp-queued", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
+      />,
+    );
+
+    expect(screen.getByTestId("dock-pane-loading-dp-queued")).toBeInTheDocument();
+    expect(screen.queryByTestId("view-memo")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("view-terminal")).not.toBeInTheDocument();
+  });
+
   it("passes viewConfig with profile to ViewRenderer in single-pane mode", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["dp-wsl"],
+      eligiblePaneIds: [],
+      readyPaneIds: ["dp-wsl"],
+    });
     render(
       <Dock
         position="bottom"

@@ -11,9 +11,8 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
-import { usePaneRevealQueue } from "@/hooks/usePaneRevealQueue";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
-import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 export interface GridPane {
   id: string;
@@ -115,25 +114,18 @@ export function PaneGrid({
   // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
   const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
 
-  // Staggered reveal: mount panes' views a few per frame instead of all in one
-  // commit, so a many-pane workspace never flashes a white/blank screen. Small
-  // layouts (≤ initialBatch) reveal synchronously — behavior unchanged. Only
-  // progresses while active, so a hidden background workspace stays paused.
-  const paneIds = panes.map((p) => p.id);
-  const paneIdsKey = paneIds.join(" ");
-  const focusedPaneId = panes.find((p) => isFocused(p.id))?.id ?? null;
-  const revealRequestCounts = usePaneRevealStore((s) => s.requestCounts);
-  const requestedPaneIds = useMemo(
-    () => new Set(paneIds.filter((paneId) => (revealRequestCounts[paneId] ?? 0) > 0)),
-    // paneIds is recreated on render; the content key tracks layout changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [paneIdsKey, revealRequestCounts],
-  );
-  const revealed = usePaneRevealQueue(paneIds, {
-    active: isActive,
-    focusedPaneId,
-    requestedPaneIds,
-  });
+  // The app-global coordinator reveals only one starting terminal at a time.
+  // Other view types do not allocate a PTY/xterm renderer and mount immediately.
+  const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
+  const revealed = useMemo(() => {
+    const paneIds = new Set<string>();
+    for (const pane of panes) {
+      if (pane.view.type !== "TerminalView" || startupRevealedPaneIds.has(pane.id)) {
+        paneIds.add(pane.id);
+      }
+    }
+    return paneIds;
+  }, [panes, startupRevealedPaneIds]);
 
   // Drag-to-swap (issue #377). Native HTML5 DnD, same pattern as workspace reorder
   // in WorkspaceSelectorView. dragSrcId 는 현재 드래그 중인 pane, dragOverId 는
