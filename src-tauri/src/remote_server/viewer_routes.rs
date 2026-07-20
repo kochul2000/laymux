@@ -68,6 +68,7 @@ pub(super) async fn remote_file_viewer_render(
     file_viewer_bridge_response(&server, &authorization, "render", params).await
 }
 
+#[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
 fn file_viewer_authorization(
     app_state: &AppState,
     lease_id: Option<&str>,
