@@ -988,15 +988,20 @@ pub fn write_terminal_input_inner(
         let protocol = protocol_gate.lock_or_err()?;
         protocol.bracketed_paste()
     };
-    let encoded = encode_terminal_input(
+    // Encode only the body here; the submit CR is written as a separate,
+    // delayed PTY write below. Fusing text and CR into one write makes a TUI
+    // (Codex/Claude Code) or shell (PowerShell/PSReadLine, WSL) fold the CR into
+    // the bracketed paste of the body, so the line is typed but never submitted
+    // until a second lone CR arrives (#490; matches the MCP path's #314 split).
+    let body = encode_terminal_input(
         text,
-        submit,
+        false,
         bracketed_paste,
         TERMINAL_STRUCTURED_INPUT_MAX_BYTES,
     )
     .map_err(|err| err.to_string())?;
     permit.ensure_current()?;
-    if encoded.is_empty() {
+    if body.is_empty() && !submit {
         return permit.finish();
     }
 
@@ -1007,7 +1012,26 @@ pub fn write_terminal_input_inner(
         .cloned()
         .ok_or_else(|| format!("Session '{id}' not found"))?;
     let deadline = permit.deadline();
-    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(&encoded, deadline))?;
+
+    if !body.is_empty() {
+        permit.ensure_current()?;
+        let pending = permit.enqueue_pty_job(|| handle.enqueue_write(&body, deadline))?;
+        let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
+        if result.is_err() {
+            return finish_human_control_io(permit, &handle, result);
+        }
+    }
+
+    if !submit {
+        return finish_human_control_io(permit, &handle, Ok(()));
+    }
+
+    // Only gap the CR when a body preceded it; a lone Enter needs no delay.
+    if !body.is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(ENTER_SUBMIT_CR_DELAY_MS));
+    }
+    permit.ensure_current()?;
+    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(b"\r", deadline))?;
     let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
     finish_human_control_io(permit, &handle, result)
 }
@@ -1696,12 +1720,16 @@ mod tests {
         );
 
         let worker_state = Arc::clone(&state);
+        // submit=false so the body is a single blocking write; a submit would
+        // add a second, delayed CR write (#490) that the one-shot BlockingTest-
+        // Writer release channel can't serve. The no-table-lock-during-I/O
+        // invariant is identical for both writes.
         let worker = thread::spawn(move || {
             write_terminal_input_inner(
                 &worker_state,
                 "t1",
                 "blocking input",
-                true,
+                false,
                 HumanControlOrigin::Local,
             )
         });
@@ -1718,6 +1746,60 @@ mod tests {
 
         release_tx.send(()).unwrap();
         worker.join().unwrap().unwrap();
+    }
+
+    /// #490: a submit must reach the PTY as the body followed by a *separate*
+    /// CR write, not one fused `text\r` buffer. Fusing them makes a TUI/shell
+    /// fold the CR into a bracketed paste of the body, typing the line without
+    /// submitting it. A per-write recorder proves the two are distinct writes.
+    #[test]
+    fn structured_submit_writes_body_and_cr_as_separate_pty_writes() {
+        #[derive(Clone)]
+        struct ChunkRecordingWriter(Arc<Mutex<Vec<Vec<u8>>>>);
+        impl Write for ChunkRecordingWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().push(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let write_chunks = |text: &str, submit: bool| -> Vec<Vec<u8>> {
+            let state = AppState::new();
+            state
+                .terminals
+                .lock_or_err()
+                .unwrap()
+                .insert("t1".into(), test_session());
+            state
+                .terminal_protocol_states
+                .lock_or_err()
+                .unwrap()
+                .insert("t1".into(), terminal_output::new_protocol_gate());
+            let chunks = Arc::new(Mutex::new(Vec::new()));
+            state.pty_handles.lock_or_err().unwrap().insert(
+                "t1".into(),
+                pty::PtyHandle::from_test_writer(Box::new(ChunkRecordingWriter(Arc::clone(
+                    &chunks,
+                )))),
+            );
+            write_terminal_input_inner(&state, "t1", text, submit, HumanControlOrigin::Local)
+                .unwrap();
+            let recorded = chunks.lock().unwrap().clone();
+            recorded
+        };
+
+        // Body + submit → two distinct writes, CR last and by itself.
+        assert_eq!(
+            write_chunks("hi", true),
+            vec![b"hi".to_vec(), b"\r".to_vec()]
+        );
+        // Lone submit → a single CR write (no empty body write ahead of it).
+        assert_eq!(write_chunks("", true), vec![b"\r".to_vec()]);
+        // No submit → body only, never a trailing CR.
+        assert_eq!(write_chunks("hi", false), vec![b"hi".to_vec()]);
     }
 
     #[test]
