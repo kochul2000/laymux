@@ -228,6 +228,87 @@ test.describe("remote mobile layout", () => {
     }
   });
 
+  test("drags visible soft keys and offers accessible order controls", async ({ page }) => {
+    await page.route("http://remote.test/", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>remote test</title>",
+      }),
+    );
+    await page.goto("http://remote.test/");
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({ visible: true, sets: [], custom: ["tab", "enter"] }),
+      );
+    });
+    await page.setContent(await loadRemotePageMarkup(true));
+
+    const renderedKeyIds = () =>
+      page
+        .locator("#keyRow .key-btn")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => (button as HTMLButtonElement).dataset.key),
+        );
+    await expect.poll(renderedKeyIds).toEqual(["tab", "enter"]);
+
+    await page.locator("#keyBarSettings").click();
+    await expect(page.locator("#keyPopoverBody")).toContainText("Key order");
+    await page.locator(".key-chip").filter({ hasText: "Esc" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["tab", "enter", "esc"]);
+
+    const orderSection = page.locator("#keyPopoverBody > .key-order-section");
+    await expect(orderSection).toHaveCount(1);
+    expect(
+      await orderSection.evaluate((section) => section === section.parentElement?.lastElementChild),
+    ).toBe(true);
+    const paletteEscBox = await page
+      .locator(".key-chip:not(.key-order-chip)")
+      .filter({ hasText: "Esc" })
+      .boundingBox();
+    const orderEscBox = await page.locator('.key-order-chip[data-order-key="esc"]').boundingBox();
+    expect(paletteEscBox).not.toBeNull();
+    expect(orderEscBox).not.toBeNull();
+    expect(Math.abs(orderEscBox!.width - paletteEscBox!.width)).toBeLessThan(0.1);
+    expect(Math.abs(orderEscBox!.height - paletteEscBox!.height)).toBeLessThan(0.1);
+
+    const escOrderChip = page.locator('.key-order-chip[data-order-key="esc"]');
+    const tabOrderChip = page.locator('.key-order-chip[data-order-key="tab"]');
+    const escBox = await escOrderChip.boundingBox();
+    const tabBox = await tabOrderChip.boundingBox();
+    expect(escBox).not.toBeNull();
+    expect(tabBox).not.toBeNull();
+    await page.mouse.move(escBox!.x + escBox!.width / 2, escBox!.y + escBox!.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(250);
+    await expect(escOrderChip).toHaveClass(/dragging/);
+    await page.mouse.move(tabBox!.x + 2, tabBox!.y + tabBox!.height / 2, { steps: 4 });
+    await expect(tabOrderChip).toHaveClass(/drop-before/);
+    await page.mouse.up();
+
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const stored = JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}");
+          return stored.order.filter((id: string) => ["esc", "tab", "enter"].includes(id));
+        }),
+      )
+      .toEqual(["esc", "tab", "enter"]);
+
+    await page.reload();
+    await page.setContent(await loadRemotePageMarkup(true));
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+
+    await page.locator("#keyBarSettings").click();
+    await page.locator('.key-order-chip[data-order-key="enter"]').click();
+    await expect(page.locator(".key-order-actions")).toBeVisible();
+    await page.getByRole("button", { name: "Move Enter to start" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["enter", "esc", "tab"]);
+    await page.getByRole("button", { name: "Reset key order" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+  });
+
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {
     const writes: string[] = [];
     let outputSocket: WebSocketRoute | null = null;
