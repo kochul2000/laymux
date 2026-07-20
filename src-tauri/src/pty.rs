@@ -187,20 +187,25 @@ impl PtyHandle {
         deadline: Instant,
         is_current_owner: impl FnMut() -> bool,
     ) -> Result<(), String> {
-        let pending = self.enqueue_write(data, deadline)?;
+        let pending = self.enqueue_write(data, false, deadline)?;
         self.await_enqueued_control_job(pending, deadline, is_current_owner)
     }
 
     /// Place a write on this terminal's FIFO without waiting for it. Human
     /// controller callers use this narrow operation while holding their owner
     /// gate, making FIFO submission atomic with an ownership transition.
+    ///
+    /// When `submit` is set, the worker appends a submit CR after the body,
+    /// gapped so a TUI/shell registers a distinct Enter, all inside this one
+    /// FIFO job so the body and CR stay atomic against other writes (#490).
     pub(crate) fn enqueue_write(
         &self,
         data: &[u8],
+        submit: bool,
         deadline: Instant,
     ) -> Result<PendingControlJob, String> {
         self.ensure_input_healthy()?;
-        self.control.submit_write(data, deadline)
+        self.control.submit_write(data, submit, deadline)
     }
 
     /// Get the child process ID.

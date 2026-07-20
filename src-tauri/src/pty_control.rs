@@ -9,11 +9,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use portable_pty::{MasterPty, PtySize};
 
-use crate::constants::PTY_CONTROL_QUEUE_CAPACITY;
+use crate::constants::{
+    ENTER_SUBMIT_CR_DELAY_MS, PTY_CONTROL_QUEUE_CAPACITY, PTY_CONTROL_WAIT_POLL_MS,
+};
 use crate::lock_ext::MutexExt;
 use crate::pty::chunked_write_to_guarded;
 
@@ -23,6 +25,9 @@ enum ControlJob {
     Write {
         id: u64,
         data: Vec<u8>,
+        /// Append a submit CR after the body, gapped by [`ENTER_SUBMIT_CR_DELAY_MS`],
+        /// within this same job so the pair stays atomic on the FIFO (#490).
+        submit: bool,
         cancelled: Arc<AtomicBool>,
         deadline: Instant,
         result: mpsc::Sender<ControlResult>,
@@ -109,6 +114,7 @@ impl PtyControlWorker {
     pub(crate) fn submit_write(
         &self,
         data: &[u8],
+        submit: bool,
         deadline: Instant,
     ) -> Result<PendingControlJob, String> {
         let id = self.next_id();
@@ -117,6 +123,7 @@ impl PtyControlWorker {
         self.submit(ControlJob::Write {
             id,
             data: data.to_vec(),
+            submit,
             cancelled: Arc::clone(&cancelled),
             deadline,
             result: result_tx,
@@ -253,12 +260,36 @@ fn execute_job(
     match job {
         ControlJob::Write {
             data,
+            submit,
             cancelled,
             deadline,
             ..
-        } => chunked_write_to_guarded(writer, &data, || {
-            !cancelled.load(Ordering::Acquire) && Instant::now() < deadline
-        }),
+        } => {
+            if !data.is_empty() {
+                chunked_write_to_guarded(writer, &data, || {
+                    !cancelled.load(Ordering::Acquire) && Instant::now() < deadline
+                })?;
+            }
+            if submit {
+                // Emit the submit CR as its own write, gapped from the body, so
+                // a TUI (Codex/Claude Code) or shell (PowerShell/PSReadLine,
+                // WSL) registers a real Enter instead of folding the CR into the
+                // body's bracketed paste (#490). Running the gap here on the
+                // FIFO worker keeps body+CR atomic — no other write on this
+                // terminal can slip between them. Accepted tradeoff: same-owner
+                // input queued behind a submit waits out this gap (~300ms); that
+                // is the cost of atomicity, and a cross-owner transition still
+                // aborts the gap within one poll (see `wait_before_submit_cr`).
+                // A lone Enter (empty body) needs no gap.
+                if !data.is_empty() {
+                    wait_before_submit_cr(&cancelled, deadline)?;
+                }
+                chunked_write_to_guarded(writer, b"\r", || {
+                    !cancelled.load(Ordering::Acquire) && Instant::now() < deadline
+                })?;
+            }
+            Ok(())
+        }
         ControlJob::Resize {
             cols,
             rows,
@@ -283,6 +314,21 @@ fn execute_job(
             ensure_job_current(&cancelled, deadline)
         }
     }
+}
+
+/// Bounded, cancellation-aware pause before the submit CR. Splitting the CR
+/// from the body lets a TUI/shell see a distinct Enter (#490); running it on the
+/// FIFO worker keeps the pair atomic against other writes on this terminal.
+/// Polled in small steps so an owner-epoch change or deadline aborts the CR
+/// (leaving the body typed) instead of waiting out the full gap.
+fn wait_before_submit_cr(cancelled: &AtomicBool, deadline: Instant) -> ControlResult {
+    let poll = Duration::from_millis(PTY_CONTROL_WAIT_POLL_MS);
+    let until = Instant::now() + Duration::from_millis(ENTER_SUBMIT_CR_DELAY_MS);
+    while Instant::now() < until {
+        ensure_job_current(cancelled, deadline)?;
+        thread::sleep(poll.min(until.saturating_duration_since(Instant::now())));
+    }
+    ensure_job_current(cancelled, deadline)
 }
 
 fn ensure_job_current(cancelled: &AtomicBool, deadline: Instant) -> Result<(), String> {

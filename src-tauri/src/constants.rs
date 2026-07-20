@@ -91,6 +91,13 @@ pub const PTY_CONTROL_QUEUE_CAPACITY: usize = 64;
 pub const PTY_CONTROL_JOB_TIMEOUT_MS: u64 = 15_000;
 /// Poll cadence used while waiting for owner cancellation or worker completion.
 pub const PTY_CONTROL_WAIT_POLL_MS: u64 = 10;
+/// Delay inserted between the input body and the submit carriage return so a
+/// TUI (Codex/Claude Code) or shell (PowerShell/PSReadLine, WSL) registers the
+/// CR as a distinct Enter keypress instead of folding it into a bracketed paste
+/// of the body. Sending them fused makes the line get typed but never submitted
+/// until a second lone CR arrives (#490; the MCP write path already splits this
+/// way per #314). Harmless where unneeded — only adds latency.
+pub const ENTER_SUBMIT_CR_DELAY_MS: u64 = 300;
 /// Grace after cancellation before the PTY is faulted and terminated.
 pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
 /// Final bounded wait for the platform worker to acknowledge PTY termination.
