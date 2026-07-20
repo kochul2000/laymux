@@ -381,6 +381,13 @@ mod tests {
         // A dedicated Send button is the touch-device send affordance.
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("class=\"composer-send\""));
+        assert!(html.contains(
+            "data-icon=\"paper-plane\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\""
+        ));
+        assert!(html.contains(
+            "M13.47 20.21 19.91 4.09 3.8 10.53l3.75 3.77 9.14-6.99-6.99 9.14 3.77 3.76Z"
+        ));
+        assert!(!html.contains("M12 5l6.5 6.5-1.42 1.42L13 8.83V19h-2V8.83l-4.08 4.09L5.5 11.5z"));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
 
