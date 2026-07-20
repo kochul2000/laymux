@@ -1,6 +1,6 @@
 /**
  * Fills a pane slot with a dark background + spinner while its real view is
- * still queued for mounting (see usePaneRevealQueue). Reuses the existing
+ * still queued for the global terminal startup slot. Reuses the existing
  * terminal loading-spinner styling so the placeholder is visually continuous
  * with the spinner TerminalView shows during its own renderer init.
  */

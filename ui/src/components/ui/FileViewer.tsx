@@ -7,7 +7,9 @@ import {
   markdownToSafePreviewDocument,
 } from "@/lib/file-preview";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { TerminalView } from "@/components/views/TerminalView";
+import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 
 /**
  * Shared file-viewer body. The single rendering mechanism behind every entry
@@ -32,6 +34,9 @@ export interface FileViewerProps {
 export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: FileViewerProps) {
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
   const profiles = useSettingsStore((s) => s.profiles);
+  const terminalStartupRevealed = useTerminalStartupStore((state) =>
+    state.revealedPaneIds.has(viewerInstanceId),
+  );
 
   const resolution = resolveViewer(path, extensionViewers);
   const previewKind = filePreviewKind(path);
@@ -91,10 +96,18 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         </div>
       );
     }
+    if (!terminalStartupRevealed) {
+      return (
+        <div className="h-full min-w-0 flex-1" data-testid="file-viewer-terminal">
+          <PaneLoadingPlaceholder data-testid="file-viewer-terminal-startup-placeholder" />
+        </div>
+      );
+    }
     return (
       <div className="h-full min-w-0 flex-1" data-testid="file-viewer-terminal">
         <TerminalView
           instanceId={viewerInstanceId}
+          paneId={viewerInstanceId}
           profile={resolution.profile}
           syncGroup=""
           cwdSend={false}
