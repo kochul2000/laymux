@@ -9,6 +9,8 @@ mod navigation_step_routes;
 mod page;
 mod routes;
 mod terminal_info;
+mod viewer_page;
+mod viewer_routes;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

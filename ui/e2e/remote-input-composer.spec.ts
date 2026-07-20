@@ -1106,7 +1106,7 @@ test("reconnect keeps a collapsed Composer editor collapsed and unfocused", asyn
   await page.locator("#release").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#connect")).toBeEnabled();
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
-  await expect(page.locator("#status")).toHaveText("Connected to terminal-1");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
   // Attach-ready auto-focus must not resurrect the editor or raise the
   // keyboard behind the user's back — only the Keyboard button does.

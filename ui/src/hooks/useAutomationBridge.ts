@@ -24,6 +24,7 @@ import type {
 } from "@/stores/types";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 import * as navigationActions from "@/lib/navigation-actions";
+import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 
 interface HandlerResult {
   success: boolean;
@@ -1064,6 +1065,9 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "fileViewer") {
+    return handleRemoteFileViewerRequest(request.method, request.params);
+  }
   if (request.target === "settings" && request.method === "getSnapshot") {
     try {
       return ok({ settings: await collectSettingsSnapshot() });

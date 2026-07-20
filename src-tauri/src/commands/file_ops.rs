@@ -75,8 +75,25 @@ pub fn read_file_for_viewer(
         .unwrap_or_default();
 
     if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-        // Read image and return as data URL (convertFileSrc can't handle WSL UNC paths)
-        let bytes = std::fs::read(&resolved).map_err(|e| format!("Cannot read image: {e}"))?;
+        // A metadata-only check has a TOCTOU gap: the file can grow between
+        // stat and read. Bound the read itself when a remote caller supplies a
+        // limit, keeping the desktop's existing unbounded behavior otherwise.
+        let bytes = if let Some(limit) = max_bytes {
+            use std::io::Read;
+            let file =
+                std::fs::File::open(&resolved).map_err(|e| format!("Cannot open image: {e}"))?;
+            let mut bytes = Vec::new();
+            file.take(limit.saturating_add(1) as u64)
+                .read_to_end(&mut bytes)
+                .map_err(|e| format!("Cannot read image: {e}"))?;
+            if bytes.len() > limit {
+                return Err(format!("File exceeds the {limit} byte viewer limit"));
+            }
+            bytes
+        } else {
+            // convertFileSrc can't handle WSL UNC paths.
+            std::fs::read(&resolved).map_err(|e| format!("Cannot read image: {e}"))?
+        };
         let mime = match ext.as_str() {
             ".png" => "image/png",
             ".jpg" | ".jpeg" => "image/jpeg",
@@ -315,6 +332,39 @@ mod tests {
     #[test]
     fn base64_encode_hello() {
         assert_eq!(base64_encode(b"Hello"), "SGVsbG8=");
+    }
+
+    #[test]
+    fn read_file_for_viewer_rejects_an_image_over_the_requested_limit() {
+        let mut file = std::env::temp_dir();
+        file.push(format!(
+            "laymux_file_viewer_limit_test_{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&file, [0_u8; 32]).expect("write temp image");
+
+        let result = read_file_for_viewer(file.to_string_lossy().into_owned(), Some(16));
+
+        assert_eq!(
+            result.expect_err("oversized image must be rejected"),
+            "File exceeds the 16 byte viewer limit"
+        );
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn read_file_for_viewer_accepts_an_image_at_the_requested_limit() {
+        let mut file = std::env::temp_dir();
+        file.push(format!(
+            "laymux_file_viewer_exact_limit_test_{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&file, [0_u8; 16]).expect("write temp image");
+
+        let result = read_file_for_viewer(file.to_string_lossy().into_owned(), Some(16));
+
+        assert!(matches!(result, Ok(FileViewerContent::Image { .. })));
+        let _ = std::fs::remove_file(&file);
     }
 
     #[test]

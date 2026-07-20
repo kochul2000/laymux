@@ -134,6 +134,14 @@ pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 16;
 pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
 pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
 
+/// Maximum source bytes returned by one Remote FileViewer render request.
+/// The frontend may expand images through base64 and preview documents, so the
+/// source cap stays deliberately small and is enforced before image reads.
+pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
+
+/// Secret-capability header required by Remote FileViewer endpoints.
+pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
+
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal
 /// title sequences even when OSC 133 markers have scrolled out.

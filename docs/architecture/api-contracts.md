@@ -626,6 +626,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/xterm.css` | GET | `/remote/` 전용 xterm.js 스타일 |
 | `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
+| `/remote/viewer/` | GET | 자격 증명이 없는 Remote FileViewer 새 탭 bootstrap |
+| `/remote/viewer/viewer.js` | GET | Remote FileViewer 외부 script (`script-src 'self'`) |
 
 `/remote`와 `/remote/`는 remote가 실효적으로 켜져 있고(`settings.remote.enabled || runtimeRemoteAccess.enabled`), 실효 remote token이 있으며, remote IP allowlist를 통과할 때 응답한다. Cloud tunnel 내부 요청은 크레이트 내부 전용 `TunnelAuthorized` marker가 있을 때 token/IP/Origin 검사를 우회하지만, 이 page route도 실효 enabled gate는 반드시 통과해야 한다. 이 HTML 문서 자체는 토큰 값을 요구하지 않지만, 페이지가 호출하는 `/remote/v1/*` 제어 API는 아래 인증 정책을 그대로 따른다. 사용자는 브라우저 주소창에서 `http://<laymux-host>:19280/remote/` 또는 dev의 `:19281/remote/`를 열고 remote token을 입력해 controller lease를 claim한다. 편의를 위해 `/remote/#token=<url-encoded-token>`도 허용하며, 이 값은 remote 페이지의 token 입력란을 미리 채우는 용도다. fragment는 HTTP 요청에 포함되지 않으므로 링크 공유용 prefill에는 query string보다 이 형태를 우선 사용한다.
 
@@ -634,6 +636,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 
 `/remote/vendor/*`도 `/remote/`와 같은 base access 조건(실효 enabled, 실효 token 존재, IP allowlist)을 통과해야 응답한다. Cloud tunnel 내부 요청은 token/IP/Origin 대신 `TunnelAuthorized` marker를 신뢰하지만, vendor route도 실효 enabled gate는 공유한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
+
+`/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 
 ### 13.1 인증과 접근 제어
 
@@ -658,6 +662,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 `claim` 성공 응답의 `leaseId`가 이후 제어 요청의 권한이다. 기존 Local input permit이 아직 남아 있으면 server는 `409 { code:"input_busy", claimReservationId, retryAfterMs, reservationTtlMs }`를 반환하고 one-shot reservation을 설치한다. 예약은 짧은 bounded TTL을 가지며, active Local 작업이 남은 동안 인증된 client가 같은 `claimReservationId`로 재시도할 때만 TTL을 다시 시작한다. 따라서 긴 PTY 작업은 연속 재시도로 기다릴 수 있지만 탭 종료·네트워크 단절로 claimant가 사라지면 새 Local 입력 차단은 마지막 재시도 뒤 한 TTL 이내에 끝난다. reservation이 살아 있는 동안 새 Local permit과 다른 claim은 앞지르지 못한다. Remote page는 이 `input_busy` 응답만 동일 token으로 자동 재시도하고 서버가 갱신해 준 만료 시각을 사용하며, 다른 `409`는 자동 재 claim하지 않는다.
 
 claim 성공 응답은 status에 더해 비밀 `resumeToken`을 포함한다([ADR-0037](../adr/0037-remote-lease-takeover-and-pagehide-release.md)). 서버는 토큰 원문이 아니라 process-random 키의 이중 SipHash digest만 lease 옆에 보관하며, status·충돌 응답 어디에도 이 값을 노출하지 않는다 — 공개 `leaseId`는 takeover 증명이 될 수 없다. claim body의 optional `resumeToken`이 현재 **Active** lease의 capability와 일치하면(owner transition 없음) 기존 lease가 있어도 claim이 통과하고, reclaim lockout·input-busy reservation·owner epoch 전진을 기존 경로 그대로 거쳐 lease를 교체한 뒤 새 `leaseId`/`resumeToken`을 발급한다(옛 capability는 즉시 무효). 자발적 release의 owner transition은 만료·reclaim·disable과 달리 capability를 revoke하지 않고 drain 동안 유지하므로, drain 중 도착한 claim이 올바른 `resumeToken`을 제시하면 서버가 bounded transition budget 안에서 drain 완료를 기다린 뒤 이어서 처리한다(handoff). capability가 없거나 틀리면 기존대로 `409`이고, reclaim lockout은 takeover/handoff보다 우선하며, 만료·reclaim·disable로 시작된 transition은 capability를 즉시 revoke한다.
+
+claim 성공 응답은 FileViewer 전용 비밀 `fileViewerToken`도 포함한다([ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md)). 이 값도 원문 대신 process-random keyed digest만 현재 lease id와 결합해 저장하고 status·충돌 응답에는 노출하지 않는다. 새 claim과 모든 owner transition은 이를 즉시 revoke하며, `resumeToken`과 달리 자발적 release handoff 중에도 보존하지 않는다.
 
 Remote page에서 `resumeToken`은 문서가 살아 있는 동안 메모리에만 존재한다. `pagehide` 시점에만 탭 단위 `sessionStorage`(`laymux.remote.resumeToken`)에 stash하고 문서 load·bfcache 복원(`pageshow`)에서 즉시 consume(get+remove)하므로, Duplicate Tab/`window.open`이 복제하는 살아 있는 원본의 저장소는 항상 비어 있어 복제 탭이 capability를 제시할 수 없다. 서버가 lease 상실을 확정하면(`401`/`403`/`409`) 메모리와 저장소의 capability를 모두 폐기한다. 또한 `pagehide`에서 `navigator.sendBeacon`(불가 시 keepalive fetch)으로 `/remote/v1/session/release`를 호출해 lease를 즉시 반납한다. beacon은 헤더를 실을 수 없으므로 WebSocket과 동일한 `token` query parameter 인증을 사용한다.
 
@@ -687,6 +693,21 @@ Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/
 `/remote/v1/navigation/spatial`과 `/remote/v1/navigation/notification`은 스텝 내비게이션 controller action이다([ADR-0039](../adr/0039-remote-spatial-notification-step-navigation.md)). body는 `{ "leaseId": "...", "direction": "..." }`이며 `X-Laymux-Remote-Lease` 헤더도 허용한다. direction은 spatial이 `"prev"|"next"`, notification이 `"recent"|"oldest"`(데스크톱 `notifications.recent/oldest` 액션과 동일 명명)이고 그 외 값·누락은 `400`이다. Rust 핸들러는 lease 검증과 중계만 수행하고, 순회 계산·store 조작은 frontend bridge action `navigation.spatialStep`/`navigation.notificationStep`이 담당한다. 공간순서는 (표시순 visible workspace) × (workspace 내 `paneNumber` 오름차순 TerminalView pane)의 순환 1D 리스트다 — hidden workspace 제외(active-hidden은 앵커로만), hidden pane 포함, non-terminal pane 제외, dock 제외, `terminalLive` 무관. 알림 스텝은 데스크톱 키보드와 같은 `findNotificationNavTarget` 규칙(unread만, `createdAt` 정렬, 동일 terminal 연속 그룹 소비)을 공유한다. 성공 응답은 `{moved:true, target:{workspaceId, workspaceName, terminalId, paneId, paneIndex, paneNumber, switchedWorkspace}}`(notification은 `consumedNotificationIds` 추가)이고, 이동할 곳이 없으면 에러가 아닌 `{moved:false, reason:"no_terminal_panes"|"no_other_target"|"no_unread_notifications"}`를 반환한다. `navigation.spatialStep`은 착지 터미널의 세션 준비를 기다린 뒤 응답하며(async bridge 경로), Rust는 spatial 성공 시 착지 터미널 unread를 `notifications.markTerminalRead`로 best-effort 읽음 처리하고 성공 시 `workspace-state-changed`를 발행한다. Remote page는 응답 `target.terminalId`로 메인 출력 attach를 follow한다.
 
 Remote page는 workspace navigation과 dock navigation을 별도 토글 패널로 렌더한다. Dock terminal 선택은 workspace 전환을 수행하지 않고 `/remote/v1/terminals/{id}/focus`만 호출한다. 이 endpoint의 frontend bridge `terminals.setFocus`는 dock terminal을 감지하면 desktop dock과 같은 전역 focus(`focusedDock`, `focusedDockPaneId`)를 설정하고 grid focus를 비운다. workspace terminal focus나 workspace 전환 경로는 dock focus를 비워 workspace pane focus가 dock focus에 의해 억제되지 않게 한다. 이어서 기존 remote terminal focus 경로와 동일하게 `notifications.markTerminalRead`로 해당 terminal unread를 읽음 처리한다.
+
+### 13.3.1 Remote File Viewer
+
+Remote drawer의 File viewer는 데스크톱에서 현재 열린 파일 상태와 호스트 경로 직접 입력을 제공하고, 결과를 별도 브라우저 탭에서 표시한다([ADR-0041](../adr/0041-remote-served-file-viewer.md), [ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md)).
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/file-viewer/status` | GET | active lease + FileViewer capability로 데스크톱 `useFileViewerStore`의 `{open,path}` 조회 |
+| `/remote/v1/file-viewer/render` | POST | active lease + FileViewer capability로 현재 viewer 파일 또는 명시한 호스트 경로를 bounded web payload로 렌더 |
+
+두 endpoint 모두 Remote bearer token/IP/Origin gate와 active controller lease에 더해 claim 성공자 전용 FileViewer capability를 요구한다. lease는 `X-Laymux-Remote-Lease`, capability는 `X-Laymux-Remote-File-Viewer` 헤더로 전달하며 둘 다 현재 lease에 결합돼 일치해야 한다. 누락·오류 capability는 동일한 `403`으로 실패한다. 서버는 frontend bridge를 호출하기 전과 완료 후 응답 직전에 같은 lease/capability를 검증한다. 그 사이 expiry·release·reclaim·disable·새 claim으로 capability가 폐기 또는 회전되면 bridge 결과를 버리고 `403`으로 fail closed한다. bridge 이후 성공·실패 응답은 `Cache-Control: no-store`를 보낸다. render body는 `{ "source": "current" }` 또는 `{ "source": "path", "path": "..." }`다. `current`는 client가 보낸 path를 무시하고 desktop `useFileViewerStore`의 현재 path만 사용한다. 닫힌 current viewer, 빈 path, 알 수 없는 source는 실패한다.
+
+`render`는 Rust route가 고정한 8 MiB `maxBytes`를 frontend async bridge에 전달한다. `readFileForViewer`는 image에도 상한을 적용한 bounded read를 수행한다. 일반 text 응답은 `{path,kind:"text",content,truncated}`, HTML/Markdown preview 응답은 원문 중복을 제거한 `{path,kind:"text",truncated,previewKind,previewDocument}`, 그 밖에는 `{path,kind:"image",dataUrl}` 또는 `{path,kind:"binary",size}`다. HTML/Markdown `previewDocument`는 데스크톱 FileViewer와 같은 sanitizer/CSP builder의 결과이며 새 탭은 sandbox iframe `srcdoc`으로만 표시하고 `truncated=true`이면 잘림 경고를 함께 표시한다. 일반 text는 `textContent`, image는 `data:image/*`만 사용한다. Remote에서는 settings의 `extensionViewers` shell 매핑을 실행하지 않고 항상 이 built-in web renderer를 사용한다.
+
+새 탭은 반드시 사용자의 button/일반 Enter action에서 `window.open("/remote/viewer/")`으로 먼저 연다. IME 조합 중 Enter와 legacy `keyCode=229`는 제출하지 않고, host path 입력은 모바일 키보드가 대소문자를 바꾸지 않도록 자동 대문자화를 끈다. child가 exact same-origin `laymux:file-viewer-ready` 메시지를 보내면 opener는 해당 `Window` 객체가 자신이 연 pending child인지 확인하고, token·lease·fileViewerToken·source/path를 `laymux:file-viewer-session` 메시지로 한 번 전달한다. child URL(query/fragment)·bootstrap DOM·localStorage/sessionStorage·문서 제목에는 token·lease·capability·path를 기록하지 않는다. 제목은 일반적인 `Laymux File Viewer`로 유지하고 path는 본문에만 표시한다. child는 exact origin과 `event.source === window.opener`를 확인해 최초 한 세션만 받고 즉시 opener 참조를 끊는다. 비동기 MCP/desktop viewer 변경은 heartbeat 성공 후 status polling으로 drawer에 반영하되 브라우저 popup 정책 때문에 자동으로 새 탭을 만들지 않는다.
 
 ### 13.4 Terminal Control
 
