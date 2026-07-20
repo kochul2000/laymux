@@ -52,15 +52,16 @@ struct ClaimRequest {
     resume_token: Option<String>,
 }
 
-/// Successful claim payload: the shared status plus the secret resume
-/// capability. The token appears only here — status and conflict responses
-/// must never carry it.
+/// Successful claim payload: the shared status plus the secret, separately
+/// scoped capabilities. The tokens appear only here — status and conflict
+/// responses must never carry them.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaimResponse {
     #[serde(flatten)]
     status: RemoteControlStatus,
     resume_token: String,
+    file_viewer_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -298,9 +299,11 @@ fn attempt_claim(
         timeout,
     );
     let resume_token = current.issue_resume_capability(&lease_id);
+    let file_viewer_token = current.issue_file_viewer_capability(&lease_id);
     ClaimAttempt::Granted(Box::new(ClaimResponse {
         status: status_from_state(current, timeout_seconds),
         resume_token,
+        file_viewer_token,
     }))
 }
 
@@ -881,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_response_returns_the_resume_token_next_to_the_flattened_status() {
+    fn claim_response_returns_both_secret_capabilities_next_to_the_flattened_status() {
         let settings = enabled_settings();
         let mut control = RemoteControlState::default();
         let granted = expect_granted(attempt_claim(
@@ -895,6 +898,8 @@ mod tests {
         assert_eq!(body["active"], true);
         assert_eq!(body["leaseId"], granted.status.lease_id.clone().unwrap());
         assert_eq!(body["resumeToken"], granted.resume_token);
+        assert_eq!(body["fileViewerToken"], granted.file_viewer_token);
+        assert_ne!(granted.file_viewer_token, granted.resume_token);
     }
 
     #[test]
@@ -939,6 +944,10 @@ mod tests {
         ));
         assert_ne!(second.status.lease_id, first.status.lease_id);
         assert_ne!(second.resume_token, first.resume_token);
+        assert_ne!(second.file_viewer_token, first.file_viewer_token);
+        let second_lease_id = second.status.lease_id.as_deref().unwrap();
+        assert!(control.file_viewer_capability_matches(second_lease_id, &second.file_viewer_token));
+        assert!(!control.file_viewer_capability_matches(second_lease_id, &first.file_viewer_token));
 
         // The consumed capability is dead.
         let rejected = expect_rejected(attempt_claim(

@@ -8,6 +8,7 @@ async function installRemoteViewerMocks(context: BrowserContext) {
     url: string;
     authorization: string | null;
     lease: string | null;
+    fileViewerCapability: string | null;
     body: Record<string, unknown>;
   }> = [];
 
@@ -60,6 +61,7 @@ async function installRemoteViewerMocks(context: BrowserContext) {
           active: true,
           leaseId: "lease-481",
           resumeToken: "resume-481",
+          fileViewerToken: "viewer-481",
           heartbeatTimeoutSeconds: 45,
         },
       });
@@ -84,6 +86,7 @@ async function installRemoteViewerMocks(context: BrowserContext) {
       });
     }
     if (url.pathname === "/remote/v1/file-viewer/status") {
+      expect(await request.headerValue("x-laymux-remote-file-viewer")).toBe("viewer-481");
       return route.fulfill({ json: { open: true, path: "C:\\work\\current.md" } });
     }
     if (url.pathname === "/remote/v1/file-viewer/render") {
@@ -91,6 +94,7 @@ async function installRemoteViewerMocks(context: BrowserContext) {
         url: request.url(),
         authorization: await request.headerValue("authorization"),
         lease: await request.headerValue("x-laymux-remote-lease"),
+        fileViewerCapability: await request.headerValue("x-laymux-remote-file-viewer"),
         body: JSON.parse(request.postData() || "{}") as Record<string, unknown>,
       });
       return route.fulfill({
@@ -139,9 +143,40 @@ test("opens a lease-gated host file in a credential-free new tab", async ({ cont
       url: "http://remote.test/remote/v1/file-viewer/render",
       authorization: "Bearer remote-secret",
       lease: "lease-481",
+      fileViewerCapability: "viewer-481",
       body: { source: "path", path: "C:\\work\\notes.html" },
     },
   ]);
+});
+
+test("does not open a path while IME is committing Enter", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  await page.goto("http://remote.test/remote/");
+  await page.locator("#token").fill("remote-secret");
+  await page.locator("#connect").click();
+  await page.locator("#navToggle").click();
+  const input = page.locator("#fileViewerPath");
+  await input.fill("C:\\work\\한글.md");
+  await page.evaluate(() => {
+    (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls = 0;
+    window.open = () => {
+      (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls! += 1;
+      return null;
+    };
+  });
+
+  await input.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
+  await input.evaluate((element) => {
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    Object.defineProperty(event, "keyCode", { get: () => 229 });
+    element.dispatchEvent(event);
+  });
+
+  expect(
+    await page.evaluate(
+      () => (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls,
+    ),
+  ).toBe(0);
 });
 
 test("keeps the file viewer drawer usable at mobile width", async ({ context, page }) => {

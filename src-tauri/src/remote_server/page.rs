@@ -208,6 +208,9 @@ mod tests {
         assert!(html.contains("laymux:file-viewer-ready"));
         assert!(html.contains("laymux:file-viewer-session"));
         assert!(html.contains("event.origin !== window.location.origin"));
+        assert!(html.contains("fileViewerToken: session.fileViewerToken"));
+        assert!(html.contains("event.isComposing ||"));
+        assert!(html.contains("event.keyCode === 229 ||"));
         assert!(!html.contains("/remote/viewer/?token="));
     }
 

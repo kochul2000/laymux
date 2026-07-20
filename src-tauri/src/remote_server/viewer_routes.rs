@@ -7,10 +7,10 @@ use serde_json::{json, Value};
 
 use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
-use crate::constants::MAX_REMOTE_FILE_VIEWER_BYTES;
+use crate::constants::{MAX_REMOTE_FILE_VIEWER_BYTES, REMOTE_FILE_VIEWER_CAPABILITY_HEADER};
 
 use super::json_error;
-use super::lease::require_active_lease;
+use super::lease::require_file_viewer_capability;
 use super::navigation_routes::lease_id_from_headers;
 
 #[derive(Debug, Deserialize)]
@@ -25,8 +25,11 @@ pub(super) async fn remote_file_viewer_status(
     State(server): State<ServerState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = require_active_lease(&server.app_state, lease_id_from_headers(&headers))
-    {
+    if let Err(response) = require_file_viewer_capability(
+        &server.app_state,
+        lease_id_from_headers(&headers),
+        file_viewer_capability_from_headers(&headers),
+    ) {
         return response;
     }
 
@@ -42,7 +45,11 @@ pub(super) async fn remote_file_viewer_render(
         .lease_id
         .as_deref()
         .or_else(|| lease_id_from_headers(&headers));
-    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+    if let Err(response) = require_file_viewer_capability(
+        &server.app_state,
+        lease_id,
+        file_viewer_capability_from_headers(&headers),
+    ) {
         return response;
     }
 
@@ -51,6 +58,13 @@ pub(super) async fn remote_file_viewer_render(
         Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
     };
     file_viewer_bridge_response(&server, "render", params).await
+}
+
+fn file_viewer_capability_from_headers(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(REMOTE_FILE_VIEWER_CAPABILITY_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
 }
 
 fn render_params(body: FileViewerRenderRequest) -> Result<Value, &'static str> {

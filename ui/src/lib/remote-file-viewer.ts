@@ -58,7 +58,16 @@ export async function handleRemoteFileViewerRequest(
       previewKind === "markdown"
         ? markdownToSafePreviewDocument(content.content)
         : htmlToSafePreviewDocument(content.content);
-    return ok({ path, ...content, previewKind, previewDocument });
+    // previewDocument already contains the sanitized source. Returning the raw
+    // text as well nearly doubles the JSON body and can cross the Cloud tunnel
+    // response limit for an otherwise valid 8 MiB file.
+    return ok({
+      path,
+      kind: "text",
+      truncated: content.truncated,
+      previewKind,
+      previewDocument,
+    });
   } catch (error) {
     return err(error instanceof Error ? error.message : String(error));
   }

@@ -1526,6 +1526,7 @@
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
         let leaseId = null;
         let resumeToken = null;
+        let fileViewerToken = null;
         let claimAttemptRevision = 0;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
@@ -1767,7 +1768,7 @@
         }
 
         function renderFileViewerState(message = null, isError = false) {
-          const connected = Boolean(leaseId);
+          const connected = Boolean(leaseId && fileViewerToken);
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
           refreshFileViewerButton.disabled = !connected;
@@ -1783,7 +1784,7 @@
         }
 
         async function refreshFileViewerStatus() {
-          if (!leaseId) {
+          if (!leaseId || !fileViewerToken) {
             fileViewerState = { open: false, path: null };
             renderFileViewerState();
             return;
@@ -1791,11 +1792,15 @@
           if (fileViewerStatusInFlight) return;
           fileViewerStatusInFlight = true;
           const statusLeaseId = leaseId;
+          const statusFileViewerToken = fileViewerToken;
           try {
             const data = await remoteFetch("/remote/v1/file-viewer/status", {
-              headers: { "x-laymux-remote-lease": statusLeaseId },
+              headers: {
+                "x-laymux-remote-lease": statusLeaseId,
+                "x-laymux-remote-file-viewer": statusFileViewerToken,
+              },
             });
-            if (leaseId !== statusLeaseId) return;
+            if (leaseId !== statusLeaseId || fileViewerToken !== statusFileViewerToken) return;
             fileViewerState = {
               open: data.open === true && typeof data.path === "string" && Boolean(data.path),
               path: typeof data.path === "string" ? data.path : null,
@@ -1807,7 +1812,7 @@
         }
 
         function openFileViewerTab(source, path = null) {
-          if (!leaseId) return;
+          if (!leaseId || !fileViewerToken) return;
           const viewerWindow = window.open("/remote/viewer/", "_blank");
           if (!viewerWindow) {
             renderFileViewerState("Popup blocked. Allow popups and try again.", true);
@@ -1819,6 +1824,7 @@
             path,
             token: token(),
             leaseId,
+            fileViewerToken,
             timeoutId,
           });
         }
@@ -1836,6 +1842,7 @@
               type: "laymux:file-viewer-session",
               token: session.token,
               leaseId: session.leaseId,
+              fileViewerToken: session.fileViewerToken,
               source: session.source,
               ...(session.source === "path" ? { path: session.path } : {}),
             },
@@ -3992,6 +3999,7 @@
             leaseId = status.leaseId;
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
+            fileViewerToken = status.fileViewerToken || null;
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
@@ -4700,6 +4708,8 @@
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();
           leaseId = null;
+          fileViewerToken = null;
+          clearPendingFileViewerWindows();
           setActiveTerminal(null);
           setConnected(false);
           if (navigationState) renderNavigation(navigationState);
@@ -4755,7 +4765,12 @@
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
         fileViewerPathInput.addEventListener("input", () => renderFileViewerState());
         fileViewerPathInput.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter" || openFileViewerPathButton.disabled) return;
+          if (
+            event.key !== "Enter" ||
+            event.isComposing ||
+            event.keyCode === 229 ||
+            openFileViewerPathButton.disabled
+          ) return;
           event.preventDefault();
           openFileViewerTab("path", fileViewerPathInput.value.trim());
         });

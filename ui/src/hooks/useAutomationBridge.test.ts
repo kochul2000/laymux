@@ -779,6 +779,7 @@ describe("handleAsyncAutomationRequest", () => {
       truncated: false,
     });
     expect(rendered.data).toHaveProperty("previewDocument");
+    expect(rendered.data).not.toHaveProperty("content");
   });
 
   it("renders an explicit path without opening the desktop viewer", async () => {

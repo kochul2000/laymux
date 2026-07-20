@@ -79,7 +79,23 @@ mod tests {
         assert!(REMOTE_VIEWER_JS.contains("event.source !== window.opener"));
         assert!(REMOTE_VIEWER_JS.contains("window.opener = null"));
         assert!(REMOTE_VIEWER_JS.contains("x-laymux-remote-lease"));
+        assert!(REMOTE_VIEWER_JS.contains("x-laymux-remote-file-viewer"));
         assert!(REMOTE_VIEWER_JS.contains("sandbox"));
+    }
+
+    #[test]
+    fn sandboxed_preview_reports_when_its_source_was_truncated() {
+        let branch_start = REMOTE_VIEWER_JS
+            .find("if (payload.kind === \"text\" && payload.previewDocument)")
+            .expect("preview branch");
+        let branch_return = REMOTE_VIEWER_JS[branch_start..]
+            .find("return;")
+            .map(|offset| branch_start + offset)
+            .expect("preview branch return");
+        let branch = &REMOTE_VIEWER_JS[branch_start..branch_return];
+
+        assert!(branch.contains("payload.truncated"));
+        assert!(branch.contains("Preview truncated at the Remote viewer limit."));
     }
 
     #[test]

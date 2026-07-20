@@ -50,6 +50,8 @@
       previewElement.setAttribute("sandbox", "");
       previewElement.srcdoc = payload.previewDocument;
       previewElement.hidden = false;
+      if (payload.truncated)
+        setStatus("Preview truncated at the Remote viewer limit.");
       return;
     }
     if (payload.kind === "text") {
@@ -84,6 +86,7 @@
         authorization: `Bearer ${session.token}`,
         "content-type": "application/json",
         "x-laymux-remote-lease": session.leaseId,
+        "x-laymux-remote-file-viewer": session.fileViewerToken,
       },
       body: JSON.stringify(body),
     });
@@ -112,6 +115,8 @@
       !session.token ||
       typeof session.leaseId !== "string" ||
       !session.leaseId ||
+      typeof session.fileViewerToken !== "string" ||
+      !session.fileViewerToken ||
       (session.source !== "current" && session.source !== "path") ||
       (session.source === "path" &&
         (typeof session.path !== "string" || !session.path.trim()))
