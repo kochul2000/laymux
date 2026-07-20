@@ -18,6 +18,23 @@ impl Write for RecordingWriter {
     }
 }
 
+/// Records each `write()` call as its own chunk, so tests can tell a split
+/// body+CR (two writes) apart from a fused `body\r` (one write).
+struct ChunkWriter {
+    chunks: Arc<StdMutex<Vec<Vec<u8>>>>,
+}
+
+impl Write for ChunkWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.chunks.lock().expect("chunk writer").push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 struct GatedWriter {
     started: Option<mpsc::Sender<()>>,
     gate: Arc<(StdMutex<bool>, Condvar)>,
@@ -72,40 +89,53 @@ fn control_worker_preserves_fifo_job_order() {
     worker.close();
 }
 
-/// #490: a submit job carries its own gapped CR, and because it is one atomic
-/// FIFO job, a write queued behind it lands AFTER the CR — never between the
-/// body and the CR. This is the property that the earlier app-level split
-/// (two separate jobs) could not guarantee.
+/// #490: a submit job writes the body and the CR as TWO distinct writes (not a
+/// fused `body\r`), gapped by the delay, and because it is one atomic FIFO job a
+/// write queued behind it lands AFTER the CR — never between the body and the
+/// CR. This is the property the earlier app-level split (two jobs) could not
+/// guarantee. Per-`write()` chunk recording is what distinguishes split from
+/// fused; a concatenating writer would pass even on a fused regression.
 #[test]
-fn submit_write_appends_gapped_cr_atomically_before_next_job() {
-    let bytes = Arc::new(StdMutex::new(Vec::new()));
+fn submit_write_appends_gapped_cr_as_separate_write_before_next_job() {
+    let chunks = Arc::new(StdMutex::new(Vec::new()));
     let worker = PtyControlWorker::spawn(
-        Box::new(RecordingWriter {
-            bytes: Arc::clone(&bytes),
+        Box::new(ChunkWriter {
+            chunks: Arc::clone(&chunks),
         }),
         no_master(),
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(5);
 
+    let started = Instant::now();
     let submit = worker
         .submit_write(b"cmd", true, deadline)
         .expect("submit job");
     let raw = worker.submit_write(b"x", false, deadline).expect("raw job");
-
     assert_eq!(submit.result.recv().expect("submit result"), Ok(()));
     assert_eq!(raw.result.recv().expect("raw result"), Ok(()));
-    assert_eq!(&*bytes.lock().expect("recorded bytes"), b"cmd\rx");
+
+    // Body, CR, then the following raw write — three separate writes, in order.
+    assert_eq!(
+        &*chunks.lock().expect("chunks"),
+        &[b"cmd".to_vec(), b"\r".to_vec(), b"x".to_vec()]
+    );
+    // The gap actually elapsed — guards against the CR being fused or un-delayed.
+    assert!(
+        started.elapsed()
+            >= Duration::from_millis(ENTER_SUBMIT_CR_DELAY_MS)
+                .saturating_sub(Duration::from_millis(50))
+    );
     worker.close();
 }
 
 /// A lone Enter (submit with an empty body) emits just the CR, with no gap.
 #[test]
 fn submit_write_with_empty_body_emits_only_cr() {
-    let bytes = Arc::new(StdMutex::new(Vec::new()));
+    let chunks = Arc::new(StdMutex::new(Vec::new()));
     let worker = PtyControlWorker::spawn(
-        Box::new(RecordingWriter {
-            bytes: Arc::clone(&bytes),
+        Box::new(ChunkWriter {
+            chunks: Arc::clone(&chunks),
         }),
         no_master(),
     )
@@ -116,7 +146,7 @@ fn submit_write_with_empty_body_emits_only_cr() {
         .submit_write(b"", true, deadline)
         .expect("lone enter job");
     assert_eq!(lone.result.recv().expect("lone result"), Ok(()));
-    assert_eq!(&*bytes.lock().expect("recorded bytes"), b"\r");
+    assert_eq!(&*chunks.lock().expect("chunks"), &[b"\r".to_vec()]);
     worker.close();
 }
 

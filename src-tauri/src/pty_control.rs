@@ -276,8 +276,11 @@ fn execute_job(
                 // WSL) registers a real Enter instead of folding the CR into the
                 // body's bracketed paste (#490). Running the gap here on the
                 // FIFO worker keeps body+CR atomic — no other write on this
-                // terminal can slip between them. A lone Enter (empty body)
-                // needs no gap.
+                // terminal can slip between them. Accepted tradeoff: same-owner
+                // input queued behind a submit waits out this gap (~300ms); that
+                // is the cost of atomicity, and a cross-owner transition still
+                // aborts the gap within one poll (see `wait_before_submit_cr`).
+                // A lone Enter (empty body) needs no gap.
                 if !data.is_empty() {
                     wait_before_submit_cr(&cancelled, deadline)?;
                 }
