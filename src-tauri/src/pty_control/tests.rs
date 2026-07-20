@@ -59,14 +59,64 @@ fn control_worker_preserves_fifo_job_order() {
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(1);
 
-    let first = worker.submit_write(b"first", deadline).expect("first job");
+    let first = worker
+        .submit_write(b"first", false, deadline)
+        .expect("first job");
     let second = worker
-        .submit_write(b"-second", deadline)
+        .submit_write(b"-second", false, deadline)
         .expect("second job");
 
     assert_eq!(first.result.recv().expect("first result"), Ok(()));
     assert_eq!(second.result.recv().expect("second result"), Ok(()));
     assert_eq!(&*bytes.lock().expect("recorded bytes"), b"first-second");
+    worker.close();
+}
+
+/// #490: a submit job carries its own gapped CR, and because it is one atomic
+/// FIFO job, a write queued behind it lands AFTER the CR — never between the
+/// body and the CR. This is the property that the earlier app-level split
+/// (two separate jobs) could not guarantee.
+#[test]
+fn submit_write_appends_gapped_cr_atomically_before_next_job() {
+    let bytes = Arc::new(StdMutex::new(Vec::new()));
+    let worker = PtyControlWorker::spawn(
+        Box::new(RecordingWriter {
+            bytes: Arc::clone(&bytes),
+        }),
+        no_master(),
+    )
+    .expect("spawn worker");
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let submit = worker
+        .submit_write(b"cmd", true, deadline)
+        .expect("submit job");
+    let raw = worker.submit_write(b"x", false, deadline).expect("raw job");
+
+    assert_eq!(submit.result.recv().expect("submit result"), Ok(()));
+    assert_eq!(raw.result.recv().expect("raw result"), Ok(()));
+    assert_eq!(&*bytes.lock().expect("recorded bytes"), b"cmd\rx");
+    worker.close();
+}
+
+/// A lone Enter (submit with an empty body) emits just the CR, with no gap.
+#[test]
+fn submit_write_with_empty_body_emits_only_cr() {
+    let bytes = Arc::new(StdMutex::new(Vec::new()));
+    let worker = PtyControlWorker::spawn(
+        Box::new(RecordingWriter {
+            bytes: Arc::clone(&bytes),
+        }),
+        no_master(),
+    )
+    .expect("spawn worker");
+    let deadline = Instant::now() + Duration::from_secs(1);
+
+    let lone = worker
+        .submit_write(b"", true, deadline)
+        .expect("lone enter job");
+    assert_eq!(lone.result.recv().expect("lone result"), Ok(()));
+    assert_eq!(&*bytes.lock().expect("recorded bytes"), b"\r");
     worker.close();
 }
 
@@ -86,7 +136,7 @@ fn cancelling_active_job_never_starts_its_later_chunk() {
     .expect("spawn worker");
     let payload = vec![b'x'; crate::constants::PTY_WRITE_CHUNK_SIZE + 7];
     let pending = worker
-        .submit_write(&payload, Instant::now() + Duration::from_secs(1))
+        .submit_write(&payload, false, Instant::now() + Duration::from_secs(1))
         .expect("write job");
     started_rx
         .recv_timeout(Duration::from_secs(1))
@@ -126,12 +176,14 @@ fn queued_cancelled_job_is_rejected_without_writing() {
     )
     .expect("spawn worker");
     let deadline = Instant::now() + Duration::from_secs(1);
-    let first = worker.submit_write(b"first", deadline).expect("first job");
+    let first = worker
+        .submit_write(b"first", false, deadline)
+        .expect("first job");
     started_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("first write started");
     let second = worker
-        .submit_write(b"second", deadline)
+        .submit_write(b"second", false, deadline)
         .expect("second job");
     second.cancelled.store(true, Ordering::Release);
     assert!(!worker.cancel_job(second.id));

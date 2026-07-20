@@ -959,7 +959,7 @@ pub fn write_to_terminal_inner(
         .ok_or_else(|| format!("Session '{id}' not found"))?;
 
     let deadline = permit.deadline();
-    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, deadline))?;
+    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, false, deadline))?;
     let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
     finish_human_control_io(permit, &handle, result)
 }
@@ -988,13 +988,22 @@ pub fn write_terminal_input_inner(
         let protocol = protocol_gate.lock_or_err()?;
         protocol.bracketed_paste()
     };
-    // Encode only the body here; the submit CR is written as a separate,
-    // delayed PTY write below. Fusing text and CR into one write makes a TUI
-    // (Codex/Claude Code) or shell (PowerShell/PSReadLine, WSL) fold the CR into
-    // the bracketed paste of the body, so the line is typed but never submitted
-    // until a second lone CR arrives (#490; matches the MCP path's #314 split).
+    // Strip a trailing newline before a submit so the body never carries its own
+    // line break into the separate submit CR (which would land an extra empty
+    // Enter). Internal newlines are preserved for multi-line input. Matches the
+    // MCP path (#314).
+    let body_text = if submit {
+        text.trim_end_matches(|c| c == '\n' || c == '\r')
+    } else {
+        text
+    };
+    // Encode only the body. The submit CR is appended by the PTY worker after a
+    // short gap, within this same FIFO job, so a TUI (Codex/Claude Code) or
+    // shell (PowerShell/PSReadLine, WSL) registers a distinct Enter instead of
+    // folding the CR into the body's bracketed paste — and no other write on
+    // this terminal can slip between the body and its CR (#490).
     let body = encode_terminal_input(
-        text,
+        body_text,
         false,
         bracketed_paste,
         TERMINAL_STRUCTURED_INPUT_MAX_BYTES,
@@ -1012,26 +1021,7 @@ pub fn write_terminal_input_inner(
         .cloned()
         .ok_or_else(|| format!("Session '{id}' not found"))?;
     let deadline = permit.deadline();
-
-    if !body.is_empty() {
-        permit.ensure_current()?;
-        let pending = permit.enqueue_pty_job(|| handle.enqueue_write(&body, deadline))?;
-        let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
-        if result.is_err() {
-            return finish_human_control_io(permit, &handle, result);
-        }
-    }
-
-    if !submit {
-        return finish_human_control_io(permit, &handle, Ok(()));
-    }
-
-    // Only gap the CR when a body preceded it; a lone Enter needs no delay.
-    if !body.is_empty() {
-        std::thread::sleep(std::time::Duration::from_millis(ENTER_SUBMIT_CR_DELAY_MS));
-    }
-    permit.ensure_current()?;
-    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(b"\r", deadline))?;
+    let pending = permit.enqueue_pty_job(|| handle.enqueue_write(&body, submit, deadline))?;
     let result = handle.await_enqueued_control_job(pending, deadline, || permit.is_current());
     finish_human_control_io(permit, &handle, result)
 }
