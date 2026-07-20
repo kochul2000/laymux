@@ -695,7 +695,9 @@ impl McpHandler {
     /// 전달을 더 크게 묶어 ~200ms 미만에서는 두 write가 codex의 burst 창 안에
     /// 합쳐졌다(제출 실패). 양 환경 모두 안전하도록 여유 마진을 둔다. 셸/
     /// PowerShell/Claude Code 에는 무해하다(추가 지연만 발생).
-    const ENTER_CR_DELAY_MS: u64 = 300;
+    ///
+    /// 컴포저 send 경로(`write_terminal_input_inner`, #490)도 같은 값을 공유한다.
+    const ENTER_CR_DELAY_MS: u64 = crate::constants::ENTER_SUBMIT_CR_DELAY_MS;
 
     /// Upper bound for `capture_ms` — the caller blocks for at most this long
     /// waiting to snapshot the target's post-write output.
