@@ -449,7 +449,19 @@ const handlers: HandlerMap = {
       if (direction !== "prev" && direction !== "next") {
         return err(`Invalid direction '${String(direction)}': expected "prev" or "next"`);
       }
-      return ok(navigationActions.spatialStep(direction));
+      const excludedPaneIds = p.excludedPaneIds;
+      if (
+        excludedPaneIds !== undefined &&
+        (!Array.isArray(excludedPaneIds) || excludedPaneIds.some((id) => typeof id !== "string"))
+      ) {
+        return err("Invalid excludedPaneIds: expected an array of pane id strings");
+      }
+      return ok(
+        navigationActions.spatialStep(
+          direction,
+          new Set<string>((excludedPaneIds as string[] | undefined) ?? []),
+        ),
+      );
     },
     notificationStep: (p) => {
       const direction = p.direction;

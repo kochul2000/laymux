@@ -179,6 +179,145 @@ test.describe("remote mobile layout", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   });
 
+  test("excludes the current workspace pane from spatial navigation in the Remote header", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ leaseId: string; direction: string; excludedPaneIds: string[] }> =
+      [];
+    const pane = {
+      id: "pane-a",
+      paneIndex: 0,
+      paneNumber: 1,
+      terminalId: "term-a",
+      terminalLive: true,
+      viewType: "TerminalView",
+    };
+    let workspacePaneActive = true;
+
+    await page.route("http://remote.test/remote/", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}page.html`,
+        contentType: "text/html; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/addon-fit.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.css`,
+        contentType: "text/css; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [
+              {
+                id: "term-a",
+                title: "Shell",
+                workspaceId: "ws-a",
+                paneNumber: 1,
+                appearance: {},
+              },
+            ],
+            activeWorkspace: {
+              id: "ws-a",
+              name: "Alpha",
+              panes: workspacePaneActive ? [pane] : [],
+            },
+            workspaces: [
+              {
+                id: "ws-a",
+                name: "Alpha",
+                isActive: true,
+                panes: workspacePaneActive ? [pane] : [],
+              },
+            ],
+            docks: workspacePaneActive
+              ? []
+              : [
+                  {
+                    position: "left",
+                    visible: true,
+                    panes: [{ ...pane, id: "dock-a", workspaceId: null, location: "dock" }],
+                  },
+                ],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation/spatial") {
+        spatialBodies.push(route.request().postDataJSON());
+        await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
+        return;
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a\/output/, () => {});
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+
+    const exclusion = page.locator("#spatialExclusion");
+    await expect(exclusion).toBeVisible();
+    await expect(exclusion.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(exclusion).toHaveAttribute("aria-pressed", "false");
+    await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
+
+    const [exclusionBox, composerToggleBox] = await Promise.all([
+      exclusion.boundingBox(),
+      page.locator("#inputModeToggle").boundingBox(),
+    ]);
+    expect(exclusionBox).not.toBeNull();
+    expect(composerToggleBox).not.toBeNull();
+    expect(exclusionBox!.height).toBe(26);
+    expect(composerToggleBox!.height).toBe(26);
+
+    await page.locator("#keyBarToggle").click();
+    await page.locator('[data-key="navNext"]').click();
+    await expect.poll(() => spatialBodies.length).toBe(1);
+    expect(spatialBodies[0].excludedPaneIds).toEqual([]);
+
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "true");
+    await expect(exclusion).toHaveAttribute("aria-label", "Include this pane in pane navigation");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
+        ),
+      )
+      .toEqual(["pane-a"]);
+
+    await page.locator('[data-key="navNext"]').click();
+    await expect.poll(() => spatialBodies.length).toBe(2);
+    expect(spatialBodies[1].excludedPaneIds).toEqual(["pane-a"]);
+
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "false");
+
+    workspacePaneActive = false;
+    await page.locator("#refresh").evaluate((button: HTMLButtonElement) => button.click());
+    await expect(exclusion).toBeHidden();
+  });
+
   test("offers a four-way flick direction key", async ({ page }) => {
     await page.route("http://remote.test/", (route) =>
       route.fulfill({

@@ -3,13 +3,15 @@ import type { Workspace } from "@/stores/types";
 import { computePaneNumbers } from "./pane-numbers";
 
 /**
- * Global spatial pane order (issue #474, ADR-0039).
+ * Global spatial pane order (issue #474, ADR-0039, ADR-0046).
  *
  * Defines the single 1D traversal used by remote step navigation:
  * (visible workspaces in display order) × (terminal panes in paneNumber order),
- * walked cyclically. Hidden workspaces contribute no entries but can still act
- * as an anchor (the active workspace may be hidden); non-terminal panes are
- * excluded because the remote viewport cannot attach to them.
+ * walked cyclically. Remote-client exclusions are removed from that order;
+ * with no exclusions every eligible pane remains included. Hidden workspaces
+ * contribute no entries but can still act as an anchor (the active workspace
+ * may be hidden); non-terminal panes are excluded because the remote viewport
+ * cannot attach to them.
  */
 
 export interface SpatialEntry {
@@ -35,11 +37,16 @@ export interface SpatialAnchor {
 }
 
 /**
- * Flatten visible workspaces into the global spatial order.
+ * Flatten visible workspaces into the global remote spatial order.
  * Pane numbers are computed over ALL panes of a workspace (badge consistency)
- * and non-terminal panes are then dropped from the traversal.
+ * and non-terminal panes are then dropped from the traversal. The optional
+ * exclusion set is a denylist supplied by the Remote client: missing and stale
+ * ids have no effect, while every matching pane is removed.
  */
-export function buildSpatialOrder(visibleWorkspaces: readonly Workspace[]): SpatialEntry[] {
+export function buildSpatialOrder(
+  visibleWorkspaces: readonly Workspace[],
+  excludedPaneIds?: ReadonlySet<string>,
+): SpatialEntry[] {
   const entries: SpatialEntry[] = [];
   for (const workspace of visibleWorkspaces) {
     const numbers = computePaneNumbers(workspace.panes);
@@ -57,7 +64,8 @@ export function buildSpatialOrder(visibleWorkspaces: readonly Workspace[]): Spat
         });
       });
   }
-  return entries;
+  if (!excludedPaneIds || excludedPaneIds.size === 0) return entries;
+  return entries.filter((entry) => !excludedPaneIds.has(entry.paneId));
 }
 
 /**
