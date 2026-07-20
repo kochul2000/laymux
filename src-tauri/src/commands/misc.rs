@@ -56,6 +56,15 @@ pub fn set_remote_runtime_access(
     Ok(status)
 }
 
+/// Whether the laymux process is currently attached to an OS remote-desktop
+/// (RDP / Terminal Services) session. The UI pulls this on mount to auto-open
+/// the Remote Access panel when launched inside a remote session; live
+/// transitions arrive via the `remote-session-changed` event.
+#[tauri::command]
+pub fn get_remote_session_active() -> bool {
+    crate::remote_session::is_remote_session()
+}
+
 #[tauri::command]
 pub fn reclaim_remote_control(
     state: State<Arc<AppState>>,

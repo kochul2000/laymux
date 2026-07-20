@@ -183,6 +183,18 @@ export async function reclaimRemoteControl(): Promise<RemoteControlStatus> {
   return invoke("reclaim_remote_control");
 }
 
+/** Whether the window is currently viewed over an OS remote-desktop (RDP) session. */
+export async function getRemoteSessionActive(): Promise<boolean> {
+  return invoke("get_remote_session_active");
+}
+
+/** Listen for OS remote-desktop (RDP) session connect/disconnect transitions. */
+export function onRemoteSessionChanged(callback: (active: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("remote-session-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 export interface TerminalStateInfo {
   activity: TerminalActivityInfo;
 }

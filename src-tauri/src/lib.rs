@@ -25,6 +25,7 @@ pub mod pty;
 mod pty_control;
 pub mod pty_trace;
 pub mod remote_server;
+pub mod remote_session;
 pub mod settings;
 pub mod state;
 pub mod terminal;
@@ -124,6 +125,18 @@ pub fn run() {
                 }
             });
 
+            // Watch for OS remote-desktop (RDP) session transitions and push
+            // them to the UI so it can auto-open the Remote Access panel when
+            // the window is entered from a phone. Windows-only; other platforms
+            // have no equivalent session concept.
+            #[cfg(target_os = "windows")]
+            {
+                let rdp_app = app.handle().clone();
+                std::thread::spawn(move || {
+                    remote_session::watch_remote_session(rdp_app);
+                });
+            }
+
             // Set window icon (for taskbar in dev mode)
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
@@ -188,6 +201,7 @@ pub fn run() {
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,
+            commands::get_remote_session_active,
             commands::get_remote_host_candidates,
             commands::reclaim_remote_control,
             commands::get_cloud_status,

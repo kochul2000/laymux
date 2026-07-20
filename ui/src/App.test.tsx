@@ -110,6 +110,8 @@ vi.mock("@/lib/tauri-api", () => {
       heartbeatTimeoutSeconds: 15,
     }),
     onRemoteControlChanged: vi.fn().mockResolvedValue(unlisten),
+    getRemoteSessionActive: vi.fn().mockResolvedValue(false),
+    onRemoteSessionChanged: vi.fn().mockResolvedValue(unlisten),
     reclaimRemoteControl: vi.fn().mockResolvedValue({
       active: false,
       leaseId: null,
