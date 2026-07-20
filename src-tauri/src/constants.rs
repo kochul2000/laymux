@@ -16,7 +16,17 @@ pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
+/// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
+/// the laymux process flips. Payload is a bool: `true` while the window is being
+/// viewed over a remote session. The UI uses it to auto-open the Remote Access
+/// panel when the window is entered from a phone RDP client (see
+/// `useAutoRemoteAccessPrompt`).
+pub const EVENT_REMOTE_SESSION_CHANGED: &str = "remote-session-changed";
 pub const EVENT_TERMINAL_OUTPUT_V2_PREFIX: &str = "terminal-output-v2-";
+
+/// Poll interval for the OS remote-session watcher. RDP connect/disconnect is a
+/// rare, human-scale event, so a slow poll keeps the cost negligible.
+pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -241,6 +251,7 @@ mod tests {
             EVENT_CLAUDE_MESSAGE_CHANGED,
             EVENT_TERMINAL_OUTPUT_ACTIVITY,
             EVENT_REMOTE_CONTROL_CHANGED,
+            EVENT_REMOTE_SESSION_CHANGED,
             EVENT_WORKSPACE_STATE_CHANGED,
             EVENT_TERMINALS_LIST_CHANGED,
         ];
