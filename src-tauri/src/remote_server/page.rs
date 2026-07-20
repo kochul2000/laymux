@@ -222,15 +222,31 @@ mod tests {
         assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
         // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
-        assert!(html.contains(
-            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
-        ));
+        assert!(html.contains("const DEFAULT_KEYBAR = {"));
+        assert!(html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(html.contains("order: KEY_ORDER,"));
         // Predefined sets are selectable and a custom palette exists.
         assert!(html.contains("id: \"nav\", name: \"Navigation\""));
         assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
         assert!(html.contains("id: \"fn\", name: \"Function\""));
         assert!(html.contains("function resolveKeyIds()"));
         assert!(html.contains("function renderKeyPopover()"));
+        // Every enabled key appears in a compact sortable grid. Long-press drag
+        // is the primary path; selection exposes keyboard/accessibility moves.
+        assert!(html.contains("function moveKey(id, offset)"));
+        assert!(html.contains("return keyBarConfig.order.filter((id) => enabled.has(id));"));
+        assert!(html.contains("const KEY_ORDER_HOLD_MS = 180;"));
+        assert!(html.contains("function installKeyOrderDrag(chip, id)"));
+        assert!(html.contains("chip.classList.add(\"dragging\");"));
+        assert!(html.contains(
+            "target.classList.add(gesture.afterTarget ? \"drop-after\" : \"drop-before\");"
+        ));
+        assert!(html.contains("title.textContent = \"Key order\";"));
+        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset key order\");"));
+        assert!(html.contains("`Move ${accessibleName} to start`"));
+        assert!(html.contains("function appendKeyToVisibleEnd(id, visibleIds)"));
+        assert!(html.contains("section.className = \"key-order-section\";"));
+        assert!(html.contains("chip.className = \"key-chip key-order-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
@@ -289,9 +305,7 @@ mod tests {
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
         // Selectable via the key-set popover and enabled by default.
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
-        assert!(html.contains(
-            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
-        ));
+        assert!(html.contains("sets: [\"step\", \"nav\"],"));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
         assert!(html.contains("const NAV_FLICK_TARGETS = {"));
         assert!(html.contains("up: [\"spatial\", \"prev\"]"));

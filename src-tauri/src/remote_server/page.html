@@ -1276,6 +1276,92 @@
         background: var(--accent-12);
         color: var(--accent);
       }
+      .key-order-section {
+        margin-top: 10px;
+      }
+      .key-order-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .key-order-heading .key-popover-title {
+        margin: 0;
+      }
+      .key-order-reset {
+        flex: 0 0 auto;
+        padding: 2px 7px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .key-order-reset:hover {
+        background: var(--hover-bg);
+      }
+      .key-order-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 6px;
+        user-select: none;
+      }
+      .key-order-chip {
+        position: relative;
+        touch-action: none;
+        cursor: grab;
+      }
+      .key-order-chip.dragging {
+        opacity: 0.45;
+        cursor: grabbing;
+      }
+      .key-order-chip.drop-before::before,
+      .key-order-chip.drop-after::after {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 3px;
+        border-radius: 2px;
+        background: var(--accent);
+        content: "";
+      }
+      .key-order-chip.drop-before::before {
+        left: -4px;
+      }
+      .key-order-chip.drop-after::after {
+        right: -4px;
+      }
+      .key-order-help {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .key-order-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        margin-top: 6px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+      }
+      .key-order-selected {
+        flex: 1 1 auto;
+        min-width: 54px;
+        color: var(--text);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-order-action {
+        min-width: 34px;
+        height: 26px;
+        padding: 0 7px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .key-order-action:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
     </style>
   </head>
   <body>
@@ -3988,8 +4074,8 @@
           tab: { label: "Tab", seq: "\t" },
           stab: { label: "⇧Tab", seq: "\x1b[Z" },
           dpad: { label: "↕↔", flick: true },
-          enter: { label: "⏎", seq: "\r" },
-          bksp: { label: "⌫", seq: "\x7f" },
+          enter: { label: "⏎", seq: "\r", hint: "Enter" },
+          bksp: { label: "⌫", seq: "\x7f", hint: "Backspace" },
           up: { label: "↑", cursor: "A" },
           down: { label: "↓", cursor: "B" },
           right: { label: "→", cursor: "C" },
@@ -4038,7 +4124,12 @@
           { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
-        const DEFAULT_KEYBAR = { visible: false, sets: ["step", "nav"], custom: [] };
+        const DEFAULT_KEYBAR = {
+          visible: false,
+          sets: ["step", "nav"],
+          custom: [],
+          order: KEY_ORDER,
+        };
         // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
         // spatial pane step (Ctrl+Alt+Up/Down territory), horizontal = alert
         // step (Ctrl+Alt+Left/Right).
@@ -4049,19 +4140,35 @@
           right: ["notification", "oldest"],
         };
         const KEY_FLICK_THRESHOLD_PX = 18;
+        const KEY_ORDER_HOLD_MS = 180;
         let keyPopoverOpen = false;
+        let selectedOrderKeyId = "";
 
         function loadKeyBarConfig() {
+          const defaultConfig = () => ({
+            visible: false,
+            sets: [...DEFAULT_KEYBAR.sets],
+            custom: [],
+            order: [...DEFAULT_KEYBAR.order],
+          });
           try {
             const raw = JSON.parse(localStorage.getItem(keyBarKey) || "null");
-            if (!raw || typeof raw !== "object") return { visible: false, sets: [...DEFAULT_KEYBAR.sets], custom: [] };
+            if (!raw || typeof raw !== "object") return defaultConfig();
+            const savedOrder = Array.isArray(raw.order)
+              ? raw.order.filter((id) => KEY_DEFS[id])
+              : [];
             return {
               visible: Boolean(raw.visible),
-              sets: Array.isArray(raw.sets) ? raw.sets.filter((id) => KEY_SETS.some((s) => s.id === id)) : [...DEFAULT_KEYBAR.sets],
-              custom: Array.isArray(raw.custom) ? raw.custom.filter((id) => KEY_DEFS[id]) : [],
+              sets: Array.isArray(raw.sets)
+                ? [...new Set(raw.sets.filter((id) => KEY_SETS.some((s) => s.id === id)))]
+                : [...DEFAULT_KEYBAR.sets],
+              custom: Array.isArray(raw.custom)
+                ? [...new Set(raw.custom.filter((id) => KEY_DEFS[id]))]
+                : [],
+              order: [...new Set([...savedOrder, ...KEY_ORDER])],
             };
           } catch (_) {
-            return { visible: false, sets: [...DEFAULT_KEYBAR.sets], custom: [] };
+            return defaultConfig();
           }
         }
 
@@ -4073,14 +4180,69 @@
           } catch (_) {}
         }
 
-        // Ordered union of every enabled set plus custom picks, deduped.
+        // Ordered union of every enabled set plus custom picks, deduped. The
+        // complete key order is stored so disabling and re-enabling a set does
+        // not discard the user's placement for its keys.
         function resolveKeyIds() {
           const enabled = new Set();
           for (const set of KEY_SETS) {
             if (keyBarConfig.sets.includes(set.id)) set.keys.forEach((id) => enabled.add(id));
           }
           keyBarConfig.custom.forEach((id) => enabled.add(id));
-          return KEY_ORDER.filter((id) => enabled.has(id));
+          return keyBarConfig.order.filter((id) => enabled.has(id));
+        }
+
+        function commitKeyOrder(order) {
+          keyBarConfig.order = order;
+          saveKeyBarConfig();
+          renderKeyRow();
+        }
+
+        function reorderKey(id, targetId, afterTarget) {
+          if (id === targetId) return;
+          const order = keyBarConfig.order.filter((keyId) => keyId !== id);
+          const targetIndex = order.indexOf(targetId);
+          if (targetIndex < 0) return;
+          order.splice(targetIndex + (afterTarget ? 1 : 0), 0, id);
+          commitKeyOrder(order);
+        }
+
+        function moveKey(id, offset) {
+          const visibleIds = resolveKeyIds();
+          const index = visibleIds.indexOf(id);
+          const targetIndex = index + offset;
+          if (index < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
+          const targetId = visibleIds[targetIndex];
+          const orderIndex = keyBarConfig.order.indexOf(id);
+          const targetOrderIndex = keyBarConfig.order.indexOf(targetId);
+          [keyBarConfig.order[orderIndex], keyBarConfig.order[targetOrderIndex]] = [
+            keyBarConfig.order[targetOrderIndex],
+            keyBarConfig.order[orderIndex],
+          ];
+          commitKeyOrder(keyBarConfig.order);
+        }
+
+        function moveKeyToEdge(id, toStart) {
+          const visibleIds = resolveKeyIds();
+          const index = visibleIds.indexOf(id);
+          if (index < 0) return;
+          const targetId = toStart ? visibleIds[0] : visibleIds[visibleIds.length - 1];
+          if (targetId === id) return;
+          reorderKey(id, targetId, !toStart);
+        }
+
+        function resetKeyOrder() {
+          selectedOrderKeyId = "";
+          commitKeyOrder([...KEY_ORDER]);
+        }
+
+        function appendKeyToVisibleEnd(id, visibleIds) {
+          if (visibleIds.includes(id) || visibleIds.length === 0) return;
+          const order = keyBarConfig.order.filter((keyId) => keyId !== id);
+          const lastVisibleIndex = order.indexOf(visibleIds[visibleIds.length - 1]);
+          if (lastVisibleIndex < 0) return;
+          order.splice(lastVisibleIndex + 1, 0, id);
+          keyBarConfig.order = order;
         }
 
         function keySequence(def) {
@@ -4297,6 +4459,199 @@
           updateKeyBarControls();
         }
 
+        function clearKeyOrderDropMarkers() {
+          for (const chip of keyPopoverBody.querySelectorAll(".key-order-chip")) {
+            chip.classList.remove("drop-before", "drop-after");
+          }
+        }
+
+        function installKeyOrderDrag(chip, id) {
+          let gesture = null;
+          let suppressClick = false;
+
+          const releaseCapture = (pointerId) => {
+            if (chip.hasPointerCapture(pointerId)) chip.releasePointerCapture(pointerId);
+          };
+
+          chip.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0 || event.isPrimary === false) return;
+            event.stopPropagation();
+            gesture = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              y: event.clientY,
+              active: false,
+              targetId: "",
+              afterTarget: false,
+              timer: 0,
+            };
+            chip.setPointerCapture(event.pointerId);
+            gesture.timer = window.setTimeout(() => {
+              if (!gesture || gesture.pointerId !== event.pointerId) return;
+              gesture.active = true;
+              suppressClick = true;
+              chip.classList.add("dragging");
+            }, KEY_ORDER_HOLD_MS);
+          });
+
+          chip.addEventListener("pointermove", (event) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            if (!gesture.active) {
+              if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) {
+                window.clearTimeout(gesture.timer);
+                suppressClick = true;
+                const pointerId = gesture.pointerId;
+                gesture = null;
+                releaseCapture(pointerId);
+              }
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            clearKeyOrderDropMarkers();
+            const target = document
+              .elementFromPoint(event.clientX, event.clientY)
+              ?.closest(".key-order-chip");
+            const targetId = target?.dataset.orderKey || "";
+            gesture.targetId = targetId === id ? "" : targetId;
+            gesture.afterTarget = false;
+            if (gesture.targetId) {
+              const rect = target.getBoundingClientRect();
+              gesture.afterTarget = event.clientX >= rect.left + rect.width / 2;
+              target.classList.add(gesture.afterTarget ? "drop-after" : "drop-before");
+            }
+            const popoverRect = keyPopoverBody.getBoundingClientRect();
+            if (event.clientY < popoverRect.top + 28) keyPopoverBody.scrollTop -= 10;
+            if (event.clientY > popoverRect.bottom - 28) keyPopoverBody.scrollTop += 10;
+          });
+
+          const finishDrag = (event, shouldCommit) => {
+            if (!gesture || event.pointerId !== gesture.pointerId) return;
+            window.clearTimeout(gesture.timer);
+            const completed = gesture;
+            gesture = null;
+            chip.classList.remove("dragging");
+            clearKeyOrderDropMarkers();
+            releaseCapture(completed.pointerId);
+            if (!completed.active) return;
+            event.preventDefault();
+            event.stopPropagation();
+            suppressClick = true;
+            if (shouldCommit && completed.targetId) {
+              const scrollTop = keyPopoverBody.scrollTop;
+              reorderKey(id, completed.targetId, completed.afterTarget);
+              renderKeyPopover();
+              keyPopoverBody.scrollTop = scrollTop;
+            }
+          };
+
+          chip.addEventListener("pointerup", (event) => finishDrag(event, true));
+          chip.addEventListener("pointercancel", (event) => finishDrag(event, false));
+          chip.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (suppressClick) {
+              suppressClick = false;
+              event.preventDefault();
+              return;
+            }
+            const scrollTop = keyPopoverBody.scrollTop;
+            selectedOrderKeyId = selectedOrderKeyId === id ? "" : id;
+            renderKeyPopover();
+            keyPopoverBody.scrollTop = scrollTop;
+          });
+          chip.addEventListener("contextmenu", (event) => event.preventDefault());
+        }
+
+        function renderKeyOrderSection() {
+          const visibleIds = resolveKeyIds();
+          if (!visibleIds.includes(selectedOrderKeyId)) selectedOrderKeyId = "";
+          const section = document.createElement("section");
+          section.className = "key-order-section";
+
+          const heading = document.createElement("div");
+          heading.className = "key-order-heading";
+          const title = document.createElement("div");
+          title.className = "key-popover-title";
+          title.textContent = "Key order";
+          const reset = document.createElement("button");
+          reset.type = "button";
+          reset.className = "key-order-reset";
+          reset.textContent = "Reset";
+          reset.setAttribute("aria-label", "Reset key order");
+          reset.addEventListener("click", (event) => {
+            event.stopPropagation();
+            resetKeyOrder();
+            renderKeyPopover();
+          });
+          heading.append(title, reset);
+          section.append(heading);
+
+          const grid = document.createElement("div");
+          grid.className = "key-order-grid";
+          grid.setAttribute("aria-label", "Current key order");
+          for (const id of visibleIds) {
+            const def = KEY_DEFS[id];
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "key-chip key-order-chip";
+            chip.dataset.orderKey = id;
+            chip.textContent = def.label;
+            chip.title = `${def.hint || def.label} — hold and drag to reorder`;
+            chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
+            chip.classList.toggle("selected", selectedOrderKeyId === id);
+            installKeyOrderDrag(chip, id);
+            grid.append(chip);
+          }
+          if (visibleIds.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "key-row-empty";
+            empty.textContent = "Choose a set or custom key first.";
+            grid.append(empty);
+          }
+          section.append(grid);
+
+          const help = document.createElement("div");
+          help.className = "key-order-help";
+          help.textContent = "Hold and drag to reorder · Tap a key for move controls";
+          section.append(help);
+          keyPopoverBody.append(section);
+
+          if (!selectedOrderKeyId) return;
+          const selectedIndex = visibleIds.indexOf(selectedOrderKeyId);
+          const def = KEY_DEFS[selectedOrderKeyId];
+          const accessibleName = def.hint || def.label;
+          const actions = document.createElement("div");
+          actions.className = "key-order-actions";
+          actions.setAttribute("aria-label", "Selected key order actions");
+          const selected = document.createElement("span");
+          selected.className = "key-order-selected";
+          selected.textContent = `Selected: ${def.label}`;
+          actions.append(selected);
+          const actionDefs = [
+            ["First", `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
+            ["←", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
+            ["→", `Move ${accessibleName} right`, selectedIndex === visibleIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
+            ["Last", `Move ${accessibleName} to end`, selectedIndex === visibleIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
+          ];
+          for (const [label, ariaLabel, disabled, action] of actionDefs) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "key-order-action";
+            button.textContent = label;
+            button.setAttribute("aria-label", ariaLabel);
+            button.disabled = disabled;
+            button.addEventListener("click", (event) => {
+              event.stopPropagation();
+              const scrollTop = keyPopoverBody.scrollTop;
+              action();
+              renderKeyPopover();
+              keyPopoverBody.scrollTop = scrollTop;
+            });
+            actions.append(button);
+          }
+          section.append(actions);
+        }
+
         function renderKeyPopover() {
           keyPopoverBody.textContent = "";
           const setsTitle = document.createElement("div");
@@ -4309,7 +4664,10 @@
             const cb = document.createElement("input");
             cb.type = "checkbox";
             cb.checked = keyBarConfig.sets.includes(set.id);
-            cb.addEventListener("change", () => {
+            cb.addEventListener("click", (event) => event.stopPropagation());
+            cb.addEventListener("change", (event) => {
+              event.stopPropagation();
+              const scrollTop = keyPopoverBody.scrollTop;
               if (cb.checked) {
                 if (!keyBarConfig.sets.includes(set.id)) keyBarConfig.sets.push(set.id);
               } else {
@@ -4317,6 +4675,8 @@
               }
               saveKeyBarConfig();
               renderKeyRow();
+              renderKeyPopover();
+              keyPopoverBody.scrollTop = scrollTop;
             });
             const name = document.createElement("span");
             name.className = "key-set-name";
@@ -4340,19 +4700,25 @@
             chip.className = "key-chip";
             chip.textContent = def.label;
             chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
-            chip.addEventListener("click", () => {
+            chip.addEventListener("click", (event) => {
+              event.stopPropagation();
+              const scrollTop = keyPopoverBody.scrollTop;
+              const visibleIds = resolveKeyIds();
               if (keyBarConfig.custom.includes(id)) {
                 keyBarConfig.custom = keyBarConfig.custom.filter((k) => k !== id);
               } else {
                 keyBarConfig.custom.push(id);
+                appendKeyToVisibleEnd(id, visibleIds);
               }
-              chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
               saveKeyBarConfig();
               renderKeyRow();
+              renderKeyPopover();
+              keyPopoverBody.scrollTop = scrollTop;
             });
             grid.append(chip);
           }
           keyPopoverBody.append(grid);
+          renderKeyOrderSection();
         }
 
         function setKeyPopoverOpen(open) {
