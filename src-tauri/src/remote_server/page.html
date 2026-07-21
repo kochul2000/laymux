@@ -1636,6 +1636,11 @@
         let heartbeatInterrupted = false;
         let outputInterrupted = false;
         let activeTerminalId = null;
+        // Keep the user's most recently attached pane across release/lease
+        // loss within this document. The navigation snapshot remains the
+        // authority for whether it is still live and eligible; this hint is
+        // intentionally not persisted across page loads.
+        let lastSelectedTerminalId = null;
         let terminalInfoById = new Map();
         let navigationState = null;
         let fileViewerStatusInFlight = false;
@@ -2345,6 +2350,7 @@
             scrollToBottomButton.hidden = true;
           }
           activeTerminalId = nextId;
+          if (nextId) lastSelectedTerminalId = nextId;
           composerIsComposing = false;
           if (activeTerminalId) {
             currentInputMode(activeTerminalId);
@@ -3801,7 +3807,10 @@
           return null;
         }
 
-        async function loadNavigation(preferredTerminalId = activeTerminalId, options = {}) {
+        async function loadNavigation(
+          preferredTerminalId = activeTerminalId || lastSelectedTerminalId,
+          options = {},
+        ) {
           const selectionRevision = Number.isSafeInteger(options.selectionRevision)
             ? options.selectionRevision
             : ++terminalSelectionRevision;
