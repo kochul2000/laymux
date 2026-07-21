@@ -444,19 +444,20 @@
       .file-viewer-status.error {
         color: var(--danger);
       }
-      .file-viewer-current,
       .file-viewer-path-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
-      }
-      .file-viewer-current button,
-      .file-viewer-path-row button {
-        min-width: 70px;
+        min-width: 0;
       }
       .file-viewer-path-row input {
         min-width: 0;
         width: 100%;
+      }
+      .file-viewer-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .file-viewer-actions button {
+        min-width: 0;
       }
       .nav-section + .nav-section {
         margin-top: 0;
@@ -1441,15 +1442,14 @@
             <section id="fileViewerSection" class="nav-section locked" aria-label="File viewer">
               <h2 class="nav-section-title">File viewer</h2>
               <div class="file-viewer-panel">
-                <div id="fileViewerStatus" class="file-viewer-status">Connect to open a file.</div>
-                <div class="file-viewer-current">
-                  <button id="openCurrentFileViewer" type="button" disabled>Desktop file</button>
-                  <button id="refreshFileViewer" type="button" disabled aria-label="Refresh desktop file viewer status">Refresh</button>
-                </div>
                 <div class="file-viewer-path-row">
-                  <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Path on host" disabled />
-                  <button id="openFileViewerPath" type="button" disabled>Open tab</button>
+                  <input id="fileViewerPath" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Host file path" placeholder="Host file path" disabled />
                 </div>
+                <div class="file-viewer-actions">
+                  <button id="pullHostFileViewerPath" type="button" aria-label="Use current host viewer path" disabled>From host</button>
+                  <button id="openFileViewer" type="button" disabled>Open viewer</button>
+                </div>
+                <div id="fileViewerStatus" class="file-viewer-status">Connect to open a host file.</div>
               </div>
             </section>
             <section id="notificationSection" class="nav-section locked" aria-label="Notifications">
@@ -1569,9 +1569,8 @@
         const fileViewerSection = $("fileViewerSection");
         const fileViewerStatusElement = $("fileViewerStatus");
         const fileViewerPathInput = $("fileViewerPath");
-        const openCurrentFileViewerButton = $("openCurrentFileViewer");
-        const openFileViewerPathButton = $("openFileViewerPath");
-        const refreshFileViewerButton = $("refreshFileViewer");
+        const pullHostFileViewerPathButton = $("pullHostFileViewerPath");
+        const openFileViewerButton = $("openFileViewer");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
         const composerSendButton = $("composerSend");
@@ -1630,8 +1629,9 @@
         let activeTerminalId = null;
         let terminalInfoById = new Map();
         let navigationState = null;
-        let fileViewerState = { open: false, path: null };
         let fileViewerStatusInFlight = false;
+        let fileViewerStatusRequestRevision = 0;
+        let fileViewerPathRevision = 0;
         const pendingFileViewerWindows = new Map();
         let terminal = null;
         let fitAddon = null;
@@ -1857,28 +1857,30 @@
           const connected = Boolean(leaseId && fileViewerToken);
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
-          refreshFileViewerButton.disabled = !connected;
-          openFileViewerPathButton.disabled = !connected || !fileViewerPathInput.value.trim();
-          openCurrentFileViewerButton.disabled = !connected || !fileViewerState.open;
-          openCurrentFileViewerButton.textContent = fileViewerState.open ? "Open desktop file" : "Desktop file";
-          const text = message || (fileViewerState.open
-            ? fileViewerState.path
-            : connected ? "No file is open in the desktop viewer." : "Connect to open a file.");
+          pullHostFileViewerPathButton.disabled = !connected || fileViewerStatusInFlight;
+          pullHostFileViewerPathButton.textContent = fileViewerStatusInFlight
+            ? "Loading..."
+            : "From host";
+          openFileViewerButton.disabled = !connected || !fileViewerPathInput.value.trim();
+          const text = message || (connected
+            ? "Enter a path or use From host."
+            : "Connect to open a host file.");
           fileViewerStatusElement.textContent = text;
-          fileViewerStatusElement.title = fileViewerState.open ? fileViewerState.path || "" : "";
+          fileViewerStatusElement.title = "";
           fileViewerStatusElement.classList.toggle("error", isError);
         }
 
-        async function refreshFileViewerStatus() {
-          if (!leaseId || !fileViewerToken) {
-            fileViewerState = { open: false, path: null };
-            renderFileViewerState();
-            return;
-          }
+        async function pullHostFileViewerPath() {
+          if (!leaseId || !fileViewerToken) return;
           if (fileViewerStatusInFlight) return;
           fileViewerStatusInFlight = true;
+          const statusRequestRevision = ++fileViewerStatusRequestRevision;
           const statusLeaseId = leaseId;
           const statusFileViewerToken = fileViewerToken;
+          const statusPathRevision = fileViewerPathRevision;
+          let message = null;
+          let isError = false;
+          renderFileViewerState();
           try {
             const data = await remoteFetch("/remote/v1/file-viewer/status", {
               headers: {
@@ -1887,17 +1889,29 @@
               },
             });
             if (leaseId !== statusLeaseId || fileViewerToken !== statusFileViewerToken) return;
-            fileViewerState = {
-              open: data.open === true && typeof data.path === "string" && Boolean(data.path),
-              path: typeof data.path === "string" ? data.path : null,
-            };
-            renderFileViewerState();
+            if (fileViewerPathRevision !== statusPathRevision) {
+              message = "Host path was not applied because the input changed.";
+              return;
+            }
+            if (data.open !== true || typeof data.path !== "string" || !data.path) {
+              message = "No file is open in the host viewer.";
+              return;
+            }
+            fileViewerPathInput.value = data.path;
+            fileViewerPathRevision += 1;
+            message = "Host viewer path loaded.";
+          } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+            isError = true;
           } finally {
-            fileViewerStatusInFlight = false;
+            if (fileViewerStatusRequestRevision === statusRequestRevision) {
+              fileViewerStatusInFlight = false;
+              renderFileViewerState(message, isError);
+            }
           }
         }
 
-        function openFileViewerTab(source, path = null) {
+        function openFileViewerTab(path) {
           if (!leaseId || !fileViewerToken) return;
           const viewerWindow = window.open("/remote/viewer/", "_blank");
           if (!viewerWindow) {
@@ -1906,7 +1920,6 @@
           }
           const timeoutId = setTimeout(() => pendingFileViewerWindows.delete(viewerWindow), 30000);
           pendingFileViewerWindows.set(viewerWindow, {
-            source,
             path,
             token: token(),
             leaseId,
@@ -1929,8 +1942,8 @@
               token: session.token,
               leaseId: session.leaseId,
               fileViewerToken: session.fileViewerToken,
-              source: session.source,
-              ...(session.source === "path" ? { path: session.path } : {}),
+              source: "path",
+              path: session.path,
             },
             window.location.origin,
           );
@@ -2107,15 +2120,14 @@
           updateTerminalControls();
           renderInputSurface();
           updateNotificationActions();
-          if (connected) {
-            refreshFileViewerStatus().catch(() => {
-              renderFileViewerState("Could not load desktop viewer status.", true);
-            });
-          } else {
-            fileViewerState = { open: false, path: null };
+          if (!connected) {
+            fileViewerStatusInFlight = false;
+            fileViewerStatusRequestRevision += 1;
+            fileViewerPathRevision += 1;
+            fileViewerPathInput.value = "";
             clearPendingFileViewerWindows();
-            renderFileViewerState();
           }
+          renderFileViewerState();
         }
 
         function setConnectionHint(message, attention = false) {
@@ -2878,7 +2890,6 @@
               "heartbeat",
               activeTerminalId ? `Connected to ${activeTerminalId}` : "Connected."
             );
-            refreshFileViewerStatus().catch(() => {});
           } catch (err) {
             if (leaseId === heartbeatLeaseId && heartbeatAbortController === controller) throw err;
           } finally {
@@ -5129,26 +5140,28 @@
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         releaseButton.addEventListener("click", () => release().catch((err) => setStatus(`Release failed: ${err.message}`, true)));
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
-        fileViewerPathInput.addEventListener("input", () => renderFileViewerState());
+        fileViewerPathInput.addEventListener("input", () => {
+          fileViewerPathRevision += 1;
+          renderFileViewerState();
+        });
+        pullHostFileViewerPathButton.addEventListener("click", () => {
+          pullHostFileViewerPath().catch((error) => {
+            renderFileViewerState(error instanceof Error ? error.message : String(error), true);
+          });
+        });
         fileViewerPathInput.addEventListener("keydown", (event) => {
           if (
             event.key !== "Enter" ||
             event.isComposing ||
             event.keyCode === 229 ||
-            openFileViewerPathButton.disabled
+            openFileViewerButton.disabled
           ) return;
           event.preventDefault();
-          openFileViewerTab("path", fileViewerPathInput.value.trim());
+          openFileViewerTab(fileViewerPathInput.value.trim());
         });
-        openFileViewerPathButton.addEventListener("click", () => {
+        openFileViewerButton.addEventListener("click", () => {
           const path = fileViewerPathInput.value.trim();
-          if (path) openFileViewerTab("path", path);
-        });
-        openCurrentFileViewerButton.addEventListener("click", () => {
-          if (fileViewerState.open) openFileViewerTab("current");
-        });
-        refreshFileViewerButton.addEventListener("click", () => {
-          refreshFileViewerStatus().catch((err) => renderFileViewerState(err.message, true));
+          if (path) openFileViewerTab(path);
         });
         window.addEventListener("message", handleFileViewerReady);
         // xterm completes a mouse selection from a document-level mouseup handler.

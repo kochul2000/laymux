@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 
 const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
-async function installRemoteViewerMocks(context: BrowserContext) {
+async function installRemoteViewerMocks(
+  context: BrowserContext,
+  options: { statusDelayMs?: number } = {},
+) {
   const renderRequests: Array<{
     url: string;
     authorization: string | null;
@@ -11,6 +14,11 @@ async function installRemoteViewerMocks(context: BrowserContext) {
     fileViewerCapability: string | null;
     body: Record<string, unknown>;
   }> = [];
+  let statusRequestCount = 0;
+  let resolveFirstStatusResponse: (() => void) | null = null;
+  const firstStatusResponse = new Promise<void>((resolve) => {
+    resolveFirstStatusResponse = resolve;
+  });
 
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
@@ -86,8 +94,15 @@ async function installRemoteViewerMocks(context: BrowserContext) {
       });
     }
     if (url.pathname === "/remote/v1/file-viewer/status") {
+      statusRequestCount += 1;
       expect(await request.headerValue("x-laymux-remote-file-viewer")).toBe("viewer-481");
-      return route.fulfill({ json: { open: true, path: "C:\\work\\current.md" } });
+      if (options.statusDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.statusDelayMs));
+      }
+      await route.fulfill({ json: { open: true, path: "C:\\work\\current.md" } });
+      resolveFirstStatusResponse?.();
+      resolveFirstStatusResponse = null;
+      return;
     }
     if (url.pathname === "/remote/v1/file-viewer/render") {
       renderRequests.push({
@@ -112,22 +127,37 @@ async function installRemoteViewerMocks(context: BrowserContext) {
     return route.fulfill({ status: 404, json: { error: "not mocked" } });
   });
 
-  return renderRequests;
+  return {
+    renderRequests,
+    firstStatusResponse,
+    statusRequestCount: () => statusRequestCount,
+  };
 }
 
 test("opens a lease-gated host file in a credential-free new tab", async ({ context, page }) => {
-  const renderRequests = await installRemoteViewerMocks(context);
+  const { renderRequests, firstStatusResponse, statusRequestCount } =
+    await installRemoteViewerMocks(context);
   await page.goto("http://remote.test/remote/");
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
   await expect(page.locator("#release")).toBeEnabled();
 
   await page.locator("#navToggle").click();
-  await expect(page.locator("#fileViewerStatus")).toHaveText("C:\\work\\current.md");
+  await page.waitForTimeout(100);
+  expect(statusRequestCount()).toBe(0);
+  await expect(page.locator("#fileViewerPath")).toHaveValue("");
+  await expect(page.locator("#fileViewerSection button")).toHaveCount(2);
+  await expect(page.locator("#pullHostFileViewerPath")).toHaveText("From host");
+  await page.locator("#pullHostFileViewerPath").click();
+  await firstStatusResponse;
+  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\current.md");
+  await expect(page.locator("#openFileViewer")).toHaveText("Open viewer");
+  await expect(page.locator("#openCurrentFileViewer")).toHaveCount(0);
+  await expect(page.locator("#refreshFileViewer")).toHaveCount(0);
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
 
   const popupPromise = page.waitForEvent("popup");
-  await page.locator("#openFileViewerPath").click();
+  await page.locator("#openFileViewer").click();
   const popup = await popupPromise;
 
   await expect(popup.frameLocator("#preview").locator("h1")).toHaveText(
@@ -148,6 +178,26 @@ test("opens a lease-gated host file in a credential-free new tab", async ({ cont
       body: { source: "path", path: "C:\\work\\notes.html" },
     },
   ]);
+});
+
+test("keeps a newer edit when a host path request finishes", async ({ context, page }) => {
+  const { firstStatusResponse } = await installRemoteViewerMocks(context, { statusDelayMs: 200 });
+  await page.goto("http://remote.test/remote/");
+  await page.locator("#token").fill("remote-secret");
+  await page.locator("#connect").click();
+  await expect(page.locator("#release")).toBeEnabled();
+  await page.locator("#navToggle").click();
+
+  await page.locator("#fileViewerPath").fill("C:\\work\\draft.txt");
+  await page.locator("#pullHostFileViewerPath").click();
+  await expect(page.locator("#pullHostFileViewerPath")).toBeDisabled();
+  await page.locator("#fileViewerPath").fill("C:\\work\\newer.txt");
+  await firstStatusResponse;
+
+  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\newer.txt");
+  await expect(page.locator("#fileViewerStatus")).toHaveText(
+    "Host path was not applied because the input changed.",
+  );
 });
 
 test("does not open a path while IME is committing Enter", async ({ context, page }) => {
