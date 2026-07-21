@@ -1,6 +1,6 @@
 # 0041. Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공한다
 
-- Status: Accepted
+- Status: Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md)
 - Date: 2026-07-19
 - Source: 사용자 요구(“서빙을 하고 이용자 브라우저로 새탭에서 열기”), issue #481, [api-contracts.md §13](../architecture/api-contracts.md), [ADR-0013](0013-direct-remote-mode.md), [ADR-0031](0031-extension-viewer-profile-path-conversion.md) 확장
 

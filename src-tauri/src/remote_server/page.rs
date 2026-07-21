@@ -207,6 +207,16 @@ mod tests {
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
         ));
+        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open viewer"));
+        assert!(html.contains("id=\"pullHostFileViewerPath\""));
+        assert!(html.contains(">From host</button>"));
+        assert!(!html.contains("id=\"openCurrentFileViewer\""));
+        assert!(!html.contains("id=\"refreshFileViewer\""));
+        assert!(!html.contains("id=\"openFileViewerPath\""));
+        assert!(!html.contains("let fileViewerPathDirty = false;"));
+        assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
+        assert!(html.contains("let fileViewerPathRevision = 0;"));
+        assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
         assert!(html.contains("/remote/viewer/"));
         assert!(html.contains("laymux:file-viewer-ready"));
         assert!(html.contains("laymux:file-viewer-session"));
