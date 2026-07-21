@@ -1031,6 +1031,15 @@
       .xterm-screen .xterm-decoration-top {
         pointer-events: none;
       }
+      .remote-path-link-decoration {
+        box-sizing: border-box;
+        border-bottom: 1px solid currentColor;
+        pointer-events: none;
+      }
+      #terminal.remote-path-link-clickable .xterm,
+      #terminal.remote-path-link-clickable .xterm-screen {
+        cursor: pointer;
+      }
       .xterm-helper-textarea {
         font-size: 16px;
       }
@@ -1633,6 +1642,16 @@
         let fileViewerStatusRequestRevision = 0;
         let fileViewerPathRevision = 0;
         const pendingFileViewerWindows = new Map();
+        const REMOTE_PATH_LINK_MAX_SELECTION_LENGTH = 4096;
+        const PATH_LINK_CLICK_SLOP_PX = 4;
+        const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;
+        let pathLinkSelectionRevision = 0;
+        let pathLinkEvaluationTimer = null;
+        let pathLinkAbortController = null;
+        let pathLinkCurrent = null;
+        let pathLinkDecoration = null;
+        let pathLinkMarker = null;
+        let pathLinkPress = null;
         let terminal = null;
         let fitAddon = null;
         let resizeObserver = null;
@@ -1954,6 +1973,233 @@
           pendingFileViewerWindows.clear();
         }
 
+        function disposePathLinkDecoration() {
+          try {
+            pathLinkDecoration?.dispose?.();
+          } catch (_) {}
+          try {
+            pathLinkMarker?.dispose?.();
+          } catch (_) {}
+          pathLinkDecoration = null;
+          pathLinkMarker = null;
+        }
+
+        function clearPathLinkVisuals() {
+          pathLinkCurrent = null;
+          pathLinkPress = null;
+          terminalHost.classList.remove("remote-path-link-clickable");
+          disposePathLinkDecoration();
+        }
+
+        function clearPathLinkSelection() {
+          pathLinkSelectionRevision += 1;
+          if (pathLinkEvaluationTimer !== null) {
+            clearTimeout(pathLinkEvaluationTimer);
+            pathLinkEvaluationTimer = null;
+          }
+          if (pathLinkAbortController) {
+            pathLinkAbortController.abort();
+            pathLinkAbortController = null;
+          }
+          clearPathLinkVisuals();
+        }
+
+        function schedulePathLinkSelectionEvaluation(delay = PATH_LINK_SELECTION_DEBOUNCE_MS) {
+          clearPathLinkSelection();
+          if (!terminal?.hasSelection?.()) return;
+          pathLinkEvaluationTimer = setTimeout(() => {
+            pathLinkEvaluationTimer = null;
+            evaluatePathLinkSelection();
+          }, delay);
+        }
+
+        function mapRemotePathLinkRange(position, rawFirstLine, token) {
+          const sameLine = position.start.y === position.end.y;
+          let startCol0 = position.start.x;
+          let endCol0 = position.start.x === position.end.x
+            ? position.start.x
+            : position.end.x - 1;
+          const tokenIndex = rawFirstLine.indexOf(token);
+          if (tokenIndex >= 0) {
+            startCol0 = position.start.x + tokenIndex;
+            endCol0 = startCol0 + token.length - 1;
+          } else if (!sameLine) {
+            endCol0 = startCol0;
+          }
+          if (endCol0 < startCol0) endCol0 = startCol0;
+          return {
+            bufferLine: position.start.y + 1,
+            startCol: startCol0 + 1,
+            endCol: endCol0 + 1,
+          };
+        }
+
+        function setVerifiedPathLink(selection) {
+          disposePathLinkDecoration();
+          pathLinkCurrent = selection;
+          const term = terminal;
+          if (!term) {
+            clearPathLinkVisuals();
+            return;
+          }
+
+          try {
+            const buffer = term.buffer.active;
+            const cursorAbsoluteLine = (buffer.baseY || 0) + (buffer.cursorY || 0);
+            const targetAbsoluteLine = selection.bufferLine - 1;
+            const offset = Math.trunc(targetAbsoluteLine - cursorAbsoluteLine);
+            if (!Number.isFinite(offset)) throw new Error("invalid marker offset");
+            const marker = term.registerMarker(offset);
+            if (!marker) throw new Error("selection line is outside the xterm buffer");
+            pathLinkMarker = marker;
+            const decoration = term.registerDecoration({
+              marker,
+              x: Math.max(0, selection.startCol - 1),
+              width: Math.max(1, selection.endCol - selection.startCol + 1),
+            });
+            if (!decoration) throw new Error("xterm decoration is unavailable");
+            pathLinkDecoration = decoration;
+            const styleDecoration = (element) => {
+              element.classList.add("remote-path-link-decoration");
+            };
+            if (decoration.element) styleDecoration(decoration.element);
+            decoration.onRender(styleDecoration);
+            terminalHost.classList.add("remote-path-link-clickable");
+          } catch (error) {
+            console.warn("[remotePathLink] decoration failed:", error);
+            clearPathLinkVisuals();
+          }
+        }
+
+        function evaluatePathLinkSelection() {
+          if (pathLinkEvaluationTimer !== null) {
+            clearTimeout(pathLinkEvaluationTimer);
+            pathLinkEvaluationTimer = null;
+          }
+          if (pathLinkAbortController) pathLinkAbortController.abort();
+          pathLinkAbortController = null;
+          const term = terminal;
+          const requestTerminalId = activeTerminalId;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          const revision = ++pathLinkSelectionRevision;
+          clearPathLinkVisuals();
+          if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
+
+          const selection = term.getSelection();
+          if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
+          if (!term.getSelectionPosition?.()) return;
+          const rawFirstLine = selection.split(/\r?\n/, 1)[0] || "";
+          const abortController = typeof AbortController === "function" ? new AbortController() : null;
+          pathLinkAbortController = abortController;
+
+          remoteFetch("/remote/v1/file-viewer/path-link", {
+            method: "POST",
+            signal: abortController?.signal,
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestFileViewerToken,
+            },
+            body: JSON.stringify({ terminalId: requestTerminalId, selection }),
+          })
+            .then((data) => {
+              const currentPosition = term.getSelectionPosition?.();
+              if (
+                revision !== pathLinkSelectionRevision ||
+                activeTerminalId !== requestTerminalId ||
+                leaseId !== requestLeaseId ||
+                fileViewerToken !== requestFileViewerToken ||
+                terminal !== term ||
+                term.getSelection() !== selection ||
+                !currentPosition
+              ) {
+                return;
+              }
+              if (
+                data.valid !== true ||
+                typeof data.token !== "string" ||
+                !data.token ||
+                typeof data.path !== "string" ||
+                !data.path ||
+                !rawFirstLine.includes(data.token)
+              ) {
+                clearPathLinkVisuals();
+                return;
+              }
+              // Resize/reflow and scrollback trim can move a still-identical
+              // selection while the bridge performs its filesystem stat. Use
+              // the live xterm coordinates, never the pre-request snapshot.
+              const range = mapRemotePathLinkRange(currentPosition, rawFirstLine, data.token);
+              setVerifiedPathLink({
+                ...range,
+                terminalId: requestTerminalId,
+                leaseId: requestLeaseId,
+                fileViewerToken: requestFileViewerToken,
+                path: data.path,
+              });
+            })
+            .catch(() => {
+              if (revision === pathLinkSelectionRevision) clearPathLinkVisuals();
+            })
+            .finally(() => {
+              if (pathLinkAbortController === abortController) pathLinkAbortController = null;
+            });
+        }
+
+        function hitTestPathLink(clientX, clientY) {
+          const element = pathLinkDecoration?.element;
+          if (!pathLinkCurrent || !element || !element.isConnected) return false;
+          const rect = element.getBoundingClientRect();
+          return (
+            clientX >= rect.left &&
+            clientX <= rect.right &&
+            clientY >= rect.top &&
+            clientY <= rect.bottom
+          );
+        }
+
+        function handlePathLinkPointerDown(event) {
+          pathLinkPress = null;
+          if (event.button !== 0 || event.isPrimary === false) return;
+          const current = pathLinkCurrent;
+          if (!current || !hitTestPathLink(event.clientX, event.clientY)) return;
+          pathLinkPress = {
+            ...current,
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          };
+        }
+
+        function handlePathLinkPointerUp(event) {
+          const press = pathLinkPress;
+          pathLinkPress = null;
+          if (!press || press.pointerId !== event.pointerId) return;
+          const moved =
+            Math.abs(event.clientX - press.clientX) > PATH_LINK_CLICK_SLOP_PX ||
+            Math.abs(event.clientY - press.clientY) > PATH_LINK_CLICK_SLOP_PX;
+          if (
+            moved ||
+            activeTerminalId !== press.terminalId ||
+            leaseId !== press.leaseId ||
+            fileViewerToken !== press.fileViewerToken
+          ) {
+            return;
+          }
+          openFileViewerTab(press.path);
+        }
+
+        function handlePathLinkPointerCancel(event) {
+          if (pathLinkPress?.pointerId === event.pointerId) pathLinkPress = null;
+        }
+
+        function handlePathLinkMouseMove(event) {
+          terminalHost.classList.toggle(
+            "remote-path-link-clickable",
+            hitTestPathLink(event.clientX, event.clientY)
+          );
+        }
+
         function loadPreferredInputMode() {
           try {
             const stored = localStorage.getItem(inputModeKey);
@@ -2089,6 +2335,7 @@
         function setActiveTerminal(nextTerminalId) {
           const nextId = nextTerminalId || null;
           if (activeTerminalId !== nextId) {
+            clearPathLinkSelection();
             // Publish a terminal switch only after the previous output/input
             // surface has been isolated. Otherwise the old socket can keep
             // rendering with its readiness flag under the new terminal id.
@@ -2121,6 +2368,7 @@
           renderInputSurface();
           updateNotificationActions();
           if (!connected) {
+            clearPathLinkSelection();
             fileViewerStatusInFlight = false;
             fileViewerStatusRequestRevision += 1;
             fileViewerPathRevision += 1;
@@ -2154,7 +2402,9 @@
         function terminalOptionsForAppearance(appearance = {}) {
           const normalized = normalizeAppearance(appearance);
           const options = {
-            allowProposedApi: false,
+            // Remote selected-path links use the same IDecoration mechanism as
+            // desktop TerminalView; xterm gates registerDecoration behind this.
+            allowProposedApi: true,
             cols: 80,
             rows: 24,
             cursorBlink: true,
@@ -2265,7 +2515,12 @@
         }
 
         function copySelectionAfterInteraction() {
-          queueMicrotask(() => copySelectionToClipboard());
+          queueMicrotask(() => {
+            copySelectionToClipboard();
+            // Pointer-up is the settle point. A zero-delay schedule coalesces
+            // the final xterm selection event without duplicating its stat.
+            schedulePathLinkSelectionEvaluation(0);
+          });
         }
 
         function isTouchPointer(event) {
@@ -2776,11 +3031,18 @@
             if (terminalReplayDepth > 0) return;
             enqueueInput(data);
           });
-          terminal.onResize(({ cols, rows }) => queueResize(cols, rows));
+          terminal.onResize(({ cols, rows }) => {
+            schedulePathLinkSelectionEvaluation();
+            queueResize(cols, rows);
+          });
           terminal.onSelectionChange(() => {
             updateTerminalControls();
             updateSelectionHandles(terminal);
             if (!terminal.hasSelection()) lastCopiedSelection = "";
+            // Dragging emits one event per changed cell. Clear stale visuals
+            // immediately, but wait for the selection to settle before the
+            // HTTP -> bridge -> filesystem validation.
+            schedulePathLinkSelectionEvaluation();
           });
           terminal.onScroll?.(() => {
             updateSelectionHandles(terminal);
@@ -2789,7 +3051,10 @@
           terminal.onCursorMove?.(() => updateCropTransform());
           // Entering the alternate buffer while a height-shrink crop is active
           // must re-fit so full-screen apps get the real surface rows.
-          terminal.buffer?.onBufferChange?.(() => scheduleTerminalFit(Boolean(activeTerminalId)));
+          terminal.buffer?.onBufferChange?.(() => {
+            schedulePathLinkSelectionEvaluation();
+            scheduleTerminalFit(Boolean(activeTerminalId));
+          });
           if ("ResizeObserver" in window) {
             resizeObserver = new ResizeObserver(() => fitTerminal());
             resizeObserver.observe(terminalHost);
@@ -3835,6 +4100,7 @@
               ) {
                 // reset() only runs at attach/reconnect, never mid-stream, so
                 // guarding it can't drop live keystrokes.
+                clearPathLinkSelection();
                 terminalReplayDepth += 1;
                 try {
                   term.reset();
@@ -5046,6 +5312,7 @@
         // follows the release drain through the server-side handoff.
         function releaseLeaseOnPageHide() {
           stashResumeTokenForUnload();
+          clearPathLinkSelection();
           const currentLease = leaseId;
           if (!currentLease) return;
           const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
@@ -5163,6 +5430,10 @@
           const path = fileViewerPathInput.value.trim();
           if (path) openFileViewerTab(path);
         });
+        terminalHost.addEventListener("pointerdown", handlePathLinkPointerDown, true);
+        terminalHost.addEventListener("mousemove", handlePathLinkMouseMove);
+        window.addEventListener("pointerup", handlePathLinkPointerUp, true);
+        window.addEventListener("pointercancel", handlePathLinkPointerCancel, true);
         window.addEventListener("message", handleFileViewerReady);
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
@@ -5267,7 +5538,12 @@
           if (resizeObserver) resizeObserver.disconnect();
           window.removeEventListener("resize", syncRemoteViewportHeight);
           remoteVisualViewport?.removeEventListener("resize", syncRemoteViewportHeight);
+          terminalHost.removeEventListener("pointerdown", handlePathLinkPointerDown, true);
+          terminalHost.removeEventListener("mousemove", handlePathLinkMouseMove);
+          window.removeEventListener("pointerup", handlePathLinkPointerUp, true);
+          window.removeEventListener("pointercancel", handlePathLinkPointerCancel, true);
           window.removeEventListener("message", handleFileViewerReady);
+          clearPathLinkSelection();
           clearPendingFileViewerWindows();
         });
       })();
