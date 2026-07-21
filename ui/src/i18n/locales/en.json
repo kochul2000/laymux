@@ -308,7 +308,7 @@
       "addTailscale": "Add Tailscale",
       "resetLoopback": "Reset Local",
       "autoMobileMinWidth": "Auto Mobile Width",
-      "autoMobileMinWidthDesc": "0 disables. At or below this app window width, Remote Access opens automatically.",
+      "autoMobileMinWidthDesc": "0 disables. Remote Access opens automatically when the app window is at or below this width, or when a phone (portrait screen with its short edge at or below this value) connects over RDP.",
       "snapshotMaxKib": "Initial Output Snapshot",
       "snapshotMaxKibDesc": "Max recent output (KiB) replayed when a remote client attaches or switches terminals. Smaller opens faster with shorter scrollback.",
       "customHosts": "Custom Hosts",

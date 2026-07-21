@@ -1,15 +1,18 @@
 //! OS-level remote-desktop session detection.
 //!
 //! The intended scenario: laymux is already running on the desktop, and the
-//! user opens Windows Remote Desktop from their phone to reach that window.
-//! When the window is entered over a remote session we want the Remote Access
-//! panel open so the phone can quickly switch to the mobile web UI.
+//! user opens Windows Remote Desktop *from their phone* to reach that window.
+//! When the window is entered over a remote session driven by a phone we want
+//! the Remote Access panel open so the phone can quickly switch to the mobile
+//! web UI. A desktop-to-desktop RDP session must not pop the panel.
 //!
-//! The window-width heuristic in `useAutoRemoteAccessPrompt` is an unreliable
-//! proxy for this — phone RDP clients usually negotiate a resolution wider than
-//! the threshold, and a non-maximized window never fires a `resize` on connect.
-//! This module reads the real Terminal Services state instead and pushes a
-//! transition event to the UI.
+//! This module only answers the coarse "is this an RDP session?" question via
+//! Terminal Services and pushes a transition event to the UI. RDP exposes no
+//! device-type flag, so the phone-vs-desktop decision lives in the frontend
+//! (`useAutoRemoteAccessPrompt` / `isPhoneLikeRemoteScreen`), which inspects the
+//! session's display geometry — a phone client is portrait and narrow on its
+//! short edge. The laymux window's own width is not used for this: a
+//! non-maximized window never fires a `resize` on connect.
 
 #[cfg(target_os = "windows")]
 pub fn is_remote_session() -> bool {
