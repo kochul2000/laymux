@@ -46,6 +46,8 @@
         --fs-xs: 10px;
         --fs-sm: 11px;
         --fs-md: 13px;
+        /* Compact controls in the Remote header share one border-box height. */
+        --header-control-height: 26px;
         --key-bar-control-height: 26px;
         --terminal-scroll-btn-right: 26px;
       }
@@ -175,7 +177,8 @@
         flex: 0 0 auto;
         align-items: center;
         gap: 5px;
-        padding: 4px 8px;
+        height: var(--header-control-height);
+        padding: 0 8px;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         background: var(--panel-2);
@@ -286,9 +289,10 @@
       .menu-button,
       .drawer-close,
       .desktop-mode-button,
-      .copy-pane-button {
+      .copy-pane-button,
+      .spatial-exclusion-button {
         width: 28px;
-        height: 24px;
+        height: var(--header-control-height);
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
@@ -300,11 +304,20 @@
       .menu-button:hover,
       .drawer-close:hover,
       .desktop-mode-button:hover,
-      .copy-pane-button:hover {
+      .copy-pane-button:hover,
+      .spatial-exclusion-button:hover {
         background: var(--hover-bg);
       }
       .copy-pane-button {
         color: var(--text-secondary);
+      }
+      .spatial-exclusion-button {
+        color: var(--text-secondary);
+      }
+      .spatial-exclusion-button[aria-pressed="true"] {
+        border-color: var(--danger);
+        background: var(--danger-bg);
+        color: var(--danger);
       }
       .desktop-mode-button {
         width: auto;
@@ -1417,6 +1430,9 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke-linecap="round"/></svg>
         </button>
         <div id="status" class="status">Enter the remote token, then connect.</div>
+        <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
+          <svg data-icon="circle-minus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+        </button>
         <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" title="Switch to Composer input">
           <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
           <span id="inputModeLabel" class="seg-label">Direct</span>
@@ -1595,6 +1611,7 @@
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>',
         };
         const copyPaneIdButton = $("copyPaneId");
+        const spatialExclusionButton = $("spatialExclusion");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
         const keyBarSettingsButton = $("keyBarSettings");
@@ -1605,6 +1622,7 @@
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
+        const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         // Secret resume capability issued by a successful claim. It lives in
         // memory while the document is alive and touches sessionStorage only
         // across the unload/load boundary (stash on pagehide, consume on
@@ -1643,6 +1661,7 @@
         let lastSelectedTerminalId = null;
         let terminalInfoById = new Map();
         let navigationState = null;
+        let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();
         let fileViewerStatusInFlight = false;
         let fileViewerStatusRequestRevision = 0;
         let fileViewerPathRevision = 0;
@@ -2357,6 +2376,7 @@
             composerDraft(activeTerminalId);
           }
           renderInputSurface();
+          updateHeaderPaneIdentity();
         }
 
         function setConnected(connected) {
@@ -3276,6 +3296,25 @@
           return Number((navigationState && navigationState.unreadNotificationCount) || 0);
         }
 
+        function loadSpatialExcludedPaneIds() {
+          try {
+            const raw = JSON.parse(localStorage.getItem(spatialExcludedPaneIdsKey) || "[]");
+            if (!Array.isArray(raw)) return new Set();
+            return new Set(raw.filter((paneId) => typeof paneId === "string" && paneId.length > 0));
+          } catch (_) {
+            return new Set();
+          }
+        }
+
+        function saveSpatialExcludedPaneIds() {
+          try {
+            localStorage.setItem(
+              spatialExcludedPaneIdsKey,
+              JSON.stringify([...spatialExcludedPaneIds].sort())
+            );
+          } catch (_) {}
+        }
+
         function updateNotificationActions() {
           const hasNotifications = notificationCount() > 0;
           const hasUnread = unreadNotificationCount() > 0;
@@ -3297,6 +3336,17 @@
             workspace,
             paneNumber: Number.isFinite(paneNumber) && paneNumber > 0 ? paneNumber : null,
           };
+        }
+
+        function activeWorkspacePane() {
+          if (!activeTerminalId || !navigationState) return null;
+          const panes = (navigationState.activeWorkspace && navigationState.activeWorkspace.panes) || [];
+          return panes.find(
+            (pane) =>
+              pane.id &&
+              pane.terminalId === activeTerminalId &&
+              pane.viewType === "TerminalView"
+          ) || null;
         }
 
         // "Workspace · Pane N" header title — the friendly replacement for the
@@ -3323,7 +3373,16 @@
         }
 
         function updateHeaderPaneIdentity() {
+          const pane = activeWorkspacePane();
           copyPaneIdButton.hidden = !activePaneIdentifier();
+          spatialExclusionButton.hidden = !pane;
+          const excluded = Boolean(pane && spatialExcludedPaneIds.has(pane.id));
+          spatialExclusionButton.setAttribute("aria-pressed", String(excluded));
+          const label = excluded
+            ? "Include this pane in pane navigation"
+            : "Exclude this pane from pane navigation";
+          spatialExclusionButton.setAttribute("aria-label", label);
+          spatialExclusionButton.title = label;
         }
 
         function setNotificationPanelOpen(open) {
@@ -3856,6 +3915,7 @@
         };
         const NAV_STEP_REASON_MESSAGES = {
           no_terminal_panes: "No terminal panes to navigate.",
+          no_included_panes: "Every pane is excluded from pane navigation.",
           no_other_target: "No other pane to move to.",
           no_unread_notifications: "No unread notifications.",
         };
@@ -3864,9 +3924,13 @@
 
         async function performNavStep(kind, direction) {
           if (!leaseId) return;
+          const requestBody =
+            kind === "spatial"
+              ? { leaseId, direction, excludedPaneIds: [...spatialExcludedPaneIds] }
+              : { leaseId, direction };
           const data = await remoteFetch(NAV_STEP_ENDPOINTS[kind], {
             method: "POST",
-            body: JSON.stringify({ leaseId, direction }),
+            body: JSON.stringify(requestBody),
           });
           if (!data || data.moved !== true || !data.target) {
             const reason = data && data.reason;
@@ -5472,6 +5536,25 @@
           writeClipboardText(identifier)
             .then(() => setStatus(`Copied ${identifier}`))
             .catch((err) => setStatus(`Copy failed: ${err.message || err}`, true));
+        });
+        keepInputSurfaceFocus(spatialExclusionButton);
+        spatialExclusionButton.addEventListener("click", () => {
+          const pane = activeWorkspacePane();
+          if (!pane) return;
+          const excluded = !spatialExcludedPaneIds.has(pane.id);
+          if (excluded) {
+            spatialExcludedPaneIds.add(pane.id);
+          } else {
+            spatialExcludedPaneIds.delete(pane.id);
+          }
+          saveSpatialExcludedPaneIds();
+          updateHeaderPaneIdentity();
+          const paneLabel = activeTerminalTitle() || "This pane";
+          setStatus(
+            excluded
+              ? `${paneLabel} excluded from pane navigation.`
+              : `${paneLabel} included in pane navigation.`
+          );
         });
         inputModeToggleButton.addEventListener("click", () => {
           setInputMode(currentInputMode() === "composer" ? "direct" : "composer");

@@ -362,16 +362,39 @@ mod tests {
         // a promise chain, and the viewport follows the landing target.
         assert!(html.contains("spatial: \"/remote/v1/navigation/spatial\""));
         assert!(html.contains("notification: \"/remote/v1/navigation/notification\""));
-        assert!(html.contains("body: JSON.stringify({ leaseId, direction })"));
+        assert!(html.contains("excludedPaneIds: [...spatialExcludedPaneIds]"));
         assert!(html.contains("let navStepChain = Promise.resolve();"));
         assert!(html.contains("if (!leaseId || navStepPending >= 2) return;"));
         assert!(html.contains("await loadNavigation(data.target.terminalId || null);"));
+        assert!(
+            html.contains("no_included_panes: \"Every pane is excluded from pane navigation.\"")
+        );
         assert!(html.contains("no_unread_notifications: \"No unread notifications.\""));
         // Nav keys gate on the lease only (escape-seq keys need a terminal
         // too); alert keys idle at zero unread and carry one count badge.
         assert!(html.contains("const isAlertKey = def.nav && def.nav[0] === \"notification\";"));
         assert!(html.contains("btn.disabled = !connected || (isAlertKey && unread <= 0);"));
         assert!(html.contains("function updateNavKeyBadge(unread)"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_spatial_pane_exclusion_toggle() {
+        let html = remote_page_html();
+
+        assert!(html.contains("id=\"spatialExclusion\""));
+        assert!(html.contains("data-icon=\"circle-minus\""));
+        // Every compact Remote header action shares one explicit border-box
+        // height, including the adjacent text-bearing Composer toggle.
+        assert!(html.contains("--header-control-height: 26px;"));
+        assert!(html.contains("height: var(--header-control-height);"));
+        assert!(html.contains("laymux.remote.spatialExcludedPaneIds"));
+        assert!(html.contains("let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();"));
+        assert!(html.contains("function activeWorkspacePane()"));
+        assert!(html.contains("spatialExclusionButton.hidden = !pane;"));
+        assert!(html
+            .contains("spatialExclusionButton.setAttribute(\"aria-pressed\", String(excluded));"));
+        assert!(html.contains("spatialExclusionButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("saveSpatialExcludedPaneIds();"));
     }
 
     #[test]

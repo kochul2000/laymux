@@ -65,6 +65,29 @@ describe("buildSpatialOrder", () => {
     expect(pairs(buildSpatialOrder([w1, w2]))).toEqual([["ws2", "t"]]);
   });
 
+  it("removes explicitly excluded panes while preserving global order", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+    const w2 = ws("ws2", "Two", [term("c", 0, 0, 1, 1)]);
+
+    const entries = buildSpatialOrder([w1, w2], new Set(["b"]));
+
+    expect(pairs(entries)).toEqual([
+      ["ws1", "a"],
+      ["ws2", "c"],
+    ]);
+    expect(entries[1]).toMatchObject({ paneIndex: 0, paneNumber: 1 });
+  });
+
+  it("ignores stale exclusions and returns empty when every eligible pane is excluded", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+
+    expect(pairs(buildSpatialOrder([w1], new Set(["stale-pane"])))).toEqual([
+      ["ws1", "a"],
+      ["ws1", "b"],
+    ]);
+    expect(buildSpatialOrder([w1], new Set(["a", "b"]))).toEqual([]);
+  });
+
   it("returns empty for no workspaces", () => {
     expect(buildSpatialOrder([])).toEqual([]);
   });

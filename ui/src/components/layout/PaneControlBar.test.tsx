@@ -1052,6 +1052,22 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-control-bar-left-solid")).not.toBeInTheDocument();
   });
 
+  it("does not expose Remote spatial exclusion controls in the PC pane bar", () => {
+    render(
+      <PaneControlBar
+        paneId="pane-workspace"
+        currentView={terminalView}
+        actions={defaultActions}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    expect(screen.queryByTitle("Exclude this pane from pane navigation")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Include this pane in pane navigation")).not.toBeInTheDocument();
+  });
+
   // -- workspace-list hide toggle (ADR-0035) --
   // pane 숨김은 보관함이 아니라 각 pane 컨트롤바의 이 토글로만 제어한다.
   describe("workspace-list hide toggle (ADR-0035)", () => {
