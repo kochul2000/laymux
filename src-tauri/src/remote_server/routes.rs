@@ -38,7 +38,9 @@ use super::navigation_step_routes::{
 use super::page::{remote_page, remote_page_redirect};
 use super::terminal_info::remote_terminal_infos;
 use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
-use super::viewer_routes::{remote_file_viewer_render, remote_file_viewer_status};
+use super::viewer_routes::{
+    remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
+};
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -162,6 +164,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/file-viewer/render",
             post(remote_file_viewer_render),
+        )
+        .route(
+            "/remote/v1/file-viewer/path-link",
+            post(remote_file_viewer_path_link),
         )
         .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
         .layer(CorsLayer::permissive());

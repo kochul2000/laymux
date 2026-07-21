@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 
 use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
-use crate::constants::{MAX_REMOTE_FILE_VIEWER_BYTES, REMOTE_FILE_VIEWER_CAPABILITY_HEADER};
+use crate::constants::{
+    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_PATH_LINK_SELECTION_CHARS,
+    MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS, REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
+};
 use crate::state::AppState;
 
 use super::json_error;
@@ -19,6 +22,14 @@ use super::navigation_routes::lease_id_from_headers;
 pub(super) struct FileViewerRenderRequest {
     source: String,
     path: Option<String>,
+    lease_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FileViewerPathLinkRequest {
+    terminal_id: String,
+    selection: String,
     lease_id: Option<String>,
 }
 
@@ -68,6 +79,31 @@ pub(super) async fn remote_file_viewer_render(
     file_viewer_bridge_response(&server, &authorization, "render", params).await
 }
 
+pub(super) async fn remote_file_viewer_path_link(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<FileViewerPathLinkRequest>,
+) -> Response {
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    let authorization = match file_viewer_authorization(
+        &server.app_state,
+        lease_id,
+        file_viewer_capability_from_headers(&headers),
+    ) {
+        Ok(authorization) => authorization,
+        Err(response) => return response,
+    };
+
+    let params = match path_link_params(body) {
+        Ok(params) => params,
+        Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
+    };
+    file_viewer_bridge_response(&server, &authorization, "pathLink", params).await
+}
+
 #[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
 fn file_viewer_authorization(
     app_state: &AppState,
@@ -107,6 +143,29 @@ fn render_params(body: FileViewerRenderRequest) -> Result<Value, &'static str> {
         }
         _ => Err("source must be 'current' or 'path'"),
     }
+}
+
+fn path_link_params(body: FileViewerPathLinkRequest) -> Result<Value, &'static str> {
+    let terminal_id = body.terminal_id.trim();
+    if terminal_id.is_empty() {
+        return Err("terminalId is required");
+    }
+    if terminal_id.chars().count() > MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS {
+        return Err("terminalId exceeds the 256 character limit");
+    }
+    if body.selection.is_empty() {
+        return Err("selection is required");
+    }
+    if body.selection.chars().count() > MAX_REMOTE_PATH_LINK_SELECTION_CHARS {
+        return Err("selection exceeds the 4096 character limit");
+    }
+
+    Ok(json!({
+        "terminalId": terminal_id,
+        // Do not trim this value: the shared desktop parser owns token cleanup
+        // and needs the exact selected text for parity with TerminalView.
+        "selection": body.selection,
+    }))
 }
 
 async fn file_viewer_bridge_response(
@@ -174,6 +233,14 @@ mod tests {
         }
     }
 
+    fn path_link_request(terminal_id: &str, selection: &str) -> FileViewerPathLinkRequest {
+        FileViewerPathLinkRequest {
+            terminal_id: terminal_id.into(),
+            selection: selection.into(),
+            lease_id: None,
+        }
+    }
+
     #[test]
     fn current_source_never_accepts_a_client_path() {
         let params = render_params(request("current", Some("C:\\secret.txt"))).unwrap();
@@ -198,6 +265,42 @@ mod tests {
         assert_eq!(
             render_params(request("path", Some("  "))).unwrap_err(),
             "path is required when source is 'path'"
+        );
+    }
+
+    #[test]
+    fn path_link_preserves_raw_selection_for_the_desktop_parser() {
+        let params = path_link_params(path_link_request(
+            "  terminal-1  ",
+            "  (\"ui/src/main.ts:42:5\")  ",
+        ))
+        .unwrap();
+
+        assert_eq!(params["terminalId"], "terminal-1");
+        assert_eq!(params["selection"], "  (\"ui/src/main.ts:42:5\")  ");
+        assert!(params.get("cwd").is_none());
+        assert!(params.get("path").is_none());
+    }
+
+    #[test]
+    fn path_link_rejects_missing_fields_and_oversized_values() {
+        assert_eq!(
+            path_link_params(path_link_request("  ", "src/main.rs")).unwrap_err(),
+            "terminalId is required"
+        );
+        assert_eq!(
+            path_link_params(path_link_request("terminal-1", "")).unwrap_err(),
+            "selection is required"
+        );
+        assert!(path_link_params(path_link_request(&"t".repeat(256), "src/main.rs")).is_ok());
+        assert_eq!(
+            path_link_params(path_link_request(&"t".repeat(257), "src/main.rs")).unwrap_err(),
+            "terminalId exceeds the 256 character limit"
+        );
+        assert!(path_link_params(path_link_request("terminal-1", &"가".repeat(4096))).is_ok());
+        assert_eq!(
+            path_link_params(path_link_request("terminal-1", &"가".repeat(4097))).unwrap_err(),
+            "selection exceeds the 4096 character limit"
         );
     }
 

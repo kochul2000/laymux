@@ -149,6 +149,17 @@ pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
 /// source cap stays deliberately small and is enforced before image reads.
 pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 
+/// Maximum Unicode scalar count accepted from one Remote terminal selection
+/// before the desktop path-link parser runs. This matches the maximum valid
+/// `terminal.pathLinkMaxLength` setting.
+pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
+
+/// Maximum Unicode scalar count accepted for the terminal id attached to a
+/// Remote path-link validation request. Runtime terminal ids are much shorter;
+/// this only prevents an authenticated client from forwarding an unbounded id
+/// through the async frontend bridge.
+pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
+
 /// Secret-capability header required by Remote FileViewer endpoints.
 pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
 

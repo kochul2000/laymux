@@ -1,11 +1,19 @@
-import { readFileForViewer } from "./tauri-api";
+import { readFileForViewer, statPath } from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
+import {
+  decidePathLinkAction,
+  isWithinPathLengthLimit,
+  joinCwdPath,
+  trimSelectionToPath,
+} from "./path-link-detect";
 import {
   filePreviewKind,
   htmlToSafePreviewDocument,
   markdownToSafePreviewDocument,
 } from "./file-preview";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 
 export interface RemoteFileViewerBridgeResult {
   success: boolean;
@@ -25,6 +33,34 @@ export async function handleRemoteFileViewerRequest(
     const viewer = useFileViewerStore.getState();
     const open = viewer.open && Boolean(viewer.path);
     return ok({ open, path: open ? viewer.path : null });
+  }
+  if (method === "pathLink") {
+    const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";
+    const selection = typeof params.selection === "string" ? params.selection : "";
+    const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
+    const settings = useSettingsStore.getState().terminal;
+    if (
+      !terminal ||
+      !settings.pathLinkEnabled ||
+      !isWithinPathLengthLimit(selection, settings.pathLinkMaxLength)
+    ) {
+      return ok({ valid: false });
+    }
+
+    const token = trimSelectionToPath(selection);
+    if (!token) return ok({ valid: false });
+    const path = joinCwdPath(terminal.cwd, token);
+    if (!path) return ok({ valid: false });
+
+    try {
+      const info = await statPath(path);
+      if (decidePathLinkAction(info) !== "openFile") return ok({ valid: false });
+      return ok({ valid: true, token, path });
+    } catch (error) {
+      return err(
+        `Path link validation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   if (method !== "render") return err(`Unknown method: fileViewer.${method}`);
 

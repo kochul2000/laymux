@@ -228,6 +228,21 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_selected_file_path_links() {
+        let html = remote_page_html();
+        assert!(html.contains("/remote/v1/file-viewer/path-link"));
+        assert!(html.contains("function evaluatePathLinkSelection()"));
+        assert!(html.contains("function schedulePathLinkSelectionEvaluation("));
+        assert!(html.contains("const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;"));
+        assert!(html.contains("pathLinkAbortController.abort();"));
+        assert!(html.contains("const currentPosition = term.getSelectionPosition?.();"));
+        assert!(html.contains("mapRemotePathLinkRange(currentPosition, rawFirstLine, data.token)"));
+        assert!(html.contains("remote-path-link-decoration"));
+        assert!(html.contains("openFileViewerTab(press.path)"));
+        assert!(html.contains("clearPathLinkSelection()"));
+    }
+
+    #[test]
     fn remote_page_html_contains_jump_to_bottom_button() {
         let html = remote_page_html();
 
