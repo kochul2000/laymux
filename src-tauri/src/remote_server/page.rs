@@ -688,6 +688,16 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_keeps_last_selection_only_in_document_memory() {
+        let html = remote_page_html();
+
+        assert!(html.contains("let lastSelectedTerminalId = null;"));
+        assert!(html.contains("if (nextId) lastSelectedTerminalId = nextId;"));
+        assert!(html.contains("preferredTerminalId = activeTerminalId || lastSelectedTerminalId"));
+        assert!(!html.contains("laymux.remote.lastSelectedTerminalId"));
+    }
+
+    #[test]
     fn remote_page_auto_claims_on_autoconnect_without_local_app_gate() {
         // The cloud dashboard flow serves the page in an external browser (not
         // localApp), so auto-claim must fire on autoConnect=1 alone — otherwise
