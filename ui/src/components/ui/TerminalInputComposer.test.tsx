@@ -292,6 +292,10 @@ describe("TerminalInputComposer", () => {
       expect(onKeyPassthrough).not.toHaveBeenCalled();
       const list = screen.getByTestId("composer-history");
       expect(list).toHaveAttribute("role", "listbox");
+      // The textarea's aria-controls must resolve to the listbox's own id, not
+      // dangle on a non-existent element (a11y: issue #504 review).
+      expect(list).toHaveAttribute("id", "composer-history");
+      expect(textarea).toHaveAttribute("aria-controls", list.id);
       const options = screen.getAllByRole("option");
       expect(options.map((o) => o.textContent)).toEqual(["third", "second", "first"]);
     });
