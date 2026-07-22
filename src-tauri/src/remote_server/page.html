@@ -3449,25 +3449,6 @@
           };
         }
 
-        // Reconcile on entry: a workspace explicitly marked skipped while it was
-        // inactive (pane ids unknown then) becomes the active workspace; expand
-        // its skip to every terminal pane so the header toggle reflects it. Pure
-        // add-only — never removes, so it never fights a header un-exclude (which
-        // demotes the workspace id out of the set first).
-        function computeSkipStateOnActiveWorkspace({
-          workspaceId,
-          terminalPaneIds,
-          excludedPaneIds,
-          excludedWorkspaceIds,
-        }) {
-          const paneSet = new Set(excludedPaneIds);
-          const workspaceSet = new Set(excludedWorkspaceIds);
-          if (workspaceId && workspaceSet.has(workspaceId)) {
-            terminalPaneIds.forEach((id) => paneSet.add(id));
-          }
-          return { paneIds: [...paneSet].sort(), workspaceIds: [...workspaceSet].sort() };
-        }
-
         // Terminal pane ids of the active workspace from the latest navigation
         // snapshot. Inactive workspaces carry no pane summaries (§13.3), so this
         // returns [] for them — matching the "ids unknown" contract above.
