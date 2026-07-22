@@ -1061,6 +1061,27 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
   );
 });
 
+test("Direct-input xterm textarea opts out of browser autofill (issue #503)", async ({ page }) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck off
+  // but omits autocomplete; without it mobile browsers offer password,
+  // credit-card, and location autofill over the direct-input keyboard.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __mockTerminal?: { textarea: HTMLTextAreaElement | null };
+            }
+          ).__mockTerminal?.textarea?.getAttribute("autocomplete") ?? null,
+      ),
+    )
+    .toBe("off");
+});
+
 test("Keyboard button collapses and restores the Composer editor with the soft keyboard", async ({
   page,
 }) => {
