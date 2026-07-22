@@ -398,6 +398,33 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_workspace_skip_toggle() {
+        let html = remote_page_html();
+
+        // Drawer per-workspace skip toggle reuses the same circle-minus icon
+        // and a Set<workspaceId> denylist persisted under its own key (#507).
+        assert!(html.contains("laymux.remote.spatialExcludedWorkspaceIds"));
+        assert!(
+            html.contains("let spatialExcludedWorkspaceIds = loadSpatialExcludedWorkspaceIds();")
+        );
+        assert!(html.contains("button.className = \"workspace-skip-button\";"));
+        assert!(html.contains(".workspace-skip-button[aria-pressed=\"true\"]"));
+        assert!(html.contains("function renderWorkspaceSkipButton(workspace)"));
+        assert!(html.contains("data-icon=\"circle-minus\""));
+        // Skip toggle must not also switch workspace (row click) — the handler
+        // stops the click from bubbling to the row.
+        assert!(html.contains("event.stopPropagation();"));
+        assert!(html.contains("saveSpatialExcludedWorkspaceIds();"));
+        // Pure promotion/demotion + on-entry reconcile rules (all panes skipped
+        // <-> workspace skipped) live in named functions.
+        assert!(html.contains("function computeSkipStateAfterPaneToggle("));
+        assert!(html.contains("function computeSkipStateAfterWorkspaceToggle("));
+        assert!(html.contains("function reconcileActiveWorkspaceSkip()"));
+        // The spatial step request carries both denylists.
+        assert!(html.contains("excludedWorkspaceIds: [...spatialExcludedWorkspaceIds]"));
+    }
+
+    #[test]
     fn remote_page_html_contains_header_pane_identity() {
         let html = remote_page_html();
         // The header shows a friendly "Workspace · Pane N" context title

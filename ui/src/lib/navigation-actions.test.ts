@@ -154,6 +154,29 @@ describe("navigation-actions", () => {
       });
     });
 
+    it("skips a whole workspace excluded by the Remote client", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0); // pane a in ws1
+
+      // ws2 excluded wholesale — stepping only ever cycles ws1's panes.
+      const excludedWorkspaces = new Set(["ws2"]);
+      const first = spatialStep("next", new Set(), excludedWorkspaces);
+      expect(first).toMatchObject({ moved: true, target: { workspaceId: "ws1", paneId: "b" } });
+
+      const second = spatialStep("next", new Set(), excludedWorkspaces);
+      expect(second).toMatchObject({ moved: true, target: { workspaceId: "ws1", paneId: "a" } });
+    });
+
+    it("reports no_included_panes when every workspace is excluded", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(spatialStep("next", new Set(), new Set(["ws1", "ws2"]))).toEqual({
+        moved: false,
+        reason: "no_included_panes",
+      });
+    });
+
     it("reports no_terminal_panes when no workspace has a terminal", () => {
       useWorkspaceStore.setState({
         workspaces: [ws("ws1", "One", [memo("m", 0, 0, 1, 1)])],

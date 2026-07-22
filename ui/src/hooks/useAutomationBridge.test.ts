@@ -2439,6 +2439,42 @@ describe("navigation step actions (issue #474)", () => {
     expect(result.error).toContain("excludedPaneIds");
   });
 
+  it("spatialStep applies the Remote client's excluded workspace ids through the bridge", async () => {
+    seedTwoWorkspaces();
+    useGridStore.getState().setFocusedPane(0); // a1; a2 is normally next
+
+    // ws-b excluded wholesale — stepping next from a1 stays inside ws-a and
+    // lands on a2 rather than crossing into ws-b.
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-ws-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedWorkspaceIds: ["ws-b"] },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      moved: true,
+      target: { workspaceId: "ws-a", terminalId: "terminal-a2" },
+    });
+  });
+
+  it("spatialStep rejects a malformed excluded workspace list", async () => {
+    seedTwoWorkspaces();
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-bad-ws-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedWorkspaceIds: [42] },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("excludedWorkspaceIds");
+  });
+
   it("spatialStep no-op returns moved:false without waiting for a terminal", async () => {
     useWorkspaceStore.setState({
       workspaces: [

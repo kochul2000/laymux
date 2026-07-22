@@ -588,6 +588,32 @@
         background: var(--hover-bg);
         opacity: 0.7;
       }
+      /* Whole-workspace skip toggle in the drawer — same circle-minus icon and
+         danger pressed style as the header pane exclusion toggle (issue #507). */
+      .workspace-skip-button {
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        opacity: 0.7;
+      }
+      .workspace-skip-button:hover {
+        background: var(--hover-bg);
+        opacity: 1;
+      }
+      .workspace-skip-button[aria-pressed="true"] {
+        border-color: var(--danger);
+        background: var(--danger-bg);
+        color: var(--danger);
+        opacity: 1;
+      }
       .workspace-count-badge {
         display: inline-flex;
         flex: 0 0 auto;
@@ -1623,6 +1649,7 @@
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
+        const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
         // memory while the document is alive and touches sessionStorage only
         // across the unload/load boundary (stash on pagehide, consume on
@@ -1669,6 +1696,14 @@
         let terminalInfoById = new Map();
         let navigationState = null;
         let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();
+        // Whole-workspace skip denylist (issue #507, ADR-0047). Independent
+        // Set<workspaceId> alongside spatialExcludedPaneIds: a workspace is
+        // skipped in remote spatial navigation when its id is here, regardless
+        // of the per-pane set. The two stay consistent for the active workspace
+        // via the promotion/demotion rule (all panes skipped <-> workspace
+        // skipped); inactive workspaces expose no pane ids, so they are tracked
+        // at workspace granularity only until entered.
+        let spatialExcludedWorkspaceIds = loadSpatialExcludedWorkspaceIds();
         let fileViewerStatusInFlight = false;
         let fileViewerStatusRequestRevision = 0;
         let fileViewerPathRevision = 0;
@@ -3329,6 +3364,134 @@
           } catch (_) {}
         }
 
+        function loadSpatialExcludedWorkspaceIds() {
+          try {
+            const raw = JSON.parse(localStorage.getItem(spatialExcludedWorkspaceIdsKey) || "[]");
+            if (!Array.isArray(raw)) return new Set();
+            return new Set(raw.filter((id) => typeof id === "string" && id.length > 0));
+          } catch (_) {
+            return new Set();
+          }
+        }
+
+        function saveSpatialExcludedWorkspaceIds() {
+          try {
+            localStorage.setItem(
+              spatialExcludedWorkspaceIdsKey,
+              JSON.stringify([...spatialExcludedWorkspaceIds].sort())
+            );
+          } catch (_) {}
+        }
+
+        // --- Pure workspace-skip promotion/demotion rules (issue #507, ADR-0047) ---
+        //
+        // These take the current denylists as string arrays plus the workspace
+        // context and return the next denylists; they mutate nothing so they are
+        // straightforward to reason about and test. The invariant they preserve,
+        // for a workspace whose terminal pane ids are known (the active
+        // workspace): the workspace id is in the workspace denylist IFF every one
+        // of its terminal panes is in the pane denylist. Inactive workspaces pass
+        // an empty terminalPaneIds and are only ever toggled at workspace
+        // granularity.
+
+        // Toggling one pane: flip it in the pane set, then promote (all panes now
+        // excluded) or demote (not all) the owning workspace to match.
+        function computeSkipStateAfterPaneToggle({
+          workspaceId,
+          terminalPaneIds,
+          paneId,
+          excludedPaneIds,
+          excludedWorkspaceIds,
+        }) {
+          const paneSet = new Set(excludedPaneIds);
+          const workspaceSet = new Set(excludedWorkspaceIds);
+          const willExclude = !paneSet.has(paneId);
+          if (willExclude) paneSet.add(paneId);
+          else paneSet.delete(paneId);
+          if (workspaceId) {
+            const allExcluded =
+              terminalPaneIds.length > 0 && terminalPaneIds.every((id) => paneSet.has(id));
+            if (allExcluded) workspaceSet.add(workspaceId);
+            else workspaceSet.delete(workspaceId);
+          }
+          return {
+            paneIds: [...paneSet].sort(),
+            workspaceIds: [...workspaceSet].sort(),
+            willExclude,
+          };
+        }
+
+        // Toggling a whole workspace: flip it in the workspace set and, for the
+        // active workspace whose pane ids are known, add/remove all of them from
+        // the pane set so the header pane toggle stays consistent (vice-versa
+        // direction of the rule). Inactive workspaces pass an empty
+        // terminalPaneIds, so only the workspace set changes.
+        function computeSkipStateAfterWorkspaceToggle({
+          workspaceId,
+          terminalPaneIds,
+          excludedPaneIds,
+          excludedWorkspaceIds,
+        }) {
+          const paneSet = new Set(excludedPaneIds);
+          const workspaceSet = new Set(excludedWorkspaceIds);
+          const willExclude = !workspaceSet.has(workspaceId);
+          if (willExclude) {
+            workspaceSet.add(workspaceId);
+            terminalPaneIds.forEach((id) => paneSet.add(id));
+          } else {
+            workspaceSet.delete(workspaceId);
+            terminalPaneIds.forEach((id) => paneSet.delete(id));
+          }
+          return {
+            paneIds: [...paneSet].sort(),
+            workspaceIds: [...workspaceSet].sort(),
+            willExclude,
+          };
+        }
+
+        // Reconcile on entry: a workspace explicitly marked skipped while it was
+        // inactive (pane ids unknown then) becomes the active workspace; expand
+        // its skip to every terminal pane so the header toggle reflects it. Pure
+        // add-only — never removes, so it never fights a header un-exclude (which
+        // demotes the workspace id out of the set first).
+        function computeSkipStateOnActiveWorkspace({
+          workspaceId,
+          terminalPaneIds,
+          excludedPaneIds,
+          excludedWorkspaceIds,
+        }) {
+          const paneSet = new Set(excludedPaneIds);
+          const workspaceSet = new Set(excludedWorkspaceIds);
+          if (workspaceId && workspaceSet.has(workspaceId)) {
+            terminalPaneIds.forEach((id) => paneSet.add(id));
+          }
+          return { paneIds: [...paneSet].sort(), workspaceIds: [...workspaceSet].sort() };
+        }
+
+        // Terminal pane ids of the active workspace from the latest navigation
+        // snapshot. Inactive workspaces carry no pane summaries (§13.3), so this
+        // returns [] for them — matching the "ids unknown" contract above.
+        function workspaceTerminalPaneIds(workspaceId) {
+          if (!workspaceId || !navigationState) return [];
+          const active = navigationState.activeWorkspace;
+          if (!active || active.id !== workspaceId) return [];
+          return (active.panes || [])
+            .filter((pane) => pane.id && pane.viewType === "TerminalView")
+            .map((pane) => pane.id);
+        }
+
+        // Apply the on-entry expansion for the active workspace and persist if it
+        // changed. Runs on every navigation render before the drawer/header are
+        // drawn so their pressed states are consistent.
+        function reconcileActiveWorkspaceSkip() {
+          if (!navigationState) return;
+          const active = navigationState.activeWorkspace;
+          if (!active || !active.id || !spatialExcludedWorkspaceIds.has(active.id)) return;
+          const before = spatialExcludedPaneIds.size;
+          workspaceTerminalPaneIds(active.id).forEach((id) => spatialExcludedPaneIds.add(id));
+          if (spatialExcludedPaneIds.size !== before) saveSpatialExcludedPaneIds();
+        }
+
         function updateNotificationActions() {
           const hasNotifications = notificationCount() > 0;
           const hasUnread = unreadNotificationCount() > 0;
@@ -3522,6 +3685,9 @@
         }
 
         function renderNavigation(data) {
+          // Keep the active workspace's pane/workspace skip sets consistent
+          // before drawing the drawer and header pressed states (ADR-0047).
+          reconcileActiveWorkspaceSkip();
           renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
           renderDockList(data.docks || []);
@@ -3691,6 +3857,11 @@
             fillCountBadge(badge, workspace.unreadCount);
             right.append(badge);
           }
+          // Whole-workspace skip toggle (issue #507). Only meaningful for
+          // workspaces that contribute terminal panes to the spatial cycle.
+          if ((workspace.terminalPaneCount || 0) > 0) {
+            right.append(renderWorkspaceSkipButton(workspace));
+          }
 
           if (panes.length > 0) {
             const paneList = document.createElement("div");
@@ -3711,6 +3882,53 @@
           }
 
           return item;
+        }
+
+        function applyWorkspaceSkipState(button, workspaceId) {
+          const excluded = spatialExcludedWorkspaceIds.has(workspaceId);
+          button.setAttribute("aria-pressed", String(excluded));
+          const label = excluded
+            ? "Include this workspace in pane navigation"
+            : "Exclude this workspace from pane navigation";
+          button.setAttribute("aria-label", label);
+          button.title = label;
+        }
+
+        function renderWorkspaceSkipButton(workspace) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "workspace-skip-button";
+          button.dataset.workspaceSkip = workspace.id;
+          button.innerHTML =
+            '<svg data-icon="circle-minus" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>';
+          applyWorkspaceSkipState(button, workspace.id);
+          // Keep the focused input surface/keyboard like every other remote
+          // control button (#482); the click still toggles via the click path.
+          keepInputSurfaceFocus(button);
+          button.addEventListener("click", (event) => {
+            // The row itself switches workspace on click — a skip toggle must
+            // not also switch. Stop the bubble before it reaches the row.
+            event.stopPropagation();
+            const next = computeSkipStateAfterWorkspaceToggle({
+              workspaceId: workspace.id,
+              terminalPaneIds: workspaceTerminalPaneIds(workspace.id),
+              excludedPaneIds: [...spatialExcludedPaneIds],
+              excludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
+            });
+            spatialExcludedPaneIds = new Set(next.paneIds);
+            spatialExcludedWorkspaceIds = new Set(next.workspaceIds);
+            saveSpatialExcludedPaneIds();
+            saveSpatialExcludedWorkspaceIds();
+            applyWorkspaceSkipState(button, workspace.id);
+            updateHeaderPaneIdentity();
+            const wsLabel = workspace.name || workspace.id || "Workspace";
+            setStatus(
+              next.willExclude
+                ? `${wsLabel} excluded from pane navigation.`
+                : `${wsLabel} included in pane navigation.`
+            );
+          });
+          return button;
         }
 
         function renderPaneRow(pane, panes, paneIndex, workspaceActive) {
@@ -3945,7 +4163,12 @@
           if (!leaseId) return;
           const requestBody =
             kind === "spatial"
-              ? { leaseId, direction, excludedPaneIds: [...spatialExcludedPaneIds] }
+              ? {
+                  leaseId,
+                  direction,
+                  excludedPaneIds: [...spatialExcludedPaneIds],
+                  excludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
+                }
               : { leaseId, direction };
           const data = await remoteFetch(NAV_STEP_ENDPOINTS[kind], {
             method: "POST",
@@ -5560,17 +5783,26 @@
         spatialExclusionButton.addEventListener("click", () => {
           const pane = activeWorkspacePane();
           if (!pane) return;
-          const excluded = !spatialExcludedPaneIds.has(pane.id);
-          if (excluded) {
-            spatialExcludedPaneIds.add(pane.id);
-          } else {
-            spatialExcludedPaneIds.delete(pane.id);
-          }
+          const workspaceId = terminalInfoById.get(activeTerminalId)?.workspaceId || null;
+          // Toggle this pane, then promote/demote the owning workspace so that
+          // "every pane skipped" and "workspace skipped" stay in sync (#507).
+          const next = computeSkipStateAfterPaneToggle({
+            workspaceId,
+            terminalPaneIds: workspaceTerminalPaneIds(workspaceId),
+            paneId: pane.id,
+            excludedPaneIds: [...spatialExcludedPaneIds],
+            excludedWorkspaceIds: [...spatialExcludedWorkspaceIds],
+          });
+          spatialExcludedPaneIds = new Set(next.paneIds);
+          spatialExcludedWorkspaceIds = new Set(next.workspaceIds);
           saveSpatialExcludedPaneIds();
+          saveSpatialExcludedWorkspaceIds();
           updateHeaderPaneIdentity();
+          // A promotion/demotion changes the drawer workspace toggle too.
+          if (navigationState) renderWorkspaceList(navigationState.workspaces || []);
           const paneLabel = activeTerminalTitle() || "This pane";
           setStatus(
-            excluded
+            next.willExclude
               ? `${paneLabel} excluded from pane navigation.`
               : `${paneLabel} included in pane navigation.`
           );
