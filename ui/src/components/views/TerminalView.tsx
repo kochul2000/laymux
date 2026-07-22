@@ -3756,6 +3756,11 @@ export function TerminalView({
     (s) => s.terminal.showScrollToBottomButton ?? true,
   );
 
+  // Issue #504: Tab-triggered Composer past-input recall popup is opt-out (default on).
+  const composerHistoryPopupEnabled = useSettingsStore(
+    (s) => s.terminal.composerHistoryPopup ?? true,
+  );
+
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The slider renders at the same right-edge width in both
   // overlay and separate modes, and the button is positioned relative to the
@@ -3881,6 +3886,7 @@ export function TerminalView({
           editor: t("terminal.composerEditor"),
           placeholder: t("terminal.composerPlaceholder"),
           resize: t("terminal.composerResize"),
+          history: t("terminal.composerHistory"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -3889,6 +3895,8 @@ export function TerminalView({
         autoFocus={isFocused}
         testId={`terminal-input-composer-${instanceId}`}
         atShellPrompt={atShellPrompt}
+        historyPopupEnabled={composerHistoryPopupEnabled}
+        history={readComposerHistory(instanceId)}
         onTextChange={(text) => {
           // A user edit ends history navigation (recall goes through storeComposerDraft).
           historyNavRef.current.index = null;

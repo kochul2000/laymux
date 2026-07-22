@@ -10,7 +10,8 @@
       "scrollToBottom": "Scroll to bottom",
       "composerEditor": "Terminal input draft",
       "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
-      "composerResize": "Resize input area (drag the top edge)"
+      "composerResize": "Resize input area (drag the top edge)",
+      "composerHistory": "Recent inputs"
     },
     "remoteControl": {
       "title": "Remote control active",
@@ -257,6 +258,8 @@
       "defaultInputModeDesc": "Input mode a new terminal starts in. Switch anytime with Ctrl+Alt+M or the pane toolbar button.",
       "inputModeDirect": "Direct",
       "inputModeComposer": "Composer",
+      "composerHistoryPopup": "Composer History on Tab",
+      "composerHistoryPopupDesc": "In Composer mode, press Tab in an empty focused input to list your recent inputs and pick one.",
       "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy to clipboard when selecting text in the terminal",
       "scrollbarStyle": "Scrollbar Style",

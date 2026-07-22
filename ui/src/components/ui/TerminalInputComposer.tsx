@@ -9,6 +9,8 @@ import {
 import {
   clampComposerHeight,
   readComposerHeight,
+  selectComposerHistoryEntries,
+  DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   writeComposerHeight,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
@@ -17,6 +19,8 @@ export interface TerminalInputComposerLabels {
   editor: string;
   placeholder: string;
   resize: string;
+  /** Accessible name for the Tab-triggered past-input recall list (issue #504). */
+  history: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -47,6 +51,16 @@ export interface TerminalInputComposerProps {
    * ↑/↓). Returning true means the key was consumed.
    */
   onHistory?: (direction: "prev" | "next") => boolean;
+  /**
+   * Enables the Tab-triggered past-input recall popup (issue #504). When true and
+   * the focused draft is empty, Tab opens a list of `history` entries instead of
+   * forwarding \t to the terminal.
+   */
+  historyPopupEnabled?: boolean;
+  /** Sent-input history for this terminal, oldest→newest. Only used by the popup. */
+  history?: readonly string[];
+  /** Maximum number of entries shown in the popup. */
+  maxHistoryItems?: number;
   className?: string;
   testId?: string;
 }
@@ -82,12 +96,33 @@ export function TerminalInputComposer({
   onSend,
   onKeyPassthrough,
   onHistory,
+  historyPopupEnabled = false,
+  history,
+  maxHistoryItems = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   className,
   testId,
 }: TerminalInputComposerProps) {
   const compositionActiveRef = useRef(false);
   const actionDisabled = disabled || commitDisabled || inFlight;
   const childTestId = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
+
+  // Tab-triggered past-input recall popup (issue #504). The list is derived from
+  // the terminal's runtime Composer history; the popup only opens on an empty,
+  // focused draft, so it never fights normal typing or shell tab-completion.
+  const historyEntries =
+    historyPopupEnabled && text.length === 0
+      ? selectComposerHistoryEntries(history ?? [], maxHistoryItems)
+      : [];
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  // Derived so the popup can never linger once its list empties (draft typed
+  // into, setting turned off, history cleared) — no reconciling effect needed.
+  const historyVisible = historyOpen && historyEntries.length > 0;
+  const closeHistory = () => setHistoryOpen(false);
+  const commitHistoryEntry = (entry: string | undefined) => {
+    setHistoryOpen(false);
+    if (entry != null) onTextChange(entry);
+  };
 
   const [height, setHeightState] = useState(() => readComposerHeight());
   const heightRef = useRef(height);
@@ -136,6 +171,48 @@ export function TerminalInputComposer({
     // History recall only fires on an unmodified arrow: modifier combos are app
     // keybindings (or selection gestures) — the host's registry check routes them.
     const plainKey = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+
+    // While the Tab recall popup is open it owns navigation/commit keys so they
+    // never leak to edge history recall, passthrough, or Send.
+    if (historyVisible && !composing) {
+      if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)) {
+        event.preventDefault();
+        setHistoryIndex((i) => (i + 1) % historyEntries.length);
+        return;
+      }
+      if (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) {
+        event.preventDefault();
+        setHistoryIndex((i) => (i - 1 + historyEntries.length) % historyEntries.length);
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitHistoryEntry(historyEntries[historyIndex]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeHistory();
+        return;
+      }
+    }
+
+    // Tab on an empty, focused draft opens the past-input recall popup instead of
+    // forwarding \t (which does nothing useful with no text to complete).
+    if (
+      !historyVisible &&
+      !composing &&
+      plainKey &&
+      event.key === "Tab" &&
+      historyEntries.length > 0
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setHistoryIndex(0);
+      setHistoryOpen(true);
+      return;
+    }
 
     // At the shell prompt, edge ↑/↓ recall the Composer's own history into the
     // editor (editable), instead of leaking ↑ to the shell where the recalled
@@ -196,13 +273,52 @@ export function TerminalInputComposer({
       data-can-send={actionDisabled ? "false" : "true"}
       aria-busy={inFlight}
       aria-disabled={disabled || undefined}
-      className={joinClassNames("terminal-input-composer flex min-w-0 flex-col", className)}
+      className={joinClassNames(
+        "terminal-input-composer relative flex min-w-0 flex-col",
+        className,
+      )}
       style={{
         height: `${height}px`,
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
       }}
     >
+      {historyVisible && (
+        <ul
+          data-testid={childTestId("history")}
+          role="listbox"
+          aria-label={labels.history}
+          className="terminal-input-composer-history absolute inset-x-0 bottom-full z-10 m-0 max-h-48 list-none overflow-y-auto border-t p-1 text-sm shadow-lg"
+          style={{
+            background: "var(--bg-overlay)",
+            borderColor: "var(--border)",
+            color: "var(--text-primary)",
+          }}
+        >
+          {historyEntries.map((entry, index) => (
+            <li
+              // Entries can repeat only across different indices post-dedupe, so
+              // index is a stable key for this ephemeral list.
+              key={`${index}-${entry}`}
+              id={`${childTestId("history")}-option-${index}`}
+              data-testid={childTestId(`history-option-${index}`)}
+              role="option"
+              aria-selected={index === historyIndex}
+              title={entry}
+              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              style={index === historyIndex ? { background: "var(--accent-20)" } : undefined}
+              onMouseEnter={() => setHistoryIndex(index)}
+              // mousedown (not click) so the textarea keeps focus through the pick.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                commitHistoryEntry(entry);
+              }}
+            >
+              {entry}
+            </li>
+          ))}
+        </ul>
+      )}
       <div
         data-testid={childTestId("resize")}
         role="separator"
@@ -229,6 +345,12 @@ export function TerminalInputComposer({
         placeholder={labels.placeholder}
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
+        role="textbox"
+        aria-expanded={historyVisible}
+        aria-controls={historyVisible ? childTestId("history") : undefined}
+        aria-activedescendant={
+          historyVisible ? `${childTestId("history")}-option-${historyIndex}` : undefined
+        }
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
@@ -237,7 +359,11 @@ export function TerminalInputComposer({
           background: "var(--bg-base)",
           color: "var(--text-primary)",
         }}
-        onChange={(event) => onTextChange(event.currentTarget.value)}
+        onChange={(event) => {
+          // Any manual edit dismisses the recall popup so it never fights typing.
+          if (historyOpen) setHistoryOpen(false);
+          onTextChange(event.currentTarget.value);
+        }}
         onCompositionStart={() => {
           compositionActiveRef.current = true;
         }}
@@ -246,6 +372,8 @@ export function TerminalInputComposer({
         }}
         onBlur={() => {
           compositionActiveRef.current = false;
+          // Leaving the editor (pane/mode switch, clicking away) closes the popup.
+          setHistoryOpen(false);
         }}
         onKeyDown={handleEditorKeyDown}
       />
