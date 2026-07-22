@@ -521,6 +521,103 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_composer_recall_history_and_autocomplete() {
+        let html = remote_page_html();
+
+        // Two floating listboxes over the editor: Tab recall popup (#504) and
+        // as-you-type autocomplete (#505). They share one CSS class since only
+        // one shows at a time (empty vs non-empty draft).
+        assert!(html.contains(
+            "id=\"composerHistoryList\" class=\"composer-suggest-list\" role=\"listbox\""
+        ));
+        assert!(html.contains(
+            "id=\"composerAutocompleteList\" class=\"composer-suggest-list\" role=\"listbox\""
+        ));
+        assert!(html.contains(".composer-suggest-list {"));
+        assert!(html.contains(".composer-suggest-item[aria-selected=\"true\"] {"));
+
+        // Pure selection helpers ported from the desktop
+        // terminal-input-composer-state.ts (case-insensitive prefix, newest
+        // first, de-duped, blank-skipping, exact-query excluded, capped).
+        assert!(html.contains("function selectComposerHistoryEntries(history, max"));
+        assert!(html.contains("function selectComposerAutocompleteSuggestions("));
+        assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
+        assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
+
+        // History is a RUNTIME-ONLY per-terminal Map (ADR-0029 non-persistence
+        // boundary). The sent text must never reach any persistent store — this
+        // keeps passwords/secrets typed into a shell from leaking through recall.
+        assert!(html.contains("const composerHistoryByTerminalId = new Map();"));
+        assert!(html.contains("function readComposerHistory(terminalId = activeTerminalId)"));
+        assert!(html.contains("function pushComposerHistory(terminalId, text)"));
+        assert!(html.contains("pushComposerHistory(terminalId, submission.text);"));
+        assert!(!html.contains("laymux.remote.composerHistory\""));
+        assert!(!html.contains("JSON.stringify([...composerHistoryByTerminalId"));
+        // The history read/write helpers touch no persistent storage at all.
+        let history_region_start = html.find("function readComposerHistory").unwrap();
+        let history_region_end = history_region_start
+            + html[history_region_start..]
+                .find("function selectComposerHistoryEntries")
+                .unwrap();
+        let history_region = &html[history_region_start..history_region_end];
+        assert!(
+            !history_region.contains("localStorage"),
+            "sent-input history must never touch localStorage"
+        );
+        assert!(
+            !history_region.contains("sessionStorage"),
+            "sent-input history must never touch sessionStorage"
+        );
+
+        // Only the on/off feature toggles are surface-local persisted state.
+        assert!(html.contains("laymux.remote.composerHistoryPopup"));
+        assert!(html.contains("laymux.remote.composerAutocomplete"));
+        assert!(html.contains("function loadComposerToggle(key)"));
+        assert!(html.contains("return localStorage.getItem(key) !== \"0\";"));
+        assert!(html.contains("localStorage.setItem(key, enabled ? \"1\" : \"0\");"));
+        // Toggles default ON to match the desktop composer (non-destructive).
+        assert!(html.contains("loadComposerToggle(composerHistoryPopupKey)"));
+        assert!(html.contains("loadComposerToggle(composerAutocompleteKey)"));
+
+        // #504 popup needs an EMPTY draft; #505 autocomplete needs a NON-empty
+        // draft — mutually exclusive by construction so they never fight.
+        assert!(html.contains("if (!draft || draft.text.length !== 0) return [];"));
+        assert!(html.contains("if (!draft || draft.text.length === 0) return [];"));
+
+        // Key ownership: the autocomplete block sits before the Tab-open block so
+        // a non-empty draft's Tab accepts a suggestion instead of opening recall.
+        let keydown_start = html
+            .find("composerInput.addEventListener(\"keydown\"")
+            .unwrap();
+        let keydown_region = &html[keydown_start..];
+        let autocomplete_block = keydown_region
+            .find("if (autocompleteVisible && !composing && plainKey) {")
+            .unwrap();
+        // The Tab-open action (empty draft opens the recall popup) is unique to
+        // the third block.
+        let tab_open_block = keydown_region.find("composerHistoryOpen = true;").unwrap();
+        assert!(
+            autocomplete_block < tab_open_block,
+            "autocomplete key handling must precede the Tab-open handling"
+        );
+        // Plain Enter still sends when no suggestion is highlighted (index −1);
+        // the original Enter=Send guard remains untouched below the recall logic.
+        assert!(html.contains("if (event.key === \"Enter\" && activeAutocompleteIndex >= 0) {"));
+        assert!(html.contains("commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);"));
+
+        // Recall lists reset on terminal switch, mode switch, and after a send.
+        assert!(html.contains("function resetComposerSuggestions()"));
+        assert!(html.contains("function renderComposerSuggestions()"));
+
+        // Feature toggles live in the existing key-set popover (Remote settings
+        // home), accessible and aria-labelled.
+        assert!(html.contains("function renderComposerPopoverSection()"));
+        assert!(html.contains("title.textContent = \"Composer recall\";"));
+        assert!(html.contains("\"composerHistoryPopupToggle\""));
+        assert!(html.contains("\"composerAutocompleteToggle\""));
+    }
+
+    #[test]
     fn remote_page_mobile_layout_tracks_viewport_without_outer_scroll() {
         let html = remote_page_html();
 
