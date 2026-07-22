@@ -413,6 +413,13 @@ describe("TerminalInputComposer", () => {
 
       const list = screen.getByTestId("composer-autocomplete");
       expect(list).toHaveAttribute("role", "listbox");
+      // The textarea's aria-controls must resolve to the listbox's own id, not
+      // dangle on a non-existent element (a11y: issue #505 review).
+      expect(list).toHaveAttribute("id", "composer-autocomplete");
+      expect(screen.getByRole("textbox", { name: "Terminal input" })).toHaveAttribute(
+        "aria-controls",
+        list.id,
+      );
       expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
         "git push",
         "git checkout",

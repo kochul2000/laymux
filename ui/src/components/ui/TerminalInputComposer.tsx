@@ -406,6 +406,7 @@ export function TerminalInputComposer({
       {autocompleteVisible && (
         <ul
           data-testid={childTestId("autocomplete")}
+          id={childTestId("autocomplete")}
           role="listbox"
           aria-label={labels.autocomplete}
           className="terminal-input-composer-history absolute inset-x-0 bottom-full z-10 m-0 max-h-48 list-none overflow-y-auto border-t p-1 text-sm shadow-lg"
