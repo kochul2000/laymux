@@ -3761,6 +3761,11 @@ export function TerminalView({
     (s) => s.terminal.composerHistoryPopup ?? true,
   );
 
+  // Issue #505: as-you-type Composer autocomplete is opt-out (default on).
+  const composerAutocompleteEnabled = useSettingsStore(
+    (s) => s.terminal.composerAutocomplete ?? true,
+  );
+
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The slider renders at the same right-edge width in both
   // overlay and separate modes, and the button is positioned relative to the
@@ -3887,6 +3892,7 @@ export function TerminalView({
           placeholder: t("terminal.composerPlaceholder"),
           resize: t("terminal.composerResize"),
           history: t("terminal.composerHistory"),
+          autocomplete: t("terminal.composerAutocomplete"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -3896,6 +3902,7 @@ export function TerminalView({
         testId={`terminal-input-composer-${instanceId}`}
         atShellPrompt={atShellPrompt}
         historyPopupEnabled={composerHistoryPopupEnabled}
+        autocompleteEnabled={composerAutocompleteEnabled}
         history={readComposerHistory(instanceId)}
         onTextChange={(text) => {
           // A user edit ends history navigation (recall goes through storeComposerDraft).

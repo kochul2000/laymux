@@ -1520,6 +1520,14 @@ function TerminalSection() {
         />
 
         <ToggleRow
+          label={t("terminal.composerAutocomplete")}
+          desc={t("terminal.composerAutocompleteDesc")}
+          testid="composer-autocomplete-toggle"
+          checked={terminal.composerAutocomplete}
+          onChange={(v) => update({ composerAutocomplete: v })}
+        />
+
+        <ToggleRow
           label={t("terminal.copyOnSelect")}
           desc={t("terminal.copyOnSelectDesc")}
           testid="copy-on-select-toggle"

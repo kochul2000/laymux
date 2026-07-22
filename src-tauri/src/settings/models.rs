@@ -581,6 +581,9 @@ pub struct TerminalSettings {
     /// Composer: Tab on an empty, focused draft opens a past-input recall popup (issue #504).
     #[serde(default = "default_true")]
     pub composer_history_popup: bool,
+    /// Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505).
+    #[serde(default = "default_true")]
+    pub composer_autocomplete: bool,
 }
 
 impl Default for TerminalSettings {
@@ -593,6 +596,7 @@ impl Default for TerminalSettings {
             path_link_max_length: default_path_link_max_length(),
             show_scroll_to_bottom_button: true,
             composer_history_popup: true,
+            composer_autocomplete: true,
         }
     }
 }
