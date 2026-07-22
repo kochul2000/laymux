@@ -369,6 +369,7 @@ export function TerminalInputComposer({
       {historyVisible && (
         <ul
           data-testid={childTestId("history")}
+          id={childTestId("history")}
           role="listbox"
           aria-label={labels.history}
           className="terminal-input-composer-history absolute inset-x-0 bottom-full z-10 m-0 max-h-48 list-none overflow-y-auto border-t p-1 text-sm shadow-lg"
@@ -465,7 +466,6 @@ export function TerminalInputComposer({
         placeholder={labels.placeholder}
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
-        role="textbox"
         aria-expanded={historyVisible || autocompleteVisible}
         aria-controls={
           historyVisible
