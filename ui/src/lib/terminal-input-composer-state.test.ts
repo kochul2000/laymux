@@ -8,12 +8,14 @@ import {
   beginComposerSubmission,
   clampComposerHeight,
   DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
+  DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   clearRuntimeComposerState,
   createComposerDraftState,
   pushComposerHistory,
   readComposerHeight,
   readComposerHistory,
   selectComposerHistoryEntries,
+  selectComposerAutocompleteSuggestions,
   readDesktopInputModePreference,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
@@ -78,6 +80,60 @@ describe("selectComposerHistoryEntries (issue #504 popup view)", () => {
 
   it("returns an empty list for empty history", () => {
     expect(selectComposerHistoryEntries([])).toEqual([]);
+  });
+});
+
+describe("selectComposerAutocompleteSuggestions (issue #505)", () => {
+  const history = ["npm install", "npm run build", "npm test", "git status", "npm install"];
+
+  it("returns newest-first prefix matches for the current query", () => {
+    // History holds two "npm install"; only the most recent occurrence is kept.
+    expect(selectComposerAutocompleteSuggestions(history, "npm")).toEqual([
+      "npm install",
+      "npm test",
+      "npm run build",
+    ]);
+  });
+
+  it("matches case-insensitively while preserving the stored casing", () => {
+    expect(selectComposerAutocompleteSuggestions(["Git Push", "git pull"], "git")).toEqual([
+      "git pull",
+      "Git Push",
+    ]);
+  });
+
+  it("returns nothing for an empty query — that is the Tab popup's domain", () => {
+    expect(selectComposerAutocompleteSuggestions(history, "")).toEqual([]);
+  });
+
+  it("excludes an entry that already equals the query exactly", () => {
+    // Nothing to complete when the draft is already a full past entry.
+    expect(selectComposerAutocompleteSuggestions(["git status"], "git status")).toEqual([]);
+  });
+
+  it("returns nothing when no entry starts with the query", () => {
+    expect(selectComposerAutocompleteSuggestions(history, "docker")).toEqual([]);
+  });
+
+  it("skips blank entries", () => {
+    expect(selectComposerAutocompleteSuggestions(["", "ls -la", ""], "ls")).toEqual(["ls -la"]);
+  });
+
+  it("caps the list at the requested maximum and returns nothing for a non-positive cap", () => {
+    const many = Array.from({ length: 20 }, (_, i) => `cmd-${i}`);
+    expect(selectComposerAutocompleteSuggestions(many, "cmd", 3)).toEqual([
+      "cmd-19",
+      "cmd-18",
+      "cmd-17",
+    ]);
+    expect(selectComposerAutocompleteSuggestions(many, "cmd", 0)).toEqual([]);
+  });
+
+  it("defaults to a compact cap", () => {
+    const many = Array.from({ length: 50 }, (_, i) => `cmd-${i}`);
+    expect(selectComposerAutocompleteSuggestions(many, "cmd")).toHaveLength(
+      DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+    );
   });
 });
 

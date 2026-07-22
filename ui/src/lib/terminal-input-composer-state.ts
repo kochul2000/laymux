@@ -140,6 +140,40 @@ export function selectComposerHistoryEntries(
   return entries;
 }
 
+/**
+ * Default number of suggestions shown in the as-you-type Composer autocomplete
+ * dropdown (issue #505). Kept small for the same reason as the Tab popup.
+ */
+export const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
+
+/**
+ * As-you-type autocomplete suggestions for the Composer (issue #505). Given the
+ * terminal's Composer history (oldest→newest) and the current draft `query`,
+ * returns the most-recent-first, de-duplicated past entries that begin with the
+ * query (case-insensitive), skipping blanks, the exact query itself (nothing to
+ * complete), and capping at `max`. An empty query yields nothing — an empty
+ * draft is the Tab recall popup's domain, so the two never show at once.
+ */
+export function selectComposerAutocompleteSuggestions(
+  history: readonly string[],
+  query: string,
+  max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+): string[] {
+  if (max <= 0 || query.length === 0) return [];
+  const needle = query.toLowerCase();
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const entry = history[i];
+    if (!entry || entry === query || seen.has(entry)) continue;
+    if (!entry.toLowerCase().startsWith(needle)) continue;
+    seen.add(entry);
+    entries.push(entry);
+    if (entries.length >= max) break;
+  }
+  return entries;
+}
+
 export type ComposerSubmissionToken = string;
 
 export interface ComposerSubmissionSnapshot {

@@ -11,7 +11,8 @@
       "composerEditor": "Terminal input draft",
       "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
       "composerResize": "Resize input area (drag the top edge)",
-      "composerHistory": "Recent inputs"
+      "composerHistory": "Recent inputs",
+      "composerAutocomplete": "Input suggestions"
     },
     "remoteControl": {
       "title": "Remote control active",
@@ -260,6 +261,8 @@
       "inputModeComposer": "Composer",
       "composerHistoryPopup": "Composer History on Tab",
       "composerHistoryPopupDesc": "In Composer mode, press Tab in an empty focused input to list your recent inputs and pick one.",
+      "composerAutocomplete": "Composer Autocomplete",
+      "composerAutocompleteDesc": "In Composer mode, suggest matching past inputs as you type; press Tab (or arrow keys then Enter) to fill one in.",
       "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy to clipboard when selecting text in the terminal",
       "scrollbarStyle": "Scrollbar Style",

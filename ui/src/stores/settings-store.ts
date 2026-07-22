@@ -121,6 +121,8 @@ export interface TerminalSettings {
   showScrollToBottomButton: boolean;
   /** Composer: Tab on an empty, focused draft opens a past-input recall popup (issue #504). */
   composerHistoryPopup: boolean;
+  /** Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505). */
+  composerAutocomplete: boolean;
 }
 
 /** Pane control bar behavior. */
@@ -537,6 +539,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   pathLinkMaxLength: 256,
   showScrollToBottomButton: true,
   composerHistoryPopup: true,
+  composerAutocomplete: true,
 };
 
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {

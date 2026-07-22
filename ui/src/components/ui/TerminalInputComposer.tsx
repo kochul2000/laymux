@@ -10,7 +10,9 @@ import {
   clampComposerHeight,
   readComposerHeight,
   selectComposerHistoryEntries,
+  selectComposerAutocompleteSuggestions,
   DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
+  DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   writeComposerHeight,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
@@ -21,6 +23,8 @@ export interface TerminalInputComposerLabels {
   resize: string;
   /** Accessible name for the Tab-triggered past-input recall list (issue #504). */
   history: string;
+  /** Accessible name for the as-you-type autocomplete suggestion list (issue #505). */
+  autocomplete: string;
 }
 
 export interface TerminalInputComposerProps {
@@ -57,10 +61,18 @@ export interface TerminalInputComposerProps {
    * forwarding \t to the terminal.
    */
   historyPopupEnabled?: boolean;
-  /** Sent-input history for this terminal, oldest→newest. Only used by the popup. */
+  /** Sent-input history for this terminal, oldest→newest. Used by both recall paths. */
   history?: readonly string[];
   /** Maximum number of entries shown in the popup. */
   maxHistoryItems?: number;
+  /**
+   * Enables as-you-type autocomplete (issue #505). When true and the focused
+   * draft is non-empty, a dropdown of prefix-matching past `history` entries
+   * appears; Tab (or arrows + Enter) accepts one.
+   */
+  autocompleteEnabled?: boolean;
+  /** Maximum number of suggestions shown in the autocomplete dropdown. */
+  maxAutocompleteItems?: number;
   className?: string;
   testId?: string;
 }
@@ -99,6 +111,8 @@ export function TerminalInputComposer({
   historyPopupEnabled = false,
   history,
   maxHistoryItems = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
+  autocompleteEnabled = false,
+  maxAutocompleteItems = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
   className,
   testId,
 }: TerminalInputComposerProps) {
@@ -121,6 +135,34 @@ export function TerminalInputComposer({
   const closeHistory = () => setHistoryOpen(false);
   const commitHistoryEntry = (entry: string | undefined) => {
     setHistoryOpen(false);
+    if (entry != null) onTextChange(entry);
+  };
+
+  // As-you-type autocomplete (issue #505). Suggestions are prefix matches of the
+  // non-empty draft against the same runtime history the Tab popup reads. Because
+  // this needs a non-empty draft and the Tab popup needs an empty one, the two
+  // lists are mutually exclusive by construction and never fight for keys.
+  const autocompleteSuggestions =
+    autocompleteEnabled && text.length > 0
+      ? selectComposerAutocompleteSuggestions(history ?? [], text, maxAutocompleteItems)
+      : [];
+  // Escape / blur dismiss the dropdown until the next keystroke reopens it.
+  const [autocompleteDismissed, setAutocompleteDismissed] = useState(false);
+  // -1 means "no active suggestion": the dropdown is showing but has not stolen
+  // Enter, so plain Enter still sends. Arrows move a real selection in.
+  const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
+  const autocompleteVisible = !autocompleteDismissed && autocompleteSuggestions.length > 0;
+  // Clamp defensively: the draft can shrink the list between renders.
+  const activeAutocompleteIndex =
+    autocompleteIndex >= 0 && autocompleteIndex < autocompleteSuggestions.length
+      ? autocompleteIndex
+      : -1;
+  const dismissAutocomplete = () => {
+    setAutocompleteDismissed(true);
+    setAutocompleteIndex(-1);
+  };
+  const commitAutocompleteEntry = (entry: string | undefined) => {
+    dismissAutocomplete();
     if (entry != null) onTextChange(entry);
   };
 
@@ -194,6 +236,47 @@ export function TerminalInputComposer({
         event.preventDefault();
         event.stopPropagation();
         closeHistory();
+        return;
+      }
+    }
+
+    // While the as-you-type autocomplete dropdown is open it owns Tab/Escape and,
+    // once a suggestion is navigated to, Enter/arrows. With no active selection it
+    // deliberately does NOT consume Enter or a bare ArrowUp, so plain Enter still
+    // sends and edge ↑/↓ recall keeps working (mutually exclusive with #504's Tab
+    // popup, which only opens on an empty draft).
+    if (autocompleteVisible && !composing && plainKey) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setAutocompleteIndex((i) => Math.min(i + 1, autocompleteSuggestions.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp" && activeAutocompleteIndex >= 0) {
+        event.preventDefault();
+        // Leaving the list at the top (index 0 → -1) keeps the dropdown open but
+        // reselects the draft, restoring plain-Enter send.
+        setAutocompleteIndex(activeAutocompleteIndex - 1);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissAutocomplete();
+        return;
+      }
+      if (event.key === "Tab") {
+        // Tab accepts the active suggestion, or the top one if none is active —
+        // the "type a prefix, Tab to complete" gesture.
+        event.preventDefault();
+        event.stopPropagation();
+        commitAutocompleteEntry(
+          autocompleteSuggestions[activeAutocompleteIndex >= 0 ? activeAutocompleteIndex : 0],
+        );
+        return;
+      }
+      if (event.key === "Enter" && activeAutocompleteIndex >= 0) {
+        event.preventDefault();
+        commitAutocompleteEntry(autocompleteSuggestions[activeAutocompleteIndex]);
         return;
       }
     }
@@ -319,6 +402,43 @@ export function TerminalInputComposer({
           ))}
         </ul>
       )}
+      {autocompleteVisible && (
+        <ul
+          data-testid={childTestId("autocomplete")}
+          role="listbox"
+          aria-label={labels.autocomplete}
+          className="terminal-input-composer-history absolute inset-x-0 bottom-full z-10 m-0 max-h-48 list-none overflow-y-auto border-t p-1 text-sm shadow-lg"
+          style={{
+            background: "var(--bg-overlay)",
+            borderColor: "var(--border)",
+            color: "var(--text-primary)",
+          }}
+        >
+          {autocompleteSuggestions.map((entry, index) => (
+            <li
+              // Post-dedupe entries are unique, so the value is a stable key.
+              key={`${index}-${entry}`}
+              id={`${childTestId("autocomplete")}-option-${index}`}
+              data-testid={childTestId(`autocomplete-option-${index}`)}
+              role="option"
+              aria-selected={index === activeAutocompleteIndex}
+              title={entry}
+              className="terminal-input-composer-history-item cursor-pointer truncate whitespace-nowrap rounded px-2 py-1"
+              style={
+                index === activeAutocompleteIndex ? { background: "var(--accent-20)" } : undefined
+              }
+              onMouseEnter={() => setAutocompleteIndex(index)}
+              // mousedown (not click) so the textarea keeps focus through the pick.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                commitAutocompleteEntry(entry);
+              }}
+            >
+              {entry}
+            </li>
+          ))}
+        </ul>
+      )}
       <div
         data-testid={childTestId("resize")}
         role="separator"
@@ -346,10 +466,20 @@ export function TerminalInputComposer({
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
         role="textbox"
-        aria-expanded={historyVisible}
-        aria-controls={historyVisible ? childTestId("history") : undefined}
+        aria-expanded={historyVisible || autocompleteVisible}
+        aria-controls={
+          historyVisible
+            ? childTestId("history")
+            : autocompleteVisible
+              ? childTestId("autocomplete")
+              : undefined
+        }
         aria-activedescendant={
-          historyVisible ? `${childTestId("history")}-option-${historyIndex}` : undefined
+          historyVisible
+            ? `${childTestId("history")}-option-${historyIndex}`
+            : autocompleteVisible && activeAutocompleteIndex >= 0
+              ? `${childTestId("autocomplete")}-option-${activeAutocompleteIndex}`
+              : undefined
         }
         spellCheck={false}
         autoCapitalize="off"
@@ -362,6 +492,10 @@ export function TerminalInputComposer({
         onChange={(event) => {
           // Any manual edit dismisses the recall popup so it never fights typing.
           if (historyOpen) setHistoryOpen(false);
+          // Typing re-arms autocomplete (undo a prior Escape) and clears any active
+          // selection so the fresh suggestion list never steals the next Enter.
+          if (autocompleteDismissed) setAutocompleteDismissed(false);
+          if (autocompleteIndex !== -1) setAutocompleteIndex(-1);
           onTextChange(event.currentTarget.value);
         }}
         onCompositionStart={() => {
@@ -372,8 +506,9 @@ export function TerminalInputComposer({
         }}
         onBlur={() => {
           compositionActiveRef.current = false;
-          // Leaving the editor (pane/mode switch, clicking away) closes the popup.
+          // Leaving the editor (pane/mode switch, clicking away) closes both lists.
           setHistoryOpen(false);
+          dismissAutocomplete();
         }}
         onKeyDown={handleEditorKeyDown}
       />
