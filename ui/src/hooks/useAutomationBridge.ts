@@ -456,10 +456,19 @@ const handlers: HandlerMap = {
       ) {
         return err("Invalid excludedPaneIds: expected an array of pane id strings");
       }
+      const excludedWorkspaceIds = p.excludedWorkspaceIds;
+      if (
+        excludedWorkspaceIds !== undefined &&
+        (!Array.isArray(excludedWorkspaceIds) ||
+          excludedWorkspaceIds.some((id) => typeof id !== "string"))
+      ) {
+        return err("Invalid excludedWorkspaceIds: expected an array of workspace id strings");
+      }
       return ok(
         navigationActions.spatialStep(
           direction,
           new Set<string>((excludedPaneIds as string[] | undefined) ?? []),
+          new Set<string>((excludedWorkspaceIds as string[] | undefined) ?? []),
         ),
       );
     },
