@@ -3030,6 +3030,11 @@
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           terminal.open(terminalSizer);
+          // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck
+          // off but omits autocomplete, so mobile browsers offer password,
+          // credit-card, and location autofill over the direct-input keyboard
+          // (issue #503). Match the composer/file-path fields and opt out.
+          terminal.textarea?.setAttribute("autocomplete", "off");
           suppressMirrorQueryReplies(terminal);
           terminalHost.addEventListener(
             "focusin",
