@@ -1659,6 +1659,13 @@
         // authority for whether it is still live and eligible; this hint is
         // intentionally not persisted across page loads.
         let lastSelectedTerminalId = null;
+        // Per-workspace variant of lastSelectedTerminalId (issue #508): remember
+        // the last terminal the user attached to inside each workspace so that
+        // re-entering a collapsed workspace resumes that pane instead of always
+        // snapping back to the first pane. Same surface-local, non-persisted
+        // lifetime as lastSelectedTerminalId; dock terminals (no workspaceId)
+        // are excluded. The navigation snapshot still validates liveness/eligibility.
+        const lastSelectedTerminalIdByWorkspace = new Map();
         let terminalInfoById = new Map();
         let navigationState = null;
         let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();
@@ -2369,7 +2376,14 @@
             scrollToBottomButton.hidden = true;
           }
           activeTerminalId = nextId;
-          if (nextId) lastSelectedTerminalId = nextId;
+          if (nextId) {
+            lastSelectedTerminalId = nextId;
+            // Record this attach against its workspace so a later re-entry can
+            // resume it (issue #508). Only workspace terminals carry a
+            // workspaceId; dock terminals are app-global and skipped.
+            const workspaceId = terminalInfoById.get(nextId)?.workspaceId;
+            if (workspaceId) lastSelectedTerminalIdByWorkspace.set(workspaceId, nextId);
+          }
           composerIsComposing = false;
           if (activeTerminalId) {
             currentInputMode(activeTerminalId);
@@ -3909,7 +3923,12 @@
           if (!leaseId || !workspaceId) return;
           setStatus("Switching workspace...");
           await activateWorkspace(workspaceId);
-          await loadNavigation(null);
+          // Prefer the pane the user last stayed on in this workspace (issue
+          // #508). preferredTerminal only restores it when the remembered
+          // terminal is still a live pane of the now-active workspace; otherwise
+          // it falls back to the host focused pane, then the first live pane.
+          // A null hint (never visited) preserves the prior first-pane behavior.
+          await loadNavigation(lastSelectedTerminalIdByWorkspace.get(workspaceId) || null);
           setNavigationOpen(false);
         }
 

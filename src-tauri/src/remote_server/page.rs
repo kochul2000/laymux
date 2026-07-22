@@ -715,9 +715,20 @@ mod tests {
         let html = remote_page_html();
 
         assert!(html.contains("let lastSelectedTerminalId = null;"));
-        assert!(html.contains("if (nextId) lastSelectedTerminalId = nextId;"));
+        assert!(html.contains("if (nextId) {\n            lastSelectedTerminalId = nextId;"));
         assert!(html.contains("preferredTerminalId = activeTerminalId || lastSelectedTerminalId"));
         assert!(!html.contains("laymux.remote.lastSelectedTerminalId"));
+
+        // Per-workspace resume hint (issue #508): surface-local map, never
+        // persisted, consulted first when re-entering a workspace.
+        assert!(html.contains("const lastSelectedTerminalIdByWorkspace = new Map();"));
+        assert!(html.contains(
+            "if (workspaceId) lastSelectedTerminalIdByWorkspace.set(workspaceId, nextId);"
+        ));
+        assert!(html.contains(
+            "await loadNavigation(lastSelectedTerminalIdByWorkspace.get(workspaceId) || null);"
+        ));
+        assert!(!html.contains("laymux.remote.lastSelectedTerminalIdByWorkspace"));
     }
 
     #[test]
