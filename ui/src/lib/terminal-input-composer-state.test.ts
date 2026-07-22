@@ -7,11 +7,13 @@ import {
   MIN_COMPOSER_HEIGHT,
   beginComposerSubmission,
   clampComposerHeight,
+  DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   clearRuntimeComposerState,
   createComposerDraftState,
   pushComposerHistory,
   readComposerHeight,
   readComposerHistory,
+  selectComposerHistoryEntries,
   readDesktopInputModePreference,
   readRuntimeComposerDraft,
   readRuntimeInputMode,
@@ -44,6 +46,38 @@ describe("composer sent-history", () => {
     clearRuntimeComposerState("a");
     expect(readComposerHistory("a")).toEqual([]);
     expect(readComposerHistory("b")).toEqual(["cmd-b"]);
+  });
+});
+
+describe("selectComposerHistoryEntries (issue #504 popup view)", () => {
+  it("shows the newest entry first", () => {
+    expect(selectComposerHistoryEntries(["one", "two", "three"])).toEqual(["three", "two", "one"]);
+  });
+
+  it("de-duplicates keeping only the most recent occurrence", () => {
+    expect(selectComposerHistoryEntries(["ls", "cd", "ls", "pwd"])).toEqual(["pwd", "ls", "cd"]);
+  });
+
+  it("skips blank entries", () => {
+    expect(selectComposerHistoryEntries(["a", "", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("caps the list at the requested maximum", () => {
+    const history = Array.from({ length: 20 }, (_, i) => `cmd-${i}`);
+    const entries = selectComposerHistoryEntries(history, 3);
+    expect(entries).toEqual(["cmd-19", "cmd-18", "cmd-17"]);
+  });
+
+  it("defaults to a compact list and returns nothing for a non-positive cap", () => {
+    const history = Array.from({ length: 50 }, (_, i) => `cmd-${i}`);
+    expect(selectComposerHistoryEntries(history)).toHaveLength(
+      DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
+    );
+    expect(selectComposerHistoryEntries(history, 0)).toEqual([]);
+  });
+
+  it("returns an empty list for empty history", () => {
+    expect(selectComposerHistoryEntries([])).toEqual([]);
   });
 });
 

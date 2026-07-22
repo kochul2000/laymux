@@ -110,6 +110,36 @@ export function pushComposerHistory(terminalId: string, text: string): void {
   runtimeHistory.set(terminalId, list);
 }
 
+/**
+ * Default number of past entries shown in the Tab-triggered Composer history
+ * popup (issue #504). Kept small so the floating list never obscures much of
+ * the terminal above the composer.
+ */
+export const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
+
+/**
+ * Most-recent-first, de-duplicated view of a terminal's Composer history for the
+ * Tab-triggered recall popup. `history` is stored oldest→newest; the popup shows
+ * the newest first, drops repeats (keeping the most recent occurrence), skips
+ * blanks, and caps the list at `max` so it stays a compact, single-screen list.
+ */
+export function selectComposerHistoryEntries(
+  history: readonly string[],
+  max = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
+): string[] {
+  if (max <= 0) return [];
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const entry = history[i];
+    if (!entry || seen.has(entry)) continue;
+    seen.add(entry);
+    entries.push(entry);
+    if (entries.length >= max) break;
+  }
+  return entries;
+}
+
 export type ComposerSubmissionToken = string;
 
 export interface ComposerSubmissionSnapshot {

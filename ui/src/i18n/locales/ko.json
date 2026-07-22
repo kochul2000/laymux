@@ -10,7 +10,8 @@
       "scrollToBottom": "맨 아래로 이동",
       "composerEditor": "터미널 입력 초안",
       "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
-      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)"
+      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)",
+      "composerHistory": "최근 입력"
     },
     "remoteControl": {
       "title": "원격 제어 중",
@@ -257,6 +258,8 @@
       "defaultInputModeDesc": "새 터미널이 시작할 때의 입력 방식. Ctrl+Alt+M 또는 pane 툴바 버튼으로 언제든 전환.",
       "inputModeDirect": "직접",
       "inputModeComposer": "입력칸",
+      "composerHistoryPopup": "Tab으로 과거 입력 보기",
+      "composerHistoryPopupDesc": "입력칸(Composer) 모드에서 비어 있는 입력창에 포커스한 채 Tab을 누르면 최근 입력 목록을 보여주고 골라 넣을 수 있습니다.",
       "copyOnSelect": "선택 시 복사",
       "copyOnSelectDesc": "터미널에서 텍스트 선택 시 자동으로 클립보드에 복사",
       "scrollbarStyle": "스크롤바 방식",
