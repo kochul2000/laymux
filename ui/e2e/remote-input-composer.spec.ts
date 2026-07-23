@@ -1201,3 +1201,182 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   await page.locator('[data-key="esc"]').click();
   await expect(editor).toBeFocused();
 });
+
+// --- Composer recall: Tab history popup (#504) + autocomplete (#505) ---
+
+async function enterComposerMode(page: Page) {
+  // Desktop layout (fine pointer) defaults to Direct; switch to Composer.
+  await page.locator("#inputModeToggle").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+}
+
+async function sendComposerLine(
+  page: Page,
+  remote: RemoteState,
+  editor: ReturnType<Page["locator"]>,
+  text: string,
+  expectedCount: number,
+) {
+  await editor.fill(text);
+  await editor.press("Enter");
+  await expect.poll(() => remote.inputs.length).toBe(expectedCount);
+  expect(remote.inputs[expectedCount - 1].body.text).toBe(text);
+  await expect(editor).toHaveValue("");
+}
+
+test("Tab on an empty draft opens the newest-first recall popup and Enter fills it (#504)", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  const list = page.locator("#composerHistoryList");
+
+  // Empty history: Tab must not open a popup.
+  await editor.focus();
+  await editor.press("Tab");
+  await expect(list).toBeHidden();
+
+  await sendComposerLine(page, remote, editor, "echo one", 1);
+  await sendComposerLine(page, remote, editor, "echo two", 2);
+  await sendComposerLine(page, remote, editor, "echo one", 3); // duplicate
+
+  await editor.focus();
+  await editor.press("Tab");
+  await expect(list).toBeVisible();
+  // Newest-first + de-duplicated: [echo one, echo two].
+  await expect(list.locator('[role="option"]')).toHaveText(["echo one", "echo two"]);
+  await expect(list.locator('[role="option"]').nth(0)).toHaveAttribute("aria-selected", "true");
+
+  await editor.press("ArrowDown");
+  await expect(list.locator('[role="option"]').nth(1)).toHaveAttribute("aria-selected", "true");
+  await editor.press("Enter");
+  await expect(list).toBeHidden();
+  await expect(editor).toHaveValue("echo two");
+  // Selecting from the popup fills the draft; it must not send.
+  expect(remote.inputs).toHaveLength(3);
+});
+
+test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow+Enter picks (#505)", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+  const dropdown = page.locator("#composerAutocompleteList");
+
+  await sendComposerLine(page, remote, editor, "echo one", 1);
+  await sendComposerLine(page, remote, editor, "echo two", 2);
+  await sendComposerLine(page, remote, editor, "ls", 3);
+
+  // Prefix match, newest-first, exact-query excluded, blank draft is #504's.
+  await editor.fill("ec");
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown.locator('[role="option"]')).toHaveText(["echo two", "echo one"]);
+  // No initial highlight (activeIndex = -1): a plain Enter still SENDS the draft.
+  await expect(dropdown.locator('[aria-selected="true"]')).toHaveCount(0);
+  await editor.press("Enter");
+  await expect.poll(() => remote.inputs.length).toBe(4);
+  expect(remote.inputs[3].body.text).toBe("ec");
+  await expect(editor).toHaveValue("");
+
+  // Arrow creates a highlight; then Enter PICKS (fills) instead of sending.
+  await editor.fill("ec");
+  await expect(dropdown).toBeVisible();
+  await editor.press("ArrowDown");
+  await expect(dropdown.locator('[role="option"]').nth(0)).toHaveAttribute("aria-selected", "true");
+  await editor.press("Enter");
+  await expect(dropdown).toBeHidden();
+  await expect(editor).toHaveValue("echo two");
+  expect(remote.inputs).toHaveLength(4);
+
+  // Tab completes to the top suggestion with no active highlight.
+  await editor.fill("ec");
+  await expect(dropdown).toBeVisible();
+  await editor.press("Tab");
+  await expect(editor).toHaveValue("echo two");
+});
+
+test("recall history is in-memory only and never written to any persistent store", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+
+  const secret = "export SECRET_TOKEN=hunter2-do-not-persist";
+  await sendComposerLine(page, remote, editor, secret, 1);
+  await sendComposerLine(page, remote, editor, "another-private-command", 2);
+
+  // The sent text is recallable from the runtime Map...
+  await editor.focus();
+  await editor.press("Tab");
+  await expect(page.locator("#composerHistoryList")).toBeVisible();
+  await expect(page.locator("#composerHistoryList").locator('[role="option"]')).toHaveText([
+    "another-private-command",
+    secret,
+  ]);
+
+  // ...but no persistent storage may contain any of the input strings.
+  const dump = await page.evaluate(() => {
+    const collect = (storage: Storage) => {
+      const out: string[] = [];
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (key == null) continue;
+        out.push(key);
+        out.push(storage.getItem(key) ?? "");
+      }
+      return out;
+    };
+    return {
+      local: collect(window.localStorage),
+      session: collect(window.sessionStorage),
+    };
+  });
+  const haystack = [...dump.local, ...dump.session].join(" ");
+  expect(haystack).not.toContain("hunter2");
+  expect(haystack).not.toContain("SECRET_TOKEN");
+  expect(haystack).not.toContain("another-private-command");
+  // Only the feature on/off toggles are allowed to be persisted (defaults on,
+  // so they may be absent until toggled — assert none carry input text).
+  expect(dump.local).not.toContain(secret);
+});
+
+test("the popover toggles disable the recall popup and autocomplete", async ({ page }) => {
+  const remote = await installRemotePage(page, { coarse: false, width: 1280 });
+  await connect(page);
+  await enterComposerMode(page);
+  const editor = page.locator("#composerInput");
+
+  await sendComposerLine(page, remote, editor, "echo one", 1);
+  await sendComposerLine(page, remote, editor, "echo two", 2);
+
+  // Open the key-set popover where the composer toggles live.
+  await page.locator("#keyBarToggle").click();
+  await page.locator("#keyBarSettings").click();
+  await expect(page.locator("#composerHistoryPopupToggle")).toBeChecked();
+  await expect(page.locator("#composerAutocompleteToggle")).toBeChecked();
+  await page.locator("#composerHistoryPopupToggle").uncheck();
+  await page.locator("#composerAutocompleteToggle").uncheck();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerHistoryPopup")))
+    .toBe("0");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerAutocomplete")))
+    .toBe("0");
+
+  // Dismiss the popover, back to the editor.
+  await page.locator("#terminal").click({ position: { x: 5, y: 5 } });
+  await editor.focus();
+
+  // Tab no longer opens the recall popup...
+  await editor.press("Tab");
+  await expect(page.locator("#composerHistoryList")).toBeHidden();
+  // ...and typing a prefix no longer shows the autocomplete dropdown.
+  await editor.fill("ec");
+  await expect(page.locator("#composerAutocompleteList")).toBeHidden();
+});
