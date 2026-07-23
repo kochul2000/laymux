@@ -215,6 +215,7 @@
         background: var(--terminal-bg);
       }
       .terminal-composer {
+        position: relative;
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(72px, auto);
@@ -223,6 +224,44 @@
         padding: 0;
         border-top: 1px solid var(--border);
         background: var(--terminal-bg);
+      }
+      /* Tab recall (issue #504) and as-you-type autocomplete (issue #505) lists.
+         They float above the editor over the terminal so they never grow the
+         composer strip; both share one class since only one shows at a time. */
+      .composer-suggest-list {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 100%;
+        z-index: 30;
+        margin: 0;
+        max-height: min(40vh, 220px);
+        overflow-y: auto;
+        list-style: none;
+        padding: 4px;
+        border: 1px solid var(--border);
+        border-bottom: 0;
+        background: var(--bg-overlay);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
+        font-size: 14px;
+      }
+      .composer-suggest-list[hidden] {
+        display: none;
+      }
+      .composer-suggest-item {
+        overflow: hidden;
+        padding: 5px 8px;
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        cursor: pointer;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .composer-suggest-item:hover {
+        background: var(--hover-bg);
+      }
+      .composer-suggest-item[aria-selected="true"] {
+        background: var(--accent-20);
       }
       /* Flush editor (mirrors desktop): no outer margin / parent padding, no
          border or rounding — it fills the strip under the divider. */
@@ -1540,6 +1579,8 @@
               </button>
             </div>
             <section id="terminalComposer" class="terminal-composer" aria-label="Terminal input composer" hidden>
+              <ul id="composerHistoryList" class="composer-suggest-list" role="listbox" aria-label="Recent terminal input" hidden></ul>
+              <ul id="composerAutocompleteList" class="composer-suggest-list" role="listbox" aria-label="Terminal input suggestions" hidden></ul>
               <textarea
                 id="composerInput"
                 class="composer-input"
@@ -1603,6 +1644,8 @@
         const terminalMetaEl = $("terminalMeta");
         const terminalComposer = $("terminalComposer");
         const composerInput = $("composerInput");
+        const composerHistoryList = $("composerHistoryList");
+        const composerAutocompleteList = $("composerAutocompleteList");
         const workspaceSection = $("workspaceSection");
         const workspaceListEl = $("workspaceList");
         const dockSection = $("dockSection");
@@ -1648,6 +1691,11 @@
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
+        // Composer recall feature toggles (issues #504 / #505). Only the on/off
+        // boolean is surface-local in localStorage — the past-input text itself
+        // is kept in a runtime Map and never persisted (see composerHistory*).
+        const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
+        const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -1744,9 +1792,32 @@
         let terminalReplayDepth = 0;
         const inputModeByTerminalId = new Map();
         const composerDraftByTerminalId = new Map();
+        // Sent-input recall history, per terminal, oldest→newest. This holds the
+        // actual text the user submitted, so — like the composer draft (ADR-0029)
+        // — it lives ONLY in this runtime Map and is never written to
+        // localStorage / sessionStorage / disk / the network. Keeping it in
+        // memory means passwords or other secrets typed into a shell cannot leak
+        // through a recall surface after the page unloads.
+        const composerHistoryByTerminalId = new Map();
+        const MAX_COMPOSER_HISTORY = 200;
+        const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
+        const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
         let preferredInputMode = loadPreferredInputMode();
+        // Feature on/off toggles are configuration (not content), so they are
+        // the only composer-recall state allowed in localStorage. Default on to
+        // match the desktop composer and stay non-destructive.
+        let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
+        let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
         let composerIsComposing = false;
         let composerReady = false;
+        // Tab recall popup (issue #504) UI state: open flag + highlighted row.
+        let composerHistoryOpen = false;
+        let composerHistoryIndex = 0;
+        // As-you-type autocomplete (issue #505) UI state. `dismissed` is cleared
+        // on the next keystroke; index −1 means "no active suggestion" so plain
+        // Enter still sends.
+        let composerAutocompleteDismissed = false;
+        let composerAutocompleteIndex = -1;
         // Keyboard-button collapse state: in composer mode the editor pane
         // hides and restores together with the soft keyboard.
         let composerCollapsed = false;
@@ -2280,6 +2351,82 @@
           } catch (_) {}
         }
 
+        // Composer recall toggles default ON; only an explicit "0" turns them
+        // off. These booleans are configuration, so persisting them is allowed
+        // (unlike the recall text itself, which stays in memory only).
+        function loadComposerToggle(key) {
+          try {
+            return localStorage.getItem(key) !== "0";
+          } catch (_) {
+            return true;
+          }
+        }
+
+        function saveComposerToggle(key, enabled) {
+          try {
+            localStorage.setItem(key, enabled ? "1" : "0");
+          } catch (_) {}
+        }
+
+        // --- Runtime-only sent-input history (issues #504 / #505) ---
+        // readComposerHistory/pushComposerHistory only ever touch the in-memory
+        // Map; there is deliberately no persistence path for this text.
+        function readComposerHistory(terminalId = activeTerminalId) {
+          if (!terminalId) return [];
+          return composerHistoryByTerminalId.get(terminalId) || [];
+        }
+
+        function pushComposerHistory(terminalId, text) {
+          if (!terminalId || !text) return;
+          const list = composerHistoryByTerminalId.get(terminalId) || [];
+          if (list[list.length - 1] === text) return;
+          list.push(text);
+          if (list.length > MAX_COMPOSER_HISTORY) {
+            list.splice(0, list.length - MAX_COMPOSER_HISTORY);
+          }
+          composerHistoryByTerminalId.set(terminalId, list);
+        }
+
+        // Most-recent-first, de-duplicated, blank-skipping view of the history
+        // for the Tab recall popup. Ported from the desktop
+        // selectComposerHistoryEntries (terminal-input-composer-state.ts).
+        function selectComposerHistoryEntries(history, max = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS) {
+          if (max <= 0) return [];
+          const seen = new Set();
+          const entries = [];
+          for (let i = history.length - 1; i >= 0; i -= 1) {
+            const entry = history[i];
+            if (!entry || seen.has(entry)) continue;
+            seen.add(entry);
+            entries.push(entry);
+            if (entries.length >= max) break;
+          }
+          return entries;
+        }
+
+        // As-you-type suggestions: most-recent-first, de-duplicated, prefix
+        // (case-insensitive), skipping blanks and the exact query. Ported from
+        // the desktop selectComposerAutocompleteSuggestions.
+        function selectComposerAutocompleteSuggestions(
+          history,
+          query,
+          max = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+        ) {
+          if (max <= 0 || query.length === 0) return [];
+          const needle = query.toLowerCase();
+          const seen = new Set();
+          const entries = [];
+          for (let i = history.length - 1; i >= 0; i -= 1) {
+            const entry = history[i];
+            if (!entry || entry === query || seen.has(entry)) continue;
+            if (!entry.toLowerCase().startsWith(needle)) continue;
+            seen.add(entry);
+            entries.push(entry);
+            if (entries.length >= max) break;
+          }
+          return entries;
+        }
+
         function currentInputMode(terminalId = activeTerminalId) {
           if (!terminalId) return preferredInputMode;
           if (!inputModeByTerminalId.has(terminalId)) {
@@ -2294,6 +2441,158 @@
             composerDraftByTerminalId.set(terminalId, { text: "", revision: 0, inFlight: null });
           }
           return composerDraftByTerminalId.get(terminalId);
+        }
+
+        // --- Composer recall UI (issues #504 / #505) ---
+        // The Tab popup needs an EMPTY focused draft; autocomplete needs a
+        // NON-empty draft. That split makes the two lists mutually exclusive by
+        // construction, so they never fight for the same keys or screen space.
+        function currentComposerHistoryEntries() {
+          if (!composerHistoryPopupEnabled) return [];
+          const draft = composerDraft();
+          if (!draft || draft.text.length !== 0) return [];
+          return selectComposerHistoryEntries(
+            readComposerHistory(),
+            DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS
+          );
+        }
+
+        function currentComposerSuggestions() {
+          if (!composerAutocompleteEnabled) return [];
+          const draft = composerDraft();
+          if (!draft || draft.text.length === 0) return [];
+          return selectComposerAutocompleteSuggestions(
+            readComposerHistory(),
+            draft.text,
+            DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS
+          );
+        }
+
+        function resetComposerSuggestions() {
+          composerHistoryOpen = false;
+          composerHistoryIndex = 0;
+          composerAutocompleteDismissed = false;
+          composerAutocompleteIndex = -1;
+        }
+
+        function dismissComposerAutocomplete() {
+          composerAutocompleteDismissed = true;
+          composerAutocompleteIndex = -1;
+        }
+
+        // Fill the draft (and textarea) from a recall pick without routing
+        // through the input event, so the input handler's re-arm logic does not
+        // fire. Caret goes to the end so the user can keep typing.
+        function setComposerDraftText(text) {
+          const draft = composerDraft();
+          if (!draft) return;
+          if (draft.text !== text) {
+            draft.text = text;
+            draft.revision += 1;
+          }
+          if (composerInput.value !== text) composerInput.value = text;
+          const end = composerInput.value.length;
+          try {
+            composerInput.setSelectionRange(end, end);
+          } catch (_) {}
+          updateComposerControls();
+        }
+
+        function commitComposerHistoryEntry(entry) {
+          composerHistoryOpen = false;
+          if (entry != null) setComposerDraftText(entry);
+          renderComposerSuggestions();
+        }
+
+        function commitComposerAutocompleteEntry(entry) {
+          dismissComposerAutocomplete();
+          if (entry != null) setComposerDraftText(entry);
+          renderComposerSuggestions();
+        }
+
+        function buildComposerSuggestList(listEl, entries, activeIndex, onPick) {
+          listEl.textContent = "";
+          entries.forEach((entry, index) => {
+            const item = document.createElement("li");
+            item.className = "composer-suggest-item";
+            item.id = `${listEl.id}-option-${index}`;
+            item.setAttribute("role", "option");
+            item.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            item.title = entry;
+            item.textContent = entry;
+            // mousedown (not click) so the textarea keeps focus through the pick.
+            item.addEventListener("mousedown", (event) => {
+              event.preventDefault();
+              onPick(entry);
+            });
+            listEl.append(item);
+          });
+        }
+
+        function renderComposerSuggestions() {
+          const historyEntries = currentComposerHistoryEntries();
+          const historyVisible = composerHistoryOpen && historyEntries.length > 0;
+          if (historyVisible && composerHistoryIndex >= historyEntries.length) {
+            composerHistoryIndex = 0;
+          }
+
+          const suggestions = currentComposerSuggestions();
+          const autocompleteVisible =
+            !composerAutocompleteDismissed && suggestions.length > 0 && !historyVisible;
+          const activeAutocompleteIndex =
+            composerAutocompleteIndex >= 0 && composerAutocompleteIndex < suggestions.length
+              ? composerAutocompleteIndex
+              : -1;
+
+          if (historyVisible) {
+            buildComposerSuggestList(
+              composerHistoryList,
+              historyEntries,
+              composerHistoryIndex,
+              commitComposerHistoryEntry
+            );
+          } else if (composerHistoryList.childElementCount) {
+            composerHistoryList.textContent = "";
+          }
+          composerHistoryList.hidden = !historyVisible;
+
+          if (autocompleteVisible) {
+            buildComposerSuggestList(
+              composerAutocompleteList,
+              suggestions,
+              activeAutocompleteIndex,
+              commitComposerAutocompleteEntry
+            );
+          } else if (composerAutocompleteList.childElementCount) {
+            composerAutocompleteList.textContent = "";
+          }
+          composerAutocompleteList.hidden = !autocompleteVisible;
+
+          // Reflect the open list on the editor for assistive tech.
+          composerInput.setAttribute(
+            "aria-expanded",
+            historyVisible || autocompleteVisible ? "true" : "false"
+          );
+          if (historyVisible) {
+            composerInput.setAttribute("aria-controls", composerHistoryList.id);
+            composerInput.setAttribute(
+              "aria-activedescendant",
+              `${composerHistoryList.id}-option-${composerHistoryIndex}`
+            );
+          } else if (autocompleteVisible && activeAutocompleteIndex >= 0) {
+            composerInput.setAttribute("aria-controls", composerAutocompleteList.id);
+            composerInput.setAttribute(
+              "aria-activedescendant",
+              `${composerAutocompleteList.id}-option-${activeAutocompleteIndex}`
+            );
+          } else {
+            if (autocompleteVisible) {
+              composerInput.setAttribute("aria-controls", composerAutocompleteList.id);
+            } else {
+              composerInput.removeAttribute("aria-controls");
+            }
+            composerInput.removeAttribute("aria-activedescendant");
+          }
         }
 
         function updateComposerControls() {
@@ -2381,6 +2680,7 @@
             scheduleTerminalRefresh();
           }
           updateComposerControls();
+          renderComposerSuggestions();
           scheduleTerminalFit();
           if (options.focus === true) {
             requestAnimationFrame(() => focusCurrentInputSurface());
@@ -2393,6 +2693,9 @@
           // An explicit mode switch always reveals its input surface; a stale
           // collapse would leave composer mode with no visible editor.
           composerCollapsed = false;
+          // A mode switch abandons any open recall list so it never lingers
+          // over the newly shown surface.
+          resetComposerSuggestions();
           if (activeTerminalId) inputModeByTerminalId.set(activeTerminalId, mode);
           if (options.persist !== false) savePreferredInputMode(mode);
           renderInputSurface({ focus: options.focus !== false });
@@ -2420,6 +2723,9 @@
             if (workspaceId) lastSelectedTerminalIdByWorkspace.set(workspaceId, nextId);
           }
           composerIsComposing = false;
+          // Each terminal has its own draft/history; drop any recall list left
+          // open on the terminal we are leaving.
+          resetComposerSuggestions();
           if (activeTerminalId) {
             currentInputMode(activeTerminalId);
             composerDraft(activeTerminalId);
@@ -4728,6 +5034,10 @@
             .then(() => {
               if (draft.inFlight !== submission) return;
               draft.inFlight = null;
+              // Record the text that was actually sent for the recall popup /
+              // autocomplete. Runtime Map only — never persisted (see the
+              // composerHistoryByTerminalId declaration).
+              pushComposerHistory(terminalId, submission.text);
               if (
                 draft.revision === submission.revision &&
                 draft.text === submission.text
@@ -4735,7 +5045,10 @@
                 draft.text = "";
                 draft.revision += 1;
               }
-              if (activeTerminalId === terminalId) renderInputSurface();
+              if (activeTerminalId === terminalId) {
+                resetComposerSuggestions();
+                renderInputSurface();
+              }
             })
             .catch((err) => {
               if (draft.inFlight !== submission) return;
@@ -5384,8 +5697,70 @@
           section.append(actions);
         }
 
+        // Composer recall feature toggles (issues #504 / #505). They live in the
+        // existing key-set popover — the Remote surface's settings home — and
+        // reuse its .key-set-row checkbox layout. Only the on/off booleans are
+        // persisted (surface-local localStorage); the recall text is never.
+        function renderComposerPopoverSection() {
+          const title = document.createElement("div");
+          title.className = "key-popover-title";
+          title.textContent = "Composer recall";
+          keyPopoverBody.append(title);
+
+          const makeToggle = (id, labelText, descText, enabled, onChange) => {
+            const row = document.createElement("label");
+            row.className = "key-set-row";
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.id = id;
+            cb.checked = enabled;
+            cb.setAttribute("aria-label", labelText);
+            cb.addEventListener("click", (event) => event.stopPropagation());
+            cb.addEventListener("change", (event) => {
+              event.stopPropagation();
+              const scrollTop = keyPopoverBody.scrollTop;
+              onChange(cb.checked);
+              renderKeyPopover();
+              keyPopoverBody.scrollTop = scrollTop;
+            });
+            const name = document.createElement("span");
+            name.className = "key-set-name";
+            name.textContent = labelText;
+            const desc = document.createElement("span");
+            desc.className = "key-set-desc";
+            desc.textContent = descText;
+            row.append(cb, name, desc);
+            keyPopoverBody.append(row);
+          };
+
+          makeToggle(
+            "composerHistoryPopupToggle",
+            "Tab history",
+            "Tab shows past input",
+            composerHistoryPopupEnabled,
+            (checked) => {
+              composerHistoryPopupEnabled = checked;
+              saveComposerToggle(composerHistoryPopupKey, checked);
+              if (!checked) composerHistoryOpen = false;
+              renderComposerSuggestions();
+            }
+          );
+          makeToggle(
+            "composerAutocompleteToggle",
+            "Autocomplete",
+            "Suggest as you type",
+            composerAutocompleteEnabled,
+            (checked) => {
+              composerAutocompleteEnabled = checked;
+              saveComposerToggle(composerAutocompleteKey, checked);
+              renderComposerSuggestions();
+            }
+          );
+        }
+
         function renderKeyPopover() {
           keyPopoverBody.textContent = "";
+          renderComposerPopoverSection();
           const setsTitle = document.createElement("div");
           setsTitle.className = "key-popover-title";
           setsTitle.textContent = "Key sets";
@@ -5801,13 +6176,28 @@
           if (!draft || draft.text === composerInput.value) return;
           draft.text = composerInput.value;
           draft.revision += 1;
+          // Manual editing closes the Tab recall popup and re-arms autocomplete
+          // (undo a prior Escape), clearing any active selection so the fresh
+          // suggestion list never steals the next Enter.
+          if (composerHistoryOpen) composerHistoryOpen = false;
+          if (composerAutocompleteDismissed) composerAutocompleteDismissed = false;
+          if (composerAutocompleteIndex !== -1) composerAutocompleteIndex = -1;
           updateComposerControls();
+          renderComposerSuggestions();
         });
         composerInput.addEventListener("compositionstart", () => {
           composerIsComposing = true;
         });
         composerInput.addEventListener("compositionend", () => {
           composerIsComposing = false;
+        });
+        // Leaving the editor (pane/mode switch, tapping away) closes both lists.
+        // Recall items commit on mousedown+preventDefault, so a pick keeps focus
+        // and this never fires mid-selection.
+        composerInput.addEventListener("blur", () => {
+          composerHistoryOpen = false;
+          dismissComposerAutocomplete();
+          renderComposerSuggestions();
         });
         // Enter behavior follows the layout (ADR-0036):
         //   - mobile layout: Enter inserts a newline. Sending is the dedicated
@@ -5818,6 +6208,119 @@
         //   - desktop layout: Enter sends, Shift+Enter is a newline. IME
         //     candidate confirmation (isComposing / keyCode 229) never submits.
         composerInput.addEventListener("keydown", (event) => {
+          const composing =
+            event.isComposing || composerIsComposing || event.keyCode === 229;
+          // Recall navigation only owns unmodified keys; modifier combos stay
+          // available as editor/app gestures.
+          const plainKey =
+            !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+
+          const historyEntries = currentComposerHistoryEntries();
+          const historyVisible = composerHistoryOpen && historyEntries.length > 0;
+          const suggestions = currentComposerSuggestions();
+          const autocompleteVisible =
+            !composerAutocompleteDismissed && suggestions.length > 0;
+          const activeAutocompleteIndex =
+            composerAutocompleteIndex >= 0 && composerAutocompleteIndex < suggestions.length
+              ? composerAutocompleteIndex
+              : -1;
+
+          // (1) While the Tab recall popup is open (empty draft, issue #504) it
+          // owns navigation/commit keys so they never leak to Send.
+          if (historyVisible && !composing) {
+            if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)) {
+              event.preventDefault();
+              composerHistoryIndex = (composerHistoryIndex + 1) % historyEntries.length;
+              renderComposerSuggestions();
+              return;
+            }
+            if (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) {
+              event.preventDefault();
+              composerHistoryIndex =
+                (composerHistoryIndex - 1 + historyEntries.length) % historyEntries.length;
+              renderComposerSuggestions();
+              return;
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              composerHistoryOpen = false;
+              renderComposerSuggestions();
+              return;
+            }
+          }
+
+          // (2) While autocomplete is open (non-empty draft, issue #505) it owns
+          // Tab/Escape and, once a suggestion is navigated to, Enter/arrows. With
+          // no active selection it deliberately leaves Enter alone so plain Enter
+          // still sends. This block sits BEFORE the Tab-open block so a non-empty
+          // draft's Tab always accepts a suggestion, never opens the recall popup.
+          if (autocompleteVisible && !composing && plainKey) {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              composerAutocompleteIndex = Math.min(
+                composerAutocompleteIndex + 1,
+                suggestions.length - 1
+              );
+              renderComposerSuggestions();
+              return;
+            }
+            if (event.key === "ArrowUp" && activeAutocompleteIndex >= 0) {
+              event.preventDefault();
+              // Leaving the list at the top (0 → −1) keeps it open but reselects
+              // the draft, restoring plain-Enter send.
+              composerAutocompleteIndex = activeAutocompleteIndex - 1;
+              renderComposerSuggestions();
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              dismissComposerAutocomplete();
+              renderComposerSuggestions();
+              return;
+            }
+            if (event.key === "Tab") {
+              // Accept the active suggestion, or the top one if none is active —
+              // the "type a prefix, Tab to complete" gesture.
+              event.preventDefault();
+              event.stopPropagation();
+              commitComposerAutocompleteEntry(
+                suggestions[activeAutocompleteIndex >= 0 ? activeAutocompleteIndex : 0]
+              );
+              return;
+            }
+            if (event.key === "Enter" && activeAutocompleteIndex >= 0) {
+              event.preventDefault();
+              commitComposerAutocompleteEntry(suggestions[activeAutocompleteIndex]);
+              return;
+            }
+          }
+
+          // (3) Tab on an empty, focused draft opens the recall popup instead of
+          // forwarding \t (which has no text to complete). This is composer-local
+          // UI navigation, not a global shortcut (api-contracts §15.5).
+          if (
+            !historyVisible &&
+            !composing &&
+            plainKey &&
+            event.key === "Tab" &&
+            historyEntries.length > 0
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            composerHistoryIndex = 0;
+            composerHistoryOpen = true;
+            renderComposerSuggestions();
+            return;
+          }
+
+          // (4) Existing Enter=Send gesture (ADR-0036, desktop layout only).
           if (event.key !== "Enter" || event.shiftKey) return;
           if (mobileLayout) return;
           if (event.isComposing || composerIsComposing || event.keyCode === 229) return;
