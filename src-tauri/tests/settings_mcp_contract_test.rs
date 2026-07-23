@@ -512,7 +512,8 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
         "terminal": {
             "pathLinkEnabled": false,
             "pathLinkMaxLength": 1024,
-            "showScrollToBottomButton": false
+            "showScrollToBottomButton": false,
+            "composerAutocomplete": false
         }
     }))
     .unwrap();
@@ -525,6 +526,10 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert!(!settings.terminal.path_link_enabled);
     assert_eq!(settings.terminal.path_link_max_length, 1024);
     assert!(!settings.terminal.show_scroll_to_bottom_button);
+    // Issue #505: the autocomplete toggle round-trips like the other terminal leaves.
+    assert!(!settings.terminal.composer_autocomplete);
+    // Both composer recall toggles default on when omitted from the JSON above.
+    assert!(settings.terminal.composer_history_popup);
 
     let serialized = serde_json::to_value(settings).unwrap();
     assert_eq!(serialized["profileDefaults"]["maxOutputCacheKB"], 512);

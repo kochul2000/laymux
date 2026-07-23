@@ -1,15 +1,15 @@
 import { create } from "zustand";
 
 interface PaneRevealStoreState {
-  /** Reference counts for panes temporarily forced through the reveal queue. */
+  /** Reference counts for panes temporarily prioritized in the startup queue. */
   requestCounts: Readonly<Record<string, number>>;
   requestReveal: (paneId: string) => () => void;
 }
 
 /**
- * Internal bridge between Automation requests and PaneGrid's progressive mount
+ * Internal bridge between Automation requests and the global terminal startup
  * queue. A request is reference-counted so concurrent writes to the same queued
- * pane cannot release each other's reveal request early.
+ * pane cannot release each other's priority request early.
  */
 export const usePaneRevealStore = create<PaneRevealStoreState>()((set) => ({
   requestCounts: {},

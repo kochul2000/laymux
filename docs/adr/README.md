@@ -57,7 +57,15 @@ ADR 이 필요한 대표 기준:
 | [0037](0037-remote-lease-takeover-and-pagehide-release.md) | Remote lease는 이탈 시 beacon으로 반납하고, 재접속은 비밀 resume capability로 이어받는다 (0027 보완) | Accepted |
 | [0038](0038-remote-height-shrink-surface-crop.md) | Remote 높이 축소는 surface-local crop — normal buffer rows 축소를 PTY에 전파하지 않음 (0015 확장) | Accepted |
 | [0039](0039-remote-spatial-notification-step-navigation.md) | Remote 공간순서·알림순서 스텝 내비게이션은 데스크톱 프론트엔드가 계산 (0018/0019/0020/0028 확장) | Accepted |
-| [0040](0040-kill-terminals-on-exit.md) | 앱 종료 시 터미널 인터럽트(kill-on-exit)는 프론트엔드가 스크롤백 캐시 앞에서 조율 | Accepted |
+| [0040](0040-remote-soft-key-user-order.md) | Remote 소프트 키는 사용자가 정한 순서를 유지한다 (0028 확장) | Accepted |
+| [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md) |
+| [0042](0042-remote-file-viewer-secret-capability.md) | Remote FileViewer는 lease-bound 비밀 capability로 호스트 파일을 읽음 (0041 권한·응답 정정) | Accepted |
+| [0043](0043-global-terminal-ready-startup-slot.md) | 터미널 시작은 앱 전역 준비 완료 슬롯으로 직렬화한다 | Accepted |
+| [0044](0044-remote-file-viewer-explicit-host-path.md) | Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행 | Accepted |
+| [0045](0045-remote-path-link-reuses-desktop-parser.md) | Remote 경로 링크는 데스크톱 파서와 CWD를 재사용해 검증한다 | Proposed |
+| [0046](0046-remote-spatial-pane-exclusions.md) | Remote 공간순회 제외 상태는 Remote 클라이언트가 소유한다 | Accepted |
+| [0047](0047-remote-spatial-workspace-exclusions.md) | Remote 공간순회 워크스페이스 제외와 pane↔workspace 승격/강등 | Accepted |
+| [0048](0048-kill-terminals-on-exit.md) | 앱 종료 시 터미널 인터럽트(kill-on-exit)는 프론트엔드가 스크롤백 캐시 앞에서 조율 | Accepted |
 
 ## 새 ADR 추가
 

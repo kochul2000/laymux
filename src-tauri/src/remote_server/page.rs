@@ -13,7 +13,11 @@ use super::internal_error;
 /// Gate the page/asset routes, which sit outside the `remote_guard` middleware.
 /// Cloud tunnel requests (WSS-authorized) only need the enable gate; direct
 /// requests go through the full token/IP/Origin base-access check.
-fn remote_page_gate(server: &ServerState, addr: SocketAddr, req: &Request) -> Option<Response> {
+pub(super) fn remote_page_gate(
+    server: &ServerState,
+    addr: SocketAddr,
+    req: &Request,
+) -> Option<Response> {
     let settings = match effective_remote_settings(&server.app_state) {
         Ok(settings) => settings,
         Err(err) => return Some(internal_error(err)),
@@ -113,7 +117,7 @@ mod tests {
         assert!(html.contains("function handleTouchTap(term, element, point)"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
-        assert!(!html.contains("event.isPrimary === false"));
+        assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
         assert!(html.contains("touchGesture.mode = \"scrolling\""));
         assert!(html.contains("touchGesture.mode = \"selecting\""));
         assert!(html.contains("mode: \"twoFingerScrolling\""));
@@ -197,6 +201,62 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_file_viewer_new_tab_handshake() {
+        let html = remote_page_html();
+        assert!(html.contains("id=\"fileViewerSection\""));
+        assert!(html.contains(
+            "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
+        ));
+        assert!(html.contains("id=\"openFileViewer\" type=\"button\" disabled>Open viewer"));
+        assert!(html.contains("id=\"pullHostFileViewerPath\""));
+        assert!(html.contains(">From host</button>"));
+        assert!(!html.contains("id=\"openCurrentFileViewer\""));
+        assert!(!html.contains("id=\"refreshFileViewer\""));
+        assert!(!html.contains("id=\"openFileViewerPath\""));
+        assert!(!html.contains("let fileViewerPathDirty = false;"));
+        assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
+        assert!(html.contains("let fileViewerPathRevision = 0;"));
+        assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
+        assert!(html.contains("/remote/viewer/"));
+        assert!(html.contains("laymux:file-viewer-ready"));
+        assert!(html.contains("laymux:file-viewer-session"));
+        assert!(html.contains("event.origin !== window.location.origin"));
+        assert!(html.contains("fileViewerToken: session.fileViewerToken"));
+        assert!(html.contains("event.isComposing ||"));
+        assert!(html.contains("event.keyCode === 229 ||"));
+        assert!(!html.contains("/remote/viewer/?token="));
+    }
+
+    #[test]
+    fn remote_page_html_contains_selected_file_path_links() {
+        let html = remote_page_html();
+        assert!(html.contains("/remote/v1/file-viewer/path-link"));
+        assert!(html.contains("function evaluatePathLinkSelection()"));
+        assert!(html.contains("function schedulePathLinkSelectionEvaluation("));
+        assert!(html.contains("const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;"));
+        assert!(html.contains("pathLinkAbortController.abort();"));
+        assert!(html.contains("const currentPosition = term.getSelectionPosition?.();"));
+        assert!(html.contains("mapRemotePathLinkRange(currentPosition, rawFirstLine, data.token)"));
+        assert!(html.contains("remote-path-link-decoration"));
+        assert!(html.contains("openFileViewerTab(press.path)"));
+        assert!(html.contains("clearPathLinkSelection()"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_jump_to_bottom_button() {
+        let html = remote_page_html();
+
+        assert!(html.contains(
+            "id=\"scrollToBottom\" class=\"terminal-scroll-to-bottom\" type=\"button\" hidden"
+        ));
+        assert!(html.contains("aria-label=\"Scroll to bottom\""));
+        assert!(html.contains("function isTerminalScrolledUp(term)"));
+        assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
+        assert!(html.contains("scrollToBottomButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("terminal.scrollToBottom();"));
+    }
+
+    #[test]
     fn remote_page_html_contains_soft_key_toolbar() {
         let html = remote_page_html();
         // Markup: toolbar row, footer toggle, and the settings popover.
@@ -208,23 +268,44 @@ mod tests {
         assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
         // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
-        assert!(html.contains(
-            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
-        ));
+        assert!(html.contains("const DEFAULT_KEYBAR = {"));
+        assert!(html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(html.contains("order: KEY_ORDER,"));
         // Predefined sets are selectable and a custom palette exists.
         assert!(html.contains("id: \"nav\", name: \"Navigation\""));
         assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
         assert!(html.contains("id: \"fn\", name: \"Function\""));
         assert!(html.contains("function resolveKeyIds()"));
         assert!(html.contains("function renderKeyPopover()"));
+        // Every enabled key appears in a compact sortable grid. Long-press drag
+        // is the primary path; selection exposes keyboard/accessibility moves.
+        assert!(html.contains("function moveKey(id, offset)"));
+        assert!(html.contains("return keyBarConfig.order.filter((id) => enabled.has(id));"));
+        assert!(html.contains("const KEY_ORDER_HOLD_MS = 180;"));
+        assert!(html.contains("function installKeyOrderDrag(chip, id)"));
+        assert!(html.contains("chip.classList.add(\"dragging\");"));
+        assert!(html.contains(
+            "target.classList.add(gesture.afterTarget ? \"drop-after\" : \"drop-before\");"
+        ));
+        assert!(html.contains("title.textContent = \"Key order\";"));
+        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset key order\");"));
+        assert!(html.contains("`Move ${accessibleName} to start`"));
+        assert!(html.contains("function appendKeyToVisibleEnd(id, visibleIds)"));
+        assert!(html.contains("section.className = \"key-order-section\";"));
+        assert!(html.contains("chip.className = \"key-chip key-order-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
-        // Pointer activation must not blur xterm's helper textarea and dismiss
-        // an already-open native keyboard. Click remains the accessible send path.
+        // Pointer/mouse activation must not blur the focused input surface and
+        // dismiss an already-open native keyboard (#482). WebKit/iOS only honors
+        // mousedown.preventDefault() for this, so both events are guarded via the
+        // shared helper. Click remains the accessible send path.
+        assert!(html.contains("function preventFocusSteal(event)"));
+        assert!(html.contains("function keepInputSurfaceFocus(button)"));
+        assert!(html.contains("button.addEventListener(\"mousedown\", preventFocusSteal);"));
+        assert!(html.contains("button.addEventListener(\"pointerdown\", preventFocusSteal);"));
         assert!(html.contains("function installSoftKey(button, id)"));
-        assert!(html.contains("button.addEventListener(\"pointerdown\", (event) => {"));
-        assert!(html.contains("event.preventDefault();"));
+        assert!(html.contains("keepInputSurfaceFocus(button);"));
         assert!(html.contains("button.addEventListener(\"click\", () => sendKey(id, button));"));
         // Cursor keys (arrows/Home/End) are DECCKM-aware: SS3 in app mode, else CSI.
         assert!(html.contains("up: { label: \"↑\", cursor: \"A\" }"));
@@ -270,9 +351,7 @@ mod tests {
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
         // Selectable via the key-set popover and enabled by default.
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
-        assert!(html.contains(
-            "const DEFAULT_KEYBAR = { visible: false, sets: [\"step\", \"nav\"], custom: [] };"
-        ));
+        assert!(html.contains("sets: [\"step\", \"nav\"],"));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
         assert!(html.contains("const NAV_FLICK_TARGETS = {"));
         assert!(html.contains("up: [\"spatial\", \"prev\"]"));
@@ -283,16 +362,66 @@ mod tests {
         // a promise chain, and the viewport follows the landing target.
         assert!(html.contains("spatial: \"/remote/v1/navigation/spatial\""));
         assert!(html.contains("notification: \"/remote/v1/navigation/notification\""));
-        assert!(html.contains("body: JSON.stringify({ leaseId, direction })"));
+        assert!(html.contains("excludedPaneIds: [...spatialExcludedPaneIds]"));
         assert!(html.contains("let navStepChain = Promise.resolve();"));
         assert!(html.contains("if (!leaseId || navStepPending >= 2) return;"));
         assert!(html.contains("await loadNavigation(data.target.terminalId || null);"));
+        assert!(
+            html.contains("no_included_panes: \"Every pane is excluded from pane navigation.\"")
+        );
         assert!(html.contains("no_unread_notifications: \"No unread notifications.\""));
         // Nav keys gate on the lease only (escape-seq keys need a terminal
         // too); alert keys idle at zero unread and carry one count badge.
         assert!(html.contains("const isAlertKey = def.nav && def.nav[0] === \"notification\";"));
         assert!(html.contains("btn.disabled = !connected || (isAlertKey && unread <= 0);"));
         assert!(html.contains("function updateNavKeyBadge(unread)"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_spatial_pane_exclusion_toggle() {
+        let html = remote_page_html();
+
+        assert!(html.contains("id=\"spatialExclusion\""));
+        assert!(html.contains("data-icon=\"circle-minus\""));
+        // Every compact Remote header action shares one explicit border-box
+        // height, including the adjacent text-bearing Composer toggle.
+        assert!(html.contains("--header-control-height: 26px;"));
+        assert!(html.contains("height: var(--header-control-height);"));
+        assert!(html.contains("laymux.remote.spatialExcludedPaneIds"));
+        assert!(html.contains("let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();"));
+        assert!(html.contains("function activeWorkspacePane()"));
+        assert!(html.contains("spatialExclusionButton.hidden = !pane;"));
+        assert!(html
+            .contains("spatialExclusionButton.setAttribute(\"aria-pressed\", String(excluded));"));
+        assert!(html.contains("spatialExclusionButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("saveSpatialExcludedPaneIds();"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_workspace_skip_toggle() {
+        let html = remote_page_html();
+
+        // Drawer per-workspace skip toggle reuses the same circle-minus icon
+        // and a Set<workspaceId> denylist persisted under its own key (#507).
+        assert!(html.contains("laymux.remote.spatialExcludedWorkspaceIds"));
+        assert!(
+            html.contains("let spatialExcludedWorkspaceIds = loadSpatialExcludedWorkspaceIds();")
+        );
+        assert!(html.contains("button.className = \"workspace-skip-button\";"));
+        assert!(html.contains(".workspace-skip-button[aria-pressed=\"true\"]"));
+        assert!(html.contains("function renderWorkspaceSkipButton(workspace)"));
+        assert!(html.contains("data-icon=\"circle-minus\""));
+        // Skip toggle must not also switch workspace (row click) — the handler
+        // stops the click from bubbling to the row.
+        assert!(html.contains("event.stopPropagation();"));
+        assert!(html.contains("saveSpatialExcludedWorkspaceIds();"));
+        // Pure promotion/demotion + on-entry reconcile rules (all panes skipped
+        // <-> workspace skipped) live in named functions.
+        assert!(html.contains("function computeSkipStateAfterPaneToggle("));
+        assert!(html.contains("function computeSkipStateAfterWorkspaceToggle("));
+        assert!(html.contains("function reconcileActiveWorkspaceSkip()"));
+        // The spatial step request carries both denylists.
+        assert!(html.contains("excludedWorkspaceIds: [...spatialExcludedWorkspaceIds]"));
     }
 
     #[test]
@@ -327,6 +456,13 @@ mod tests {
         // A dedicated Send button is the touch-device send affordance.
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("class=\"composer-send\""));
+        assert!(html.contains(
+            "data-icon=\"paper-plane\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"currentColor\""
+        ));
+        assert!(html.contains(
+            "M13.47 20.21 19.91 4.09 3.8 10.53l3.75 3.77 9.14-6.99-6.99 9.14 3.77 3.76Z"
+        ));
+        assert!(!html.contains("M12 5l6.5 6.5-1.42 1.42L13 8.83V19h-2V8.83l-4.08 4.09L5.5 11.5z"));
         assert!(html.contains("laymux.remote.inputMode"));
         assert!(html.contains("matchMedia(\"(pointer: coarse)\")"));
 
@@ -382,6 +518,103 @@ mod tests {
         assert!(html.contains("cursorInactiveStyle = \"none\""));
         assert!(html.contains("scheduleTerminalFit();"));
         assert!(html.contains("if (currentInputMode() === \"direct\")"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_composer_recall_history_and_autocomplete() {
+        let html = remote_page_html();
+
+        // Two floating listboxes over the editor: Tab recall popup (#504) and
+        // as-you-type autocomplete (#505). They share one CSS class since only
+        // one shows at a time (empty vs non-empty draft).
+        assert!(html.contains(
+            "id=\"composerHistoryList\" class=\"composer-suggest-list\" role=\"listbox\""
+        ));
+        assert!(html.contains(
+            "id=\"composerAutocompleteList\" class=\"composer-suggest-list\" role=\"listbox\""
+        ));
+        assert!(html.contains(".composer-suggest-list {"));
+        assert!(html.contains(".composer-suggest-item[aria-selected=\"true\"] {"));
+
+        // Pure selection helpers ported from the desktop
+        // terminal-input-composer-state.ts (case-insensitive prefix, newest
+        // first, de-duped, blank-skipping, exact-query excluded, capped).
+        assert!(html.contains("function selectComposerHistoryEntries(history, max"));
+        assert!(html.contains("function selectComposerAutocompleteSuggestions("));
+        assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
+        assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
+
+        // History is a RUNTIME-ONLY per-terminal Map (ADR-0029 non-persistence
+        // boundary). The sent text must never reach any persistent store — this
+        // keeps passwords/secrets typed into a shell from leaking through recall.
+        assert!(html.contains("const composerHistoryByTerminalId = new Map();"));
+        assert!(html.contains("function readComposerHistory(terminalId = activeTerminalId)"));
+        assert!(html.contains("function pushComposerHistory(terminalId, text)"));
+        assert!(html.contains("pushComposerHistory(terminalId, submission.text);"));
+        assert!(!html.contains("laymux.remote.composerHistory\""));
+        assert!(!html.contains("JSON.stringify([...composerHistoryByTerminalId"));
+        // The history read/write helpers touch no persistent storage at all.
+        let history_region_start = html.find("function readComposerHistory").unwrap();
+        let history_region_end = history_region_start
+            + html[history_region_start..]
+                .find("function selectComposerHistoryEntries")
+                .unwrap();
+        let history_region = &html[history_region_start..history_region_end];
+        assert!(
+            !history_region.contains("localStorage"),
+            "sent-input history must never touch localStorage"
+        );
+        assert!(
+            !history_region.contains("sessionStorage"),
+            "sent-input history must never touch sessionStorage"
+        );
+
+        // Only the on/off feature toggles are surface-local persisted state.
+        assert!(html.contains("laymux.remote.composerHistoryPopup"));
+        assert!(html.contains("laymux.remote.composerAutocomplete"));
+        assert!(html.contains("function loadComposerToggle(key)"));
+        assert!(html.contains("return localStorage.getItem(key) !== \"0\";"));
+        assert!(html.contains("localStorage.setItem(key, enabled ? \"1\" : \"0\");"));
+        // Toggles default ON to match the desktop composer (non-destructive).
+        assert!(html.contains("loadComposerToggle(composerHistoryPopupKey)"));
+        assert!(html.contains("loadComposerToggle(composerAutocompleteKey)"));
+
+        // #504 popup needs an EMPTY draft; #505 autocomplete needs a NON-empty
+        // draft — mutually exclusive by construction so they never fight.
+        assert!(html.contains("if (!draft || draft.text.length !== 0) return [];"));
+        assert!(html.contains("if (!draft || draft.text.length === 0) return [];"));
+
+        // Key ownership: the autocomplete block sits before the Tab-open block so
+        // a non-empty draft's Tab accepts a suggestion instead of opening recall.
+        let keydown_start = html
+            .find("composerInput.addEventListener(\"keydown\"")
+            .unwrap();
+        let keydown_region = &html[keydown_start..];
+        let autocomplete_block = keydown_region
+            .find("if (autocompleteVisible && !composing && plainKey) {")
+            .unwrap();
+        // The Tab-open action (empty draft opens the recall popup) is unique to
+        // the third block.
+        let tab_open_block = keydown_region.find("composerHistoryOpen = true;").unwrap();
+        assert!(
+            autocomplete_block < tab_open_block,
+            "autocomplete key handling must precede the Tab-open handling"
+        );
+        // Plain Enter still sends when no suggestion is highlighted (index −1);
+        // the original Enter=Send guard remains untouched below the recall logic.
+        assert!(html.contains("if (event.key === \"Enter\" && activeAutocompleteIndex >= 0) {"));
+        assert!(html.contains("commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);"));
+
+        // Recall lists reset on terminal switch, mode switch, and after a send.
+        assert!(html.contains("function resetComposerSuggestions()"));
+        assert!(html.contains("function renderComposerSuggestions()"));
+
+        // Feature toggles live in the existing key-set popover (Remote settings
+        // home), accessible and aria-labelled.
+        assert!(html.contains("function renderComposerPopoverSection()"));
+        assert!(html.contains("title.textContent = \"Composer recall\";"));
+        assert!(html.contains("\"composerHistoryPopupToggle\""));
+        assert!(html.contains("\"composerAutocompleteToggle\""));
     }
 
     #[test]
@@ -599,6 +832,27 @@ mod tests {
         assert!(
             !preferred_terminal.contains("if (preferredTerminalId) {\n            const existing")
         );
+    }
+
+    #[test]
+    fn remote_page_keeps_last_selection_only_in_document_memory() {
+        let html = remote_page_html();
+
+        assert!(html.contains("let lastSelectedTerminalId = null;"));
+        assert!(html.contains("if (nextId) {\n            lastSelectedTerminalId = nextId;"));
+        assert!(html.contains("preferredTerminalId = activeTerminalId || lastSelectedTerminalId"));
+        assert!(!html.contains("laymux.remote.lastSelectedTerminalId"));
+
+        // Per-workspace resume hint (issue #508): surface-local map, never
+        // persisted, consulted first when re-entering a workspace.
+        assert!(html.contains("const lastSelectedTerminalIdByWorkspace = new Map();"));
+        assert!(html.contains(
+            "if (workspaceId) lastSelectedTerminalIdByWorkspace.set(workspaceId, nextId);"
+        ));
+        assert!(html.contains(
+            "await loadNavigation(lastSelectedTerminalIdByWorkspace.get(workspaceId) || null);"
+        ));
+        assert!(!html.contains("laymux.remote.lastSelectedTerminalIdByWorkspace"));
     }
 
     #[test]

@@ -16,7 +16,17 @@ pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
+/// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
+/// the laymux process flips. Payload is a bool: `true` while the window is being
+/// viewed over a remote session. The UI uses it to auto-open the Remote Access
+/// panel when the window is entered from a phone RDP client (see
+/// `useAutoRemoteAccessPrompt`).
+pub const EVENT_REMOTE_SESSION_CHANGED: &str = "remote-session-changed";
 pub const EVENT_TERMINAL_OUTPUT_V2_PREFIX: &str = "terminal-output-v2-";
+
+/// Poll interval for the OS remote-session watcher. RDP connect/disconnect is a
+/// rare, human-scale event, so a slow poll keeps the cost negligible.
+pub const REMOTE_SESSION_POLL: Duration = Duration::from_secs(2);
 
 // ── Environment variable names ─────────────────────────────────────
 
@@ -91,6 +101,13 @@ pub const PTY_CONTROL_QUEUE_CAPACITY: usize = 64;
 pub const PTY_CONTROL_JOB_TIMEOUT_MS: u64 = 15_000;
 /// Poll cadence used while waiting for owner cancellation or worker completion.
 pub const PTY_CONTROL_WAIT_POLL_MS: u64 = 10;
+/// Delay inserted between the input body and the submit carriage return so a
+/// TUI (Codex/Claude Code) or shell (PowerShell/PSReadLine, WSL) registers the
+/// CR as a distinct Enter keypress instead of folding it into a bracketed paste
+/// of the body. Sending them fused makes the line get typed but never submitted
+/// until a second lone CR arrives (#490; the MCP write path already splits this
+/// way per #314). Harmless where unneeded — only adds latency.
+pub const ENTER_SUBMIT_CR_DELAY_MS: u64 = 300;
 /// Grace after cancellation before the PTY is faulted and terminated.
 pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
 /// Final bounded wait for the platform worker to acknowledge PTY termination.
@@ -126,6 +143,25 @@ pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 16;
 /// context so a TUI attach is not visibly empty.
 pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
 pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
+
+/// Maximum source bytes returned by one Remote FileViewer render request.
+/// The frontend may expand images through base64 and preview documents, so the
+/// source cap stays deliberately small and is enforced before image reads.
+pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
+
+/// Maximum Unicode scalar count accepted from one Remote terminal selection
+/// before the desktop path-link parser runs. This matches the maximum valid
+/// `terminal.pathLinkMaxLength` setting.
+pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
+
+/// Maximum Unicode scalar count accepted for the terminal id attached to a
+/// Remote path-link validation request. Runtime terminal ids are much shorter;
+/// this only prevents an authenticated client from forwarding an unbounded id
+/// through the async frontend bridge.
+pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
+
+/// Secret-capability header required by Remote FileViewer endpoints.
+pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
 
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal
@@ -226,6 +262,7 @@ mod tests {
             EVENT_CLAUDE_MESSAGE_CHANGED,
             EVENT_TERMINAL_OUTPUT_ACTIVITY,
             EVENT_REMOTE_CONTROL_CHANGED,
+            EVENT_REMOTE_SESSION_CHANGED,
             EVENT_WORKSPACE_STATE_CHANGED,
             EVENT_TERMINALS_LIST_CHANGED,
         ];

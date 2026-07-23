@@ -31,6 +31,10 @@ const NOTIFICATION_DIRECTIONS: [&str; 2] = ["recent", "oldest"];
 pub(super) struct NavigationStepRequest {
     direction: String,
     lease_id: Option<String>,
+    #[serde(default)]
+    excluded_pane_ids: Vec<String>,
+    #[serde(default)]
+    excluded_workspace_ids: Vec<String>,
 }
 
 pub(super) async fn remote_navigation_spatial_step(
@@ -61,7 +65,11 @@ pub(super) async fn remote_navigation_spatial_step(
         "action",
         "navigation",
         "spatialStep",
-        serde_json::json!({ "direction": body.direction.clone() }),
+        serde_json::json!({
+            "direction": body.direction.clone(),
+            "excludedPaneIds": body.excluded_pane_ids,
+            "excludedWorkspaceIds": body.excluded_workspace_ids,
+        }),
     )
     .await
     {
@@ -186,11 +194,14 @@ mod tests {
 
     #[test]
     fn request_reads_direction_and_body_lease() {
-        let body =
-            navigation_step_request_from_body(br#"{"direction":"next","leaseId":"lease-body"}"#)
-                .unwrap();
+        let body = navigation_step_request_from_body(
+            br#"{"direction":"next","leaseId":"lease-body","excludedPaneIds":["pane-a","pane-c"],"excludedWorkspaceIds":["ws-2"]}"#,
+        )
+        .unwrap();
         assert_eq!(body.direction, "next");
         assert_eq!(body.lease_id.as_deref(), Some("lease-body"));
+        assert_eq!(body.excluded_pane_ids, vec!["pane-a", "pane-c"]);
+        assert_eq!(body.excluded_workspace_ids, vec!["ws-2"]);
     }
 
     #[test]
@@ -198,6 +209,8 @@ mod tests {
         let body = navigation_step_request_from_body(br#"{"direction":"recent"}"#).unwrap();
         assert_eq!(body.direction, "recent");
         assert!(body.lease_id.is_none());
+        assert!(body.excluded_pane_ids.is_empty());
+        assert!(body.excluded_workspace_ids.is_empty());
     }
 
     #[test]

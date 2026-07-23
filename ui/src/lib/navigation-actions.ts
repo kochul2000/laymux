@@ -14,11 +14,12 @@ import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 /**
- * Shared step-navigation orchestration (issue #474, ADR-0039).
+ * Shared step-navigation orchestration (issue #474, ADR-0039, ADR-0046, ADR-0047).
  *
- * Both the desktop keyboard shortcuts and the remote bridge actions
- * (`navigation.spatialStep`/`navigation.notificationStep`) consume these
- * functions so the two surfaces can never drift apart semantically.
+ * Notification navigation is shared with desktop keyboard shortcuts. Spatial
+ * navigation is a Remote-only action and applies the controlling Remote
+ * client's surface-local exclusions at both pane and whole-workspace
+ * granularity.
  */
 
 export type NotificationDirection = "recent" | "oldest";
@@ -37,7 +38,11 @@ export type NavigationStepResult =
   | { moved: true; target: NavigationStepTarget; consumedNotificationIds?: string[] }
   | {
       moved: false;
-      reason: "no_terminal_panes" | "no_other_target" | "no_unread_notifications";
+      reason:
+        | "no_terminal_panes"
+        | "no_included_panes"
+        | "no_other_target"
+        | "no_unread_notifications";
     };
 
 const toTerminalId = (paneId: string) => `terminal-${paneId}`;
@@ -63,10 +68,21 @@ export function getSortedWorkspaces() {
  * workspace boundaries (cyclic). Lands with dock focus cleared and the target
  * pane focused, mirroring the desktop workspace-switch invariant.
  */
-export function spatialStep(direction: SpatialDirection): NavigationStepResult {
+export function spatialStep(
+  direction: SpatialDirection,
+  excludedPaneIds: ReadonlySet<string> = new Set(),
+  excludedWorkspaceIds: ReadonlySet<string> = new Set(),
+): NavigationStepResult {
   const { workspaces, visibleWorkspaces } = getSortedWorkspaces();
-  const entries = buildSpatialOrder(visibleWorkspaces);
-  if (entries.length === 0) return { moved: false, reason: "no_terminal_panes" };
+  const entries = buildSpatialOrder(visibleWorkspaces, excludedPaneIds, excludedWorkspaceIds);
+  if (entries.length === 0) {
+    const hasExclusions = excludedPaneIds.size > 0 || excludedWorkspaceIds.size > 0;
+    const hasEligiblePane = hasExclusions && buildSpatialOrder(visibleWorkspaces).length > 0;
+    return {
+      moved: false,
+      reason: hasEligiblePane ? "no_included_panes" : "no_terminal_panes",
+    };
+  }
 
   const workspaceState = useWorkspaceStore.getState();
   const activeWorkspaceId = workspaceState.activeWorkspaceId;

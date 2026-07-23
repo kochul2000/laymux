@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TerminalInputComposer, type TerminalInputComposerLabels } from "./TerminalInputComposer";
@@ -9,6 +9,8 @@ const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
   placeholder: "Type before sending",
   resize: "Resize input area",
+  history: "Recent inputs",
+  autocomplete: "Input suggestions",
 };
 
 function renderComposer(
@@ -267,6 +269,324 @@ describe("TerminalInputComposer", () => {
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "ArrowUp" });
     expect(onHistory).not.toHaveBeenCalled();
     expect(onKeyPassthrough).toHaveBeenCalled();
+  });
+
+  describe("Tab history popup (issue #504)", () => {
+    const history = ["first", "second", "third"];
+
+    it("opens a newest-first list on Tab when the empty draft has history", () => {
+      const onKeyPassthrough = vi.fn().mockReturnValue(true);
+      renderComposer({
+        text: "",
+        historyPopupEnabled: true,
+        history,
+        onKeyPassthrough,
+      });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+      const tab = createEvent.keyDown(textarea, { key: "Tab" });
+      fireEvent(textarea, tab);
+
+      expect(tab.defaultPrevented).toBe(true);
+      // Tab opens the recall list instead of leaking \t to the terminal.
+      expect(onKeyPassthrough).not.toHaveBeenCalled();
+      const list = screen.getByTestId("composer-history");
+      expect(list).toHaveAttribute("role", "listbox");
+      // The textarea's aria-controls must resolve to the listbox's own id, not
+      // dangle on a non-existent element (a11y: issue #504 review).
+      expect(list).toHaveAttribute("id", "composer-history");
+      expect(textarea).toHaveAttribute("aria-controls", list.id);
+      const options = screen.getAllByRole("option");
+      expect(options.map((o) => o.textContent)).toEqual(["third", "second", "first"]);
+    });
+
+    it("passes Tab through when the popup is disabled", () => {
+      const onKeyPassthrough = vi.fn().mockReturnValue(true);
+      renderComposer({ text: "", historyPopupEnabled: false, history, onKeyPassthrough });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      expect(onKeyPassthrough).toHaveBeenCalled();
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
+
+    it("does not open on a non-empty draft or with empty history", () => {
+      const { rerender } = render(
+        <TerminalInputComposer
+          mode="composer"
+          text="typed"
+          labels={labels}
+          historyPopupEnabled
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "Tab" });
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+
+      rerender(
+        <TerminalInputComposer
+          mode="composer"
+          text=""
+          labels={labels}
+          historyPopupEnabled
+          history={[]}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "Tab" });
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
+
+    it("navigates with arrows and fills the draft on Enter", () => {
+      const onTextChange = vi.fn();
+      const onSend = vi.fn();
+      renderComposer({ text: "", historyPopupEnabled: true, history, onTextChange, onSend });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      fireEvent.keyDown(textarea, { key: "ArrowDown" }); // third -> second
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      expect(onTextChange).toHaveBeenCalledWith("second");
+      // Enter chose an entry — it must not also submit the draft.
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
+
+    it("fills the draft when an entry is clicked", () => {
+      const onTextChange = vi.fn();
+      renderComposer({ text: "", historyPopupEnabled: true, history, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      fireEvent.mouseDown(screen.getByText("first"));
+
+      expect(onTextChange).toHaveBeenCalledWith("first");
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
+
+    it("closes on Escape without touching the draft", () => {
+      const onTextChange = vi.fn();
+      renderComposer({ text: "", historyPopupEnabled: true, history, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      expect(screen.getByTestId("composer-history")).toBeInTheDocument();
+      const escape = createEvent.keyDown(textarea, { key: "Escape" });
+      fireEvent(textarea, escape);
+
+      expect(escape.defaultPrevented).toBe(true);
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
+
+    it("does not recall edge history via ArrowUp while the popup is open", () => {
+      const onHistory = vi.fn().mockReturnValue(true);
+      renderComposer({
+        text: "",
+        atShellPrompt: true,
+        historyPopupEnabled: true,
+        history,
+        onHistory,
+      });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      // ArrowUp moves the popup selection; it must not trigger edge history recall.
+      expect(onHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("typing autocomplete (issue #505)", () => {
+    // Newest-first prefix matches for "git": ["git push", "git checkout", "git commit"].
+    const history = ["git commit", "git checkout", "git push"];
+
+    it("shows newest-first prefix matches while typing when enabled", () => {
+      renderComposer({ text: "git", autocompleteEnabled: true, history });
+
+      const list = screen.getByTestId("composer-autocomplete");
+      expect(list).toHaveAttribute("role", "listbox");
+      // The textarea's aria-controls must resolve to the listbox's own id, not
+      // dangle on a non-existent element (a11y: issue #505 review).
+      expect(list).toHaveAttribute("id", "composer-autocomplete");
+      expect(screen.getByRole("textbox", { name: "Terminal input" })).toHaveAttribute(
+        "aria-controls",
+        list.id,
+      );
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "git push",
+        "git checkout",
+        "git commit",
+      ]);
+    });
+
+    it("shows nothing when disabled, on an empty draft, or with no prefix match", () => {
+      const { rerender } = render(
+        <TerminalInputComposer
+          mode="composer"
+          text="git"
+          labels={labels}
+          autocompleteEnabled={false}
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+
+      // Empty draft belongs to the Tab history popup, not autocomplete.
+      rerender(
+        <TerminalInputComposer
+          mode="composer"
+          text=""
+          labels={labels}
+          autocompleteEnabled
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+
+      rerender(
+        <TerminalInputComposer
+          mode="composer"
+          text="docker"
+          labels={labels}
+          autocompleteEnabled
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("does not hijack plain Enter when no suggestion is active (Enter still sends)", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      renderComposer({ text: "git", autocompleteEnabled: true, history, onSend, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onTextChange).not.toHaveBeenCalled();
+    });
+
+    it("fills the draft on Enter once a suggestion is navigated to (no send)", () => {
+      const onSend = vi.fn();
+      const onTextChange = vi.fn();
+      renderComposer({ text: "git", autocompleteEnabled: true, history, onSend, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      fireEvent.keyDown(textarea, { key: "ArrowDown" }); // select "git push"
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      expect(onTextChange).toHaveBeenCalledWith("git push");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("accepts the top suggestion on Tab without navigating first", () => {
+      const onTextChange = vi.fn();
+      renderComposer({ text: "git", autocompleteEnabled: true, history, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      const tab = createEvent.keyDown(textarea, { key: "Tab" });
+      fireEvent(textarea, tab);
+
+      expect(tab.defaultPrevented).toBe(true);
+      expect(onTextChange).toHaveBeenCalledWith("git push");
+    });
+
+    it("dismisses on Escape without touching the draft", () => {
+      const onTextChange = vi.fn();
+      renderComposer({ text: "git", autocompleteEnabled: true, history, onTextChange });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+      expect(screen.getByTestId("composer-autocomplete")).toBeInTheDocument();
+      const escape = createEvent.keyDown(textarea, { key: "Escape" });
+      fireEvent(textarea, escape);
+
+      expect(escape.defaultPrevented).toBe(true);
+      expect(onTextChange).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("fills the draft when a suggestion is clicked", () => {
+      const onTextChange = vi.fn();
+      renderComposer({ text: "git", autocompleteEnabled: true, history, onTextChange });
+
+      fireEvent.mouseDown(screen.getByText("git checkout"));
+      expect(onTextChange).toHaveBeenCalledWith("git checkout");
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+    });
+
+    it("lets ArrowUp fall through to edge history recall when no suggestion is active", () => {
+      const onHistory = vi.fn().mockReturnValue(true);
+      renderComposer({
+        text: "git",
+        atShellPrompt: true,
+        autocompleteEnabled: true,
+        history,
+        onHistory,
+      });
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+      // Cursor at the very start so edge ArrowUp recall is eligible.
+      const ta = textarea as HTMLTextAreaElement;
+      ta.setSelectionRange(0, 0);
+
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      // No suggestion selected yet, so ArrowUp is not consumed by autocomplete.
+      expect(onHistory).toHaveBeenCalledWith("prev");
+    });
+
+    it("keeps the Tab history popup and typing autocomplete mutually exclusive", () => {
+      const { rerender } = render(
+        <TerminalInputComposer
+          mode="composer"
+          text=""
+          labels={labels}
+          historyPopupEnabled
+          autocompleteEnabled
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      // Empty draft: Tab opens the history popup, autocomplete stays hidden.
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "Tab" });
+      expect(screen.getByTestId("composer-history")).toBeInTheDocument();
+      expect(screen.queryByTestId("composer-autocomplete")).not.toBeInTheDocument();
+
+      // Typed draft: autocomplete shows, the history popup stays hidden.
+      rerender(
+        <TerminalInputComposer
+          mode="composer"
+          text="git"
+          labels={labels}
+          historyPopupEnabled
+          autocompleteEnabled
+          history={history}
+          onTextChange={vi.fn()}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      expect(screen.getByTestId("composer-autocomplete")).toBeInTheDocument();
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+    });
   });
 
   it("preserves the draft across mode switches without coupling them", async () => {

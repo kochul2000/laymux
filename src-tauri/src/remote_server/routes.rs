@@ -37,6 +37,10 @@ use super::navigation_step_routes::{
 };
 use super::page::{remote_page, remote_page_redirect};
 use super::terminal_info::remote_terminal_infos;
+use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
+use super::viewer_routes::{
+    remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
+};
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -50,15 +54,16 @@ struct ClaimRequest {
     resume_token: Option<String>,
 }
 
-/// Successful claim payload: the shared status plus the secret resume
-/// capability. The token appears only here — status and conflict responses
-/// must never carry it.
+/// Successful claim payload: the shared status plus the secret, separately
+/// scoped capabilities. The tokens appear only here — status and conflict
+/// responses must never carry them.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaimResponse {
     #[serde(flatten)]
     status: RemoteControlStatus,
     resume_token: String,
+    file_viewer_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +157,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/terminals/{id}/output",
             get(remote_terminal_output_ws),
         )
+        .route(
+            "/remote/v1/file-viewer/status",
+            get(remote_file_viewer_status),
+        )
+        .route(
+            "/remote/v1/file-viewer/render",
+            post(remote_file_viewer_render),
+        )
+        .route(
+            "/remote/v1/file-viewer/path-link",
+            post(remote_file_viewer_path_link),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
         .layer(CorsLayer::permissive());
 
@@ -161,6 +178,8 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route("/remote/vendor/xterm.js", get(remote_xterm_js))
         .route("/remote/vendor/xterm.css", get(remote_xterm_css))
         .route("/remote/vendor/addon-fit.js", get(remote_addon_fit_js))
+        .route("/remote/viewer/", get(remote_viewer_page))
+        .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)
 }
 
@@ -286,9 +305,11 @@ fn attempt_claim(
         timeout,
     );
     let resume_token = current.issue_resume_capability(&lease_id);
+    let file_viewer_token = current.issue_file_viewer_capability(&lease_id);
     ClaimAttempt::Granted(Box::new(ClaimResponse {
         status: status_from_state(current, timeout_seconds),
         resume_token,
+        file_viewer_token,
     }))
 }
 
@@ -869,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_response_returns_the_resume_token_next_to_the_flattened_status() {
+    fn claim_response_returns_both_secret_capabilities_next_to_the_flattened_status() {
         let settings = enabled_settings();
         let mut control = RemoteControlState::default();
         let granted = expect_granted(attempt_claim(
@@ -883,6 +904,8 @@ mod tests {
         assert_eq!(body["active"], true);
         assert_eq!(body["leaseId"], granted.status.lease_id.clone().unwrap());
         assert_eq!(body["resumeToken"], granted.resume_token);
+        assert_eq!(body["fileViewerToken"], granted.file_viewer_token);
+        assert_ne!(granted.file_viewer_token, granted.resume_token);
     }
 
     #[test]
@@ -927,6 +950,10 @@ mod tests {
         ));
         assert_ne!(second.status.lease_id, first.status.lease_id);
         assert_ne!(second.resume_token, first.resume_token);
+        assert_ne!(second.file_viewer_token, first.file_viewer_token);
+        let second_lease_id = second.status.lease_id.as_deref().unwrap();
+        assert!(control.file_viewer_capability_matches(second_lease_id, &second.file_viewer_token));
+        assert!(!control.file_viewer_capability_matches(second_lease_id, &first.file_viewer_token));
 
         // The consumed capability is dead.
         let rejected = expect_rejected(attempt_claim(

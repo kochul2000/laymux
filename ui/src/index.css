@@ -185,6 +185,10 @@
     cursor: not-allowed;
   }
   .workspace-quick-hide {
+    /* At rest the button is invisible; take it out of flow so it does not
+       reserve width to the right of the count badge (keeps the badge flush
+       right). It rejoins the flow on hover/focus below. */
+    position: absolute;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--transition-fast);
@@ -198,6 +202,7 @@
   }
   .workspace-item-animated:hover .workspace-quick-hide,
   .workspace-item-animated:focus-within .workspace-quick-hide {
+    position: static;
     opacity: 1;
     pointer-events: auto;
   }
@@ -651,9 +656,9 @@
   }
 }
 
-/* Placeholder shown in a pane slot while its real view is queued for mounting
-   (staggered reveal — see usePaneRevealQueue). Dark background matches the pane
-   backstop so the user never sees an unpainted white box. */
+/* Placeholder shown in a pane slot while its terminal waits for the app-global
+   startup slot. Dark background matches the pane backstop so the user never
+   sees an unpainted white box. */
 .pane-loading-placeholder {
   position: absolute;
   inset: 0;
@@ -663,8 +668,8 @@
   background: var(--bg-base);
 }
 
-/* Respect reduced-motion: stop the spinner animation (the reveal queue itself
-   also collapses to a synchronous reveal under prefers-reduced-motion). */
+/* Respect reduced-motion for the indicator. Startup remains serialized because
+   the queue is a resource-safety boundary, not an animation. */
 @media (prefers-reduced-motion: reduce) {
   .terminal-loading-spinner {
     animation: none;

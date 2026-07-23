@@ -16,6 +16,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { readFileForViewer } from "@/lib/tauri-api";
 import {
   registerTerminalScroller,
   unregisterTerminalScroller,
@@ -26,6 +27,7 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
+  readFileForViewer: vi.fn(),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -731,12 +733,92 @@ describe("handleAutomationRequest", () => {
 
 describe("handleAsyncAutomationRequest", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     document.body.innerHTML = "";
     document.documentElement.querySelectorAll("canvas").forEach((node) => node.remove());
     vi.mocked(html2canvas).mockReset();
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
     useDockStore.setState(useDockStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useFileViewerStore.setState(useFileViewerStore.getInitialState());
+  });
+
+  it("reports and renders the current file viewer through the async bridge", async () => {
+    useFileViewerStore.setState({ open: true, path: "/tmp/readme.md", maximized: false });
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "# Remote viewer",
+      truncated: false,
+    });
+
+    const status = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-status",
+      category: "query",
+      target: "fileViewer",
+      method: "status",
+      params: {},
+    });
+    const rendered = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-render-current",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: { source: "current", maxBytes: 8_388_608 },
+    });
+
+    expect(status).toEqual({
+      success: true,
+      data: { open: true, path: "/tmp/readme.md" },
+    });
+    expect(readFileForViewer).toHaveBeenCalledWith("/tmp/readme.md", 8_388_608);
+    expect(rendered.success).toBe(true);
+    expect(rendered.data).toMatchObject({
+      kind: "text",
+      path: "/tmp/readme.md",
+      previewKind: "markdown",
+      truncated: false,
+    });
+    expect(rendered.data).toHaveProperty("previewDocument");
+    expect(rendered.data).not.toHaveProperty("content");
+  });
+
+  it("renders an explicit path without opening the desktop viewer", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 4096 });
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-render-path",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: { source: "path", path: "  C:\\temp\\archive.zip  ", maxBytes: 1024 },
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: { kind: "binary", path: "C:\\temp\\archive.zip", size: 4096 },
+    });
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("rejects a closed current viewer and invalid render bounds", async () => {
+    const closed = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-render-closed",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: { source: "current", maxBytes: 1024 },
+    });
+    const invalid = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-render-invalid",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: { source: "path", path: "/tmp/a.txt", maxBytes: 0 },
+    });
+
+    expect(closed).toEqual({ success: false, error: "No file is open in the desktop viewer" });
+    expect(invalid).toEqual({ success: false, error: "maxBytes must be a positive integer" });
+    expect(readFileForViewer).not.toHaveBeenCalled();
   });
 
   it("returns a full frontend settings snapshot for backend validation", async () => {
@@ -2321,6 +2403,76 @@ describe("navigation step actions (issue #474)", () => {
     // Mirrors terminals.setFocus: the landing terminal takes terminal-store focus.
     const landed = useTerminalStore.getState().instances.find((i) => i.id === "terminal-b1");
     expect(landed?.isFocused).toBe(true);
+  });
+
+  it("spatialStep applies the Remote client's excluded pane ids through the bridge", async () => {
+    seedTwoWorkspaces();
+    useGridStore.getState().setFocusedPane(0); // a1; a2 is normally next
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedPaneIds: ["a2"] },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      moved: true,
+      target: { workspaceId: "ws-b", terminalId: "terminal-b1" },
+    });
+  });
+
+  it("spatialStep rejects a malformed excluded pane list", async () => {
+    seedTwoWorkspaces();
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-bad-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedPaneIds: "a2" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("excludedPaneIds");
+  });
+
+  it("spatialStep applies the Remote client's excluded workspace ids through the bridge", async () => {
+    seedTwoWorkspaces();
+    useGridStore.getState().setFocusedPane(0); // a1; a2 is normally next
+
+    // ws-b excluded wholesale — stepping next from a1 stays inside ws-a and
+    // lands on a2 rather than crossing into ws-b.
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-ws-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedWorkspaceIds: ["ws-b"] },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      moved: true,
+      target: { workspaceId: "ws-a", terminalId: "terminal-a2" },
+    });
+  });
+
+  it("spatialStep rejects a malformed excluded workspace list", async () => {
+    seedTwoWorkspaces();
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "nav-bad-ws-exclusions",
+      category: "action",
+      target: "navigation",
+      method: "spatialStep",
+      params: { direction: "next", excludedWorkspaceIds: [42] },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("excludedWorkspaceIds");
   });
 
   it("spatialStep no-op returns moved:false without waiting for a terminal", async () => {

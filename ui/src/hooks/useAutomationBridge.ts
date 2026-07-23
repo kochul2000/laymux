@@ -10,6 +10,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
@@ -24,6 +25,7 @@ import type {
 } from "@/stores/types";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 import * as navigationActions from "@/lib/navigation-actions";
+import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 
 interface HandlerResult {
   success: boolean;
@@ -35,7 +37,7 @@ type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
-const TERMINAL_SESSION_READY_TIMEOUT_MS = 4000;
+const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -447,7 +449,28 @@ const handlers: HandlerMap = {
       if (direction !== "prev" && direction !== "next") {
         return err(`Invalid direction '${String(direction)}': expected "prev" or "next"`);
       }
-      return ok(navigationActions.spatialStep(direction));
+      const excludedPaneIds = p.excludedPaneIds;
+      if (
+        excludedPaneIds !== undefined &&
+        (!Array.isArray(excludedPaneIds) || excludedPaneIds.some((id) => typeof id !== "string"))
+      ) {
+        return err("Invalid excludedPaneIds: expected an array of pane id strings");
+      }
+      const excludedWorkspaceIds = p.excludedWorkspaceIds;
+      if (
+        excludedWorkspaceIds !== undefined &&
+        (!Array.isArray(excludedWorkspaceIds) ||
+          excludedWorkspaceIds.some((id) => typeof id !== "string"))
+      ) {
+        return err("Invalid excludedWorkspaceIds: expected an array of workspace id strings");
+      }
+      return ok(
+        navigationActions.spatialStep(
+          direction,
+          new Set<string>((excludedPaneIds as string[] | undefined) ?? []),
+          new Set<string>((excludedWorkspaceIds as string[] | undefined) ?? []),
+        ),
+      );
     },
     notificationStep: (p) => {
       const direction = p.direction;
@@ -1064,6 +1087,9 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "fileViewer") {
+    return handleRemoteFileViewerRequest(request.method, request.params);
+  }
   if (request.target === "settings" && request.method === "getSnapshot") {
     try {
       return ok({ settings: await collectSettingsSnapshot() });

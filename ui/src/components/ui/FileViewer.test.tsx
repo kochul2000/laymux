@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
 import { openExternal, readFileForViewer } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   openExternal: vi.fn().mockResolvedValue(undefined),
@@ -39,6 +40,11 @@ describe("FileViewer", () => {
       truncated: false,
     });
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: [baseProps.viewerInstanceId],
+      eligiblePaneIds: [baseProps.viewerInstanceId],
+    });
   });
 
   it("renders text content for a web viewer", async () => {
@@ -130,6 +136,32 @@ describe("FileViewer", () => {
       "data-viewer-path",
       "/home/user/README.md",
     );
+  });
+
+  it("keeps a terminal viewer queued until the global startup slot reveals it", async () => {
+    useSettingsStore.setState({
+      fileExplorer: {
+        ...useSettingsStore.getState().fileExplorer,
+        extensionViewers: [{ extensions: [".md"], command: "vi", profile: "WSL" }],
+      },
+    });
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
+
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/README.md" />);
+    });
+
+    expect(screen.getByTestId("file-viewer-terminal-startup-placeholder")).toBeInTheDocument();
+    expect(screen.queryByTestId("mock-terminal-view")).not.toBeInTheDocument();
+
+    act(() => {
+      useTerminalStartupStore.getState().syncCandidates({
+        knownPaneIds: [baseProps.viewerInstanceId],
+        eligiblePaneIds: [baseProps.viewerInstanceId],
+      });
+    });
+
+    expect(screen.getByTestId("mock-terminal-view")).toBeInTheDocument();
   });
 
   it("renders an image for image content", async () => {

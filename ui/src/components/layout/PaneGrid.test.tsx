@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, within, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
 vi.mock("@/components/views/TerminalView", () => ({
@@ -28,6 +28,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -44,6 +45,7 @@ describe("PaneGrid", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -444,15 +446,12 @@ describe("PaneGrid", () => {
   });
 });
 
-describe("PaneGrid staggered reveal", () => {
+describe("PaneGrid global terminal startup", () => {
   beforeEach(() => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
+    useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
   });
 
   const base = {
@@ -467,39 +466,58 @@ describe("PaneGrid staggered reveal", () => {
   const revealedCount = () =>
     Number(screen.getByTestId("grid").getAttribute("data-pane-revealed-count"));
 
-  it("mounts only the initial batch, then reveals the rest one frame at a time", () => {
-    act(() => {
-      render(<PaneGrid {...base} panes={makePanes(8)} isFocused={() => false} />);
+  it("mounts exactly one terminal, then waits for its startup settlement", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: makePanes(3).map((pane) => pane.id),
+      eligiblePaneIds: makePanes(3).map((pane) => pane.id),
     });
-    // Initial batch = 4 revealed, remaining 4 show placeholders.
-    expect(revealedCount()).toBe(4);
-    expect(placeholderCount()).toBe(4);
-
-    for (let i = 0; i < 4; i++) act(() => vi.advanceTimersByTime(16));
-
-    expect(revealedCount()).toBe(8);
-    expect(placeholderCount()).toBe(0);
-  });
-
-  it("reveals small layouts (≤ batch) synchronously with no placeholders", () => {
     act(() => {
       render(<PaneGrid {...base} panes={makePanes(3)} isFocused={() => false} />);
     });
-    expect(revealedCount()).toBe(3);
-    expect(placeholderCount()).toBe(0);
+    expect(revealedCount()).toBe(1);
+    expect(placeholderCount()).toBe(2);
+
+    act(() => useTerminalStartupStore.getState().settleStartup("pane-0"));
+
+    expect(revealedCount()).toBe(2);
+    expect(placeholderCount()).toBe(1);
   });
 
-  it("never shows the focused pane as a placeholder", () => {
+  it("reveals non-terminal panes immediately without consuming the terminal slot", () => {
+    const panes: GridPane[] = [
+      ...makePanes(2),
+      { id: "memo", view: { type: "MemoView" }, x: 0, y: 0, w: 1, h: 1 },
+    ];
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: ["pane-0", "pane-1"],
+      eligiblePaneIds: ["pane-0", "pane-1"],
+    });
+    act(() => {
+      render(<PaneGrid {...base} panes={panes} isFocused={() => false} />);
+    });
+    expect(revealedCount()).toBe(2);
+    expect(placeholderCount()).toBe(1);
+  });
+
+  it("uses the globally granted focused pane instead of bypassing the slot locally", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: makePanes(8).map((pane) => pane.id),
+      eligiblePaneIds: ["pane-7", ...makePanes(7).map((pane) => pane.id)],
+    });
     act(() => {
       render(<PaneGrid {...base} panes={makePanes(8)} isFocused={(id) => id === "pane-7"} />);
     });
-    // pane-7 is beyond the array-order initial batch but is focused → revealed.
     expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+    expect(revealedCount()).toBe(1);
   });
 
-  it("mounts a queued pane immediately when Automation requests it", () => {
+  it("does not let an Automation request bypass an already occupied global slot", () => {
+    useTerminalStartupStore.getState().syncCandidates({
+      knownPaneIds: makePanes(8).map((pane) => pane.id),
+      eligiblePaneIds: makePanes(8).map((pane) => pane.id),
+    });
     act(() => {
-      render(<PaneGrid {...base} panes={makePanes(8)} isActive={false} isFocused={() => false} />);
+      render(<PaneGrid {...base} panes={makePanes(8)} isFocused={() => false} />);
     });
     expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).not.toBeNull();
 
@@ -507,7 +525,7 @@ describe("PaneGrid staggered reveal", () => {
     act(() => {
       release = usePaneRevealStore.getState().requestReveal("pane-7");
     });
-    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).toBeNull();
+    expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).not.toBeNull();
 
     act(() => release());
   });

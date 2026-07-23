@@ -122,6 +122,61 @@ describe("navigation-actions", () => {
       expect(result).toMatchObject({ moved: true, target: { workspaceId: "ws3" } });
     });
 
+    it("skips panes excluded by the Remote client", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0); // pane a
+
+      const excluded = new Set(["b"]);
+      const first = spatialStep("next", excluded);
+      expect(first).toMatchObject({ moved: true, target: { workspaceId: "ws2", paneId: "c" } });
+
+      const second = spatialStep("next", excluded);
+      expect(second).toMatchObject({ moved: true, target: { workspaceId: "ws1", paneId: "a" } });
+    });
+
+    it("keeps every pane included by default and ignores stale exclusions", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(spatialStep("next", new Set(["stale-pane"]))).toMatchObject({
+        moved: true,
+        target: { workspaceId: "ws1", paneId: "b" },
+      });
+    });
+
+    it("reports no_included_panes when the Remote client excludes every eligible pane", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(spatialStep("next", new Set(["a", "b", "c"]))).toEqual({
+        moved: false,
+        reason: "no_included_panes",
+      });
+    });
+
+    it("skips a whole workspace excluded by the Remote client", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0); // pane a in ws1
+
+      // ws2 excluded wholesale — stepping only ever cycles ws1's panes.
+      const excludedWorkspaces = new Set(["ws2"]);
+      const first = spatialStep("next", new Set(), excludedWorkspaces);
+      expect(first).toMatchObject({ moved: true, target: { workspaceId: "ws1", paneId: "b" } });
+
+      const second = spatialStep("next", new Set(), excludedWorkspaces);
+      expect(second).toMatchObject({ moved: true, target: { workspaceId: "ws1", paneId: "a" } });
+    });
+
+    it("reports no_included_panes when every workspace is excluded", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(spatialStep("next", new Set(), new Set(["ws1", "ws2"]))).toEqual({
+        moved: false,
+        reason: "no_included_panes",
+      });
+    });
+
     it("reports no_terminal_panes when no workspace has a terminal", () => {
       useWorkspaceStore.setState({
         workspaces: [ws("ws1", "One", [memo("m", 0, 0, 1, 1)])],

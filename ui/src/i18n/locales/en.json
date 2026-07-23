@@ -10,7 +10,9 @@
       "scrollToBottom": "Scroll to bottom",
       "composerEditor": "Terminal input draft",
       "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
-      "composerResize": "Resize input area (drag the top edge)"
+      "composerResize": "Resize input area (drag the top edge)",
+      "composerHistory": "Recent inputs",
+      "composerAutocomplete": "Input suggestions"
     },
     "remoteControl": {
       "title": "Remote control active",
@@ -257,6 +259,10 @@
       "defaultInputModeDesc": "Input mode a new terminal starts in. Switch anytime with Ctrl+Alt+M or the pane toolbar button.",
       "inputModeDirect": "Direct",
       "inputModeComposer": "Composer",
+      "composerHistoryPopup": "Composer History on Tab",
+      "composerHistoryPopupDesc": "In Composer mode, press Tab in an empty focused input to list your recent inputs and pick one.",
+      "composerAutocomplete": "Composer Autocomplete",
+      "composerAutocompleteDesc": "In Composer mode, suggest matching past inputs as you type; press Tab (or arrow keys then Enter) to fill one in.",
       "copyOnSelect": "Copy on Select",
       "copyOnSelectDesc": "Automatically copy to clipboard when selecting text in the terminal",
       "scrollbarStyle": "Scrollbar Style",
@@ -315,7 +321,7 @@
       "addTailscale": "Add Tailscale",
       "resetLoopback": "Reset Local",
       "autoMobileMinWidth": "Auto Mobile Width",
-      "autoMobileMinWidthDesc": "0 disables. At or below this app window width, Remote Access opens automatically.",
+      "autoMobileMinWidthDesc": "0 disables. Remote Access opens automatically when the app window is at or below this width, or when a phone (portrait screen with its short edge at or below this value) connects over RDP.",
       "snapshotMaxKib": "Initial Output Snapshot",
       "snapshotMaxKibDesc": "Max recent output (KiB) replayed when a remote client attaches or switches terminals. Smaller opens faster with shorter scrollback.",
       "customHosts": "Custom Hosts",

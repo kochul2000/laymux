@@ -3,7 +3,9 @@ import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
+import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneGrid } from "./PaneGrid";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
@@ -55,6 +57,7 @@ export function Dock({
 
   const singleHover = useHoverTimer(hoverIdleSeconds);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
+  const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
 
   // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
@@ -75,6 +78,12 @@ export function Dock({
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
   const singleView = panes[0]?.view;
+  // The pane config is the coordinator's source of truth. Use the same type for
+  // both gating and rendering even if a restored activeView is briefly stale.
+  const renderedViewType = singleView?.type ?? activeView;
+  const singleViewRevealed =
+    renderedViewType !== "TerminalView" ||
+    (singlePaneId !== undefined && startupRevealedPaneIds.has(singlePaneId));
   const hasSingleCwdView =
     singleView?.type === "TerminalView" || singleView?.type === "FileExplorerView";
   const singleCwdDefaults = hasSingleCwdView && singleView ? resolveCwdDefaults(singleView) : null;
@@ -160,23 +169,27 @@ export function Dock({
                 : undefined,
           }}
         >
-          <ViewRenderer
-            viewType={activeView}
-            viewConfig={panes[0]?.view}
-            paneId={singlePaneId ?? `dock-${position}`}
-            workspaceId={activeWorkspaceId}
-            workspaceName={activeWsName}
-            isFocused={isFocused}
-            onSelectView={
-              singlePaneId
-                ? (config) => onSetPaneView?.(singlePaneId, config)
-                : onSwitchView
-                  ? (config) => onSwitchView(config.type, config)
-                  : undefined
-            }
-            emptyViewContext="dock"
-            location="dock"
-          />
+          {singleViewRevealed ? (
+            <ViewRenderer
+              viewType={renderedViewType}
+              viewConfig={panes[0]?.view}
+              paneId={singlePaneId ?? `dock-${position}`}
+              workspaceId={activeWorkspaceId}
+              workspaceName={activeWsName}
+              isFocused={isFocused}
+              onSelectView={
+                singlePaneId
+                  ? (config) => onSetPaneView?.(singlePaneId, config)
+                  : onSwitchView
+                    ? (config) => onSwitchView(config.type, config)
+                    : undefined
+              }
+              emptyViewContext="dock"
+              location="dock"
+            />
+          ) : (
+            <PaneLoadingPlaceholder data-testid={`dock-pane-loading-${singlePaneId}`} />
+          )}
         </PaneControlBar>
       </div>
     </div>

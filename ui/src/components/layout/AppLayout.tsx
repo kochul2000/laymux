@@ -19,6 +19,7 @@ import type { DockPosition, ViewType } from "@/stores/types";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
 import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
+import { useTerminalStartupCoordinator } from "@/hooks/useTerminalStartupCoordinator";
 
 function ModalOverlay({
   testIdPrefix,
@@ -159,6 +160,7 @@ export function AppLayout() {
   useAppTheme();
   useHiddenItemsCoordinator();
   useHiddenTerminalAutoClose();
+  useTerminalStartupCoordinator();
   const docks = useDockStore((s) => s.docks);
   const layoutMode = useDockStore((s) => s.layoutMode);
   const focusedDock = useDockStore((s) => s.focusedDock);

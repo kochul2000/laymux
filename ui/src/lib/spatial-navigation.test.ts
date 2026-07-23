@@ -65,6 +65,50 @@ describe("buildSpatialOrder", () => {
     expect(pairs(buildSpatialOrder([w1, w2]))).toEqual([["ws2", "t"]]);
   });
 
+  it("removes explicitly excluded panes while preserving global order", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+    const w2 = ws("ws2", "Two", [term("c", 0, 0, 1, 1)]);
+
+    const entries = buildSpatialOrder([w1, w2], new Set(["b"]));
+
+    expect(pairs(entries)).toEqual([
+      ["ws1", "a"],
+      ["ws2", "c"],
+    ]);
+    expect(entries[1]).toMatchObject({ paneIndex: 0, paneNumber: 1 });
+  });
+
+  it("ignores stale exclusions and returns empty when every eligible pane is excluded", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+
+    expect(pairs(buildSpatialOrder([w1], new Set(["stale-pane"])))).toEqual([
+      ["ws1", "a"],
+      ["ws1", "b"],
+    ]);
+    expect(buildSpatialOrder([w1], new Set(["a", "b"]))).toEqual([]);
+  });
+
+  it("removes every pane of an excluded workspace while keeping others", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+    const w2 = ws("ws2", "Two", [term("c", 0, 0, 1, 1)]);
+
+    const entries = buildSpatialOrder([w1, w2], new Set(), new Set(["ws1"]));
+
+    expect(pairs(entries)).toEqual([["ws2", "c"]]);
+  });
+
+  it("combines pane and workspace exclusions and ignores stale workspace ids", () => {
+    const w1 = ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]);
+    const w2 = ws("ws2", "Two", [term("c", 0, 0), term("d", 0.5, 0)]);
+
+    // ws1 excluded wholesale, plus pane d in ws2 — only ws2:c survives.
+    const entries = buildSpatialOrder([w1, w2], new Set(["d"]), new Set(["ws1", "ws-gone"]));
+    expect(pairs(entries)).toEqual([["ws2", "c"]]);
+
+    // Excluding every workspace empties the order.
+    expect(buildSpatialOrder([w1, w2], new Set(), new Set(["ws1", "ws2"]))).toEqual([]);
+  });
+
   it("returns empty for no workspaces", () => {
     expect(buildSpatialOrder([])).toEqual([]);
   });

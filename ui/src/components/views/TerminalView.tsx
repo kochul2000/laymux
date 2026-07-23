@@ -20,6 +20,7 @@ import {
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useSettingsStore, defaultProfileDefaults } from "@/stores/settings-store";
 import { useOverridesStore, FONT_ZOOM_MIN, FONT_ZOOM_MAX } from "@/stores/overrides-store";
 import { toSupportedCursorShape, toXtermCursorOptions } from "@/lib/cursor-settings";
@@ -827,6 +828,23 @@ export function TerminalView({
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
+    let cancelled = false;
+    let terminalSessionReady = false;
+    let firstRenderReady = false;
+    let startupSettled = false;
+    const settleStartupIfReady = () => {
+      if (cancelled || startupSettled || !paneId || !terminalSessionReady || !firstRenderReady) {
+        return;
+      }
+      startupSettled = true;
+      useTerminalStartupStore.getState().settleStartup(paneId);
+    };
+    const settleFailedStartup = () => {
+      if (cancelled || startupSettled || !paneId) return;
+      startupSettled = true;
+      useTerminalStartupStore.getState().settleStartup(paneId);
+    };
+
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
 
     // Diagnostic shadow-cursor tracer. Bound once per effect mount because
@@ -1731,6 +1749,8 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
+      firstRenderReady = true;
+      settleStartupIfReady();
       if (readyGenerationRef.current !== terminalGeneration) {
         readyGenerationRef.current = terminalGeneration;
         setReadyGeneration(terminalGeneration);
@@ -2113,7 +2133,6 @@ export function TerminalView({
     const streamDecoder = new TextDecoder("utf-8", { fatal: false });
 
     // Listen for terminal output from backend PTY
-    let cancelled = false;
     let pendingTerminalWrites = 0;
     let outputAttachParserBusy = false;
     type DeferredTerminalWrite = {
@@ -2399,7 +2418,6 @@ export function TerminalView({
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputAttachEpoch = 0;
     let outputAttachInFlight = false;
-    let terminalSessionReady = false;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
     let terminalOutputWriteChain = Promise.resolve();
@@ -3100,9 +3118,11 @@ export function TerminalView({
           )
             .then(() => {
               terminalSessionReady = true;
+              if (cancelled) return;
               useTerminalStore.getState().updateInstanceInfo(instanceId, {
                 sessionReady: true,
               });
+              settleStartupIfReady();
               outputListenerReady
                 .then(() => startOutputAttach())
                 .catch((error) => {
@@ -3111,10 +3131,12 @@ export function TerminalView({
                 });
             })
             .catch((err) => {
+              if (cancelled) return;
               console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
               trackedTerminalWrite(
                 `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
               );
+              settleFailedStartup();
             });
         }
       } else if (sessionCreated && width > 0 && height > 0) {
@@ -3734,6 +3756,16 @@ export function TerminalView({
     (s) => s.terminal.showScrollToBottomButton ?? true,
   );
 
+  // Issue #504: Tab-triggered Composer past-input recall popup is opt-out (default on).
+  const composerHistoryPopupEnabled = useSettingsStore(
+    (s) => s.terminal.composerHistoryPopup ?? true,
+  );
+
+  // Issue #505: as-you-type Composer autocomplete is opt-out (default on).
+  const composerAutocompleteEnabled = useSettingsStore(
+    (s) => s.terminal.composerAutocomplete ?? true,
+  );
+
   // Issue #361: the jump-to-bottom button must clear the scrollbar slider so
   // they do not overlap. The slider renders at the same right-edge width in both
   // overlay and separate modes, and the button is positioned relative to the
@@ -3859,6 +3891,8 @@ export function TerminalView({
           editor: t("terminal.composerEditor"),
           placeholder: t("terminal.composerPlaceholder"),
           resize: t("terminal.composerResize"),
+          history: t("terminal.composerHistory"),
+          autocomplete: t("terminal.composerAutocomplete"),
         }}
         textareaRef={composerTextareaRef}
         inFlight={composerDraft.inFlight !== null}
@@ -3867,6 +3901,9 @@ export function TerminalView({
         autoFocus={isFocused}
         testId={`terminal-input-composer-${instanceId}`}
         atShellPrompt={atShellPrompt}
+        historyPopupEnabled={composerHistoryPopupEnabled}
+        autocompleteEnabled={composerAutocompleteEnabled}
+        history={readComposerHistory(instanceId)}
         onTextChange={(text) => {
           // A user edit ends history navigation (recall goes through storeComposerDraft).
           historyNavRef.current.index = null;

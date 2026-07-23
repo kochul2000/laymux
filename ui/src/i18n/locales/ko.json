@@ -10,7 +10,9 @@
       "scrollToBottom": "맨 아래로 이동",
       "composerEditor": "터미널 입력 초안",
       "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
-      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)"
+      "composerResize": "입력 영역 크기 조절 (위 경계 드래그)",
+      "composerHistory": "최근 입력",
+      "composerAutocomplete": "입력 추천"
     },
     "remoteControl": {
       "title": "원격 제어 중",
@@ -257,6 +259,10 @@
       "defaultInputModeDesc": "새 터미널이 시작할 때의 입력 방식. Ctrl+Alt+M 또는 pane 툴바 버튼으로 언제든 전환.",
       "inputModeDirect": "직접",
       "inputModeComposer": "입력칸",
+      "composerHistoryPopup": "Tab으로 과거 입력 보기",
+      "composerHistoryPopupDesc": "입력칸(Composer) 모드에서 비어 있는 입력창에 포커스한 채 Tab을 누르면 최근 입력 목록을 보여주고 골라 넣을 수 있습니다.",
+      "composerAutocomplete": "입력 자동완성",
+      "composerAutocompleteDesc": "입력칸(Composer) 모드에서 타이핑하는 동안 일치하는 과거 입력을 추천합니다. Tab(또는 방향키 후 Enter)으로 골라 넣을 수 있습니다.",
       "copyOnSelect": "선택 시 복사",
       "copyOnSelectDesc": "터미널에서 텍스트 선택 시 자동으로 클립보드에 복사",
       "scrollbarStyle": "스크롤바 방식",
@@ -315,7 +321,7 @@
       "addTailscale": "Tailscale 추가",
       "resetLoopback": "로컬로 초기화",
       "autoMobileMinWidth": "자동 모바일 폭",
-      "autoMobileMinWidthDesc": "0이면 비활성화. 앱 창 폭이 이 값 이하가 되면 Remote Access가 자동으로 열립니다.",
+      "autoMobileMinWidthDesc": "0이면 비활성화. 앱 창 폭이 이 값 이하이거나, 휴대폰(세로 화면 + 짧은 변이 이 값 이하)에서 RDP로 접속하면 Remote Access가 자동으로 열립니다.",
       "snapshotMaxKib": "초기 출력 스냅샷",
       "snapshotMaxKibDesc": "원격 접속·터미널 전환 시 재생할 최근 출력 상한(KiB)입니다. 작을수록 빠르게 열리고 스크롤백이 짧아집니다.",
       "customHosts": "수동 호스트",

@@ -46,6 +46,7 @@ pub struct RemoteControlState {
     claim_token_hasher: ClaimTokenHasher,
     transition_deadline: Option<Instant>,
     resume_capability: Option<ResumeCapability>,
+    file_viewer_capability: Option<FileViewerCapability>,
 }
 
 /// Secret proof that a claim may replace/resume the lease it was issued for.
@@ -54,6 +55,15 @@ pub struct RemoteControlState {
 /// status or conflict responses (unlike the public lease id).
 #[derive(Debug, Clone)]
 struct ResumeCapability {
+    lease_id: String,
+    token_hash: [u64; 2],
+}
+
+/// Lease-bound proof that permits access to host files through the Remote
+/// FileViewer. It is deliberately separate from the public lease id and from
+/// the resume capability so each secret has one authority.
+#[derive(Debug, Clone)]
+struct FileViewerCapability {
     lease_id: String,
     token_hash: [u64; 2],
 }
@@ -338,6 +348,8 @@ impl RemoteControlState {
         self.lease = Some(lease);
         self.transitioning = false;
         self.transition_deadline = None;
+        self.resume_capability = None;
+        self.file_viewer_capability = None;
         self.cancel_claim_reservation();
     }
 
@@ -408,6 +420,32 @@ impl RemoteControlState {
         token
     }
 
+    /// Issue the FileViewer capability for a freshly installed lease. Only the
+    /// successful claim response receives the token; the server retains a
+    /// process-keyed digest bound to that lease.
+    pub(crate) fn issue_file_viewer_capability(&mut self, lease_id: &str) -> String {
+        let token = Uuid::new_v4().to_string();
+        self.file_viewer_capability = Some(FileViewerCapability {
+            lease_id: lease_id.to_owned(),
+            token_hash: self.claim_token_hasher.hash(&token),
+        });
+        token
+    }
+
+    pub(crate) fn file_viewer_capability_matches(&self, lease_id: &str, token: &str) -> bool {
+        self.active_lease_id_matches(lease_id)
+            && self
+                .file_viewer_capability
+                .as_ref()
+                .is_some_and(|capability| {
+                    capability.lease_id == lease_id
+                        && token_hashes_equal(
+                            capability.token_hash,
+                            self.claim_token_hasher.hash(token),
+                        )
+                })
+    }
+
     fn resume_capability_matches(&self, resume_token: &str) -> bool {
         self.resume_capability.as_ref().is_some_and(|capability| {
             token_hashes_equal(
@@ -463,6 +501,9 @@ impl RemoteControlState {
         // revokes the resume capability. Only the voluntary release wrapper
         // re-arms it for the handoff drain.
         self.resume_capability = None;
+        // File reads never survive an owner transition, including voluntary
+        // release handoff. A successful successor claim receives a new token.
+        self.file_viewer_capability = None;
         // A registered Remote request can still be waiting on protocol
         // encoding or another non-PTY gate. Such an operation is safe to
         // detach: enqueue is performed under this same owner mutex, so either
@@ -978,6 +1019,44 @@ pub(crate) fn require_active_lease(
     }
 }
 
+#[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
+pub(crate) fn require_file_viewer_capability(
+    app_state: &AppState,
+    lease_id: Option<&str>,
+    token: Option<&str>,
+) -> Result<(), Response> {
+    let Some(lease_id) = lease_id.filter(|value| !value.is_empty()) else {
+        return Err(json_error(
+            StatusCode::FORBIDDEN,
+            "remote file viewer capability is required or invalid",
+        ));
+    };
+    let Some(token) = token.filter(|value| !value.is_empty()) else {
+        return Err(json_error(
+            StatusCode::FORBIDDEN,
+            "remote file viewer capability is required or invalid",
+        ));
+    };
+
+    let settings = effective_remote_settings(app_state).map_err(internal_error)?;
+    let timeout = Duration::from_secs(effective_heartbeat_timeout_seconds(&settings));
+    let mut current = app_state
+        .remote_control
+        .lock_or_err()
+        .map_err(internal_error)?;
+    let now = Instant::now();
+    current.observe_lease_expiry(now, timeout);
+    current.prune_expired_claim_reservation(now);
+    if current.file_viewer_capability_matches(lease_id, token) {
+        Ok(())
+    } else {
+        Err(json_error(
+            StatusCode::FORBIDDEN,
+            "remote file viewer capability is required or invalid",
+        ))
+    }
+}
+
 pub(crate) fn active_lease_matches(app_state: &AppState, lease_id: &str) -> Result<bool, String> {
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
@@ -1210,6 +1289,27 @@ mod tests {
         // conflict responses to any holder of the shared remote token.
         assert!(!control.remote_lease_takeover_allowed("lease-1"));
         assert!(!control.remote_lease_takeover_allowed("wrong-token"));
+    }
+
+    #[test]
+    fn file_viewer_requires_its_lease_bound_secret_capability() {
+        let mut control = RemoteControlState::default();
+        let _resume_token = install_lease_with_capability(
+            &mut control,
+            "lease-1",
+            Instant::now(),
+            Duration::from_secs(45),
+        );
+        let file_viewer_token = control.issue_file_viewer_capability("lease-1");
+
+        assert!(control.file_viewer_capability_matches("lease-1", &file_viewer_token));
+        assert!(!control.file_viewer_capability_matches("lease-1", "lease-1"));
+        assert!(!control.file_viewer_capability_matches("other-lease", &file_viewer_token));
+
+        control
+            .begin_remote_owner_transition(Instant::now())
+            .expect("an active lease should begin a transition");
+        assert!(!control.file_viewer_capability_matches("lease-1", &file_viewer_token));
     }
 
     #[test]

@@ -1520,6 +1520,22 @@ function TerminalSection() {
         </SettingRow>
 
         <ToggleRow
+          label={t("terminal.composerHistoryPopup")}
+          desc={t("terminal.composerHistoryPopupDesc")}
+          testid="composer-history-popup-toggle"
+          checked={terminal.composerHistoryPopup}
+          onChange={(v) => update({ composerHistoryPopup: v })}
+        />
+
+        <ToggleRow
+          label={t("terminal.composerAutocomplete")}
+          desc={t("terminal.composerAutocompleteDesc")}
+          testid="composer-autocomplete-toggle"
+          checked={terminal.composerAutocomplete}
+          onChange={(v) => update({ composerAutocomplete: v })}
+        />
+
+        <ToggleRow
           label={t("terminal.copyOnSelect")}
           desc={t("terminal.copyOnSelectDesc")}
           testid="copy-on-select-toggle"

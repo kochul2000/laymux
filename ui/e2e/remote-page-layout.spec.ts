@@ -1,4 +1,4 @@
-import { expect, test, type WebSocketRoute } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +13,85 @@ async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
   return runInlineScript
     ? withoutExternalAssets
     : withoutExternalAssets.replace(/<script[\s\S]*?<\/script>/g, "");
+}
+
+/**
+ * Serve the real remote page against a fixed navigation snapshot: active
+ * workspace `ws-a` with two terminal panes (p-a1, p-a2) plus an inactive
+ * `ws-b`. Spatial step requests are recorded into `spatialBodies`. Used by the
+ * whole-workspace skip tests (issue #507).
+ */
+async function routeRemoteWithWorkspaces(
+  page: Page,
+  spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }>,
+): Promise<void> {
+  const paneA1 = {
+    id: "p-a1",
+    paneIndex: 0,
+    paneNumber: 1,
+    terminalId: "term-a1",
+    terminalLive: true,
+    viewType: "TerminalView",
+  };
+  const paneA2 = {
+    id: "p-a2",
+    paneIndex: 1,
+    paneNumber: 2,
+    terminalId: "term-a2",
+    terminalLive: true,
+    viewType: "TerminalView",
+  };
+
+  await page.route("http://remote.test/remote/", (route) =>
+    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
+  );
+  for (const [asset, contentType] of [
+    ["xterm.js", "application/javascript; charset=utf-8"],
+    ["addon-fit.js", "application/javascript; charset=utf-8"],
+    ["xterm.css", "text/css; charset=utf-8"],
+  ] as const) {
+    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
+      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
+    );
+  }
+  await page.route("http://remote.test/remote/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/remote/v1/session/claim") {
+      await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+      return;
+    }
+    if (url.pathname === "/remote/v1/navigation") {
+      await route.fulfill({
+        json: {
+          terminals: [
+            { id: "term-a1", title: "A1", workspaceId: "ws-a", paneNumber: 1, appearance: {} },
+            { id: "term-a2", title: "A2", workspaceId: "ws-a", paneNumber: 2, appearance: {} },
+          ],
+          activeWorkspace: { id: "ws-a", name: "Alpha", panes: [paneA1, paneA2] },
+          workspaces: [
+            {
+              id: "ws-a",
+              name: "Alpha",
+              isActive: true,
+              terminalPaneCount: 2,
+              panes: [paneA1, paneA2],
+            },
+            { id: "ws-b", name: "Beta", isActive: false, terminalPaneCount: 1, panes: [] },
+          ],
+          docks: [],
+          notifications: [],
+        },
+      });
+      return;
+    }
+    if (url.pathname === "/remote/v1/navigation/spatial") {
+      spatialBodies.push(route.request().postDataJSON());
+      await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, () => {});
 }
 
 test.describe("remote mobile layout", () => {
@@ -179,6 +258,252 @@ test.describe("remote mobile layout", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   });
 
+  test("excludes the current workspace pane from spatial navigation in the Remote header", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ leaseId: string; direction: string; excludedPaneIds: string[] }> =
+      [];
+    const pane = {
+      id: "pane-a",
+      paneIndex: 0,
+      paneNumber: 1,
+      terminalId: "term-a",
+      terminalLive: true,
+      viewType: "TerminalView",
+    };
+    let workspacePaneActive = true;
+
+    await page.route("http://remote.test/remote/", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}page.html`,
+        contentType: "text/html; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/addon-fit.js`,
+        contentType: "application/javascript; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}assets/xterm.css`,
+        contentType: "text/css; charset=utf-8",
+      }),
+    );
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [
+              {
+                id: "term-a",
+                title: "Shell",
+                workspaceId: "ws-a",
+                paneNumber: 1,
+                appearance: {},
+              },
+            ],
+            activeWorkspace: {
+              id: "ws-a",
+              name: "Alpha",
+              panes: workspacePaneActive ? [pane] : [],
+            },
+            workspaces: [
+              {
+                id: "ws-a",
+                name: "Alpha",
+                isActive: true,
+                panes: workspacePaneActive ? [pane] : [],
+              },
+            ],
+            docks: workspacePaneActive
+              ? []
+              : [
+                  {
+                    position: "left",
+                    visible: true,
+                    panes: [{ ...pane, id: "dock-a", workspaceId: null, location: "dock" }],
+                  },
+                ],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation/spatial") {
+        spatialBodies.push(route.request().postDataJSON());
+        await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
+        return;
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a\/output/, () => {});
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+
+    const exclusion = page.locator("#spatialExclusion");
+    await expect(exclusion).toBeVisible();
+    await expect(exclusion.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(exclusion).toHaveAttribute("aria-pressed", "false");
+    await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
+
+    const [exclusionBox, composerToggleBox] = await Promise.all([
+      exclusion.boundingBox(),
+      page.locator("#inputModeToggle").boundingBox(),
+    ]);
+    expect(exclusionBox).not.toBeNull();
+    expect(composerToggleBox).not.toBeNull();
+    expect(exclusionBox!.height).toBe(26);
+    expect(composerToggleBox!.height).toBe(26);
+
+    await page.locator("#keyBarToggle").click();
+    await page.locator('[data-key="navNext"]').click();
+    await expect.poll(() => spatialBodies.length).toBe(1);
+    expect(spatialBodies[0].excludedPaneIds).toEqual([]);
+
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "true");
+    await expect(exclusion).toHaveAttribute("aria-label", "Include this pane in pane navigation");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
+        ),
+      )
+      .toEqual(["pane-a"]);
+
+    await page.locator('[data-key="navNext"]').click();
+    await expect.poll(() => spatialBodies.length).toBe(2);
+    expect(spatialBodies[1].excludedPaneIds).toEqual(["pane-a"]);
+
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "false");
+
+    workspacePaneActive = false;
+    await page.locator("#refresh").evaluate((button: HTMLButtonElement) => button.click());
+    await expect(exclusion).toBeHidden();
+  });
+
+  test("skips a whole workspace from the drawer and carries it into spatial navigation", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies);
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    // Every workspace with terminal panes shows the same circle-minus skip icon.
+    const skipB = page.locator('[data-workspace-skip="ws-b"]');
+    await expect(skipB).toBeVisible();
+    await expect(skipB.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(skipB).toHaveAttribute("aria-pressed", "false");
+
+    await skipB.click();
+    await expect(skipB).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedWorkspaceIds") || "[]"),
+        ),
+      )
+      .toEqual(["ws-b"]);
+
+    // The spatial step request now carries the workspace denylist.
+    await page.locator("#navToggle").click();
+    await page.locator("#keyBarToggle").click();
+    await page.locator('[data-key="navNext"]').click();
+    await expect.poll(() => spatialBodies.length).toBe(1);
+    expect(spatialBodies[0].excludedWorkspaceIds).toEqual(["ws-b"]);
+
+    // Skipping the ACTIVE workspace expands to its pane ids (vice-versa rule)
+    // so the header pane toggle reflects it; un-skipping clears both.
+    await page.locator("#navToggle").click();
+    const skipA = page.locator('[data-workspace-skip="ws-a"]');
+    await skipA.click();
+    await expect(skipA).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
+        ),
+      )
+      .toEqual(["p-a1", "p-a2"]);
+    await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "true");
+
+    await skipA.click();
+    await expect(skipA).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
+        ),
+      )
+      .toEqual([]);
+    await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("promotes a workspace to skipped once its every pane is excluded", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies);
+    // Pre-exclude the second pane so excluding the active pane completes the set.
+    await page.addInitScript(() => {
+      localStorage.setItem("laymux.remote.spatialExcludedPaneIds", JSON.stringify(["p-a2"]));
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+
+    // ws-a is not yet fully excluded — its workspace toggle is unpressed.
+    await page.locator("#navToggle").click();
+    const skipA = page.locator('[data-workspace-skip="ws-a"]');
+    await expect(skipA).toHaveAttribute("aria-pressed", "false");
+    await page.locator("#navToggle").click();
+
+    // Exclude the active pane (p-a1) via the header — now every pane of ws-a is
+    // excluded, so the workspace auto-promotes to skipped.
+    const exclusion = page.locator("#spatialExclusion");
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedWorkspaceIds") || "[]"),
+        ),
+      )
+      .toEqual(["ws-a"]);
+    await page.locator("#navToggle").click();
+    await expect(skipA).toHaveAttribute("aria-pressed", "true");
+
+    // Re-including one pane demotes the workspace back out of the skip set.
+    await page.locator("#navToggle").click();
+    await exclusion.click();
+    await expect(exclusion).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedWorkspaceIds") || "[]"),
+        ),
+      )
+      .toEqual([]);
+    await page.locator("#navToggle").click();
+    await expect(skipA).toHaveAttribute("aria-pressed", "false");
+  });
+
   test("offers a four-way flick direction key", async ({ page }) => {
     await page.route("http://remote.test/", (route) =>
       route.fulfill({
@@ -226,6 +551,87 @@ test.describe("remote mobile layout", () => {
       await page.mouse.up();
       await expect(flickHint).toBeHidden();
     }
+  });
+
+  test("drags visible soft keys and offers accessible order controls", async ({ page }) => {
+    await page.route("http://remote.test/", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>remote test</title>",
+      }),
+    );
+    await page.goto("http://remote.test/");
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({ visible: true, sets: [], custom: ["tab", "enter"] }),
+      );
+    });
+    await page.setContent(await loadRemotePageMarkup(true));
+
+    const renderedKeyIds = () =>
+      page
+        .locator("#keyRow .key-btn")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => (button as HTMLButtonElement).dataset.key),
+        );
+    await expect.poll(renderedKeyIds).toEqual(["tab", "enter"]);
+
+    await page.locator("#keyBarSettings").click();
+    await expect(page.locator("#keyPopoverBody")).toContainText("Key order");
+    await page.locator(".key-chip").filter({ hasText: "Esc" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["tab", "enter", "esc"]);
+
+    const orderSection = page.locator("#keyPopoverBody > .key-order-section");
+    await expect(orderSection).toHaveCount(1);
+    expect(
+      await orderSection.evaluate((section) => section === section.parentElement?.lastElementChild),
+    ).toBe(true);
+    const paletteEscBox = await page
+      .locator(".key-chip:not(.key-order-chip)")
+      .filter({ hasText: "Esc" })
+      .boundingBox();
+    const orderEscBox = await page.locator('.key-order-chip[data-order-key="esc"]').boundingBox();
+    expect(paletteEscBox).not.toBeNull();
+    expect(orderEscBox).not.toBeNull();
+    expect(Math.abs(orderEscBox!.width - paletteEscBox!.width)).toBeLessThan(0.1);
+    expect(Math.abs(orderEscBox!.height - paletteEscBox!.height)).toBeLessThan(0.1);
+
+    const escOrderChip = page.locator('.key-order-chip[data-order-key="esc"]');
+    const tabOrderChip = page.locator('.key-order-chip[data-order-key="tab"]');
+    const escBox = await escOrderChip.boundingBox();
+    const tabBox = await tabOrderChip.boundingBox();
+    expect(escBox).not.toBeNull();
+    expect(tabBox).not.toBeNull();
+    await page.mouse.move(escBox!.x + escBox!.width / 2, escBox!.y + escBox!.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(250);
+    await expect(escOrderChip).toHaveClass(/dragging/);
+    await page.mouse.move(tabBox!.x + 2, tabBox!.y + tabBox!.height / 2, { steps: 4 });
+    await expect(tabOrderChip).toHaveClass(/drop-before/);
+    await page.mouse.up();
+
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const stored = JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}");
+          return stored.order.filter((id: string) => ["esc", "tab", "enter"].includes(id));
+        }),
+      )
+      .toEqual(["esc", "tab", "enter"]);
+
+    await page.reload();
+    await page.setContent(await loadRemotePageMarkup(true));
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
+
+    await page.locator("#keyBarSettings").click();
+    await page.locator('.key-order-chip[data-order-key="enter"]').click();
+    await expect(page.locator(".key-order-actions")).toBeVisible();
+    await page.getByRole("button", { name: "Move Enter to start" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["enter", "esc", "tab"]);
+    await page.getByRole("button", { name: "Reset key order" }).click();
+    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
   });
 
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {
