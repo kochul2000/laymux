@@ -13,6 +13,7 @@ use super::internal_error;
 const XTERM_JS: &str = include_str!("assets/xterm.js");
 const XTERM_CSS: &str = include_str!("assets/xterm.css");
 const ADDON_FIT_JS: &str = include_str!("assets/addon-fit.js");
+const WEB_LINKS_ADDON_JS: &str = include_str!("assets/addon-web-links.js");
 
 pub(crate) async fn remote_xterm_js(
     State(server): State<ServerState>,
@@ -52,6 +53,20 @@ pub(crate) async fn remote_addon_fit_js(
         addr,
         request_is_tunnel_authorized(&req),
         ADDON_FIT_JS,
+        "application/javascript; charset=utf-8",
+    )
+}
+
+pub(crate) async fn remote_web_links_addon_js(
+    State(server): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response {
+    remote_asset(
+        &server,
+        addr,
+        request_is_tunnel_authorized(&req),
+        WEB_LINKS_ADDON_JS,
         "application/javascript; charset=utf-8",
     )
 }
@@ -108,6 +123,7 @@ mod tests {
         assert!(XTERM_JS.contains("Terminal"));
         assert!(XTERM_CSS.contains(".xterm"));
         assert!(ADDON_FIT_JS.contains("FitAddon"));
+        assert!(WEB_LINKS_ADDON_JS.contains("WebLinksAddon"));
     }
 
     #[test]

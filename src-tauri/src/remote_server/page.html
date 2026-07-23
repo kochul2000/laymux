@@ -1621,6 +1621,7 @@
     </div>
     <script src="/remote/vendor/xterm.js"></script>
     <script src="/remote/vendor/addon-fit.js"></script>
+    <script src="/remote/vendor/addon-web-links.js"></script>
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
@@ -2780,6 +2781,16 @@
           };
         }
 
+        function openRemoteUrl(uri) {
+          try {
+            const url = new URL(uri);
+            if (url.protocol !== "http:" && url.protocol !== "https:") return;
+            window.open(url.href, "_blank", "noopener,noreferrer");
+          } catch (_) {
+            // Ignore malformed terminal-controlled links.
+          }
+        }
+
         function terminalOptionsForAppearance(appearance = {}) {
           const normalized = normalizeAppearance(appearance);
           const options = {
@@ -2797,6 +2808,13 @@
             scrollback: normalized.scrollback,
             convertEol: false,
             theme: normalized.theme,
+            // OSC 8 URIs are terminal-controlled input. Keep xterm's own
+            // non-HTTP rejection enabled and route accepted web links through
+            // the same safe browser opener as plain-text links.
+            linkHandler: {
+              activate: (_event, uri) => openRemoteUrl(uri),
+              allowNonHttpProtocols: false,
+            },
           };
           if (normalized.cursorWidth !== undefined) {
             options.cursorWidth = normalized.cursorWidth;
@@ -3378,12 +3396,23 @@
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
           const FitAddonCtor = window.FitAddon && window.FitAddon.FitAddon;
+          const WebLinksAddonCtor =
+            window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon;
           if (!TerminalCtor || !FitAddonCtor) {
             throw new Error("xterm assets failed to load");
           }
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
+          // Keep the terminal usable if this non-core asset is unavailable;
+          // OSC 8 links still use linkHandler and the Rust asset test guards
+          // the production bundle. Plain-text link activation degrades only.
+          if (WebLinksAddonCtor) {
+            const webLinksAddon = new WebLinksAddonCtor((_event, uri) =>
+              openRemoteUrl(uri)
+            );
+            terminal.loadAddon(webLinksAddon);
+          }
           terminal.open(terminalSizer);
           // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck
           // off but omits autocomplete, so mobile browsers offer password,

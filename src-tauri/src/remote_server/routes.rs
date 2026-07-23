@@ -19,7 +19,9 @@ use crate::lock_ext::MutexExt;
 use crate::terminal_output::{self, TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
-use super::assets::{remote_addon_fit_js, remote_xterm_css, remote_xterm_js};
+use super::assets::{
+    remote_addon_fit_js, remote_web_links_addon_js, remote_xterm_css, remote_xterm_js,
+};
 use super::auth::remote_guard;
 use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
@@ -178,6 +180,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route("/remote/vendor/xterm.js", get(remote_xterm_js))
         .route("/remote/vendor/xterm.css", get(remote_xterm_css))
         .route("/remote/vendor/addon-fit.js", get(remote_addon_fit_js))
+        .route(
+            "/remote/vendor/addon-web-links.js",
+            get(remote_web_links_addon_js),
+        )
         .route("/remote/viewer/", get(remote_viewer_page))
         .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)

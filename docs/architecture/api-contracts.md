@@ -644,6 +644,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/xterm.css` | GET | `/remote/` 전용 xterm.js 스타일 |
 | `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
+| `/remote/vendor/addon-web-links.js` | GET | `/remote/` 전용 xterm 평문 URL 링크 애드온 |
 | `/remote/viewer/` | GET | 자격 증명이 없는 Remote FileViewer 새 탭 bootstrap |
 | `/remote/viewer/viewer.js` | GET | Remote FileViewer 외부 script (`script-src 'self'`) |
 

@@ -92,6 +92,7 @@ mod tests {
         let html = remote_page_html();
         assert!(html.contains("Laymux Remote"));
         assert!(html.contains("/remote/vendor/xterm.js"));
+        assert!(html.contains("/remote/vendor/addon-web-links.js"));
         assert!(html.contains("/remote/v1/session/claim"));
         assert!(html.contains("/remote/v1/navigation"));
         assert!(html.contains("/remote/v1/workspaces/active"));
@@ -99,6 +100,12 @@ mod tests {
         assert!(html.contains("/remote/v1/terminals"));
         assert!(html.contains("new WebSocket"));
         assert!(html.contains("new TerminalCtor"));
+        assert!(html.contains("new WebLinksAddonCtor"));
+        assert!(html.contains("function openRemoteUrl(uri)"));
+        assert!(html.contains("linkHandler: {"));
+        assert!(html.contains("allowNonHttpProtocols: false"));
+        assert!(html.contains("url.protocol !== \"http:\" && url.protocol !== \"https:\""));
+        assert!(html.contains("window.open(url.href, \"_blank\", \"noopener,noreferrer\")"));
         assert!(html.contains("terminalOptionsForAppearance"));
         assert!(html.contains("terminalInfo.appearance"));
         assert!(html.contains("inputWriteChain"));
