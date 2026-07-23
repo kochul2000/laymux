@@ -1,4 +1,4 @@
-import { writeToTerminal } from "@/lib/tauri-api";
+import { interruptTerminalOnExit as invokeInterruptTerminalOnExit } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { ExitSettings } from "@/lib/tauri-api";
@@ -99,7 +99,9 @@ export async function interruptTerminalsOnExit(): Promise<void> {
     await runInterruptTerminals({
       config,
       getTerminalIds: () => useTerminalStore.getState().instances.map((instance) => instance.id),
-      write: (id, data) => writeToTerminal(id, data),
+      // Shutdown-only ETX path: bypasses the human-control gate so the interrupt
+      // still lands while a remote client holds the control lease (issue #451).
+      write: (id) => invokeInterruptTerminalOnExit(id),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     });
   } catch (err) {

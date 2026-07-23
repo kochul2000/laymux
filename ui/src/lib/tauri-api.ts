@@ -78,6 +78,15 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
+/**
+ * Shutdown-only Ctrl+C (issue #451). Sends ETX bypassing the human-control
+ * owner gate so kill-on-exit still fires while a remote client holds the
+ * control lease. Only ever sends ETX; not a general write path.
+ */
+export async function interruptTerminalOnExit(id: string): Promise<void> {
+  return invoke("interrupt_terminal_on_exit", { id });
+}
+
 export async function writeTerminalInput(id: string, text: string, submit: boolean): Promise<void> {
   return invoke("write_terminal_input", { id, text, submit });
 }

@@ -933,6 +933,24 @@ pub fn write_to_terminal(
     write_to_terminal_inner(&state, &id, data.as_bytes(), HumanControlOrigin::Local)
 }
 
+/// Shutdown-only Ctrl+C (issue #451). Writes ETX (0x03) straight onto the PTY
+/// FIFO, bypassing the human-control owner gate. The normal `write_to_terminal`
+/// path runs as `HumanControlOrigin::Local` and is rejected while a remote
+/// client holds the control lease or a claim reservation — which would silently
+/// drop the kill-on-exit interrupt. On app exit the local process legitimately
+/// interrupts its own child processes regardless of remote ownership, so this
+/// path is intentionally unguarded. It can only ever send ETX.
+#[tauri::command]
+pub fn interrupt_terminal_on_exit(id: String, state: State<Arc<AppState>>) -> Result<(), String> {
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    handle.write(b"\x03")
+}
+
 pub fn write_to_terminal_inner(
     state: &AppState,
     id: &str,

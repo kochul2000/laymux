@@ -139,6 +139,7 @@ pub fn run() {
             commands::create_terminal_session,
             commands::resize_terminal,
             commands::write_to_terminal,
+            commands::interrupt_terminal_on_exit,
             commands::write_terminal_input,
             commands::attach_terminal_output,
             commands::log_terminal_trace_batch,
