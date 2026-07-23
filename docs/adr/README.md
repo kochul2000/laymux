@@ -65,6 +65,7 @@ ADR 이 필요한 대표 기준:
 | [0045](0045-remote-path-link-reuses-desktop-parser.md) | Remote 경로 링크는 데스크톱 파서와 CWD를 재사용해 검증한다 | Proposed |
 | [0046](0046-remote-spatial-pane-exclusions.md) | Remote 공간순회 제외 상태는 Remote 클라이언트가 소유한다 | Accepted |
 | [0047](0047-remote-spatial-workspace-exclusions.md) | Remote 공간순회 워크스페이스 제외와 pane↔workspace 승격/강등 | Accepted |
+| [0048](0048-kill-terminals-on-exit.md) | 앱 종료 시 터미널 인터럽트(kill-on-exit)는 프론트엔드가 스크롤백 캐시 앞에서 조율 | Accepted |
 
 ## 새 ADR 추가
 

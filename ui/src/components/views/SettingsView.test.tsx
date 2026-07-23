@@ -1004,6 +1004,50 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.copyOnSelect).toBe(false);
   });
 
+  // -- Terminal section: kill-on-exit (issue #451) --
+
+  it("interrupt-on-exit is off by default and its inputs are hidden", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("interrupt-on-exit-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByTestId("interrupt-rounds-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("interrupt-settle-input")).not.toBeInTheDocument();
+  });
+
+  it("does NOT update interrupt-on-exit in store until Save is clicked", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.click(screen.getByTestId("interrupt-on-exit-toggle"));
+
+    expect(useSettingsStore.getState().exit.interruptTerminals).toBe(false);
+  });
+
+  it("enabling interrupt-on-exit reveals rounds/settle inputs and persists on Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.click(screen.getByTestId("interrupt-on-exit-toggle"));
+
+    // Inputs appear once enabled (draft state), before Save.
+    const rounds = screen.getByTestId("interrupt-rounds-input") as HTMLInputElement;
+    const settle = screen.getByTestId("interrupt-settle-input") as HTMLInputElement;
+    fireEvent.change(rounds, { target: { value: "5" } });
+    fireEvent.change(settle, { target: { value: "1200" } });
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    const exit = useSettingsStore.getState().exit;
+    expect(exit.interruptTerminals).toBe(true);
+    expect(exit.interruptRounds).toBe(5);
+    expect(exit.settleMs).toBe(1200);
+  });
+
   // -- Terminal section: scrollbar style --
 
   it("shows scrollbar style select in terminal section", async () => {

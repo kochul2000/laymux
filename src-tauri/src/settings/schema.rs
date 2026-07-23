@@ -130,6 +130,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/exit",
+        description: "앱 종료 시 터미널에 Ctrl+C를 보내 실행 중인 작업을 정리하고 Claude/Codex가 재개 세션 ID를 출력하도록 유도하는 설정입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/memo",
         description: "MemoView 폰트·여백·문단 복사 동작 설정입니다.",
         sensitive: false,

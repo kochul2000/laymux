@@ -144,6 +144,7 @@ export async function collectSettingsSnapshot(
     },
     claude: { ...settingsState.claude },
     codex: { ...settingsState.codex },
+    exit: { ...settingsState.exit },
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },

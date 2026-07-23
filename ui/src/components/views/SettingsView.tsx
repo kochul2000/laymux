@@ -1482,6 +1482,14 @@ function TerminalSection() {
   const update = (partial: Partial<typeof terminal>) =>
     setDraftTerminal((prev) => ({ ...prev, ...partial }));
 
+  // Exit behavior (issue #451) lives under the top-level `exit` key but is
+  // edited here in the Terminal section since it interrupts terminals.
+  const storeExit = useSettingsStore((s) => s.exit);
+  const setExit = useSettingsStore((s) => s.setExit);
+  const [exit, setDraftExit] = useDraft("exit", storeExit, (v) => setExit(v));
+  const updateExit = (partial: Partial<typeof exit>) =>
+    setDraftExit((prev) => ({ ...prev, ...partial }));
+
   // Default input mode is a desktop-surface UI preference (localStorage), not part
   // of the Rust-backed settings.json — so it stays outside the terminal draft.
   const [defaultInputMode, setDefaultInputMode] = useState<InputMode>(() =>
@@ -1583,6 +1591,65 @@ function TerminalSection() {
             }
           />
         </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("terminal.exitGroup")}>
+        <ToggleRow
+          label={t("terminal.interruptOnExit")}
+          desc={t("terminal.interruptOnExitDesc")}
+          testid="interrupt-on-exit-toggle"
+          checked={exit.interruptTerminals}
+          onChange={(v) => updateExit({ interruptTerminals: v })}
+        />
+
+        {exit.interruptTerminals && (
+          <>
+            <SettingRow
+              label={t("terminal.interruptRounds")}
+              desc={t("terminal.interruptRoundsDesc")}
+            >
+              <FocusInput
+                data-testid="interrupt-rounds-input"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={exit.interruptRounds}
+                onChange={(e) =>
+                  updateExit({
+                    interruptRounds: Math.min(
+                      10,
+                      Math.max(1, Math.round(Number(e.target.value) || 1)),
+                    ),
+                  })
+                }
+              />
+            </SettingRow>
+
+            <SettingRow
+              label={t("terminal.interruptSettle")}
+              desc={t("terminal.interruptSettleDesc")}
+            >
+              <FocusInput
+                data-testid="interrupt-settle-input"
+                type="number"
+                min={0}
+                max={10000}
+                step={100}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={exit.settleMs}
+                onChange={(e) =>
+                  updateExit({
+                    settleMs: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                  })
+                }
+              />
+            </SettingRow>
+          </>
+        )}
       </SubGroup>
     </div>
   );

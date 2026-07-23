@@ -3,6 +3,7 @@ import type {
   ClaudeSyncCwdMode,
   ClaudeSettings,
   CodexSettings,
+  ExitSettings,
   FileExplorerSettings,
   IssueReporterSettings,
   MemoSettings,
@@ -180,7 +181,7 @@ export interface WorkspaceSelectorSettings {
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
 
-export type { IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
+export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
   SyncCwdConfig,
   SyncCwdPair,
@@ -372,6 +373,7 @@ interface SettingsState {
   workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
+  exit: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
@@ -390,6 +392,7 @@ interface SettingsState {
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
+  setExit: (data: Partial<ExitSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
@@ -436,6 +439,7 @@ interface SettingsState {
         | "workspaceSelector"
         | "claude"
         | "codex"
+        | "exit"
         | "memo"
         | "issueReporter"
         | "fileExplorer"
@@ -555,6 +559,13 @@ export const DEFAULT_DOCK: DockSettings = {
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   dismiss: "workspace",
+};
+
+/** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
+export const DEFAULT_EXIT: ExitSettings = {
+  interruptTerminals: false,
+  interruptRounds: 3,
+  settleMs: 700,
 };
 
 export const DEFAULT_WORKSPACE_DISPLAY: WorkspaceDisplaySettings = {
@@ -953,6 +964,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
+  exit: { ...DEFAULT_EXIT },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
@@ -1002,6 +1014,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setCodex: (data) =>
     set((state) => ({
       codex: { ...state.codex, ...data },
+    })),
+
+  setExit: (data) =>
+    set((state) => ({
+      exit: { ...state.exit, ...data },
     })),
 
   setMemo: (data) =>
@@ -1219,6 +1236,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...(data.codex as Partial<CodexSettings>),
         }
       : undefined;
+    // Ensure exit settings have all fields (backwards compat)
+    const exit = data.exit
+      ? { ...DEFAULT_EXIT, ...(data.exit as Partial<ExitSettings>) }
+      : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
       ? { ...DEFAULT_ISSUE_REPORTER, ...(data.issueReporter as Partial<IssueReporterSettings>) }
@@ -1293,6 +1314,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),
+      ...(exit ? { exit } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),

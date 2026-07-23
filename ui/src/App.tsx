@@ -6,6 +6,8 @@ import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
 import { saveBeforeClose } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
+import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLanguageSync } from "@/hooks/useLanguageSync";
@@ -52,7 +54,10 @@ export function App() {
             await saveBeforeClose();
             await closeOpenTerminalSessions();
           },
-          timeoutMs: 5000,
+          // Widen the base save timeout by the kill-on-exit budget (issue #451)
+          // so a configured Ctrl+C settle delay is not cut off. Read at close
+          // time to reflect current settings.
+          timeoutMs: () => 5000 + exitInterruptBudgetMs(useSettingsStore.getState().exit),
         });
         appWindow
           .onCloseRequested(handler)

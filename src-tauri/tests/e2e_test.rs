@@ -182,6 +182,7 @@ fn settings_round_trip_with_full_config() {
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),
+        exit: Default::default(),
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),

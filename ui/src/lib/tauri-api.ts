@@ -78,6 +78,15 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
+/**
+ * Shutdown-only Ctrl+C (issue #451). Sends ETX bypassing the human-control
+ * owner gate so kill-on-exit still fires while a remote client holds the
+ * control lease. Only ever sends ETX; not a general write path.
+ */
+export async function interruptTerminalOnExit(id: string): Promise<void> {
+  return invoke("interrupt_terminal_on_exit", { id });
+}
+
 export async function writeTerminalInput(id: string, text: string, submit: boolean): Promise<void> {
   return invoke("write_terminal_input", { id, text, submit });
 }
@@ -316,6 +325,16 @@ export interface CodexSettings {
   statusMessageDelimiter: string;
 }
 
+/** App-exit behavior (issue #451). */
+export interface ExitSettings {
+  /** Send Ctrl+C to all terminals on app exit. Default: false (opt-in). */
+  interruptTerminals: boolean;
+  /** How many Ctrl+C presses to send per terminal. Clamped 1..=10. Default: 3. */
+  interruptRounds: number;
+  /** Delay (ms) after the last Ctrl+C so agents can print their session id. Clamped 0..=10000. Default: 700. */
+  settleMs: number;
+}
+
 export interface IssueReporterSettings {
   shell: string;
   paddingTop: number;
@@ -448,6 +467,7 @@ export interface Settings {
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
+  exit?: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
