@@ -246,6 +246,11 @@ fn remote_snapshot_max_kib_outside_range_is_rejected() {
 }
 
 #[test]
+fn remote_snapshot_max_kib_defaults_to_four() {
+    assert_eq!(Settings::default().remote.snapshot_max_kib, 4);
+}
+
+#[test]
 fn exit_interrupt_defaults_are_off_and_conservative() {
     let defaults = Settings::default();
     assert!(

@@ -499,7 +499,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   authToken: "",
   heartbeatTimeoutSeconds: 45,
   autoMobileModeMinWidth: 720,
-  snapshotMaxKib: 16,
+  snapshotMaxKib: 4,
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,

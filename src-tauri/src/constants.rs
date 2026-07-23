@@ -136,7 +136,7 @@ pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = 1024 * 1024;
 /// Default cap (KiB) for the recent-output snapshot replayed to a remote
 /// client on terminal attach. Small on purpose: a remote connect or workspace
 /// switch should open at the live tail instead of replaying long history.
-pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 16;
+pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 4;
 
 /// Effective bounds for `remote.snapshotMaxKib`. The upper bound matches the
 /// retained output ring (1 MiB); the lower bound keeps at least one screen of

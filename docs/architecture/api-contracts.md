@@ -54,7 +54,7 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "authToken": "",                   // enabled=true일 때 필수
     "heartbeatTimeoutSeconds": 45,      // 기본 45초, 최소 30초로 clamp
     "autoMobileModeMinWidth": 720,      // 앱 창 폭이 이 값 이하이거나, 휴대폰(세로 화면+짧은 변이 이 값 이하)에서 RDP 접속 시 Remote Access 모달 자동 표시. 0 = 비활성
-    "snapshotMaxKib": 16,               // 원격 attach 시 재생하는 최근 출력 스냅샷 상한(KiB). 1~1024로 clamp, 절단 시 개행 경계로 정렬
+    "snapshotMaxKib": 4,                // 원격 attach 시 재생하는 최근 출력 스냅샷 상한(KiB). 1~1024로 clamp, 절단 시 개행 경계로 정렬
     "preferredHost": "",               // 복사 URL 기본 호스트. 빈 값 = 자동
     "customHosts": [],                  // 감지 후보 외에 URL host select 에 표시할 수동 호스트
     "cloudEnabled": false,              // 클라우드 연결 영속 설정. pairing 전 기본값 false

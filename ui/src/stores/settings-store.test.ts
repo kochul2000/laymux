@@ -892,7 +892,7 @@ describe("settings-store", () => {
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.heartbeatTimeoutSeconds).toBe(45);
-    expect(useSettingsStore.getState().remote.snapshotMaxKib).toBe(16);
+    expect(useSettingsStore.getState().remote.snapshotMaxKib).toBe(4);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
