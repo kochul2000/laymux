@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   DEFAULT_COMPOSER_HEIGHT,
   DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY,
@@ -366,5 +367,144 @@ describe("composer draft state", () => {
     expect(
       settleComposerSubmission(started.draft, { token: "empty-send", outcome: "success" }),
     ).toEqual({ text: "", revision: 0, inFlight: null });
+  });
+});
+
+/**
+ * Regression guard for the security invariant of the desktop composer recall
+ * features (#504 Tab popup, #505 autocomplete, and edge ↑/↓ recall): the actual
+ * *input content* — draft text, sent-history entries, autocomplete candidates —
+ * is strictly in-memory (runtime Maps) and must never reach any persistent or
+ * exported store. Passwords, tokens, and other secrets typed into the composer
+ * cannot leak to disk. Only the boolean feature toggles (settings.json) and the
+ * UI-only mode/height prefs (localStorage) persist — and those carry no content.
+ *
+ * Mirrors the same in-memory-only principle applied to the Remote composer.
+ */
+describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 방지)", () => {
+  // Secret-looking strings that must never surface in a persistent store.
+  const SECRETS = [
+    "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCY",
+    "mysql -u root -pSup3rS3cr3tP@ssw0rd",
+    "curl -H 'Authorization: Bearer sk-live-0xDEADBEEFCAFE'",
+    "echo 비밀번호는-절대-저장되면-안된다",
+  ];
+  const TERMINAL_ID = "terminal-secret";
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearRuntimeComposerState();
+  });
+
+  afterEach(() => {
+    clearRuntimeComposerState();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  /** Full JSON dump of a web Storage so we can assert content never appears in it. */
+  function serializeStorage(storage: Storage): string {
+    const dump: Record<string, string | null> = {};
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (key !== null) dump[key] = storage.getItem(key);
+    }
+    return JSON.stringify(dump);
+  }
+
+  it("keeps sent-history recallable in memory yet absent from local/session storage", () => {
+    for (const secret of SECRETS) pushComposerHistory(TERMINAL_ID, secret);
+
+    // Recall works from the runtime Map...
+    expect(readComposerHistory(TERMINAL_ID)).toEqual(SECRETS);
+
+    // ...but nothing landed in either web storage.
+    const localDump = serializeStorage(localStorage);
+    const sessionDump = serializeStorage(sessionStorage);
+    for (const secret of SECRETS) {
+      expect(localDump).not.toContain(secret);
+      expect(sessionDump).not.toContain(secret);
+    }
+
+    // A WebView reload (runtime clear) erases the history entirely.
+    clearRuntimeComposerState();
+    expect(readComposerHistory(TERMINAL_ID)).toEqual([]);
+  });
+
+  it("never passes draft or history content to Storage.setItem", () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+    // Drive the realistic runtime flow: type a draft, then record it as sent
+    // history — exactly what TerminalView does on a successful Send.
+    for (const secret of SECRETS) {
+      writeRuntimeComposerDraft(
+        TERMINAL_ID,
+        updateComposerDraftText(createComposerDraftState(), secret),
+      );
+      pushComposerHistory(TERMINAL_ID, secret);
+    }
+    // Legitimate UI-only persistence (mode + height) may write to storage, but
+    // the persisted *values* must never be the input content.
+    writeDesktopInputModePreference("composer");
+    writeComposerHeight(180);
+
+    for (const [, value] of setItemSpy.mock.calls) {
+      for (const secret of SECRETS) expect(String(value ?? "")).not.toContain(secret);
+    }
+    setItemSpy.mockRestore();
+  });
+
+  it("persists only UI-only prefs, keying nothing to the terminal or its content", () => {
+    writeComposerHeight(180);
+    writeDesktopInputModePreference("composer");
+    writeRuntimeComposerDraft(
+      TERMINAL_ID,
+      updateComposerDraftText(createComposerDraftState(), SECRETS[0]),
+    );
+    pushComposerHistory(TERMINAL_ID, SECRETS[0]);
+
+    const localDump = serializeStorage(localStorage);
+    // The two UI-only preference keys are the *only* things persisted.
+    expect(localDump).toContain(DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY);
+    expect(localDump).toContain(DESKTOP_INPUT_MODE_STORAGE_KEY);
+    expect(localDump).not.toContain(SECRETS[0]);
+    // No per-terminal key exists — the composer never keys storage by terminal id.
+    expect(localStorage.getItem(TERMINAL_ID)).toBeNull();
+  });
+
+  it("recall selectors are pure — they derive views without any storage side-effect", () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+    const popup = selectComposerHistoryEntries(SECRETS);
+    const suggestions = selectComposerAutocompleteSuggestions(SECRETS, "export");
+
+    // They return derived, in-memory views of the input...
+    expect(popup).toContain(SECRETS[0]);
+    expect(suggestions).toContain(SECRETS[0]);
+    // ...without persisting anything.
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(serializeStorage(localStorage)).not.toContain(SECRETS[0]);
+    setItemSpy.mockRestore();
+  });
+
+  it("keeps input content out of the persisted settings-store snapshot", () => {
+    // The feature toggles live in settings.json (persistent); their values are
+    // booleans. Flipping them and capturing history must not co-mingle content
+    // into the settings snapshot — the two subsystems stay decoupled.
+    useSettingsStore.getState().setTerminal({
+      composerHistoryPopup: false,
+      composerAutocomplete: true,
+    });
+    for (const secret of SECRETS) pushComposerHistory(TERMINAL_ID, secret);
+
+    // JSON.stringify drops the action functions, leaving exactly what serializes
+    // to settings.json.
+    const snapshot = JSON.stringify(useSettingsStore.getState());
+    for (const secret of SECRETS) expect(snapshot).not.toContain(secret);
+
+    // The toggles themselves persist as plain booleans (feature on/off, not content).
+    expect(typeof useSettingsStore.getState().terminal.composerHistoryPopup).toBe("boolean");
+    expect(typeof useSettingsStore.getState().terminal.composerAutocomplete).toBe("boolean");
   });
 });
