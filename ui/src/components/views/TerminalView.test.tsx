@@ -230,6 +230,7 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   id: "t1",
   title: "Terminal",
+  initialExecutionHost: "unknown",
   config: {
     profile: "PowerShell",
     cols: 80,
@@ -240,6 +241,7 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalProtocolReply = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
@@ -281,6 +283,7 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalProtocolReply: (...args: unknown[]) => mockWriteTerminalProtocolReply(...args),
   writeTerminalInput: (...args: unknown[]) => mockWriteTerminalInput(...args),
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
@@ -2349,6 +2352,235 @@ describe("TerminalView", () => {
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
+  });
+
+  describe("terminal protocol reply ownership", () => {
+    const latestOnData = () =>
+      mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+    const emitLive = (terminalId: string, value: string) => {
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      act(() => onOutput?.(new TextEncoder().encode(value)));
+    };
+
+    it("sends replies produced by a live parser write through the protocol path", async () => {
+      const terminalId = "t-live-protocol-reply";
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWriteTerminalProtocolReply.mockClear();
+      mockWriteToTerminal.mockClear();
+      const reply = "\x1b]10;rgb:ffff/ffff/ffff\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        latestOnData()?.(reply);
+        callback?.();
+      });
+
+      emitLive(terminalId, "LIVE_QUERY");
+
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    });
+
+    it("suppresses replies produced by snapshot replay", async () => {
+      const terminalId = "t-replay-protocol-reply";
+      const snapshot = new TextEncoder().encode("REPLAY_QUERY");
+      mockAttachTerminalOutput.mockResolvedValueOnce({
+        state: {
+          version: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: snapshot.length,
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+        },
+        snapshot: Array.from(snapshot),
+      });
+      const reply = "\x1b]11;rgb:0000/0000/0000\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        latestOnData()?.(reply);
+        callback?.();
+      });
+
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+
+      expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
+      expect(mockWriteToTerminal).not.toHaveBeenCalledWith(terminalId, reply);
+    });
+
+    it("keeps live protocol replies flowing while local human control is unknown", async () => {
+      const terminalId = "t-unknown-owner-protocol-reply";
+      mockGetRemoteControlStatus.mockImplementationOnce(() => new Promise(() => {}));
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+      const terminal = createdTerminals.at(-1)!;
+      expect(terminal.options.disableStdin).toBe(true);
+      const reply = "\x1b]10;rgb:aaaa/bbbb/cccc\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        latestOnData()?.(reply);
+        callback?.();
+      });
+
+      emitLive(terminalId, "LIVE_QUERY");
+
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+    });
+
+    it("toggles xterm human stdin with the remote owner snapshot", async () => {
+      const terminalId = "t-owner-disable-stdin";
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForLocalTerminalControl();
+      const terminal = createdTerminals.at(-1)!;
+      expect(terminal.options.disableStdin).toBe(false);
+
+      act(() => capturedRemoteControlChanged?.({ active: true }));
+      expect(terminal.options.disableStdin).toBe(true);
+      expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "a" }))).toBe(false);
+
+      const reply = "\x1b]11;rgb:0000/0000/0000\x1b\\";
+      mockWriteTerminalProtocolReply.mockClear();
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        latestOnData()?.(reply);
+        callback?.();
+      });
+      emitLive(terminalId, "LIVE_QUERY_WHILE_REMOTE");
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+    });
+  });
+
+  describe("native Windows synchronized-output transaction", () => {
+    const sessionResult = (initialExecutionHost: string) => ({
+      id: "t-native-stabilizer",
+      title: "Terminal",
+      initialExecutionHost,
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+
+    it("removes only the in-frame cursor show and refreshes after one atomic write", async () => {
+      const terminalId = "t-native-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce(sessionResult("nativeWindows"));
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      mockWrite.mockClear();
+      mockRefresh.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+      const expected = "\x1b[?2026hbody\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+      await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    });
+
+    it("keeps a large exact frame and restore in one xterm write", async () => {
+      const terminalId = "t-native-large-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+      mockRefresh.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw =
+        "\x1b[?2026h" + "x".repeat(70_000) + "\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      const written = new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array);
+      expect(written).toHaveLength(raw.length - "\x1b[?25h".length);
+      expect(written.endsWith("\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h")).toBe(true);
+      await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    });
+
+    it("preserves active IME preedit and routes its single commit as human input", async () => {
+      const terminalId = "t-native-ime-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />);
+      const wrapper = screen.getByTestId(`terminal-view-${terminalId}`);
+      const terminal = createdTerminals.at(-1) as unknown as {
+        element: HTMLDivElement;
+      };
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      wrapper.appendChild(terminal.element);
+      await waitForTerminalInputReady();
+
+      helper.focus();
+      helper.value = "\u3131";
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+      helper.dispatchEvent(new Event("input", { bubbles: true }));
+      mockWrite.mockClear();
+      mockWriteToTerminal.mockClear();
+      mockWriteTerminalProtocolReply.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+
+      act(() => {
+        onOutput?.(new TextEncoder().encode("\x1b[?2026hbody\x1b[?25h\x1b[?2026l"));
+      });
+      expect(mockWrite).not.toHaveBeenCalled();
+      act(() => {
+        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[3;4H\x1b[?25h"));
+      });
+
+      expect(document.activeElement).toBe(helper);
+      expect(helper.value).toBe("\u3131");
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+
+      const onData = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+      act(() => {
+        helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uAC00" }));
+        onData?.("\uAC00");
+      });
+
+      expect(mockWriteToTerminal).toHaveBeenCalledTimes(1);
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\uAC00");
+      expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
+    });
+
+    it("passes direct WSL sessions through byte-for-byte", async () => {
+      const terminalId = "t-wsl-stabilizer-bypass";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("wsl"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(raw);
+    });
   });
 
   // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
