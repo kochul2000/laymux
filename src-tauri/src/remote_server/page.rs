@@ -626,6 +626,22 @@ mod tests {
         assert!(html.contains("if (event.key === \"Enter\" && activeAutocompleteIndex >= 0) {"));
         assert!(html.contains("commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);"));
 
+        // Touch path: soft keyboards have no Tab key, so a tap/click on the
+        // empty editor opens the same recall popup. The handler must sit
+        // OUTSIDE the keydown listener (it is a pointer gesture, not a key).
+        let click_block = html
+            .find("composerInput.addEventListener(\"click\"")
+            .expect("tap-to-open recall handler must exist");
+        assert!(
+            click_block < keydown_start,
+            "tap-to-open handler must not live inside the keydown listener"
+        );
+        let click_region = &html[click_block..keydown_start];
+        assert!(click_region.contains("if (composerHistoryOpen) return;"));
+        assert!(click_region.contains("const historyEntries = currentComposerHistoryEntries();"));
+        assert!(click_region.contains("if (historyEntries.length === 0) return;"));
+        assert!(click_region.contains("composerHistoryOpen = true;"));
+
         // Recall lists reset on terminal switch, mode switch, and after a send.
         assert!(html.contains("function resetComposerSuggestions()"));
         assert!(html.contains("function renderComposerSuggestions()"));
